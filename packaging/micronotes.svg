@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title>micronotes</title>
+  <desc>Icon showing a note page with lines and a folded corner.</desc>
+  <rect width="512" height="512" rx="96" fill="#0d1117"/>
+  <rect x="116" y="88" width="280" height="336" rx="30" fill="#f4f6f8"/>
+  <path d="M368 88v78c0 16 13 30 30 30h18L368 88z" fill="#72e6c6"/>
+  <path d="M368 88h-70c-18 0-34 16-34 34v74c0 18 16 34 34 34h104" fill="none" stroke="#d8dde3" stroke-width="12" stroke-linejoin="round"/>
+  <rect x="152" y="184" width="196" height="14" rx="7" fill="#20303a"/>
+  <rect x="152" y="228" width="160" height="14" rx="7" fill="#20303a"/>
+  <rect x="152" y="272" width="176" height="14" rx="7" fill="#20303a"/>
+  <rect x="152" y="316" width="126" height="14" rx="7" fill="#20303a"/>
+  <path d="M188 128h88" stroke="#72e6c6" stroke-width="20" stroke-linecap="round"/>
+</svg>

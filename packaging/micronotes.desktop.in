@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=micronotes
+Comment=Local Markdown notes
+Exec=micronotes
+TryExec=micronotes
+Icon=micronotes
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=micronotes
+Keywords=notes;markdown;editor;
