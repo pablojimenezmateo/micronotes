@@ -133,3 +133,27 @@ MICRONOTES_TEST(app_state_creates_loads_saves_and_refreshes_notes) {
   std::filesystem::remove_all(root);
   std::filesystem::remove_all(xdg);
 }
+
+
+MICRONOTES_TEST(app_state_recovers_unsaved_selected_note_body) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-recovery-test";
+  std::filesystem::remove_all(root);
+
+  micronotes::ui::AppState state;
+  MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
+  auto created = state.createNote("Recover", {}, "saved body");
+  MICRONOTES_REQUIRE(created.has_value());
+  MICRONOTES_REQUIRE(state.saveSelectedNoteRecovery("draft body"));
+  auto recovered = state.selectedRecoveryBody();
+  MICRONOTES_REQUIRE(recovered.has_value());
+  MICRONOTES_REQUIRE(*recovered == "draft body");
+
+  MICRONOTES_REQUIRE(state.saveSelectedNote("draft body"));
+  MICRONOTES_REQUIRE(!state.selectedRecoveryBody().has_value());
+  auto saved = state.selectedNote();
+  MICRONOTES_REQUIRE(saved.has_value());
+  MICRONOTES_REQUIRE(saved->body == "draft body");
+
+  std::filesystem::remove_all(root);
+}
+

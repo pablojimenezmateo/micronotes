@@ -23,8 +23,8 @@ public:
   LoadedNote loadNote(const std::filesystem::path& path) const;
   std::string loadNoteBody(const std::filesystem::path& path) const;
   NoteMetadata loadNoteMetadata(const std::filesystem::path& path) const;
-  void saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const;
-  void updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const;
+  bool saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const;
+  bool updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const;
   std::filesystem::path createFolder(const std::filesystem::path& relativeFolder) const;
   std::filesystem::path renameNote(const std::filesystem::path& path, const std::string& newTitle) const;
   std::filesystem::path moveNote(const std::filesystem::path& path, const std::filesystem::path& relativeFolder) const;

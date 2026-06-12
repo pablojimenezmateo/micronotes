@@ -33,13 +33,22 @@ private:
 
 }
 
-MICRONOTES_TEST(library_index_searches_cached_rows) {
+MICRONOTES_TEST(library_index_searches_file_backed_rows) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-file-backed-test";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "today-note";
+  metadata.title = "Today";
+  library.createNote(metadata, "daily body");
+
   micronotes::library::LibraryIndex index;
-  index.add({"1", "work/today.md", "Today"});
-  index.add({"2", "personal/list.md", "List"});
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
   const auto results = index.search("Today");
   MICRONOTES_REQUIRE(results.size() == 1);
-  MICRONOTES_REQUIRE(results[0].id == "1");
+  MICRONOTES_REQUIRE(results[0].id == "today-note");
+  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_index_rebuilds_sqlite_cache_from_files) {

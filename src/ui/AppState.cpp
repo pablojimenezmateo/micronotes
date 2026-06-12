@@ -3,13 +3,26 @@
 #include "library/Metadata.h"
 #include "perf/Perf.h"
 #include "platform/PathUtils.h"
+#include "platform/DurableFile.h"
 
 #include <cctype>
+#include <charconv>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 
 namespace micronotes::ui {
 namespace {
+
+
+static std::string readFile(const std::filesystem::path& path) {
+  std::ifstream in(path);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+static std::filesystem::path recoveryPath(const library::Library& library, std::string_view noteId) {
+  return library.root() / ".micronotes" / "recovery" / (platform::sanitizeFileStem(std::string(noteId)) + ".body");
+}
 
 static std::string uniqueTitle(const library::Library& library, const std::string& requested, const std::filesystem::path& folder = {}, const std::filesystem::path& currentPath = {}) {
   const auto base = requested.empty() ? "Untitled" : requested;
@@ -142,8 +155,26 @@ bool AppState::saveSelectedNote(std::string_view body) {
   if(!library_) return false;
   auto note = selectedNote();
   if(!note) return false;
-  library_->saveNote(note->item.path, note->metadata, body);
+  if(!library_->saveNote(note->item.path, note->metadata, body)) return false;
+  clearSelectedNoteRecovery();
   return refreshLibrary();
+}
+
+bool AppState::saveSelectedNoteRecovery(std::string_view body) const {
+  if(!library_ || selection_.noteId.empty()) return false;
+  return platform::writeFileDurably(recoveryPath(*library_, selection_.noteId), body);
+}
+
+bool AppState::clearSelectedNoteRecovery() const {
+  if(!library_ || selection_.noteId.empty()) return true;
+  return platform::removeFileDurably(recoveryPath(*library_, selection_.noteId));
+}
+
+std::optional<std::string> AppState::selectedRecoveryBody() const {
+  if(!library_ || selection_.noteId.empty()) return std::nullopt;
+  const auto path = recoveryPath(*library_, selection_.noteId);
+  if(!std::filesystem::exists(path)) return std::nullopt;
+  return readFile(path);
 }
 
 bool AppState::renameSelectedNote(const std::string& title) {
@@ -153,7 +184,7 @@ bool AppState::renameSelectedNote(const std::string& title) {
   auto metadata = note->metadata;
   metadata.title = uniqueTitle(*library_, title, note->item.path.parent_path().lexically_relative(library_->root()), note->item.path);
   const auto target = library_->renameNote(note->item.path, metadata.title);
-  library_->saveNote(target, metadata, note->body);
+  if(!library_->saveNote(target, metadata, note->body)) return false;
   selection_.noteId = metadata.id;
   return refreshLibrary();
 }
@@ -211,7 +242,7 @@ bool AppState::updateSelectedTags(const std::vector<std::string>& tags) {
   auto note = selectedNote();
   if(!note) return false;
   note->metadata.tags = tags;
-  library_->saveNote(note->item.path, note->metadata, note->body);
+  if(!library_->saveNote(note->item.path, note->metadata, note->body)) return false;
   return refreshLibrary();
 }
 
@@ -222,9 +253,7 @@ bool AppState::refreshLibrary() {
 }
 
 bool AppState::saveUiState(const std::filesystem::path& path) const {
-  std::filesystem::create_directories(path.parent_path());
-  std::ofstream out(path);
-  if(!out) return false;
+  std::ostringstream out;
   out << "pane=" << static_cast<int>(shell_.paneMode) << "\n";
   out << "sidebar=" << shell_.sidebarWidth << "\n";
   out << "notelist=" << shell_.noteListWidth << "\n";
@@ -232,25 +261,43 @@ bool AppState::saveUiState(const std::filesystem::path& path) const {
   out << "tag=" << selection_.tag << "\n";
   out << "note=" << selection_.noteId << "\n";
   out << "search_scope=" << static_cast<int>(selection_.searchScope) << "\n";
-  return true;
+  return platform::writeFileDurably(path, out.str());
 }
 
 bool AppState::loadUiState(const std::filesystem::path& path) {
   std::ifstream in(path);
   if(!in) return false;
   std::string line;
+  const auto parseInt = [](const std::string& value, int fallback) {
+    int result = fallback;
+    const auto* first = value.data();
+    const auto* last = value.data() + value.size();
+    const auto [ptr, ec] = std::from_chars(first, last, result);
+    if(ec != std::errc {} || ptr != last) return fallback;
+    return result;
+  };
   while(std::getline(in, line)) {
     const auto eq = line.find('=');
     if(eq == std::string::npos) continue;
     const auto key = line.substr(0, eq);
     const auto value = line.substr(eq + 1);
-    if(key == "pane") shell_.paneMode = static_cast<PaneMode>(std::stoi(value));
-    else if(key == "sidebar") shell_.sidebarWidth = std::stoi(value);
-    else if(key == "notelist") shell_.noteListWidth = std::stoi(value);
+    if(key == "pane") {
+      const int mode = parseInt(value, static_cast<int>(shell_.paneMode));
+      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Split)) {
+        shell_.paneMode = static_cast<PaneMode>(mode);
+      }
+    }
+    else if(key == "sidebar") shell_.sidebarWidth = parseInt(value, shell_.sidebarWidth);
+    else if(key == "notelist") shell_.noteListWidth = parseInt(value, shell_.noteListWidth);
     else if(key == "folder") selection_.folder = value;
     else if(key == "tag") selection_.tag = value;
     else if(key == "note") selection_.noteId = value;
-    else if(key == "search_scope") selection_.searchScope = static_cast<library::SearchScope>(std::stoi(value));
+    else if(key == "search_scope") {
+      const int scope = parseInt(value, static_cast<int>(selection_.searchScope));
+      if(scope >= static_cast<int>(library::SearchScope::All) && scope <= static_cast<int>(library::SearchScope::Content)) {
+        selection_.searchScope = static_cast<library::SearchScope>(scope);
+      }
+    }
   }
   return true;
 }

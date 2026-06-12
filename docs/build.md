@@ -184,7 +184,8 @@ Useful runtime controls:
 - `Ctrl+S`: save the current note and refresh search.
 - `Ctrl+R`: refresh the local library/index after external edits.
 - `Ctrl+T`: edit space-separated tags for the selected note.
-- `Ctrl+V`: paste text, or paste clipboard image data as a managed image attachment.
+- `Ctrl+V`: paste text, or paste image data when the clipboard has no text.
+- `Ctrl+Shift+V`: paste clipboard image data as a managed image attachment, falling back to text.
 - `Ctrl+Z`, `Ctrl+Y`: undo and redo editor changes.
 - `Ctrl+1`, `Ctrl+2`, `Ctrl+3`: editor, viewer, and split panes.
 - `/`: focus search when the editor is not focused.

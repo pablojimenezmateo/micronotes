@@ -1,28 +1,11 @@
-# Build trees and generated CMake files
-/build/
-/build-*/
-/cmake-build-*/
-/CMakeCache.txt
-/CMakeFiles/
-/CTestTestfile.cmake
-/CPackConfig.cmake
-/CPackSourceConfig.cmake
-/Testing/
-/build.ninja
-/cmake_install.cmake
-/compile_commands.json
-/install_manifest.txt
-/_CPack_Packages/
+# CMake build output
+build/
+_CPack_Packages/
 
-# App state created in the project root when opening a library here
-/.micronotes/
+# Packaged artifacts
+*.deb
 
-# IDE, editor, and OS clutter
-.idea/
-.vscode/
-.cursor/
+# OS / editor cruft
 .DS_Store
 *.swp
-*.swo
 *~
-*.log

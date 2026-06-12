@@ -13,7 +13,6 @@ struct RuntimePaths {
 
 RuntimePaths resolveRuntimePaths();
 std::filesystem::path normalizeInsideRoot(const std::filesystem::path& root, const std::filesystem::path& candidate);
-bool isInsideRoot(const std::filesystem::path& root, const std::filesystem::path& candidate);
 std::string sanitizeFileStem(std::string title);
 
 }

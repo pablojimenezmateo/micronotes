@@ -32,6 +32,7 @@ public:
   const std::string& text() const;
   std::size_t cursor() const;
   bool dirty() const;
+  void markDirty();
   void markSaved();
 
 private:

@@ -47,6 +47,9 @@ public:
   std::optional<library::NoteListItem> findNote(std::string_view noteId) const;
   std::optional<library::NoteListItem> createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body = "");
   bool saveSelectedNote(std::string_view body);
+  bool saveSelectedNoteRecovery(std::string_view body) const;
+  bool clearSelectedNoteRecovery() const;
+  std::optional<std::string> selectedRecoveryBody() const;
   bool renameSelectedNote(const std::string& title);
   bool deleteSelectedNote();
   bool moveSelectedNoteToFolder(const std::filesystem::path& folder);

@@ -2,7 +2,9 @@
 
 #include "attachments/AttachmentService.h"
 #include "editor/MarkdownEditor.h"
+#include "editor/SoftWrap.h"
 #include "markdown/MarkdownParser.h"
+#include "platform/DurableFile.h"
 #include "perf/Perf.h"
 #include "platform/PathUtils.h"
 #include "ui/AppState.h"
@@ -567,6 +569,9 @@ struct UiRuntime {
   markdown::MarkdownParser parser;
   std::string cachedMarkdownSource;
   std::optional<markdown::Document> cachedMarkdownDocument;
+  std::string cachedEditorRowsSource;
+  int cachedEditorRowsWidth = -1;
+  std::vector<editor::SoftWrapRow> cachedEditorRows;
   FocusArea focus = FocusArea::Editor;
   std::string loadedNoteId;
   std::string searchDraft;
@@ -612,7 +617,7 @@ struct UiRuntime {
   Uint64 lastAutosaveAttempt = 0;
 };
 
-static void saveCurrent(UiRuntime& ui, bool quiet = false);
+static bool saveCurrent(UiRuntime& ui, bool quiet = false);
 static void updateFindStatus(UiRuntime& ui);
 
 static const markdown::Document& previewDocument(UiRuntime& ui) {
@@ -626,6 +631,9 @@ static const markdown::Document& previewDocument(UiRuntime& ui) {
 
 static void markEdited(UiRuntime& ui) {
   ui.lastEdit = SDL_GetTicks();
+  if(ui.state.hasLibrary() && !ui.state.selection().noteId.empty()) {
+    if(!ui.state.saveSelectedNoteRecovery(ui.editor.text())) ui.status = "Recovery save failed";
+  }
 }
 
 static bool setClipboardText(std::string_view value) {
@@ -660,30 +668,34 @@ static bool publishEditorPrimarySelection(UiRuntime& ui) {
 static void selectNoteAt(UiRuntime& ui, int index) {
   auto notes = ui.state.currentNotes();
   if(notes.empty()) return;
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty()) saveCurrent(ui);
+  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   index = std::clamp(index, 0, static_cast<int>(notes.size()) - 1);
   ui.noteCursor = index;
   ui.state.selectNote(notes[static_cast<std::size_t>(index)].id);
   if(auto note = ui.state.selectedNote()) {
     ui.loadedNoteId = note->metadata.id;
-    ui.editor.setText(note->body);
+    const auto recovered = ui.state.selectedRecoveryBody();
+    ui.editor.setText(recovered ? *recovered : note->body);
+    if(recovered && *recovered != note->body) ui.editor.markDirty();
     ui.editorScroll = 0;
     ui.viewerScroll = 0;
     ui.revealEditorCursor = false;
-    ui.status = "Loaded " + note->metadata.title;
+    ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
   }
 }
 
 static void selectNoteById(UiRuntime& ui, const std::string& noteId) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty()) saveCurrent(ui);
+  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectNote(noteId);
   if(auto note = ui.state.selectedNote()) {
     ui.loadedNoteId = note->metadata.id;
-    ui.editor.setText(note->body);
+    const auto recovered = ui.state.selectedRecoveryBody();
+    ui.editor.setText(recovered ? *recovered : note->body);
+    if(recovered && *recovered != note->body) ui.editor.markDirty();
     ui.editorScroll = 0;
     ui.viewerScroll = 0;
     ui.revealEditorCursor = false;
-    ui.status = "Loaded " + note->metadata.title;
+    ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
   }
 }
 
@@ -701,7 +713,7 @@ static void createNote(UiRuntime& ui) {
     ui.status = "Start with --library <path> before creating notes";
     return;
   }
-  if(ui.editor.dirty()) saveCurrent(ui);
+  if(ui.editor.dirty() && !saveCurrent(ui)) return;
   const auto folder = ui.state.selection().folder;
   if(auto created = ui.state.createNote("Untitled", folder, "# Untitled\n\n")) {
     ui.loadedNoteId = created->id;
@@ -715,16 +727,17 @@ static void createNote(UiRuntime& ui) {
 }
 
 static void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder) {
+  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   const auto previousFolder = ui.state.selection().folder;
   ui.state.selectFolder(folder);
   createNote(ui);
   if(ui.state.selection().noteId.empty()) ui.state.selectFolder(previousFolder);
 }
 
-static void saveCurrent(UiRuntime& ui, bool quiet) {
+static bool saveCurrent(UiRuntime& ui, bool quiet) {
   if(!ui.state.hasLibrary()) {
     if(!quiet) ui.status = "No library open";
-    return;
+    return false;
   }
   if(ui.state.selection().noteId.empty()) {
     createNote(ui);
@@ -732,9 +745,10 @@ static void saveCurrent(UiRuntime& ui, bool quiet) {
   if(ui.state.saveSelectedNote(ui.editor.text())) {
     ui.editor.markSaved();
     if(!quiet) ui.status = "Saved " + trimTitle(ui.editor.text());
-  } else {
-    if(!quiet) ui.status = "Nothing selected to save";
+    return true;
   }
+  ui.status = quiet ? "Autosave failed" : "Save failed";
+  return false;
 }
 
 static bool ensureSelectedNote(UiRuntime& ui) {
@@ -749,7 +763,7 @@ static bool ensureSelectedNote(UiRuntime& ui) {
 static void insertAttachmentMarkdown(UiRuntime& ui, const attachments::AttachmentLink& link) {
   if(ui.editor.text().empty() || ui.editor.text().back() == '\n') ui.editor.insert(link.markdown + "\n");
   else ui.editor.insert("\n" + link.markdown + "\n");
-  saveCurrent(ui);
+  (void)saveCurrent(ui);
 }
 
 static bool attachPathToEditor(UiRuntime& ui, const std::filesystem::path& source) {
@@ -769,7 +783,6 @@ static bool attachPathToEditor(UiRuntime& ui, const std::filesystem::path& sourc
 }
 
 static bool pasteClipboardImage(UiRuntime& ui) {
-  if(!ensureSelectedNote(ui)) return false;
   static constexpr const char* kImageMimes[] = {"image/png", "image/jpeg", "image/jpg", "image/bmp", "image/webp"};
   const char* mime = nullptr;
   for(const char* candidate : kImageMimes) {
@@ -779,6 +792,9 @@ static bool pasteClipboardImage(UiRuntime& ui) {
     }
   }
   if(!mime) return false;
+  // Only commit to image handling (which may create a note) once we know the
+  // clipboard actually holds image data, so a plain-text paste is never hijacked.
+  if(!ensureSelectedNote(ui)) return false;
 
   size_t size = 0;
   void* data = SDL_GetClipboardData(mime, &size);
@@ -909,7 +925,7 @@ static bool pastePrimarySelectionIntoInput(UiRuntime& ui) {
 }
 
 static void beginTagEdit(UiRuntime& ui) {
-  if(ui.editor.dirty()) saveCurrent(ui);
+  if(ui.editor.dirty() && !saveCurrent(ui)) return;
   auto note = ui.state.selectedNote();
   if(!note) {
     ui.status = "Select a note before editing tags";
@@ -936,7 +952,7 @@ static void beginRename(UiRuntime& ui) {
     ui.status = "Select a note before renaming";
     return;
   }
-  if(ui.editor.dirty()) saveCurrent(ui);
+  if(ui.editor.dirty() && !saveCurrent(ui)) return;
   ui.renameDraft = note->metadata.title.empty() ? note->item.title : note->metadata.title;
   ui.noteMenuOpen = false;
   ui.inputAllSelected = false;
@@ -1092,7 +1108,7 @@ static void performAction(UiRuntime& ui, UiAction action) {
       deleteSelected(ui);
       break;
     case UiAction::Save:
-      saveCurrent(ui);
+      (void)saveCurrent(ui);
       break;
     case UiAction::Tags:
       beginTagEdit(ui);
@@ -1131,13 +1147,7 @@ static std::optional<std::filesystem::path> readConfiguredLibraryRoot() {
 
 static bool writeConfiguredLibraryRoot(const std::filesystem::path& root) {
   const auto configPath = libraryPathConfigPath();
-  std::error_code ec;
-  std::filesystem::create_directories(configPath.parent_path(), ec);
-  if(ec) return false;
-  std::ofstream out(configPath, std::ios::trunc);
-  if(!out) return false;
-  out << root.generic_string() << '\n';
-  return static_cast<bool>(out);
+  return platform::writeFileDurably(configPath, root.generic_string() + "\n");
 }
 
 static bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
@@ -1549,6 +1559,7 @@ static float listMarkerWidth(const markdown::Block& block) {
 }
 
 static float blockBottomSpacing(const markdown::Block& block, bool heading, bool html) {
+  if(block.type == markdown::BlockType::BlankLine) return 0.0f;
   if(block.type == markdown::BlockType::OrderedItem || block.type == markdown::BlockType::UnorderedItem) return 2.0f;
   return heading ? 14.0f : html ? 8.0f : 10.0f;
 }
@@ -1650,11 +1661,14 @@ static int viewerMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
     const bool rule = block.type == markdown::BlockType::HorizontalRule;
     const bool table = block.type == markdown::BlockType::Table;
     const bool html = block.type == markdown::BlockType::Html;
+    const bool blankLine = block.type == markdown::BlockType::BlankLine;
     const float indentW = static_cast<float>(std::max(0, block.depth - 1)) * 14.0f;
     const float markerW = listMarkerWidth(block);
     const float quoteW = block.type == markdown::BlockType::Quote ? 16.0f : 0.0f;
     const int lineHeight = text.lineHeight(heading);
-    if(rule) {
+    if(blankLine) {
+      measureY += static_cast<float>(text.lineHeight());
+    } else if(rule) {
       measureY += 22.0f;
     } else if(table) {
       measureY += tableHeight(text, block, contentWidth - indentW) + 12.0f;
@@ -1794,42 +1808,29 @@ static void drawNotes(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
   }
 }
 
-static std::pair<int, int> cursorLineColumn(std::string_view value, std::size_t cursor) {
-  cursor = std::min(cursor, value.size());
-  int line = 0;
-  int column = 0;
-  for(std::size_t i = 0; i < cursor; ++i) {
-    if(value[i] == '\n') {
-      ++line;
-      column = 0;
-    } else {
-      ++column;
-    }
-  }
-  return {line, column};
+static editor::MeasureText editorMeasure(TextRenderer& text) {
+  return [&text](std::string_view value) {
+    return text.width(value, false, true);
+  };
 }
 
-static std::size_t cursorIndexForLineColumn(std::string_view value, int targetLine, int targetColumn) {
-  int line = 0;
-  int column = 0;
-  for(std::size_t i = 0; i < value.size(); ++i) {
-    if(line == targetLine && column >= targetColumn) return i;
-    if(value[i] == '\n') {
-      if(line == targetLine) return i;
-      ++line;
-      column = 0;
-    } else {
-      ++column;
-    }
+static const std::vector<editor::SoftWrapRow>& editorRows(TextRenderer& text, UiRuntime& ui, Rect rect) {
+  const Rect writing = editorWritingRect(rect);
+  const int wrapWidth = static_cast<int>(std::max(1.0f, writing.w - 20.0f));
+  const auto& source = ui.editor.text();
+  if(ui.cachedEditorRowsWidth != wrapWidth || ui.cachedEditorRowsSource != source) {
+    ui.cachedEditorRowsWidth = wrapWidth;
+    ui.cachedEditorRowsSource = source;
+    ui.cachedEditorRows = editor::softWrap(ui.cachedEditorRowsSource, wrapWidth, editorMeasure(text));
   }
-  return value.size();
+  return ui.cachedEditorRows;
 }
 
-static int editorMaxScroll(TextRenderer& text, const UiRuntime& ui, Rect rect) {
+static int editorMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
   Rect writing = editorWritingRect(rect);
   const int lineHeight = text.lineHeight();
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
-  const int lineCount = static_cast<int>(splitLines(ui.editor.text()).size());
+  const int lineCount = static_cast<int>(editorRows(text, ui, rect).size());
   return std::max(0, lineCount - maxLines);
 }
 
@@ -1918,29 +1919,13 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   return CursorKind::Default;
 }
 
-static int nearestColumnForX(TextRenderer& text, const std::string& line, float localX) {
-  if(localX <= 0) return 0;
-  int best = 0;
-  float bestDistance = localX;
-  for(std::size_t i = 0; i <= line.size(); ++i) {
-    const float w = static_cast<float>(text.width(std::string_view(line.data(), i), false, true));
-    const float distance = std::abs(w - localX);
-    if(distance <= bestDistance) {
-      bestDistance = distance;
-      best = static_cast<int>(i);
-    }
-  }
-  return best;
-}
-
-static std::size_t editorIndexAtPoint(TextRenderer& text, const UiRuntime& ui, Rect rect, float x, float y) {
+static std::size_t editorIndexAtPoint(TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
   const int lineHeight = text.lineHeight();
-  auto lines = splitLines(ui.editor.text());
-  Rect writing = editorWritingRect(rect);
+  const auto& rows = editorRows(text, ui, rect);
+  const Rect writing = editorWritingRect(rect);
   const int visibleLine = std::max(0, static_cast<int>((y - (writing.y + 12)) / static_cast<float>(lineHeight)));
-  const int lineIndex = std::clamp(ui.editorScroll + visibleLine, 0, std::max(0, static_cast<int>(lines.size()) - 1));
-  const int column = nearestColumnForX(text, lines[static_cast<std::size_t>(lineIndex)], x - (writing.x + 12));
-  return cursorIndexForLineColumn(ui.editor.text(), lineIndex, column);
+  const int rowIndex = std::clamp(ui.editorScroll + visibleLine, 0, std::max(0, static_cast<int>(rows.size()) - 1));
+  return editor::offsetForRowX(rows[static_cast<std::size_t>(rowIndex)], x - (writing.x + 12), editorMeasure(text));
 }
 
 static void placeEditorCursor(TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
@@ -1974,49 +1959,49 @@ static void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
   Rect writing {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
   drawSurface(renderer, writing, SDL_Color {13, 16, 20, 255}, ui.focus == FocusArea::Editor ? kAccentDim : kHairline);
   const int lineHeight = text.lineHeight();
-  auto lines = splitLines(ui.editor.text());
+  const auto& rows = editorRows(text, ui, rect);
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
-  const auto [cursorLine, cursorColumn] = cursorLineColumn(ui.editor.text(), ui.editor.cursor());
+  const int cursorRow = editor::rowForOffset(rows, ui.editor.cursor());
   if(ui.revealEditorCursor) {
-    if(cursorLine < ui.editorScroll) ui.editorScroll = cursorLine;
-    if(cursorLine >= ui.editorScroll + maxLines) ui.editorScroll = cursorLine - maxLines + 1;
+    if(cursorRow < ui.editorScroll) ui.editorScroll = cursorRow;
+    if(cursorRow >= ui.editorScroll + maxLines) ui.editorScroll = cursorRow - maxLines + 1;
   }
-  const int maxScroll = std::max(0, static_cast<int>(lines.size()) - maxLines);
+  const int maxScroll = std::max(0, static_cast<int>(rows.size()) - maxLines);
   ui.editorScroll = std::clamp(ui.editorScroll, 0, maxScroll);
   ui.revealEditorCursor = false;
   {
     ClipGuard clip(renderer, {writing.x + 1, writing.y + 1, writing.w - 2, writing.h - 2});
     float y = writing.y + 12;
-    for(int i = ui.editorScroll; i < static_cast<int>(lines.size()) && y < writing.y + writing.h - 12; ++i) {
-      const auto& line = lines[static_cast<std::size_t>(i)];
+    for(int i = ui.editorScroll; i < static_cast<int>(rows.size()) && y < writing.y + writing.h - 12; ++i) {
+      const auto& row = rows[static_cast<std::size_t>(i)];
+      const auto& line = row.text;
       if(ui.editor.hasSelection()) {
-        const auto lineStartIndex = cursorIndexForLineColumn(ui.editor.text(), i, 0);
-        const auto lineEndIndex = lineStartIndex + line.size();
-        const auto selStart = std::max(ui.editor.selectionStart(), lineStartIndex);
-        const auto selEnd = std::min(ui.editor.selectionEnd(), lineEndIndex);
+        const auto selStart = std::max(ui.editor.selectionStart(), row.start);
+        const auto selEnd = std::min(ui.editor.selectionEnd(), row.end);
         if(selStart < selEnd) {
-          const auto before = std::string_view(line.data(), selStart - lineStartIndex);
-          const auto selected = std::string_view(line.data() + (selStart - lineStartIndex), selEnd - selStart);
+          const auto before = std::string_view(line.data(), selStart - row.start);
+          const auto selected = std::string_view(line.data() + (selStart - row.start), selEnd - selStart);
           const float sx = writing.x + 12 + static_cast<float>(text.width(before, false, true));
           const float sw = static_cast<float>(text.width(selected, false, true));
           fill(renderer, {sx, y - 2, std::min(sw, writing.x + writing.w - 8 - sx), static_cast<float>(lineHeight)}, SDL_Color {48, 82, 95, 210});
         }
       }
       drawFindHighlights(renderer, text, ui, line, writing, y);
-      text.draw(ellipsizeToWidth(text, line, static_cast<int>(writing.w - 24), false, true), writing.x + 12, y, kText, false, true);
+      text.draw(line.empty() ? " " : line, writing.x + 12, y, kText, false, true);
       y += lineHeight;
     }
-    if(ui.focus == FocusArea::Editor && cursorLine >= ui.editorScroll && cursorLine < ui.editorScroll + maxLines) {
+    if(ui.focus == FocusArea::Editor && cursorRow >= ui.editorScroll && cursorRow < ui.editorScroll + maxLines) {
       std::string prefix;
-      if(cursorLine >= 0 && cursorLine < static_cast<int>(lines.size())) {
-        const auto& line = lines[static_cast<std::size_t>(cursorLine)];
-        prefix = line.substr(0, std::min<std::size_t>(line.size(), static_cast<std::size_t>(cursorColumn)));
+      if(cursorRow >= 0 && cursorRow < static_cast<int>(rows.size())) {
+        const auto& row = rows[static_cast<std::size_t>(cursorRow)];
+        const auto cursorInRow = ui.editor.cursor() <= row.end ? ui.editor.cursor() - row.start : row.text.size();
+        prefix = row.text.substr(0, std::min<std::size_t>(row.text.size(), cursorInRow));
       }
       const float cursorX = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
-      const float cursorY = writing.y + 12 + static_cast<float>((cursorLine - ui.editorScroll) * lineHeight);
+      const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.editorScroll) * lineHeight);
       fill(renderer, {std::min(cursorX, writing.x + writing.w - 8), cursorY, 2, static_cast<float>(lineHeight - 2)}, kAccent);
     }
-    if(lines.empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, kMuted);
+    if(ui.editor.text().empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, kMuted);
   }
   drawVerticalScrollbar(renderer, writing, ui.editorScroll, maxScroll);
 }
@@ -2043,6 +2028,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     const bool table = block.type == markdown::BlockType::Table;
     const bool footnote = block.type == markdown::BlockType::Footnote;
     const bool html = block.type == markdown::BlockType::Html;
+    const bool blankLine = block.type == markdown::BlockType::BlankLine;
     if(!ordered) orderedIndex = 1;
     if(heading) {
       const auto anchor = anchorFor(blockText(block));
@@ -2055,7 +2041,9 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     const float markerW = listMarkerWidth(block);
     const float quoteW = block.type == markdown::BlockType::Quote ? 16.0f : 0.0f;
     const int lineHeight = text.lineHeight(heading);
-    if(rule) {
+    if(blankLine) {
+      measureY += static_cast<float>(text.lineHeight());
+    } else if(rule) {
       measureY += 22.0f;
     } else if(table) {
       measureY += tableHeight(text, block, contentWidth - indentW) + 12.0f;
@@ -2108,6 +2096,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
       const bool table = block.type == markdown::BlockType::Table;
       const bool admonition = block.type == markdown::BlockType::Admonition;
       const bool footnote = block.type == markdown::BlockType::Footnote;
+      const bool blankLine = block.type == markdown::BlockType::BlankLine;
       if(!ordered) orderedIndex = 1;
       const float indentW = static_cast<float>(std::max(0, block.depth - 1)) * 14.0f;
       const float markerW = listMarkerWidth(block);
@@ -2115,7 +2104,9 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
       const float extraW = admonitionLabelWidth(text, block) + footnoteLabelWidth(text, block);
       const float textX = contentLeft + indentW + markerW + quoteW + extraW;
       const int lineHeight = text.lineHeight(heading);
-      if(rule) {
+      if(blankLine) {
+        y += static_cast<float>(text.lineHeight());
+      } else if(rule) {
         if(y + 12.0f >= page.y && y <= page.y + page.h) {
           hLine(renderer, contentLeft + indentW, contentLeft + contentWidth, y + 8.0f, kDivider);
           hLine(renderer, contentLeft + indentW, contentLeft + contentWidth, y + 9.0f, kHairline);
@@ -2417,13 +2408,20 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(shortcut(SDLK_V, SDL_SCANCODE_V)) {
     if(focusedInput(ui)) pasteClipboardIntoInput(ui);
     else if(ui.focus == FocusArea::Editor) {
-      if(!pasteClipboardText(ui)) pasteClipboardImage(ui);
+      // Decide by what is actually on the clipboard: image data wins (image
+      // copies often also expose an incidental text/plain target), otherwise
+      // paste text. Shift forces plain text even when an image is present.
+      if(shift) {
+        if(!pasteClipboardText(ui)) pasteClipboardImage(ui);
+      } else {
+        if(!pasteClipboardImage(ui)) pasteClipboardText(ui);
+      }
       ui.revealEditorCursor = true;
     }
   } else if(shortcut(SDLK_L, SDL_SCANCODE_L)) {
     cyclePaneMode(ui);
   } else if(shortcut(SDLK_F, SDL_SCANCODE_F) && shift) {
-    if(ui.editor.dirty() && !ui.state.selection().noteId.empty()) saveCurrent(ui);
+    if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
     ui.inputAllSelected = false;
     ui.focus = FocusArea::Search;
     ui.state.setSearch(ui.searchDraft, ui.searchScope);
@@ -2664,6 +2662,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     auto folders = ui.state.folders();
     int index = static_cast<int>((y - (layout.sidebar.y + 40.0f)) / 26.0f);
     if(index >= 0 && index < static_cast<int>(folders.size())) {
+      if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
       ui.state.selectFolder(folders[static_cast<std::size_t>(index)].path);
       selectNoteAt(ui, 0);
       if(button == SDL_BUTTON_RIGHT) {
@@ -2686,6 +2685,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     auto tags = ui.state.tags();
     int tagIndex = static_cast<int>((y - firstTagY) / 26.0f);
     if(tagIndex >= 0 && tagIndex < static_cast<int>(tags.size())) {
+      if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
       ui.state.selectTag(tags[static_cast<std::size_t>(tagIndex)]);
       selectNoteAt(ui, 0);
     }
@@ -2962,7 +2962,6 @@ int run(ApplicationOptions options) {
           if(ui.state.shell().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
           const auto cursor = editorIndexAtPoint(text, ui, editorRect, event.motion.x, event.motion.y);
           ui.editor.selectRange(ui.editorSelectionAnchor, cursor);
-          publishEditorPrimarySelection(ui);
           ui.revealEditorCursor = true;
         } else if(ui.scrollDragTarget != ScrollDragTarget::None) {
           const AppLayout layout = computeLayout(ui.state.shell(), width, height);
@@ -3023,7 +3022,7 @@ int run(ApplicationOptions options) {
     if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty() &&
        now - ui.lastEdit > 1200 && now - ui.lastAutosaveAttempt > 1000) {
       ui.lastAutosaveAttempt = now;
-      saveCurrent(ui, true);
+      (void)saveCurrent(ui, true);
       needsDraw = true;
     }
     if(needsDraw) {
@@ -3035,7 +3034,7 @@ int run(ApplicationOptions options) {
     }
   }
 
-  if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty()) saveCurrent(ui, true);
+  if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty()) (void)saveCurrent(ui, true);
   if(ui.state.hasLibrary()) ui.state.saveUiState(uiStatePath(ui.state.libraryRoot()));
   SDL_StopTextInput(window);
   cursors.destroy();

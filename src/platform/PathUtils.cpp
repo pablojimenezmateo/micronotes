@@ -36,15 +36,6 @@ std::filesystem::path normalizeInsideRoot(const std::filesystem::path& root, con
   return candidateAbs;
 }
 
-bool isInsideRoot(const std::filesystem::path& root, const std::filesystem::path& candidate) {
-  try {
-    (void)normalizeInsideRoot(root, candidate);
-    return true;
-  } catch(...) {
-    return false;
-  }
-}
-
 std::string sanitizeFileStem(std::string title) {
   std::string out;
   out.reserve(title.size());

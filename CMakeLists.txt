@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(micronotes VERSION 0.1.0 LANGUAGES CXX C)
+project(micronotes VERSION 0.1.2 LANGUAGES CXX C)
 
 if(NOT UNIX OR APPLE)
   message(FATAL_ERROR "micronotes is Linux-only for this product scope.")
@@ -116,6 +116,7 @@ target_link_libraries(md4c_html PUBLIC md4c)
 set(MICRONOTES_CORE_SOURCES
   src/attachments/AttachmentService.cpp
   src/editor/MarkdownEditor.cpp
+  src/editor/SoftWrap.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp
@@ -123,13 +124,10 @@ set(MICRONOTES_CORE_SOURCES
   src/markdown/MarkdownParser.cpp
   src/markdown/RenderModel.cpp
   src/perf/Perf.cpp
-  src/persistence/SqliteDb.cpp
   src/platform/DefaultOpener.cpp
+  src/platform/DurableFile.cpp
   src/platform/PathUtils.cpp
   src/ui/AppState.cpp
-  src/ui/ShellModel.cpp
-  src/viewer/MarkdownViewer.cpp
-  src/viewer/SdlMarkdownRenderer.cpp
 )
 
 add_library(micronotes_core STATIC ${MICRONOTES_CORE_SOURCES})

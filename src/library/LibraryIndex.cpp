@@ -265,10 +265,6 @@ bool LibraryIndex::refreshChangedFiles() {
   return ok;
 }
 
-void LibraryIndex::add(SearchResult result) {
-  rows_.push_back(std::move(result));
-}
-
 std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchScope scope) const {
   perf::ScopeTimer timer("library_index.search");
   std::vector<SearchResult> out;

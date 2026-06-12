@@ -1,10 +1,12 @@
 #include "library/Library.h"
 
 #include "platform/PathUtils.h"
+#include "platform/DurableFile.h"
 
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <stdexcept>
 #include <sstream>
 #include <vector>
 
@@ -125,9 +127,9 @@ std::filesystem::path Library::notePath(const std::string& title) const {
 std::filesystem::path Library::createNote(const NoteMetadata& metadata, std::string_view body) const {
   ensureLayout();
   const auto path = uniqueMarkdownPath(platform::normalizeInsideRoot(root_, notePath(metadata.title)));
-  std::ofstream out(path);
-  out << metadataHeader(metadata);
-  out << body;
+  if(!platform::writeFileDurably(path, metadataHeader(metadata) + std::string(body))) {
+    throw std::runtime_error("failed to create note");
+  }
   return path;
 }
 
@@ -150,16 +152,15 @@ NoteMetadata Library::loadNoteMetadata(const std::filesystem::path& path) const 
   return parseMetadata(readMetadataHeader(in));
 }
 
-void Library::saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const {
+bool Library::saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const {
   const auto safePath = platform::normalizeInsideRoot(root_, path);
-  std::ofstream out(safePath);
-  out << metadataHeader(metadata) << body;
+  return platform::writeFileDurably(safePath, metadataHeader(metadata) + std::string(body));
 }
 
-void Library::updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const {
+bool Library::updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const {
   auto note = loadNote(path);
   note.metadata.tags = tags;
-  saveNote(path, note.metadata, note.body);
+  return saveNote(path, note.metadata, note.body);
 }
 
 std::filesystem::path Library::createFolder(const std::filesystem::path& relativeFolder) const {
@@ -173,7 +174,7 @@ std::filesystem::path Library::renameNote(const std::filesystem::path& path, con
   auto note = loadNote(safePath);
   note.metadata.title = newTitle;
   const auto target = uniqueMarkdownPath(platform::normalizeInsideRoot(root_, safePath.parent_path() / (platform::sanitizeFileStem(newTitle) + ".md")), safePath);
-  saveNote(target, note.metadata, note.body);
+  if(!saveNote(target, note.metadata, note.body)) return safePath;
   if(target != safePath) std::filesystem::remove(safePath);
   return target;
 }
@@ -221,11 +222,17 @@ void Library::deleteNote(const std::filesystem::path& path) const {
 std::vector<std::filesystem::path> Library::noteFiles() const {
   std::vector<std::filesystem::path> files;
   if(!std::filesystem::exists(root_)) return files;
-  for(const auto& entry : std::filesystem::recursive_directory_iterator(root_)) {
-    if(!entry.is_regular_file()) continue;
+  std::error_code ec;
+  const auto internal = (root_ / ".micronotes").string();
+  std::filesystem::recursive_directory_iterator it(
+      root_, std::filesystem::directory_options::skip_permission_denied, ec);
+  const std::filesystem::recursive_directory_iterator end;
+  for(; !ec && it != end; it.increment(ec)) {
+    const auto& entry = *it;
+    if(!entry.is_regular_file(ec)) continue;
     const auto path = entry.path();
     if(path.extension() != ".md") continue;
-    if(path.string().find((root_ / ".micronotes").string()) == 0) continue;
+    if(path.string().find(internal) == 0) continue;
     files.push_back(path);
   }
   return files;

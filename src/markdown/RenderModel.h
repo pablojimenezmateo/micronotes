@@ -16,7 +16,8 @@ enum class BlockType {
   HorizontalRule,
   Html,
   Footnote,
-  Admonition
+  Admonition,
+  BlankLine
 };
 
 enum class InlineType {
@@ -81,6 +82,5 @@ struct Document {
 };
 
 std::string plainText(const Document& document);
-std::vector<Inline> images(const Document& document);
 
 }

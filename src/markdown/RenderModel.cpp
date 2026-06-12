@@ -4,6 +4,18 @@ namespace micronotes::markdown {
 
 std::string plainText(const Document& document) {
   std::string out;
+  std::size_t size = document.blocks.size();
+  for(const auto& block : document.blocks) {
+    for(const auto& item : block.inlines) size += item.text.size();
+    for(const auto& row : block.tableRows) {
+      ++size;
+      for(const auto& cell : row.cells) {
+        ++size;
+        for(const auto& item : cell.inlines) size += item.text.size();
+      }
+    }
+  }
+  out.reserve(size);
   for(const auto& block : document.blocks) {
     for(const auto& item : block.inlines) {
       out += item.text;
@@ -16,23 +28,6 @@ std::string plainText(const Document& document) {
       out.push_back('\n');
     }
     out.push_back('\n');
-  }
-  return out;
-}
-
-std::vector<Inline> images(const Document& document) {
-  std::vector<Inline> out;
-  for(const auto& block : document.blocks) {
-    for(const auto& item : block.inlines) {
-      if(item.type == InlineType::Image) out.push_back(item);
-    }
-    for(const auto& row : block.tableRows) {
-      for(const auto& cell : row.cells) {
-        for(const auto& item : cell.inlines) {
-          if(item.type == InlineType::Image) out.push_back(item);
-        }
-      }
-    }
   }
   return out;
 }

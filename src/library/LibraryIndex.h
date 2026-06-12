@@ -35,7 +35,6 @@ public:
   bool migrate();
   bool rebuild();
   bool refreshChangedFiles();
-  void add(SearchResult result);
   std::vector<SearchResult> search(std::string_view query, SearchScope scope = SearchScope::All) const;
   std::size_t size() const;
 

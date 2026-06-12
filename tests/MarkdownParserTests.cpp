@@ -49,6 +49,35 @@ MICRONOTES_TEST(markdown_parser_keeps_links_and_images) {
   MICRONOTES_REQUIRE(sawImage);
 }
 
+MICRONOTES_TEST(markdown_parser_renders_single_newlines_as_line_breaks) {
+  const auto doc = MarkdownParser().parse("first line\nsecond line\n");
+  MICRONOTES_REQUIRE(doc.blocks.size() == 1);
+  bool sawBreak = false;
+  std::string combined;
+  for(const auto& item : doc.blocks[0].inlines) {
+    combined += item.text;
+    sawBreak = sawBreak || item.text == "\n";
+  }
+  MICRONOTES_REQUIRE(sawBreak);
+  MICRONOTES_REQUIRE(combined == "first line\nsecond line");
+}
+
+MICRONOTES_TEST(markdown_parser_preserves_additional_empty_lines_as_blank_blocks) {
+  const auto doc = MarkdownParser().parse("first\n\n\n\nsecond\n");
+  MICRONOTES_REQUIRE(doc.blocks.size() == 4);
+  MICRONOTES_REQUIRE(doc.blocks[0].type == BlockType::Paragraph);
+  MICRONOTES_REQUIRE(doc.blocks[1].type == BlockType::BlankLine);
+  MICRONOTES_REQUIRE(doc.blocks[2].type == BlockType::BlankLine);
+  MICRONOTES_REQUIRE(doc.blocks[3].type == BlockType::Paragraph);
+}
+
+MICRONOTES_TEST(markdown_parser_keeps_empty_lines_inside_fenced_code) {
+  const auto doc = MarkdownParser().parse("```text\nfirst\n\nsecond\n```\n");
+  MICRONOTES_REQUIRE(doc.blocks.size() == 1);
+  MICRONOTES_REQUIRE(doc.blocks[0].type == BlockType::Code);
+  MICRONOTES_REQUIRE(micronotes::markdown::plainText(doc).find("first\n\nsecond") != std::string::npos);
+}
+
 MICRONOTES_TEST(markdown_parser_keeps_empty_links_and_images) {
   const auto doc = MarkdownParser().parse("![](.micronotes/attachments/note/clipboard.png)\n[](.micronotes/attachments/note/doc.pdf)\n");
   MICRONOTES_REQUIRE(doc.blocks.size() == 1);
@@ -75,7 +104,7 @@ MICRONOTES_TEST(markdown_parser_tolerates_attachment_links_with_spaces) {
 }
 
 MICRONOTES_TEST(markdown_parser_autolinks_raw_urls) {
-  const auto url = std::string("https://example.com/files/report.pdf");
+  const auto url = std::string("https://ptvgroup-my.sharepoint.com/:b:/p/lena_wostracky/IQD_Wqa8-9fCRZ6zBN9QL");
   const auto doc = MarkdownParser().parse("Open " + url + ".\n");
   MICRONOTES_REQUIRE(doc.blocks.size() == 1);
   bool sawLink = false;

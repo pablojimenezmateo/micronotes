@@ -1,9 +1,9 @@
 #include "TestSupport.h"
 
 #include "editor/MarkdownEditor.h"
+#include "editor/SoftWrap.h"
 #include "markdown/MarkdownParser.h"
 #include "ui/ShellModel.h"
-#include "viewer/MarkdownViewer.h"
 
 #include <filesystem>
 #include <fstream>
@@ -37,6 +37,22 @@ MICRONOTES_TEST(editor_moves_cursor_and_deletes_forward) {
   MICRONOTES_REQUIRE(editor.text() == "one\nwo\nthree");
 }
 
+MICRONOTES_TEST(editor_moves_and_erases_by_utf8_codepoints) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("caf\xC3\xA9");  // "café", the 'é' is two bytes
+  MICRONOTES_REQUIRE(editor.cursor() == 5);
+  editor.moveLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 3);  // landed on the codepoint start, not mid-byte
+  editor.moveRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 5);
+  editor.erasePrevious();
+  MICRONOTES_REQUIRE(editor.text() == "caf");  // whole 'é' removed, no dangling byte
+  editor.setText("\xC3\xA9xy");  // "éxy"
+  editor.moveCursor(0);
+  editor.eraseNext();
+  MICRONOTES_REQUIRE(editor.text() == "xy");  // whole leading 'é' removed
+}
+
 MICRONOTES_TEST(editor_moves_to_line_boundaries) {
   micronotes::editor::MarkdownEditor editor;
   editor.setText("one\ntwo three\nfour");
@@ -64,12 +80,102 @@ MICRONOTES_TEST(editor_selects_replaces_and_erases_ranges) {
   MICRONOTES_REQUIRE(editor.text().empty());
 }
 
-MICRONOTES_TEST(viewer_layout_counts_blocks) {
-  auto doc = micronotes::markdown::MarkdownParser().parse("# One\nText\n");
-  auto layout = micronotes::viewer::MarkdownViewer().layout(doc, 800);
-  MICRONOTES_REQUIRE(layout.width == 800);
-  MICRONOTES_REQUIRE(layout.blockCount == 2);
-  MICRONOTES_REQUIRE(layout.totalHeight > 0);
+MICRONOTES_TEST(editor_ignores_empty_insert_without_selection) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("alpha");
+  editor.insert("");
+  MICRONOTES_REQUIRE(!editor.dirty());
+  MICRONOTES_REQUIRE(!editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "alpha");
+}
+
+MICRONOTES_TEST(editor_caps_undo_history) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("");
+  for(int i = 0; i < 105; ++i) {
+    editor.insert("x");
+  }
+  int undoCount = 0;
+  while(editor.undo()) {
+    ++undoCount;
+  }
+  MICRONOTES_REQUIRE(undoCount == 100);
+  MICRONOTES_REQUIRE(editor.text().size() == 5);
+}
+
+MICRONOTES_TEST(editor_soft_wraps_by_words_without_changing_source_offsets) {
+  const std::string source = "alpha beta gamma";
+  const auto rows = micronotes::editor::softWrap(source, 11, [](std::string_view value) {
+    return static_cast<int>(value.size());
+  });
+  MICRONOTES_REQUIRE(rows.size() == 2);
+  MICRONOTES_REQUIRE(rows[0].text == "alpha beta ");
+  MICRONOTES_REQUIRE(rows[0].start == 0);
+  MICRONOTES_REQUIRE(rows[0].end == 11);
+  MICRONOTES_REQUIRE(rows[1].text == "gamma");
+  MICRONOTES_REQUIRE(rows[1].start == 11);
+  MICRONOTES_REQUIRE(rows[1].end == source.size());
+}
+
+MICRONOTES_TEST(editor_soft_wrap_keeps_remaining_words_together_when_they_fit) {
+  const std::string source = "alpha beta gamma delta";
+  const auto rows = micronotes::editor::softWrap(source, 11, [](std::string_view value) {
+    return static_cast<int>(value.size());
+  });
+  MICRONOTES_REQUIRE(rows.size() == 2);
+  MICRONOTES_REQUIRE(rows[0].text == "alpha beta ");
+  MICRONOTES_REQUIRE(rows[0].start == 0);
+  MICRONOTES_REQUIRE(rows[0].end == 11);
+  MICRONOTES_REQUIRE(rows[1].text == "gamma delta");
+  MICRONOTES_REQUIRE(rows[1].start == 11);
+  MICRONOTES_REQUIRE(rows[1].end == source.size());
+}
+
+MICRONOTES_TEST(editor_soft_wrap_preserves_hard_newlines) {
+  const std::string source = "one two\nthree";
+  const auto rows = micronotes::editor::softWrap(source, 20, [](std::string_view value) {
+    return static_cast<int>(value.size());
+  });
+  MICRONOTES_REQUIRE(rows.size() == 2);
+  MICRONOTES_REQUIRE(rows[0].text == "one two");
+  MICRONOTES_REQUIRE(rows[0].start == 0);
+  MICRONOTES_REQUIRE(rows[0].end == 7);
+  MICRONOTES_REQUIRE(rows[1].text == "three");
+  MICRONOTES_REQUIRE(rows[1].start == 8);
+  MICRONOTES_REQUIRE(rows[1].end == source.size());
+}
+
+MICRONOTES_TEST(editor_soft_wrap_splits_oversized_words) {
+  const std::string source = "abcdefgh";
+  const auto rows = micronotes::editor::softWrap(source, 3, [](std::string_view value) {
+    return static_cast<int>(value.size());
+  });
+  MICRONOTES_REQUIRE(rows.size() == 3);
+  MICRONOTES_REQUIRE(rows[0].text == "abc");
+  MICRONOTES_REQUIRE(rows[1].text == "def");
+  MICRONOTES_REQUIRE(rows[2].text == "gh");
+}
+
+MICRONOTES_TEST(editor_soft_wrap_keeps_utf8_codepoints_intact) {
+  const std::string source = "a\xC3\xA9\xC3\xA9";  // "aéé", each 'é' is two bytes
+  const auto rows = micronotes::editor::softWrap(source, 2, [](std::string_view value) {
+    return static_cast<int>(value.size());
+  });
+  MICRONOTES_REQUIRE(rows.size() == 3);
+  MICRONOTES_REQUIRE(rows[0].text == "a");
+  MICRONOTES_REQUIRE(rows[1].text == "\xC3\xA9");
+  MICRONOTES_REQUIRE(rows[2].text == "\xC3\xA9");
+}
+
+MICRONOTES_TEST(editor_soft_wrap_maps_offsets_and_hit_testing) {
+  const std::string source = "alpha beta gamma";
+  const auto measure = [](std::string_view value) {
+    return static_cast<int>(value.size());
+  };
+  const auto rows = micronotes::editor::softWrap(source, 11, measure);
+  MICRONOTES_REQUIRE(micronotes::editor::rowForOffset(rows, 0) == 0);
+  MICRONOTES_REQUIRE(micronotes::editor::rowForOffset(rows, 12) == 1);
+  MICRONOTES_REQUIRE(micronotes::editor::offsetForRowX(rows[1], 2.0f, measure) == 13);
 }
 
 MICRONOTES_TEST(markdown_parser_covers_syntax_reference_blocks) {
@@ -108,26 +214,4 @@ MICRONOTES_TEST(markdown_parser_covers_syntax_reference_blocks) {
   MICRONOTES_REQUIRE(quotes >= 2);
   MICRONOTES_REQUIRE(codeBlocks >= 2);
   MICRONOTES_REQUIRE(links >= 8);
-}
-
-MICRONOTES_TEST(pane_controller_tracks_visibility_modes) {
-  micronotes::ui::PaneController panes;
-  panes.setMode(micronotes::ui::PaneMode::Editor);
-  MICRONOTES_REQUIRE(panes.editorVisible());
-  MICRONOTES_REQUIRE(!panes.viewerVisible());
-  panes.setMode(micronotes::ui::PaneMode::Viewer);
-  MICRONOTES_REQUIRE(!panes.editorVisible());
-  MICRONOTES_REQUIRE(panes.viewerVisible());
-  panes.setMode(micronotes::ui::PaneMode::Split);
-  MICRONOTES_REQUIRE(panes.editorVisible());
-  MICRONOTES_REQUIRE(panes.viewerVisible());
-}
-
-MICRONOTES_TEST(debounced_refresh_waits_before_refreshing) {
-  micronotes::ui::DebouncedRefresh refresh(100);
-  refresh.markDirty(1000);
-  MICRONOTES_REQUIRE(!refresh.shouldRefresh(1050));
-  MICRONOTES_REQUIRE(refresh.shouldRefresh(1100));
-  refresh.markRefreshed();
-  MICRONOTES_REQUIRE(!refresh.shouldRefresh(1200));
 }

@@ -3,6 +3,31 @@
 #include <algorithm>
 
 namespace micronotes::editor {
+namespace {
+
+constexpr std::size_t kMaxUndoSnapshots = 100;
+
+bool isUtf8Continuation(unsigned char c) {
+  return (c & 0xC0) == 0x80;
+}
+
+// Start offset of the UTF-8 codepoint immediately before `pos`.
+std::size_t previousCodepoint(const std::string& text, std::size_t pos) {
+  if(pos == 0) return 0;
+  std::size_t i = pos - 1;
+  while(i > 0 && isUtf8Continuation(static_cast<unsigned char>(text[i]))) --i;
+  return i;
+}
+
+// Start offset of the UTF-8 codepoint immediately after `pos`.
+std::size_t nextCodepoint(const std::string& text, std::size_t pos) {
+  if(pos >= text.size()) return text.size();
+  std::size_t i = pos + 1;
+  while(i < text.size() && isUtf8Continuation(static_cast<unsigned char>(text[i]))) ++i;
+  return i;
+}
+
+}
 
 void MarkdownEditor::setText(std::string text) {
   text_ = std::move(text);
@@ -15,6 +40,7 @@ void MarkdownEditor::setText(std::string text) {
 }
 
 void MarkdownEditor::insert(std::string_view text) {
+  if(text.empty() && !hasSelection()) return;
   snapshot();
   if(hasSelection()) {
     const auto start = selectionStart();
@@ -34,8 +60,9 @@ void MarkdownEditor::erasePrevious() {
   }
   if(cursor_ == 0) return;
   snapshot();
-  text_.erase(cursor_ - 1, 1);
-  --cursor_;
+  const auto previous = previousCodepoint(text_, cursor_);
+  text_.erase(previous, cursor_ - previous);
+  cursor_ = previous;
   dirty_ = true;
 }
 
@@ -46,7 +73,7 @@ void MarkdownEditor::eraseNext() {
   }
   if(cursor_ >= text_.size()) return;
   snapshot();
-  text_.erase(cursor_, 1);
+  text_.erase(cursor_, nextCodepoint(text_, cursor_) - cursor_);
   dirty_ = true;
 }
 
@@ -101,12 +128,12 @@ void MarkdownEditor::eraseSelection() {
 
 void MarkdownEditor::moveLeft() {
   clearSelection();
-  if(cursor_ > 0) --cursor_;
+  cursor_ = previousCodepoint(text_, cursor_);
 }
 
 void MarkdownEditor::moveRight() {
   clearSelection();
-  if(cursor_ < text_.size()) ++cursor_;
+  cursor_ = nextCodepoint(text_, cursor_);
 }
 
 void MarkdownEditor::moveLineUp() {
@@ -187,12 +214,18 @@ bool MarkdownEditor::dirty() const {
   return dirty_;
 }
 
+void MarkdownEditor::markDirty() {
+  dirty_ = true;
+}
+
 void MarkdownEditor::markSaved() {
   dirty_ = false;
 }
 
 void MarkdownEditor::snapshot() {
+  if(!undo_.empty() && undo_.back() == text_) return;
   undo_.push_back(text_);
+  if(undo_.size() > kMaxUndoSnapshots) undo_.erase(undo_.begin());
   redo_.clear();
 }
 

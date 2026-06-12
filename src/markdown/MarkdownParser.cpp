@@ -6,8 +6,10 @@ extern "C" {
 #include <entity.h>
 }
 
+#include <algorithm>
 #include <cstdlib>
 #include <cctype>
+#include <optional>
 #include <utility>
 #include <string>
 #include <string_view>
@@ -341,7 +343,7 @@ static int textCallback(MD_TEXTTYPE type, const char* text, unsigned size, void*
   Inline inlineText;
   inlineText.type = activeType(state, type);
   if(type == MD_TEXT_BR) inlineText.text = "\n";
-  else if(type == MD_TEXT_SOFTBR) inlineText.text = " ";
+  else if(type == MD_TEXT_SOFTBR) inlineText.text = "\n";
   else if(type == MD_TEXT_NULLCHAR) inlineText.text = "\xef\xbf\xbd";
   else if(type == MD_TEXT_ENTITY) inlineText.text = decodeEntity(text, size);
   else inlineText.text.assign(text, size);
@@ -519,9 +521,31 @@ static void autolinkDocument(Document& doc) {
   }
 }
 
+static bool isBlankLine(std::string_view line) {
+  return std::all_of(line.begin(), line.end(), [](unsigned char c) {
+    return std::isspace(c);
+  });
 }
 
-Document MarkdownParser::parse(std::string_view source) const {
+struct FenceState {
+  char marker = '\0';
+  std::size_t length = 0;
+};
+
+static std::optional<FenceState> fenceOnLine(std::string_view line) {
+  std::size_t pos = 0;
+  while(pos < line.size() && pos < 4 && line[pos] == ' ') ++pos;
+  if(pos > 3 || pos >= line.size() || (line[pos] != '`' && line[pos] != '~')) return std::nullopt;
+
+  const char marker = line[pos];
+  std::size_t end = pos;
+  while(end < line.size() && line[end] == marker) ++end;
+  const std::size_t length = end - pos;
+  if(length < 3) return std::nullopt;
+  return FenceState {marker, length};
+}
+
+static Document parseMarkdownFragment(std::string_view source) {
   ParseState state;
   MD_PARSER parser {};
   parser.abi_version = 0;
@@ -532,8 +556,100 @@ Document MarkdownParser::parse(std::string_view source) const {
   parser.leave_span = leaveSpan;
   parser.text = textCallback;
   md_parse(source.data(), static_cast<unsigned>(source.size()), &parser, &state);
-  autolinkDocument(state.doc);
   return std::move(state.doc);
+}
+
+static void appendParsedFragment(Document& doc, std::string_view source) {
+  if(source.empty()) return;
+  auto parsed = parseMarkdownFragment(source);
+  doc.blocks.insert(doc.blocks.end(), std::make_move_iterator(parsed.blocks.begin()), std::make_move_iterator(parsed.blocks.end()));
+}
+
+static void appendBlankLines(Document& doc, std::size_t count) {
+  for(std::size_t i = 0; i < count; ++i) {
+    Block block;
+    block.type = BlockType::BlankLine;
+    doc.blocks.push_back(std::move(block));
+  }
+}
+
+static Document parsePreservingBlankLines(std::string_view source) {
+  Document doc;
+  std::size_t segmentStart = std::string_view::npos;
+  std::size_t blankRunStart = std::string_view::npos;
+  std::size_t firstBlankEnd = std::string_view::npos;
+  std::size_t blankRun = 0;
+  std::optional<FenceState> openFence;
+
+  auto flushSegment = [&](std::size_t end) {
+    if(segmentStart == std::string_view::npos) return;
+    appendParsedFragment(doc, source.substr(segmentStart, end - segmentStart));
+    segmentStart = std::string_view::npos;
+  };
+
+  auto resetBlankRun = [&]() {
+    blankRun = 0;
+    blankRunStart = std::string_view::npos;
+    firstBlankEnd = std::string_view::npos;
+  };
+
+  std::size_t lineStart = 0;
+  while(lineStart < source.size()) {
+    std::size_t lineEnd = source.find('\n', lineStart);
+    if(lineEnd == std::string_view::npos) lineEnd = source.size();
+    const std::string_view line = source.substr(lineStart, lineEnd - lineStart);
+    const std::size_t nextLineStart = lineEnd < source.size() ? lineEnd + 1 : lineEnd;
+
+    if(!openFence && isBlankLine(line)) {
+      if(blankRun == 0) {
+        blankRunStart = lineStart;
+        firstBlankEnd = nextLineStart;
+      }
+      ++blankRun;
+      lineStart = nextLineStart;
+      continue;
+    }
+
+    if(blankRun > 0) {
+      if(segmentStart == std::string_view::npos) {
+        appendBlankLines(doc, blankRun);
+      } else if(blankRun > 1) {
+        flushSegment(firstBlankEnd);
+        appendBlankLines(doc, blankRun - 1);
+        segmentStart = lineStart;
+      }
+      resetBlankRun();
+    }
+
+    if(segmentStart == std::string_view::npos) segmentStart = lineStart;
+
+    if(const auto fence = fenceOnLine(line)) {
+      if(!openFence) {
+        openFence = fence;
+      } else if(fence->marker == openFence->marker && fence->length >= openFence->length) {
+        openFence.reset();
+      }
+    }
+
+    lineStart = nextLineStart;
+  }
+
+  if(blankRun > 0) {
+    flushSegment(blankRunStart);
+    appendBlankLines(doc, blankRun);
+    resetBlankRun();
+  } else {
+    flushSegment(source.size());
+  }
+  return doc;
+}
+
+}
+
+Document MarkdownParser::parse(std::string_view source) const {
+  auto doc = parsePreservingBlankLines(source);
+  autolinkDocument(doc);
+  return doc;
 }
 
 }
