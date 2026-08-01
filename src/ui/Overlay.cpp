@@ -235,9 +235,9 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
   if(usesField(*overlay)) {
     // The field owns caret motion, selection, word jumps and undo; only a key
     // it declines falls through to be swallowed below.
-    const auto handledBy = applyKeyToField(overlay->value, key, ctrl, shift);
-    if(handledBy == FieldKeyResult::Changed) resetHighlight();
-    if(handledBy != FieldKeyResult::Ignored) return std::nullopt;
+    const auto handledBy = editor::applyKeyToField(overlay->value, key, ctrl, shift);
+    if(handledBy == editor::FieldKeyResult::Changed) resetHighlight();
+    if(handledBy != editor::FieldKeyResult::Ignored) return std::nullopt;
   }
   // Anything else is swallowed so it cannot leak into the editor behind.
   return std::nullopt;

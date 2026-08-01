@@ -1,20 +1,18 @@
 #pragma once
 
-#include "CoreAliases.h"
-
 #include "core/editor/SingleLineEditor.h"
 
 #include <SDL3/SDL.h>
 
 #include <string>
 
-namespace micronotes::ui {
+namespace microcore::editor {
 
 // A single-line field plus the one piece of view state it has to remember
 // between frames: how far its text is scrolled sideways. Recomputing that from
 // scratch each frame would make the field snap back to the left every repaint.
 struct TextField {
-  editor::SingleLineEditor editor;
+  SingleLineEditor editor;
   float scrollX = 0.0f;
 
   const std::string& text() const { return editor.text(); }
@@ -39,10 +37,11 @@ enum class FieldKeyResult {
 // and Delete (with their Ctrl word-wise forms), Shift for selection, and
 // Ctrl+A / Ctrl+Z / Ctrl+Y.
 //
-// This lives outside Application.cpp on purpose. Routing every field through
-// one function is what stops the five inputs from drifting apart -- the version
-// this replaces reimplemented "Backspace" separately for each field, and all
-// five got it wrong in the same way.
+// One function rather than a branch per field, and in core rather than in
+// either app, on purpose. Both apps previously spelled "Backspace" out
+// separately for every input they had -- five copies in one, three in the
+// other -- and every copy was wrong in the same way. There is now one
+// implementation to keep right.
 FieldKeyResult applyKeyToField(TextField& field, SDL_Keycode key, bool ctrl, bool shift);
 
 }

@@ -1,6 +1,6 @@
 #include "TestSupport.h"
 
-#include "ui/TextField.h"
+#include "core/editor/TextField.h"
 
 #include <string>
 
@@ -11,22 +11,22 @@
 
 namespace {
 
-using micronotes::ui::FieldKeyResult;
-using micronotes::ui::TextField;
+using microcore::editor::FieldKeyResult;
+using microcore::editor::TextField;
 
 }
 
 MICRONOTES_TEST(text_field_backspace_reports_a_change) {
   TextField field;
   field.beginWith("hello", false);
-  MICRONOTES_REQUIRE(micronotes::ui::applyKeyToField(field, SDLK_BACKSPACE, false, false) == FieldKeyResult::Changed);
+  MICRONOTES_REQUIRE(microcore::editor::applyKeyToField(field, SDLK_BACKSPACE, false, false) == FieldKeyResult::Changed);
   MICRONOTES_REQUIRE(field.text() == "hell");
 }
 
 MICRONOTES_TEST(text_field_ctrl_backspace_erases_a_word) {
   TextField field;
   field.beginWith("hello world", false);
-  micronotes::ui::applyKeyToField(field, SDLK_BACKSPACE, true, false);
+  microcore::editor::applyKeyToField(field, SDLK_BACKSPACE, true, false);
   MICRONOTES_REQUIRE(field.text() == "hello ");
 }
 
@@ -34,41 +34,41 @@ MICRONOTES_TEST(text_field_backspace_erases_the_selection_not_one_character) {
   TextField field;
   field.beginWith("hello world");  // begins fully selected
   MICRONOTES_REQUIRE(field.editor.hasSelection());
-  micronotes::ui::applyKeyToField(field, SDLK_BACKSPACE, false, false);
+  microcore::editor::applyKeyToField(field, SDLK_BACKSPACE, false, false);
   MICRONOTES_REQUIRE(field.text().empty());
 }
 
 MICRONOTES_TEST(text_field_arrows_move_and_report_motion) {
   TextField field;
   field.beginWith("hello", false);
-  MICRONOTES_REQUIRE(micronotes::ui::applyKeyToField(field, SDLK_LEFT, false, false) == FieldKeyResult::Moved);
+  MICRONOTES_REQUIRE(microcore::editor::applyKeyToField(field, SDLK_LEFT, false, false) == FieldKeyResult::Moved);
   MICRONOTES_REQUIRE(field.editor.cursor() == 4);
-  micronotes::ui::applyKeyToField(field, SDLK_HOME, false, false);
+  microcore::editor::applyKeyToField(field, SDLK_HOME, false, false);
   MICRONOTES_REQUIRE(field.editor.cursor() == 0);
-  micronotes::ui::applyKeyToField(field, SDLK_END, false, false);
+  microcore::editor::applyKeyToField(field, SDLK_END, false, false);
   MICRONOTES_REQUIRE(field.editor.cursor() == 5);
 }
 
 MICRONOTES_TEST(text_field_shift_arrow_selects) {
   TextField field;
   field.beginWith("hello", false);
-  micronotes::ui::applyKeyToField(field, SDLK_LEFT, false, true);
-  micronotes::ui::applyKeyToField(field, SDLK_LEFT, false, true);
+  microcore::editor::applyKeyToField(field, SDLK_LEFT, false, true);
+  microcore::editor::applyKeyToField(field, SDLK_LEFT, false, true);
   MICRONOTES_REQUIRE(field.editor.selectedText() == "lo");
 }
 
 MICRONOTES_TEST(text_field_ctrl_arrow_moves_by_word) {
   TextField field;
   field.beginWith("hello world", false);
-  micronotes::ui::applyKeyToField(field, SDLK_LEFT, true, false);
+  microcore::editor::applyKeyToField(field, SDLK_LEFT, true, false);
   MICRONOTES_REQUIRE(field.editor.cursor() == 6);
 }
 
 MICRONOTES_TEST(text_field_ignores_keys_it_does_not_own) {
   TextField field;
   field.beginWith("hello", false);
-  MICRONOTES_REQUIRE(micronotes::ui::applyKeyToField(field, SDLK_RETURN, false, false) == FieldKeyResult::Ignored);
-  MICRONOTES_REQUIRE(micronotes::ui::applyKeyToField(field, SDLK_A, false, false) == FieldKeyResult::Ignored);
+  MICRONOTES_REQUIRE(microcore::editor::applyKeyToField(field, SDLK_RETURN, false, false) == FieldKeyResult::Ignored);
+  MICRONOTES_REQUIRE(microcore::editor::applyKeyToField(field, SDLK_A, false, false) == FieldKeyResult::Ignored);
   MICRONOTES_REQUIRE(field.text() == "hello");
 }
 

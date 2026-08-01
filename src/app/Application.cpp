@@ -24,6 +24,7 @@
 #include "ui/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/TreeModel.h"
+#include "core/editor/TextField.h"
 
 #include <SDL3/SDL.h>
 #if MICRONOTES_HAS_SDL3_IMAGE
@@ -364,12 +365,12 @@ struct UiRuntime {
   std::vector<editor::SoftWrapRow> cachedEditorRows;
   FocusArea focus = FocusArea::Editor;
   std::string loadedNoteId;
-  ui::TextField search;
+  editor::TextField search;
   library::SearchScope searchScope = library::SearchScope::All;
-  ui::TextField find;
-  ui::TextField tag;
-  ui::TextField rename;
-  ui::TextField folderRename;
+  editor::TextField find;
+  editor::TextField tag;
+  editor::TextField rename;
+  editor::TextField folderRename;
   std::string status;
   std::vector<LinkRegion> linkRegions;
   std::map<std::string, int> viewerAnchors;
@@ -900,7 +901,7 @@ static bool pasteClipboardText(UiRuntime& ui) {
   return true;
 }
 
-static ui::TextField* focusedField(UiRuntime& ui) {
+static editor::TextField* focusedField(UiRuntime& ui) {
   switch(ui.focus) {
     case FocusArea::Search: return &ui.search;
     case FocusArea::Find: return &ui.find;
@@ -1408,7 +1409,7 @@ static editor::TextWidthFn fieldMeasure(const TextRenderer& text) {
 // string, which is why they had no visible insertion point, no selection, and
 // no way to reach text past the right edge.
 static void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
-                          ui::TextField& field, Rect box, bool focused,
+                          editor::TextField& field, Rect box, bool focused,
                           std::string_view placeholder) {
   const auto view = editor::layoutSingleLine(field.editor, box.w, field.scrollX, fieldMeasure(text));
   field.scrollX = view.scrollX;
@@ -1438,7 +1439,7 @@ static void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime&
 
 // Byte offset in `field` under a pointer at window x, for a field drawn in
 // `box`. Always a code point boundary.
-static std::size_t fieldOffsetAtX(const TextRenderer& text, const ui::TextField& field, Rect box, float x) {
+static std::size_t fieldOffsetAtX(const TextRenderer& text, const editor::TextField& field, Rect box, float x) {
   return editor::offsetAtX(field.text(), x - box.x + field.scrollX, fieldMeasure(text));
 }
 
@@ -3872,9 +3873,9 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
         default: ui.focus = FocusArea::Editor; break;
       }
     } else {
-      const auto result = ui::applyKeyToField(*field, key, ctrl, shift);
-      if(result == ui::FieldKeyResult::Changed) syncFocusedInput(ui);
-      else if(result == ui::FieldKeyResult::Moved && field->editor.hasSelection()) {
+      const auto result = editor::applyKeyToField(*field, key, ctrl, shift);
+      if(result == editor::FieldKeyResult::Changed) syncFocusedInput(ui);
+      else if(result == editor::FieldKeyResult::Moved && field->editor.hasSelection()) {
         SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
       }
     }

@@ -136,6 +136,7 @@ set(MICROCORE_SOURCES
   src/core/editor/SingleLineEditor.cpp
   src/core/editor/SingleLineView.cpp
   src/core/editor/SoftWrap.cpp
+  src/core/editor/TextField.cpp
   src/core/markdown/MarkdownParser.cpp
   src/core/markdown/RenderModel.cpp
   src/core/perf/Perf.cpp
@@ -168,7 +169,6 @@ set(MICRONOTES_APP_SOURCES
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
   src/ui/Settings.cpp
-  src/ui/TextField.cpp
   src/ui/Theme.cpp
   src/ui/TreeModel.cpp
 )

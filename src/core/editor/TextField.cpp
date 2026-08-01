@@ -1,6 +1,6 @@
-#include "ui/TextField.h"
+#include "core/editor/TextField.h"
 
-namespace micronotes::ui {
+namespace microcore::editor {
 
 void TextField::beginWith(std::string value, bool selectAll) {
   editor.setText(std::move(value));

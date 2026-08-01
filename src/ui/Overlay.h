@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ui/TextField.h"
+#include "core/editor/TextField.h"
 #include "ui/Draw.h"
 
 #include <SDL3/SDL.h>
@@ -38,7 +38,7 @@ struct Overlay {
   std::string hint;
 
   // TextPrompt value, or the filter text of a filterable List.
-  TextField value;
+  editor::TextField value;
   std::string placeholder;
 
   std::vector<OverlayItem> items;
