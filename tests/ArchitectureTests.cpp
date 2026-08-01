@@ -192,3 +192,29 @@ MICRONOTES_TEST(text_texture_cache_distinguishes_colour_and_style) {
   MICRONOTES_REQUIRE(cache.find("x", white, {true, false, false, false}) == nullptr);
   MICRONOTES_REQUIRE(cache.find("x", white, {}) != nullptr);
 }
+
+// Opening a connection outside SqliteDb bypasses two things at once: the
+// per-connection pragmas (so `synchronous` falls back to FULL and
+// `foreign_keys` to OFF, silently disabling ON DELETE CASCADE) and the
+// instrumentation. The second failure is the nastier one: sqlite.connection_opens
+// then reads *zero*, which is indistinguishable from "this code path never ran".
+//
+// architecture_every_perf_counter_has_a_producer cannot catch that, because the
+// counter does have a producer -- just not on the path that matters. This rule
+// closes the gap by requiring every connection to go through the wrapper.
+MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
+  std::string offenders;
+  for(const auto& path : sourceFiles(repoRoot() / "src")) {
+    if(path.parent_path().filename() == "persistence") continue;
+    const std::string text = readText(path);
+    if(text.find("sqlite3_open") != std::string::npos) {
+      if(!offenders.empty()) offenders += ", ";
+      offenders += path.filename().string();
+    }
+  }
+  micronotes::tests::require(
+    offenders.empty(),
+    "sqlite3_open is called outside core/persistence: " + offenders +
+    " -- use microcore::persistence::SqliteDb, which applies the per-connection "
+    "pragmas and counts the open; a direct handle silently loses both");
+}
