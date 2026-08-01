@@ -14,6 +14,7 @@
 #include "core/perf/PerformanceCounters.h"
 #include "core/render/FontResolver.h"
 #include "core/render/TextTextureCache.h"
+#include "core/editor/SingleLineView.h"
 #include "core/platform/PathUtils.h"
 #include "ui/AppState.h"
 #include "ui/Draw.h"
@@ -363,12 +364,12 @@ struct UiRuntime {
   std::vector<editor::SoftWrapRow> cachedEditorRows;
   FocusArea focus = FocusArea::Editor;
   std::string loadedNoteId;
-  std::string searchDraft;
+  ui::TextField search;
   library::SearchScope searchScope = library::SearchScope::All;
-  std::string findDraft;
-  std::string tagDraft;
-  std::string renameDraft;
-  std::string folderRenameDraft;
+  ui::TextField find;
+  ui::TextField tag;
+  ui::TextField rename;
+  ui::TextField folderRename;
   std::string status;
   std::vector<LinkRegion> linkRegions;
   std::map<std::string, int> viewerAnchors;
@@ -419,11 +420,14 @@ struct UiRuntime {
   Rect favoriteButton;
   bool resizingSidebar = false;
   bool resizingNotes = false;
+  // Set while a drag inside a single-line field is extending its selection.
+  bool selectingFieldText = false;
+  std::size_t fieldSelectionAnchor = 0;
+
   bool selectingEditorText = false;
   std::size_t editorSelectionAnchor = 0;
   Uint64 lastEditorClick = 0;
   int editorClickCount = 0;
-  bool inputAllSelected = false;
   // Block multi-select, held as source offsets rather than block indices so an
   // edit underneath it cannot silently re-point it at a different block.
   bool blockSelectActive = false;
@@ -896,17 +900,20 @@ static bool pasteClipboardText(UiRuntime& ui) {
   return true;
 }
 
-static std::string* focusedInput(UiRuntime& ui) {
+static ui::TextField* focusedField(UiRuntime& ui) {
   switch(ui.focus) {
-    case FocusArea::Search: return &ui.searchDraft;
-    case FocusArea::Find: return &ui.findDraft;
+    case FocusArea::Search: return &ui.search;
+    case FocusArea::Find: return &ui.find;
+    case FocusArea::TagEditor: return &ui.tag;
+    case FocusArea::RenameNote: return &ui.rename;
+    case FocusArea::RenameFolder: return &ui.folderRename;
     default: return nullptr;
   }
 }
 
 static void syncFocusedInput(UiRuntime& ui) {
   if(ui.focus == FocusArea::Search) {
-    ui.state.setSearch(ui.searchDraft, ui.searchScope);
+    ui.state.setSearch(ui.search.text(), ui.searchScope);
     selectNoteAt(ui, 0);
   } else if(ui.focus == FocusArea::Find) {
     updateFindStatus(ui);
@@ -914,7 +921,7 @@ static void syncFocusedInput(UiRuntime& ui) {
 }
 
 static bool pasteClipboardIntoInput(UiRuntime& ui) {
-  auto* input = focusedInput(ui);
+  auto* input = focusedField(ui);
   const bool hasText = SDL_HasClipboardText();
   if(inputDebugEnabled()) {
     std::cerr << "clipboard paste input"
@@ -927,9 +934,9 @@ static bool pasteClipboardIntoInput(UiRuntime& ui) {
   char* raw = SDL_GetClipboardText();
   if(!raw) return false;
   if(inputDebugEnabled()) std::cerr << "clipboard paste input bytes=" << std::strlen(raw) << "\n";
-  if(ui.inputAllSelected) input->clear();
-  *input += raw;
-  ui.inputAllSelected = false;
+  // Lands at the caret and replaces the selection, rather than being appended
+  // to the end of the field regardless of where the user was working.
+  input->editor.insert(raw);
   SDL_free(raw);
   syncFocusedInput(ui);
   return true;
@@ -954,7 +961,7 @@ static bool pastePrimarySelectionText(UiRuntime& ui) {
 }
 
 static bool pastePrimarySelectionIntoInput(UiRuntime& ui) {
-  auto* input = focusedInput(ui);
+  auto* input = focusedField(ui);
   const bool hasPrimary = SDL_HasPrimarySelectionText();
   if(inputDebugEnabled()) {
     std::cerr << "primary paste input"
@@ -967,9 +974,7 @@ static bool pastePrimarySelectionIntoInput(UiRuntime& ui) {
   char* raw = SDL_GetPrimarySelectionText();
   if(!raw) return false;
   if(inputDebugEnabled()) std::cerr << "primary paste input bytes=" << std::strlen(raw) << "\n";
-  if(ui.inputAllSelected) input->clear();
-  *input += raw;
-  ui.inputAllSelected = false;
+  input->editor.insert(raw);
   SDL_free(raw);
   syncFocusedInput(ui);
   return true;
@@ -986,15 +991,14 @@ static void beginTagEdit(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "tags";
   overlay.title = "Tags for \"" + note->item.title + "\"";
-  overlay.value = joinTags(note->metadata.tags);
+  overlay.value.beginWith(joinTags(note->metadata.tags));
   overlay.placeholder = "space separated";
-  overlay.valueSelected = !overlay.value.empty();
   overlay.hint = "Enter to save, Esc to cancel";
   ui.overlays.open(std::move(overlay));
 }
 
 static void saveTags(UiRuntime& ui) {
-  if(ui.state.updateSelectedTags(splitTags(ui.tagDraft))) {
+  if(ui.state.updateSelectedTags(splitTags(ui.tag.text()))) {
     ui.focus = FocusArea::Editor;
     ui.status = "Saved tags";
   } else {
@@ -1013,19 +1017,18 @@ static void beginRename(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "rename-note";
   overlay.title = "Rename note";
-  overlay.value = note->metadata.title.empty() ? note->item.title : note->metadata.title;
+  overlay.value.beginWith(note->metadata.title.empty() ? note->item.title : note->metadata.title);
   overlay.placeholder = "Note title";
-  overlay.valueSelected = !overlay.value.empty();
   overlay.hint = "Enter to save, Esc to cancel";
   ui.overlays.open(std::move(overlay));
 }
 
 static void saveRename(UiRuntime& ui) {
-  if(ui.renameDraft.empty()) {
+  if(ui.rename.empty()) {
     ui.status = "Rename needs a title";
     return;
   }
-  if(ui.state.renameSelectedNote(ui.renameDraft)) {
+  if(ui.state.renameSelectedNote(ui.rename.text())) {
     loadSelectedIntoEditor(ui);
     ui.focus = FocusArea::Editor;
     ui.status = "Renamed note";
@@ -1044,9 +1047,8 @@ static void beginFolderCreate(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "folder-name";
   overlay.title = "New notebook";
-  overlay.value = "Notebook";
+  overlay.value.beginWith("Notebook");
   overlay.placeholder = "Notebook name";
-  overlay.valueSelected = true;
   overlay.hint = "Enter to create, Esc to cancel";
   ui.overlays.open(std::move(overlay));
 }
@@ -1061,20 +1063,19 @@ static void beginFolderRename(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "folder-name";
   overlay.title = "Rename notebook";
-  overlay.value = ui.state.selection().folder.generic_string();
+  overlay.value.beginWith(ui.state.selection().folder.generic_string());
   overlay.placeholder = "Notebook name";
-  overlay.valueSelected = !overlay.value.empty();
   overlay.hint = "Enter to save, Esc to cancel";
   ui.overlays.open(std::move(overlay));
 }
 
 static void saveFolderRename(UiRuntime& ui) {
-  if(ui.folderRenameDraft.empty()) {
+  if(ui.folderRename.empty()) {
     ui.status = "Notebook name is required";
     return;
   }
   const bool creating = ui.creatingFolder;
-  const bool saved = creating ? ui.state.createFolder(ui.folderRenameDraft) : ui.state.renameSelectedFolder(ui.folderRenameDraft);
+  const bool saved = creating ? ui.state.createFolder(ui.folderRename.text()) : ui.state.renameSelectedFolder(ui.folderRename.text());
   if(saved) {
     ui.creatingFolder = false;
     ui.focus = FocusArea::Folders;
@@ -1137,15 +1138,16 @@ static void cyclePaneMode(UiRuntime& ui) {
 }
 
 static void updateFindStatus(UiRuntime& ui) {
-  if(ui.findDraft.empty()) {
+  const std::string& needle = ui.find.text();
+  if(needle.empty()) {
     ui.status = "Find in note";
     return;
   }
   std::size_t count = 0;
-  std::size_t pos = ui.editor.text().find(ui.findDraft);
+  std::size_t pos = ui.editor.text().find(needle);
   while(pos != std::string::npos) {
     ++count;
-    pos = ui.editor.text().find(ui.findDraft, pos + std::max<std::size_t>(1, ui.findDraft.size()));
+    pos = ui.editor.text().find(needle, pos + std::max<std::size_t>(1, needle.size()));
   }
   ui.status = std::to_string(count) + " matches in note";
 }
@@ -1262,7 +1264,7 @@ static bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   // Whatever was open last time still has to be reachable, so the folder
   // holding it is opened even if its parent was left collapsed.
   ui.tree.reveal(ui.state.selection().folder);
-  ui.searchDraft = ui.state.selection().search;
+  ui.search.beginWith(ui.state.selection().search, false);
   ui.searchScope = ui.state.selection().searchScope;
   // The editor is emptied first: the previous library's note is gone, and a
   // library with nothing in it has no note to overwrite it with.
@@ -1330,17 +1332,18 @@ static void drawEmptyMessage(TextRenderer& text, std::string_view title, std::st
 }
 
 static void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui, const std::string& line, Rect writing, float y) {
-  if(ui.findDraft.empty()) return;
-  std::size_t pos = line.find(ui.findDraft);
+  const std::string& needle = ui.find.text();
+  if(needle.empty()) return;
+  std::size_t pos = line.find(needle);
   while(pos != std::string::npos) {
     const auto prefix = std::string_view(line.data(), pos);
     const float x = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
-    const float w = static_cast<float>(std::max(6, text.width(ui.findDraft, false, true)));
+    const float w = static_cast<float>(std::max(6, text.width(needle, false, true)));
     if(x < writing.x + writing.w - 8) {
       fill(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().findBg);
       stroke(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().findBorder);
     }
-    pos = line.find(ui.findDraft, pos + std::max<std::size_t>(1, ui.findDraft.size()));
+    pos = line.find(needle, pos + std::max<std::size_t>(1, needle.size()));
   }
 }
 
@@ -1386,6 +1389,59 @@ static Rect searchBoxRect(Rect notes) {
   return {notes.x + 14.0f, notes.y + 12.0f, notes.w - 28.0f, 34.0f};
 }
 
+// The strip inside the search box that holds the text: after the "Find" label
+// and before the scope toggle. Layout and hit testing both derive from this, so
+// a click lands where the glyph it pointed at is actually drawn.
+static Rect searchTextRect(Rect notes, const TextRenderer& text) {
+  const Rect box = searchBoxRect(notes);
+  return {box.x + 52.0f, box.y + 7.0f, box.w - 92.0f, static_cast<float>(text.lineHeight())};
+}
+
+// Core measures text through a callback so it stays free of any font
+// dependency; this binds it to the renderer actually drawing the field.
+static editor::TextWidthFn fieldMeasure(const TextRenderer& text) {
+  return [&text](std::string_view run) { return text.width(run); };
+}
+
+// Paints a single-line field: selection band, then the text scrolled so the
+// caret is visible, then the caret. The fields this replaces drew only the
+// string, which is why they had no visible insertion point, no selection, and
+// no way to reach text past the right edge.
+static void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
+                          ui::TextField& field, Rect box, bool focused,
+                          std::string_view placeholder) {
+  const auto view = editor::layoutSingleLine(field.editor, box.w, field.scrollX, fieldMeasure(text));
+  field.scrollX = view.scrollX;
+
+  ClipGuard clip(renderer, box);
+  const float originX = box.x - view.scrollX;
+  if(focused && view.hasSelection) {
+    fill(renderer, {originX + view.selectionStartX, box.y - 2.0f,
+                    view.selectionEndX - view.selectionStartX, box.h + 4.0f}, theme().selectionBg);
+  }
+  if(field.empty() && !placeholder.empty()) {
+    text.draw(placeholder, box.x, box.y, theme().dim);
+  } else {
+    text.draw(field.text(), originX, box.y, theme().text);
+  }
+  if(focused) {
+    const float caretX = originX + view.caretX;
+    fill(renderer, {caretX, box.y - 2.0f, 2.0f, box.h + 4.0f}, theme().accent);
+    // Give the IME a candidate rectangle here too. Without it a dead-key or
+    // composition popup opened while typing in a field lands at the window
+    // origin instead of next to the text being composed.
+    ui.caretReported = true;
+    ui.caretRect = SDL_Rect {static_cast<int>(caretX), static_cast<int>(box.y - 2.0f),
+                             2, static_cast<int>(box.h + 4.0f)};
+  }
+}
+
+// Byte offset in `field` under a pointer at window x, for a field drawn in
+// `box`. Always a code point boundary.
+static std::size_t fieldOffsetAtX(const TextRenderer& text, const ui::TextField& field, Rect box, float x) {
+  return editor::offsetAtX(field.text(), x - box.x + field.scrollX, fieldMeasure(text));
+}
+
 static Rect editorWritingRect(Rect editorRect) {
   return {editorRect.x + 8.0f, editorRect.y + 8.0f, editorRect.w - 16.0f, editorRect.h - 28.0f};
 }
@@ -1403,7 +1459,7 @@ static bool isResizeGutter(const AppLayout& layout, float x, float y) {
 static bool noteRowAt(const UiRuntime& ui, Rect notesRect, float x, float y) {
   if(!contains(notesRect, x, y)) return false;
   float rowY = notesRect.y + 62.0f;
-  if(!ui.searchDraft.empty()) {
+  if(!ui.search.empty()) {
     for(const auto& result : ui.state.currentSearchResults()) {
       const std::size_t snippetCount = std::max<std::size_t>(result.snippets.size(), result.matchLine.empty() ? 0 : 1);
       const float availableH = notesRect.y + notesRect.h - 24.0f - (rowY - 8.0f);
@@ -1998,7 +2054,7 @@ static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expand
     // Opening a note from the tree moves the context to its folder too, so the
     // note list and the breadcrumb agree with what is on screen. A search owns
     // the note list while it is running, so it is left alone.
-    if(ui.searchDraft.empty() && ui.state.selection().noteId == row.tree.noteId) {
+    if(ui.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
       ui.state.selectFolder(row.tree.folder);
     }
     return;
@@ -2138,21 +2194,18 @@ static void drawNotes(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
   Rect search {rect.x + 14, rect.y + 12, rect.w - 28, 34};
   drawSurface(renderer, search, theme().inputBg, ui.focus == FocusArea::Search ? theme().accentDim : theme().hairline);
   ui.searchScopeToggle = {search.x + search.w - 34, search.y + 5, 24, 24};
-  const auto searchLabel = ui.searchDraft.empty() ? "Search all notes" : ui.searchDraft;
-  if(ui.focus == FocusArea::Search && ui.inputAllSelected && !ui.searchDraft.empty()) {
-    fill(renderer, {search.x + 50, search.y + 6, search.w - 88, 22}, theme().selectionBg);
-  }
   text.draw("Find", search.x + 12, search.y + 8, ui.focus == FocusArea::Search ? theme().accent : theme().dim);
-  text.draw(ellipsizeToWidth(text, searchLabel, static_cast<int>(search.w - 94)), search.x + 52, search.y + 8, ui.searchDraft.empty() ? theme().dim : theme().text);
+  drawTextField(renderer, text, ui, ui.search, {search.x + 52, search.y + 8, search.w - 94, 22},
+                ui.focus == FocusArea::Search, "Search all notes");
   fill(renderer, ui.searchScopeToggle, ui.focus == FocusArea::Search ? theme().accentSoft : theme().surface);
   stroke(renderer, ui.searchScopeToggle, ui.focus == FocusArea::Search ? theme().accentDim : theme().hairline);
   text.draw(searchScopeLabel(ui.searchScope), ui.searchScopeToggle.x + 8, ui.searchScopeToggle.y + 4, ui.focus == FocusArea::Search ? theme().accent : theme().muted);
 
   float y = rect.y + 62;
-  if(!ui.searchDraft.empty()) {
+  if(!ui.search.empty()) {
     const auto results = ui.state.currentSearchResults();
     if(results.empty()) {
-      drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.searchDraft + "\".",
+      drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.search.text() + "\".",
                        {rect.x + 8, y - 8, rect.w - 16, 110}, "Esc  clear the search");
       return;
     }
@@ -2277,6 +2330,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   }
 
   if(ui.overlays.active()) return CursorKind::Pointer;
+
 
   if(contains(layout.sidebar, x, y)) {
     if(sidebarRowAt(ui, layout.sidebar, x, y)) return CursorKind::Pointer;
@@ -2784,7 +2838,7 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
     selection.start = ui.editor.selectionStart();
     selection.end = ui.editor.selectionEnd();
   }
-  ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.findDraft);
+  ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.find.text());
   for(const auto& link : ui.livePage.links()) ui.linkRegions.push_back({link.rect, link.target});
   if(ui.editor.text().empty()) {
     // On the content column rather than the page edge, so the prompt sits
@@ -2801,8 +2855,8 @@ static void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
   // can hold them all and be searched.
   std::string help = std::string(paneModeName(ui.state.shell().paneMode)) +
     "   Ctrl+P Go to note   Ctrl+Shift+P Commands   F1 Shortcuts";
-  if(ui.focus == FocusArea::Search) help = "Search all: " + ui.searchDraft + "    Enter open  Esc clear";
-  if(ui.focus == FocusArea::Find) help = "Find in note: " + ui.findDraft + "    Esc close";
+  if(ui.focus == FocusArea::Search) help = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
+  if(ui.focus == FocusArea::Find) help = "Find in note: " + ui.find.text() + "    Esc close";
   fill(renderer, {rect.x + 12, rect.y + 7, 6, 6}, ui.editor.dirty() ? theme().warn : theme().accent);
   text.draw(ellipsize(help, 100), rect.x + 28, rect.y + 6, theme().muted);
   if(!ui.status.empty()) {
@@ -3208,8 +3262,7 @@ static void openIconPrompt(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "note-icon";
   overlay.title = "Note icon";
-  overlay.value = note->metadata.icon;
-  overlay.valueSelected = !overlay.value.empty();
+  overlay.value.beginWith(note->metadata.icon);
   overlay.placeholder = "One emoji";
   overlay.hint = "Enter save   Esc cancel   empty removes the icon";
   ui.overlays.open(std::move(overlay));
@@ -3292,8 +3345,7 @@ static void openLibraryPrompt(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "settings-library";
   overlay.title = "Library folder";
-  overlay.value = ui.state.hasLibrary() ? displayPath(ui.state.libraryRoot()) : std::string {};
-  overlay.valueSelected = !overlay.value.empty();
+  overlay.value.beginWith(ui.state.hasLibrary() ? displayPath(ui.state.libraryRoot()) : std::string {});
   overlay.placeholder = "~/Notes";
   overlay.hint = "Enter open   Esc cancel   a folder that is not there is created";
   overlay.width = 520.0f;
@@ -3517,13 +3569,13 @@ static void openDeleteFolderConfirm(UiRuntime& ui) {
 
 static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   if(result.overlayId == "rename-note") {
-    ui.renameDraft = result.value;
+    ui.rename.beginWith(result.value, false);
     saveRename(ui);
   } else if(result.overlayId == "tags") {
-    ui.tagDraft = result.value;
+    ui.tag.beginWith(result.value, false);
     saveTags(ui);
   } else if(result.overlayId == "folder-name") {
-    ui.folderRenameDraft = result.value;
+    ui.folderRename.beginWith(result.value, false);
     saveFolderRename(ui);
   } else if(result.overlayId == "delete-note") {
     deleteSelected(ui);
@@ -3549,7 +3601,7 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     selectNoteById(ui, result.itemId);
     if(const auto note = ui.state.findNote(result.itemId)) {
       const auto folder = note->path.lexically_relative(ui.state.libraryRoot()).parent_path();
-      ui.searchDraft.clear();
+      ui.search.reset();
       ui.state.selectFolder(folder);
       ui.state.selectNote(result.itemId);
       ui.tree.reveal(folder);
@@ -3597,10 +3649,10 @@ static void handleText(UiRuntime& ui, const char* input) {
     ui.overlays.handleText(input);
     return;
   }
-  if(auto* draft = focusedInput(ui)) {
-    if(ui.inputAllSelected) draft->clear();
-    *draft += input;
-    ui.inputAllSelected = false;
+  if(auto* field = focusedField(ui)) {
+    // insert() replaces the selection, so a select-all followed by a keystroke
+    // overwrites without any separate "all selected" flag to keep in step.
+    field->editor.insert(input);
     syncFocusedInput(ui);
   } else if(ui.focus == FocusArea::Editor) {
     // Typing is text editing, so it takes the caret back from a block selection
@@ -3648,7 +3700,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
               << " ctrl=" << ctrl
               << " focus=" << focusName(ui.focus)
               << " editor_selection=" << ui.editor.hasSelection()
-              << " input_all_selected=" << ui.inputAllSelected
+              << " field_selection=" << (focusedField(ui) != nullptr && focusedField(ui)->editor.hasSelection())
               << "\n";
   }
   if(key == SDLK_F1) {
@@ -3675,9 +3727,9 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       publishEditorPrimarySelection(ui);
       ui.revealEditorCursor = true;
     }
-    else if(auto* input = focusedInput(ui)) {
-      ui.inputAllSelected = !input->empty();
-      if(ui.inputAllSelected) SDL_SetPrimarySelectionText(input->c_str());
+    else if(auto* field = focusedField(ui)) {
+      field->editor.selectAll();
+      if(field->editor.hasSelection()) SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
     }
   } else if(shortcut(SDLK_C, SDL_SCANCODE_C)) {
     if(ui.focus == FocusArea::Editor && ui.blockSelectActive) {
@@ -3689,8 +3741,10 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
                     ? "Copied block" : "Copy failed: " + std::string(SDL_GetError());
     } else if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
       ui.status = setClipboardText(ui.editor.selectedText()) ? "Copied selection" : "Copy failed: " + std::string(SDL_GetError());
-    } else if(auto* input = focusedInput(ui); input && ui.inputAllSelected) {
-      ui.status = setClipboardText(*input) ? "Copied selection" : "Copy failed: " + std::string(SDL_GetError());
+    } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
+      // Copies the actual selected range. It used to copy the whole field,
+      // because the whole field was the only range that could be selected.
+      ui.status = setClipboardText(field->editor.selectedText()) ? "Copied selection" : "Copy failed: " + std::string(SDL_GetError());
     }
   } else if(shortcut(SDLK_X, SDL_SCANCODE_X)) {
     if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
@@ -3699,27 +3753,32 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       markEdited(ui);
       ui.revealEditorCursor = true;
       ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
-    } else if(auto* input = focusedInput(ui); input && ui.inputAllSelected) {
-      const bool copied = setClipboardText(*input);
-      input->clear();
-      ui.inputAllSelected = false;
+    } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
+      const bool copied = setClipboardText(field->editor.selectedText());
+      field->editor.eraseSelection();
       syncFocusedInput(ui);
       ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
     }
   } else if(shortcut(SDLK_Z, SDL_SCANCODE_Z)) {
-    if(ui.focus == FocusArea::Editor && ui.editor.undo()) {
+    // Resolved through `shortcut`, which also accepts the scancode, so Ctrl+Z
+    // still works on a layout where the Z key does not produce 'z'.
+    if(auto* field = focusedField(ui)) {
+      if(field->editor.undo()) syncFocusedInput(ui);
+    } else if(ui.focus == FocusArea::Editor && ui.editor.undo()) {
       markEdited(ui);
       ui.revealEditorCursor = true;
       ui.status = "Undo";
     }
   } else if(shortcut(SDLK_Y, SDL_SCANCODE_Y)) {
-    if(ui.focus == FocusArea::Editor && ui.editor.redo()) {
+    if(auto* field = focusedField(ui)) {
+      if(field->editor.redo()) syncFocusedInput(ui);
+    } else if(ui.focus == FocusArea::Editor && ui.editor.redo()) {
       markEdited(ui);
       ui.revealEditorCursor = true;
       ui.status = "Redo";
     }
   } else if(shortcut(SDLK_V, SDL_SCANCODE_V)) {
-    if(focusedInput(ui)) pasteClipboardIntoInput(ui);
+    if(focusedField(ui)) pasteClipboardIntoInput(ui);
     else if(ui.focus == FocusArea::Editor) {
       // Decide by what is actually on the clipboard: image data wins (image
       // copies often also expose an incidental text/plain target), otherwise
@@ -3779,22 +3838,21 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     cyclePaneMode(ui);
   } else if(shortcut(SDLK_F, SDL_SCANCODE_F) && shift) {
     if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-    ui.inputAllSelected = false;
     ui.focus = FocusArea::Search;
-    ui.state.setSearch(ui.searchDraft, ui.searchScope);
+    ui.search.editor.selectAll();
+    ui.state.setSearch(ui.search.text(), ui.searchScope);
     ui.status = "Search all notes";
   } else if(shortcut(SDLK_F, SDL_SCANCODE_F)) {
-    ui.inputAllSelected = false;
     ui.focus = FocusArea::Find;
+    ui.find.editor.selectAll();
     updateFindStatus(ui);
   } else if(key == SDLK_ESCAPE) {
-    if(ui.focus == FocusArea::Search && !ui.searchDraft.empty()) {
-      ui.searchDraft.clear();
+    if(ui.focus == FocusArea::Search && !ui.search.empty()) {
+      ui.search.reset();
       ui.state.setSearch("", ui.searchScope);
     }
-    if(ui.focus == FocusArea::Find) ui.findDraft.clear();
+    if(ui.focus == FocusArea::Find) ui.find.reset();
     ui.creatingFolder = false;
-    ui.inputAllSelected = false;
     // In the live surface Esc steps out of the text and selects the block
     // itself; a second Esc puts the caret back.
     if(ui.focus == FocusArea::Editor && ui.state.shell().paneMode == ui::PaneMode::Live) {
@@ -3802,29 +3860,23 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       else selectBlockAtCursor(ui);
     }
     ui.focus = FocusArea::Editor;
-  } else if(ui.focus == FocusArea::Search) {
-    if((key == SDLK_BACKSPACE || key == SDLK_DELETE) && ui.inputAllSelected) {
-      ui.searchDraft.clear();
-      ui.inputAllSelected = false;
-      ui.state.setSearch(ui.searchDraft, ui.searchScope);
-      selectNoteAt(ui, 0);
-    } else if(key == SDLK_BACKSPACE && !ui.searchDraft.empty()) {
-      ui.searchDraft.pop_back();
-      ui.state.setSearch(ui.searchDraft, ui.searchScope);
-      selectNoteAt(ui, 0);
-    } else if(key == SDLK_RETURN) {
-      ui.focus = FocusArea::Editor;
-    }
-  } else if(ui.focus == FocusArea::Find) {
-    if((key == SDLK_BACKSPACE || key == SDLK_DELETE) && ui.inputAllSelected) {
-      ui.findDraft.clear();
-      ui.inputAllSelected = false;
-      updateFindStatus(ui);
-    } else if(key == SDLK_BACKSPACE && !ui.findDraft.empty()) {
-      ui.findDraft.pop_back();
-      updateFindStatus(ui);
-    } else if(key == SDLK_RETURN) {
-      ui.focus = FocusArea::Editor;
+  } else if(auto* field = focusedField(ui)) {
+    // Enter is the only key whose meaning depends on which field this is;
+    // everything else -- arrows, word motion, Home/End, Backspace, Delete,
+    // Ctrl+Z/Y -- is the same for all five and lives in one place.
+    if(key == SDLK_RETURN) {
+      switch(ui.focus) {
+        case FocusArea::TagEditor: saveTags(ui); break;
+        case FocusArea::RenameNote: saveRename(ui); break;
+        case FocusArea::RenameFolder: saveFolderRename(ui); break;
+        default: ui.focus = FocusArea::Editor; break;
+      }
+    } else {
+      const auto result = ui::applyKeyToField(*field, key, ctrl, shift);
+      if(result == ui::FieldKeyResult::Changed) syncFocusedInput(ui);
+      else if(result == ui::FieldKeyResult::Moved && field->editor.hasSelection()) {
+        SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
+      }
     }
   } else if(ui.focus == FocusArea::Editor && ui.blockSelectActive) {
     // Selected blocks are objects: the arrows walk them, and one command acts
@@ -3952,7 +4004,9 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   if(button == SDL_BUTTON_MIDDLE) {
     if(contains(layout.notes, x, y) && y >= layout.notes.y + 12 && y <= layout.notes.y + 46) {
       ui.focus = FocusArea::Search;
-      ui.inputAllSelected = false;
+      // Middle-click pastes at the point pressed, like every other X11 text
+      // field, rather than always at the end of the string.
+      ui.search.editor.moveCursor(fieldOffsetAtX(text, ui.search, searchTextRect(layout.notes, text), x));
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
       return;
     }
@@ -3978,7 +4032,15 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         return;
       }
     }
-    if(focusedInput(ui)) {
+    if(auto* field = focusedField(ui)) {
+      // The search box is the one field drawn in a pane, so a middle click
+      // inside it drops the caret where it landed before pasting.
+      if(ui.focus == FocusArea::Search) {
+        const Rect fieldRect = searchTextRect(layout.notes, text);
+        if(contains(fieldRect, x, y)) {
+          field->editor.moveCursor(fieldOffsetAtX(text, *field, fieldRect, x));
+        }
+      }
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
     }
     return;
@@ -4093,16 +4155,22 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     if(y >= layout.notes.y + 12 && y <= layout.notes.y + 46) {
       if(contains(ui.searchScopeToggle, x, y)) {
         ui.searchScope = nextSearchScope(ui.searchScope);
-        ui.state.setSearch(ui.searchDraft, ui.searchScope);
+        ui.state.setSearch(ui.search.text(), ui.searchScope);
         ui.status = "Search scope " + searchScopeLabel(ui.searchScope);
         return;
       }
-      ui.inputAllSelected = false;
+      // Clicking a text field puts the caret where you clicked. Before, it only
+      // moved focus, and the insertion point stayed pinned to the end.
+      const Rect fieldRect = searchTextRect(layout.notes, text);
       ui.focus = FocusArea::Search;
+      const auto offset = fieldOffsetAtX(text, ui.search, fieldRect, x);
+      ui.search.editor.moveCursor(offset);
+      ui.selectingFieldText = true;
+      ui.fieldSelectionAnchor = offset;
       return;
     }
     ui.focus = FocusArea::Notes;
-    if(!ui.searchDraft.empty()) {
+    if(!ui.search.empty()) {
       float rowY = layout.notes.y + 62.0f;
       for(const auto& result : ui.state.currentSearchResults()) {
         const std::size_t snippetCount = std::max<std::size_t>(result.snippets.size(), result.matchLine.empty() ? 0 : 1);
@@ -4141,7 +4209,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
       ui.state.selectFolder(folder);
       ui.tree.reveal(folder);
-      ui.searchDraft.clear();
+      ui.search.reset();
       selectNoteAt(ui, 0);
       return;
     }
@@ -4365,9 +4433,15 @@ static void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int wid
       ui.blockDropOffset.reset();
     }
     if(ui.selectingEditorText) publishEditorPrimarySelection(ui);
+    if(ui.selectingFieldText) {
+      if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
+        SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
+      }
+    }
     ui.resizingSidebar = false;
     ui.resizingNotes = false;
     ui.selectingEditorText = false;
+    ui.selectingFieldText = false;
     ui.scrollDragTarget = ScrollDragTarget::None;
   }
   if(button != SDL_BUTTON_LEFT || (!ui.draggingNote && !ui.draggingFolder)) return;

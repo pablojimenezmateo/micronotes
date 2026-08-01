@@ -1,3 +1,4 @@
+#include "core/editor/SingleLineView.h"
 #include "ui/Overlay.h"
 
 #include "ui/Fuzzy.h"
@@ -54,8 +55,8 @@ std::vector<int> OverlayStack::visibleIndices(const Overlay& overlay) const {
   std::vector<std::pair<int, int>> scored;  // (score, index)
   for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) {
     const auto& item = overlay.items[static_cast<std::size_t>(i)];
-    auto score = fuzzyScore(item.label, overlay.value);
-    if(!score && !item.detail.empty()) score = fuzzyScore(item.detail, overlay.value);
+    auto score = fuzzyScore(item.label, overlay.value.text());
+    if(!score && !item.detail.empty()) score = fuzzyScore(item.detail, overlay.value.text());
     if(score) scored.emplace_back(*score, i);
   }
   std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
@@ -192,7 +193,7 @@ std::optional<OverlayResult> OverlayStack::commit() {
   if(!overlay) return std::nullopt;
   OverlayResult result;
   result.overlayId = overlay->id;
-  result.value = overlay->value;
+  result.value = overlay->value.text();
   if(overlay->kind == OverlayKind::List) {
     const auto indices = visibleIndices(*overlay);
     if(indices.empty()) return std::nullopt;
@@ -232,23 +233,11 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
     return std::nullopt;
   }
   if(usesField(*overlay)) {
-    if(ctrl && (key == SDLK_A)) {
-      overlay->valueSelected = !overlay->value.empty();
-      return std::nullopt;
-    }
-    if(key == SDLK_BACKSPACE) {
-      if(overlay->valueSelected) {
-        overlay->value.clear();
-        overlay->valueSelected = false;
-      } else if(!overlay->value.empty()) {
-        // Step back over a whole UTF-8 codepoint.
-        std::size_t at = overlay->value.size() - 1;
-        while(at > 0 && (static_cast<unsigned char>(overlay->value[at]) & 0xC0) == 0x80) --at;
-        overlay->value.erase(at);
-      }
-      resetHighlight();
-      return std::nullopt;
-    }
+    // The field owns caret motion, selection, word jumps and undo; only a key
+    // it declines falls through to be swallowed below.
+    const auto handledBy = applyKeyToField(overlay->value, key, ctrl, shift);
+    if(handledBy == FieldKeyResult::Changed) resetHighlight();
+    if(handledBy != FieldKeyResult::Ignored) return std::nullopt;
   }
   // Anything else is swallowed so it cannot leak into the editor behind.
   return std::nullopt;
@@ -258,11 +247,7 @@ bool OverlayStack::handleText(const char* input) {
   Overlay* overlay = top();
   if(!overlay || !input) return false;
   if(!usesField(*overlay)) return true;
-  if(overlay->valueSelected) {
-    overlay->value.clear();
-    overlay->valueSelected = false;
-  }
-  overlay->value += input;
+  overlay->value.editor.insert(input);
   resetHighlight();
   return true;
 }
@@ -289,7 +274,7 @@ std::optional<OverlayResult> OverlayStack::handleClick(float x, float y, bool& h
       OverlayResult result;
       result.overlayId = overlay->id;
       result.itemId = "confirm";
-      result.value = overlay->value;
+      result.value = overlay->value.text();
       close();
       return result;
     }
@@ -314,7 +299,9 @@ void OverlayStack::handleMotion(float x, float y) {
 }
 
 void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWidth, int windowHeight) {
-  const Overlay* overlay = top();
+  // Not const: drawing the field settles its scroll offset, so the next frame
+  // and the next hit-test agree with what was painted.
+  Overlay* overlay = top();
   if(!overlay) return;
 
   // Dim whatever is behind so the overlay reads as the focused surface.
@@ -343,20 +330,22 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     if(overlay->value.empty()) {
       text.draw(overlay->placeholder, layout.field.x + 10.0f, textY, theme().dim, bodyStyle);
     } else {
-      const int valueW = text.width(overlay->value, bodyStyle);
-      // A value wider than the field scrolls so its end stays in view, the way
-      // any text field does: the caret is there, and so is what was just
-      // typed. Clipped as well as offset, or a long path would be painted
-      // straight across the panel and the window behind it.
+      // The field lays itself out: the view reports where the caret and the
+      // selection sit after scrolling, so a long value keeps the caret in
+      // sight instead of always pinning the end of the text.
       const float inner = layout.field.w - 20.0f;
-      const float shift = std::max(0.0f, static_cast<float>(valueW) - inner);
-      const float left = layout.field.x + 10.0f - shift;
+      const auto measure = [&](std::string_view value) { return text.width(value, bodyStyle); };
+      const auto view = editor::layoutSingleLine(overlay->value.editor, inner, overlay->value.scrollX, measure);
+      overlay->value.scrollX = view.scrollX;
+      const float left = layout.field.x + 10.0f - view.scrollX;
       ClipGuard clip(renderer, layout.field);
-      if(overlay->valueSelected) {
-        fill(renderer, {left - 2.0f, layout.field.y + 6.0f, static_cast<float>(valueW) + 4.0f, layout.field.h - 12.0f}, theme().selectionBg);
+      if(view.hasSelection) {
+        fill(renderer, {left + view.selectionStartX, layout.field.y + 6.0f,
+                        view.selectionEndX - view.selectionStartX, layout.field.h - 12.0f},
+             theme().selectionBg);
       }
-      text.draw(overlay->value, left, textY, theme().text, bodyStyle);
-      fill(renderer, {left + static_cast<float>(valueW) + 1.0f, layout.field.y + 8.0f, 2.0f, layout.field.h - 16.0f}, theme().accent);
+      text.draw(overlay->value.text(), left, textY, theme().text, bodyStyle);
+      fill(renderer, {left + view.caretX, layout.field.y + 8.0f, 2.0f, layout.field.h - 16.0f}, theme().accent);
     }
   }
 

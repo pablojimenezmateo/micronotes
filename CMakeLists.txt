@@ -168,6 +168,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
   src/ui/Settings.cpp
+  src/ui/TextField.cpp
   src/ui/Theme.cpp
   src/ui/TreeModel.cpp
 )
@@ -227,6 +228,7 @@ add_executable(micronotes_tests
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/SingleLineEditorTests.cpp
+  tests/TextFieldTests.cpp
 )
 target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
