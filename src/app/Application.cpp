@@ -338,6 +338,11 @@ static bool spawnDetached(const std::vector<std::string>& command) {
   return true;
 }
 
+// One wheel notch scrolls three lines in the editor and roughly three lines'
+// worth of pixels in the viewer, matching the platform convention.
+constexpr float kEditorScrollLinesPerNotch = 3.0f;
+constexpr float kViewerScrollPixelsPerNotch = 42.0f;
+
 struct UiRuntime {
   ui::AppState state;
   editor::MarkdownEditor editor;
@@ -368,6 +373,13 @@ struct UiRuntime {
   // Rows the raw editor last had room for, so PageUp/PageDown match the view.
   int editorVisibleRows = 20;
   int viewerScroll = 0;
+  // Fractional remainder of a scroll gesture, in lines (editor) and pixels
+  // (viewer). A high-resolution wheel or a trackpad delivers deltas well below
+  // 1.0 per event; truncating each one to an int discarded them entirely, so
+  // slow gestures scrolled nothing at all and fast ones moved in visible jumps.
+  // Carrying the remainder across events makes the movement track the finger.
+  float editorScrollRemainder = 0.0f;
+  float viewerScrollRemainder = 0.0f;
   Uint64 lastRefresh = 0;
   float mouseX = -1;
   float mouseY = -1;
@@ -4474,6 +4486,23 @@ int run(ApplicationOptions options) {
     SDL_Quit();
     return 1;
   }
+  // Present in step with the display. Without this the renderer tears on one
+  // frame and stalls on the next, which reads as jitter even when every frame
+  // is well inside budget.
+  SDL_SetRenderVSync(renderer, 1);
+
+  // Every layout number in this file is in logical (density-independent) units,
+  // and SDL_GetWindowSize reports the same. Scaling the renderer by the window's
+  // pixel density is therefore all that is needed to make HIGH_PIXEL_DENSITY
+  // produce a sharper image rather than a bigger one. Expressed as a density
+  // rather than a ratio against a fixed window size, it stays correct across
+  // resizes; the display-changed event below re-reads it when the window moves
+  // to a monitor with a different scale.
+  const auto applyPixelDensity = [renderer, window]() {
+    const float density = SDL_GetWindowPixelDensity(window);
+    SDL_SetRenderScale(renderer, density, density);
+  };
+  applyPixelDensity();
   SDL_StartTextInput(window);
   TextRenderer text(renderer);
   float appliedScale = 0.0f;
@@ -4645,10 +4674,21 @@ int run(ApplicationOptions options) {
           wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY);
           wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY);
         }
+        // SDL reports wheel.y in notches for a discrete wheel and in fractions
+        // of a notch for precise devices. Accumulate, take the whole part, and
+        // keep the remainder for the next event.
         if(wheelViewer) {
-          ui.viewerScroll = std::max(0, ui.viewerScroll - static_cast<int>(event.wheel.y * 42));
+          ui.viewerScrollRemainder += -event.wheel.y * kViewerScrollPixelsPerNotch;
+          const float whole = std::trunc(ui.viewerScrollRemainder);
+          ui.viewerScrollRemainder -= whole;
+          ui.viewerScroll = std::clamp(ui.viewerScroll + static_cast<int>(whole), 0,
+                                       viewerMaxScroll(text, ui, viewerRect));
         } else if(wheelEditor) {
-          ui.editorScroll = std::clamp(ui.editorScroll - static_cast<int>(event.wheel.y * 3), 0, editorMaxScroll(text, ui, editorRect));
+          ui.editorScrollRemainder += -event.wheel.y * kEditorScrollLinesPerNotch;
+          const float whole = std::trunc(ui.editorScrollRemainder);
+          ui.editorScrollRemainder -= whole;
+          ui.editorScroll = std::clamp(ui.editorScroll + static_cast<int>(whole), 0,
+                                       editorMaxScroll(text, ui, editorRect));
           ui.revealEditorCursor = false;
         }
       } else if(event.type == SDL_EVENT_DROP_FILE) {
