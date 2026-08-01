@@ -551,7 +551,15 @@ static Document parseMarkdownFragment(std::string_view source) {
   ParseState state;
   MD_PARSER parser {};
   parser.abi_version = 0;
-  parser.flags = MD_DIALECT_GITHUB;
+  // Raw http(s) URLs are autolinked by autolinkDocument() below, not by md4c.
+  // md4c's permissive URL autolink runs to the next whitespace and keeps the
+  // trailing sentence punctuation inside both the label and the href, so
+  // "see https://example.com/report.pdf." links to a URL ending in a period.
+  // autolinkTextInline() already trims that punctuation back out into its own
+  // text run; it just never got the chance, because it only rewrites Text
+  // inlines and md4c had already turned the whole thing into a Link.
+  // Leave the email and www forms with md4c -- nothing else recognizes them.
+  parser.flags = MD_DIALECT_GITHUB & ~MD_FLAG_PERMISSIVEURLAUTOLINKS;
   parser.enter_block = enterBlock;
   parser.leave_block = leaveBlock;
   parser.enter_span = enterSpan;
