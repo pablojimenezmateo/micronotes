@@ -44,7 +44,9 @@ namespace microcore::perf {
   X(EditorInsertCalls, "editor.insert_calls")                                          \
   X(EditorEraseCalls, "editor.erase_calls")                                            \
   X(EditorUndoRecords, "editor.undo_records")                                          \
+  X(EditorUndoRecordsCoalesced, "editor.undo_records_coalesced")                       \
   X(EditorUndoBytesRetained, "editor.undo_bytes_retained")                             \
+  X(EditorUndoRecordsDropped, "editor.undo_records_dropped")                           \
   /* --- persistence ------------------------------------------------------ */        \
   X(SqliteStatementsPrepared, "sqlite.statements_prepared")                            \
   X(SqliteExecCalls, "sqlite.exec_calls")                                              \

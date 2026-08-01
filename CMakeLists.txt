@@ -129,6 +129,7 @@ set(MICROCORE_SOURCES
   src/core/platform/DurableFile.cpp
   src/core/platform/PathUtils.cpp
   src/core/ui/ShellModel.cpp
+  src/core/util/Utf8.cpp
   src/core/viewer/MarkdownViewer.cpp
   src/core/viewer/SdlMarkdownRenderer.cpp
 )

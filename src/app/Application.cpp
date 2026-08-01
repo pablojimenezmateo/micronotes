@@ -340,6 +340,10 @@ static bool spawnDetached(const std::vector<std::string>& command) {
 
 // One wheel notch scrolls three lines in the editor and roughly three lines'
 // worth of pixels in the viewer, matching the platform convention.
+// Lines moved by PageUp/PageDown. A fixed value rather than the visible line
+// count because handleKey has no layout in scope; it matches a typical viewport.
+constexpr int kEditorPageLines = 20;
+
 constexpr float kEditorScrollLinesPerNotch = 3.0f;
 constexpr float kViewerScrollPixelsPerNotch = 42.0f;
 

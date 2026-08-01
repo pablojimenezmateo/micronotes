@@ -1,6 +1,7 @@
 #include "core/editor/MarkdownEditor.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/Utf8.h"
 
 #include <algorithm>
 #include <cctype>
@@ -31,6 +32,26 @@ std::size_t nextCodepoint(const std::string& text, std::size_t pos) {
   std::size_t i = pos + 1;
   while(i < text.size() && isUtf8Continuation(static_cast<unsigned char>(text[i]))) ++i;
   return i;
+}
+
+// Vertical motion keeps the column in code points, not bytes. On a line holding
+// multi-byte characters a byte column lands at a different character on the
+// line below -- or mid-character, which is worse.
+std::size_t codepointColumn(const std::string& text, std::size_t lineStart, std::size_t pos) {
+  std::size_t column = 0;
+  for(std::size_t i = lineStart; i < pos && i < text.size(); ++i) {
+    if(!isUtf8Continuation(static_cast<unsigned char>(text[i]))) ++column;
+  }
+  return column;
+}
+
+std::size_t offsetForColumn(const std::string& text, std::size_t lineStart, std::size_t lineEnd, std::size_t column) {
+  std::size_t i = lineStart;
+  while(column > 0 && i < lineEnd) {
+    i = nextCodepoint(text, i);
+    --column;
+  }
+  return i < lineEnd ? i : lineEnd;
 }
 
 bool isSpaceByte(char c) {
@@ -70,7 +91,6 @@ void MarkdownEditor::insert(std::string_view text) {
     const auto start = selectionStart();
     text_.erase(start, selectionEnd() - start);
     cursor_ = start;
-    clearSelection();
   }
   text_.insert(cursor_, text);
   cursor_ += text.size();
@@ -94,7 +114,6 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
 }
 
 void MarkdownEditor::erasePrevious() {
-  perf::addCounter(perf::CounterId::EditorEraseCalls);
   if(hasSelection()) {
     eraseSelection();
     return;
@@ -110,7 +129,6 @@ void MarkdownEditor::erasePrevious() {
 }
 
 void MarkdownEditor::eraseNext() {
-  perf::addCounter(perf::CounterId::EditorEraseCalls);
   if(hasSelection()) {
     eraseSelection();
     return;
@@ -163,12 +181,14 @@ void MarkdownEditor::selectRange(std::size_t anchor, std::size_t cursor) {
   selectionAnchor_ = std::min(anchor, text_.size());
   cursor_ = std::min(cursor, text_.size());
   selecting_ = selectionAnchor_ != cursor_;
+  breakUndoGroup();
 }
 
 void MarkdownEditor::selectAll() {
   selectionAnchor_ = 0;
   cursor_ = text_.size();
   selecting_ = !text_.empty();
+  breakUndoGroup();
 }
 
 void MarkdownEditor::clearSelection() {
@@ -267,15 +287,14 @@ void MarkdownEditor::moveLineUp(bool keepSelection) {
   }
   const auto previousEnd = lineStart;
   const auto previousStart = text_.rfind('\n', previousEnd == 0 ? 0 : previousEnd - 1);
-  const auto column = cursor_ - lineStart - 1;
+  const auto column = codepointColumn(text_, lineStart + 1, cursor_);
   const auto targetStart = previousStart == std::string::npos ? 0 : previousStart + 1;
-  const auto targetLength = previousEnd - targetStart;
-  moveTo(targetStart + std::min(column, targetLength), keepSelection);
+  moveTo(offsetForColumn(text_, targetStart, previousEnd, column), keepSelection);
 }
 
 void MarkdownEditor::moveLineDown(bool keepSelection) {
   const auto lineStart = text_.rfind('\n', cursor_ == 0 ? 0 : cursor_ - 1);
-  const auto column = cursor_ - (lineStart == std::string::npos ? 0 : lineStart + 1);
+  const auto column = codepointColumn(text_, lineStart == std::string::npos ? 0 : lineStart + 1, cursor_);
   const auto currentEnd = text_.find('\n', cursor_);
   if(currentEnd == std::string::npos) {
     moveTo(text_.size(), keepSelection);
@@ -284,7 +303,7 @@ void MarkdownEditor::moveLineDown(bool keepSelection) {
   const auto nextStart = currentEnd + 1;
   const auto nextEnd = text_.find('\n', nextStart);
   const auto targetEnd = nextEnd == std::string::npos ? text_.size() : nextEnd;
-  moveTo(nextStart + std::min(column, targetEnd - nextStart), keepSelection);
+  moveTo(offsetForColumn(text_, nextStart, targetEnd, column), keepSelection);
 }
 
 void MarkdownEditor::moveLineStart(bool keepSelection) {
@@ -305,13 +324,29 @@ void MarkdownEditor::moveDocumentEnd(bool keepSelection) {
   moveTo(text_.size(), keepSelection);
 }
 
+std::size_t MarkdownEditor::undoDepth() const {
+  return undo_.size();
+}
+
+std::size_t MarkdownEditor::undoBytes() const {
+  std::size_t bytes = 0;
+  for(const auto& record : undo_) bytes += record.text.size();
+  for(const auto& record : redo_) bytes += record.text.size();
+  return bytes;
+}
+
 bool MarkdownEditor::undo() {
   if(undo_.empty()) return false;
-  redo_.push_back({text_, cursor_});
+  redo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
   text_ = std::move(undo_.back().text);
   cursor_ = std::min(undo_.back().cursor, text_.size());
+  if(undo_.back().selecting) {
+    selectionAnchor_ = std::min(undo_.back().anchor, text_.size());
+    selecting_ = true;
+  } else {
+    clearSelection();
+  }
   undo_.pop_back();
-  clearSelection();
   dirty_ = true;
   breakUndoGroup();
   return true;
@@ -319,11 +354,16 @@ bool MarkdownEditor::undo() {
 
 bool MarkdownEditor::redo() {
   if(redo_.empty()) return false;
-  undo_.push_back({text_, cursor_});
+  undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
   text_ = std::move(redo_.back().text);
   cursor_ = std::min(redo_.back().cursor, text_.size());
+  if(redo_.back().selecting) {
+    selectionAnchor_ = std::min(redo_.back().anchor, text_.size());
+    selecting_ = true;
+  } else {
+    clearSelection();
+  }
   redo_.pop_back();
-  clearSelection();
   dirty_ = true;
   breakUndoGroup();
   return true;
@@ -361,6 +401,7 @@ void MarkdownEditor::snapshot(EditKind kind) {
                           now - groupAt_ <= kCoalesceWindow;
   if(kind != EditKind::Structural && contiguous) {
     // Fold into the open step: the pre-edit text is already on the stack.
+    perf::addCounter(perf::CounterId::EditorUndoRecordsCoalesced);
     groupAt_ = now;
     redo_.clear();
     return;
@@ -368,8 +409,11 @@ void MarkdownEditor::snapshot(EditKind kind) {
   if(undo_.empty() || undo_.back().text != text_) {
     perf::addCounter(perf::CounterId::EditorUndoRecords);
     perf::addCounter(perf::CounterId::EditorUndoBytesRetained, text_.size());
-    undo_.push_back({text_, cursor_});
-    if(undo_.size() > kMaxUndoSnapshots) undo_.erase(undo_.begin());
+    undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
+    if(undo_.size() > kMaxUndoSnapshots) {
+      perf::addCounter(perf::CounterId::EditorUndoRecordsDropped);
+      undo_.erase(undo_.begin());
+    }
   }
   redo_.clear();
   groupOpen_ = kind != EditKind::Structural;

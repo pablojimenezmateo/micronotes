@@ -4,13 +4,30 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace microcore::editor {
 
+// A plain-text editing model over a UTF-8 buffer, addressed by byte offset.
+//
+// Two things here were the source of most of the editor's clumsiness and are
+// worth stating explicitly, because both look correct at a glance:
+//
+//  * Cursor motion used to step one *byte* at a time, so arrowing through or
+//    backspacing over any non-ASCII character split it and produced mojibake.
+//    All motion now moves whole code points (see core/util/Utf8.h).
+//
+//  * Undo used to push a full copy of the document on every keystroke, with no
+//    coalescing, no bound, and no record of where the caret was. Typing a
+//    paragraph into a 100 KB note therefore retained megabytes of near-identical
+//    snapshots, Ctrl+Z walked back one character at a time, and each step left
+//    the caret wherever it happened to be rather than where the edit was.
+//    Records now coalesce over a run of typing, are bounded, and restore the
+//    selection they were taken with.
 class MarkdownEditor {
 public:
   void setText(std::string text);
+
+  // --- editing ---
   void insert(std::string_view text);
   // The single entry point for structural edits. Block transforms, Markdown
   // typing shortcuts and formatting commands all land here so they share the
@@ -55,14 +72,22 @@ public:
   void markDirty();
   void markSaved();
 
+  // Retained undo bytes and record count, exposed for tests and the harness.
+  std::size_t undoBytes() const;
+  std::size_t undoDepth() const;
+
 private:
   // Consecutive edits of the same kind at the same spot fold into one undo
   // step; anything else opens a new one.
   enum class EditKind { Structural, Insert, Erase };
 
+  // The selection rides along with the text so Ctrl+Z puts the caret and the
+  // highlight back where they were, not just the characters.
   struct Snapshot {
     std::string text;
     std::size_t cursor = 0;
+    std::size_t anchor = 0;
+    bool selecting = false;
   };
 
   void snapshot(EditKind kind);

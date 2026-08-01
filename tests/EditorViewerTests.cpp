@@ -372,3 +372,170 @@ MICRONOTES_TEST(debounced_refresh_waits_before_refreshing) {
   refresh.markRefreshed();
   MICRONOTES_REQUIRE(!refresh.shouldRefresh(1200));
 }
+
+// --- editor: UTF-8 caret arithmetic ----------------------------------------
+//
+// The caret is a byte offset, which is the right representation, but it used to
+// *move* a byte at a time. Stepping into or deleting across a multi-byte code
+// point split it and left an invalid sequence behind.
+
+MICRONOTES_TEST(editor_backspace_removes_a_whole_code_point) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("caf\xc3\xa9");  // "café" -- the e-acute is two bytes
+  MICRONOTES_REQUIRE(editor.cursor() == 5);
+  editor.erasePrevious();
+  MICRONOTES_REQUIRE(editor.text() == "caf");
+  MICRONOTES_REQUIRE(editor.cursor() == 3);
+}
+
+MICRONOTES_TEST(editor_arrow_steps_over_a_whole_code_point) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("caf\xc3\xa9x");
+  editor.moveDocumentStart();
+  for(int i = 0; i < 3; ++i) editor.moveRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 3);
+  editor.moveRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 5);  // skipped both bytes, not one
+  editor.moveLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 3);
+}
+
+MICRONOTES_TEST(editor_vertical_motion_uses_code_point_columns) {
+  microcore::editor::MarkdownEditor editor;
+  // Column 3 on the first line is past the two-byte character; a byte-based
+  // column would land at a different character on the line below.
+  editor.setText("\xc3\xa9\xc3\xa9xy\nabcde");
+  editor.moveDocumentStart();
+  for(int i = 0; i < 3; ++i) editor.moveRight();
+  editor.moveLineDown();
+  const auto lineStart = editor.text().find('\n') + 1;
+  MICRONOTES_REQUIRE(editor.cursor() == lineStart + 3);
+}
+
+// --- editor: keyboard selection --------------------------------------------
+//
+// Every motion collapsed the selection unconditionally, so Shift+Arrow could
+// not select at all -- only Home and End honoured the modifier.
+
+MICRONOTES_TEST(editor_shift_arrow_extends_the_selection) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("hello world");
+  editor.moveDocumentStart();
+  for(int i = 0; i < 5; ++i) editor.moveRight(true);
+  MICRONOTES_REQUIRE(editor.hasSelection());
+  MICRONOTES_REQUIRE(editor.selectedText() == "hello");
+  editor.moveLeft(true);
+  MICRONOTES_REQUIRE(editor.selectedText() == "hell");
+}
+
+MICRONOTES_TEST(editor_unshifted_arrow_collapses_to_the_selection_edge) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("hello world");
+  editor.selectRange(2, 7);
+  editor.moveLeft();
+  MICRONOTES_REQUIRE(!editor.hasSelection());
+  MICRONOTES_REQUIRE(editor.cursor() == 2);
+  editor.selectRange(2, 7);
+  editor.moveRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 7);
+}
+
+MICRONOTES_TEST(editor_shift_vertical_motion_extends_the_selection) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("one\ntwo\nthree");
+  editor.moveDocumentStart();
+  editor.moveLineDown(true);
+  MICRONOTES_REQUIRE(editor.hasSelection());
+  MICRONOTES_REQUIRE(editor.selectedText() == "one\n");
+}
+
+// --- editor: word motion ----------------------------------------------------
+
+MICRONOTES_TEST(editor_word_motion_crosses_words_not_characters) {
+  microcore::editor::MarkdownEditor editor;
+  // Word motion stops at run boundaries: rightwards at the end of the run it
+  // crossed, leftwards at the start of it.
+  editor.setText("alpha beta gamma");
+  editor.moveDocumentStart();
+  editor.moveWordRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 5);
+  editor.moveWordRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 10);
+  editor.moveWordLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 6);
+}
+
+MICRONOTES_TEST(editor_word_delete_removes_the_word_before_the_caret) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("alpha beta");
+  editor.erasePreviousWord();
+  MICRONOTES_REQUIRE(editor.text() == "alpha ");
+  editor.erasePreviousWord();
+  MICRONOTES_REQUIRE(editor.text() == "");
+}
+
+// --- editor: undo -----------------------------------------------------------
+//
+// Undo used to push a full document copy per keystroke, unbounded, and restore
+// no caret. Ctrl+Z therefore rewound one character at a time and left the caret
+// wherever it happened to be.
+
+MICRONOTES_TEST(editor_undo_coalesces_a_run_of_typing) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("");
+  for(const char c : std::string("hello")) editor.insert(std::string(1, c));
+  MICRONOTES_REQUIRE(editor.text() == "hello");
+  // One record for the whole run, not five.
+  MICRONOTES_REQUIRE(editor.undoDepth() == 1);
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "");
+}
+
+MICRONOTES_TEST(editor_undo_breaks_the_run_at_a_newline) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("");
+  for(const char c : std::string("ab")) editor.insert(std::string(1, c));
+  editor.insert("\n");
+  for(const char c : std::string("cd")) editor.insert(std::string(1, c));
+  MICRONOTES_REQUIRE(editor.text() == "ab\ncd");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "ab\n");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "ab");
+}
+
+MICRONOTES_TEST(editor_undo_restores_the_caret_it_was_taken_with) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("hello world");
+  editor.moveCursor(5);
+  editor.insert(",");
+  MICRONOTES_REQUIRE(editor.text() == "hello, world");
+  editor.moveDocumentEnd();
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "hello world");
+  // Back where the edit happened, not at the end where the caret had wandered.
+  MICRONOTES_REQUIRE(editor.cursor() == 5);
+}
+
+MICRONOTES_TEST(editor_undo_history_is_bounded) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText(std::string(4096, 'x'));
+  // Each caret jump seals the previous record, so this is 2000 distinct edits.
+  for(int i = 0; i < 2000; ++i) {
+    editor.moveCursor(static_cast<std::size_t>(i % 100));
+    editor.insert("a");
+  }
+  MICRONOTES_REQUIRE(editor.undoDepth() <= 256);
+  MICRONOTES_REQUIRE(editor.undoBytes() <= 32u * 1024u * 1024u);
+}
+
+MICRONOTES_TEST(editor_redo_returns_the_undone_edit) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("a");
+  editor.moveDocumentEnd();
+  editor.insert("b");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "a");
+  MICRONOTES_REQUIRE(editor.redo());
+  MICRONOTES_REQUIRE(editor.text() == "ab");
+}
