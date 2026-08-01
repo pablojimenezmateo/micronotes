@@ -1,0 +1,15 @@
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/md4c.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/md4c_html.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/micronotes_core.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/micronotes.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/micronotes_tests.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/micronotes_perf.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/package.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/package_source.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/test.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/edit_cache.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/rebuild_cache.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/list_install_components.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/install.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/install/local.dir
+/home/gef/Documents/projects/micronotes/build-tsan/CMakeFiles/install/strip.dir

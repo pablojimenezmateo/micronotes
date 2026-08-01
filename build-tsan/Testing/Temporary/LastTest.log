@@ -1,0 +1,131 @@
+Start testing: Aug 01 17:57 CEST
+----------------------------------------------------------
+1/2 Testing: micronotes_tests
+1/2 Test: micronotes_tests
+Command: "/home/gef/Documents/projects/micronotes/build-tsan/bin/micronotes_tests"
+Directory: /home/gef/Documents/projects/micronotes/build-tsan
+"micronotes_tests" start time: Aug 01 17:57 CEST
+Output:
+----------------------------------------------------------
+[PASS] app_state_opens_library_filters_and_persists_state
+[PASS] app_state_creates_loads_saves_and_refreshes_notes
+[PASS] architecture_every_perf_counter_has_a_producer
+[PASS] architecture_perf_counter_names_cover_every_id
+[PASS] architecture_core_does_not_hardcode_the_app_name
+[PASS] font_resolver_finds_a_real_file_for_every_face
+[PASS] text_texture_cache_evicts_least_recently_used_not_everything
+[PASS] text_texture_cache_distinguishes_colour_and_style
+[PASS] architecture_connections_go_through_the_sqlite_wrapper
+[PASS] attachment_service_detects_supported_images
+[PASS] attachment_service_copies_and_links_files
+[PASS] attachment_service_labels_non_image_links_with_file_name
+[PASS] attachment_service_writes_clipboard_bytes_with_unique_names
+[PASS] attachment_service_builds_default_open_command
+[PASS] attachment_service_rejects_path_traversal
+[PASS] editor_tracks_dirty_state
+[PASS] editor_moves_cursor_and_deletes_forward
+[PASS] editor_moves_to_line_boundaries
+[PASS] editor_selects_replaces_and_erases_ranges
+[PASS] viewer_layout_counts_blocks
+[PASS] markdown_parser_covers_syntax_reference_blocks
+[PASS] pane_controller_tracks_visibility_modes
+[PASS] debounced_refresh_waits_before_refreshing
+[PASS] editor_backspace_removes_a_whole_code_point
+[PASS] editor_arrow_steps_over_a_whole_code_point
+[PASS] editor_vertical_motion_uses_code_point_columns
+[PASS] editor_shift_arrow_extends_the_selection
+[PASS] editor_unshifted_arrow_collapses_to_the_selection_edge
+[PASS] editor_shift_vertical_motion_extends_the_selection
+[PASS] editor_word_motion_crosses_words_not_characters
+[PASS] editor_word_delete_removes_the_word_before_the_caret
+[PASS] editor_undo_coalesces_a_run_of_typing
+[PASS] editor_undo_breaks_the_run_at_a_newline
+[PASS] editor_undo_restores_the_caret_it_was_taken_with
+[PASS] editor_undo_history_is_bounded
+[PASS] editor_redo_returns_the_undone_edit
+[PASS] metadata_header_contains_stable_id
+[PASS] library_creates_reads_and_renames_note_without_losing_id
+[PASS] library_loads_metadata_and_body_in_one_read
+[PASS] library_reads_metadata_from_header_without_body_scan
+[PASS] library_never_overwrites_notes_on_path_collisions
+[PASS] library_rejects_paths_outside_root
+[PASS] library_persists_tag_updates
+[PASS] library_delete_note_moves_note_and_attachments_to_trash
+[PASS] library_delete_folder_moves_folder_notes_and_attachments_to_trash
+[PASS] markdown_parser_parses_basic_blocks
+[PASS] markdown_parser_keeps_links_and_images
+[PASS] markdown_parser_keeps_empty_links_and_images
+[PASS] markdown_parser_tolerates_attachment_links_with_spaces
+[PASS] markdown_parser_autolinks_raw_urls
+[PASS] markdown_parser_keeps_ordered_numbers_and_rules
+[PASS] markdown_parser_keeps_gfm_tables
+[PASS] markdown_parser_keeps_gfm_task_lists_and_strike_links
+[PASS] markdown_parser_keeps_nested_list_parent_items
+[PASS] markdown_parser_keeps_footnotes_and_admonitions
+[PASS] markdown_parser_decodes_entities_like_md4c_html
+[PASS] path_utils_sanitizes_file_stem
+[PASS] path_utils_resolves_runtime_paths
+[PASS] library_index_searches_cached_rows
+[PASS] library_index_rebuilds_sqlite_cache_from_files
+[PASS] library_index_refresh_preserves_search_after_note_move
+[PASS] library_index_refresh_removes_trashed_note_from_sqlite
+[PASS] library_index_refresh_removes_trashed_folder_notes_from_sqlite
+[PASS] organization_lists_folders_tags_and_notes
+[PASS] library_index_uses_one_connection_for_its_lifetime
+[PASS] library_index_refresh_writes_nothing_when_nothing_changed
+[PASS] library_index_scan_does_not_descend_into_the_state_directory
+[PASS] single_line_backspace_erases_a_whole_code_point
+[PASS] single_line_caret_starts_at_the_end_and_moves_by_code_point
+[PASS] single_line_inserts_at_the_caret_not_at_the_end
+[PASS] single_line_home_and_end_reach_both_edges
+[PASS] single_line_shift_motion_selects_a_range_not_just_everything
+[PASS] single_line_typing_replaces_the_selection
+[PASS] single_line_word_erase_removes_a_word
+[PASS] single_line_undo_restores_the_previous_value
+[PASS] single_line_flattens_pasted_newlines
+[PASS] single_line_select_all_then_type_clears_the_field
+[PASS] single_line_view_reports_caret_and_selection_positions
+[PASS] single_line_view_scrolls_to_keep_the_caret_visible
+[PASS] single_line_view_returns_flush_left_once_the_text_fits
+[PASS] single_line_view_hit_test_lands_on_code_point_boundaries
+[PASS] text_field_backspace_reports_a_change
+[PASS] text_field_ctrl_backspace_erases_a_word
+[PASS] text_field_backspace_erases_the_selection_not_one_character
+[PASS] text_field_arrows_move_and_report_motion
+[PASS] text_field_shift_arrow_selects
+[PASS] text_field_ctrl_arrow_moves_by_word
+[PASS] text_field_ignores_keys_it_does_not_own
+[PASS] text_field_begin_with_selects_all_so_typing_replaces
+[PASS] text_field_reset_clears_text_and_scroll
+[PASS] wrap_lines_preserves_the_source_exactly
+[PASS] wrap_lines_breaks_at_word_boundaries
+[PASS] wrap_lines_keeps_an_overlong_word_on_its_own_line
+[PASS] wrap_lines_starts_a_new_line_at_every_newline
+[PASS] wrap_lines_claims_every_caret_offset
+[PASS] wrap_lines_puts_the_end_of_the_buffer_on_the_last_line
+[PASS] wrap_lines_handles_empty_text
+<end of output>
+Test time =   0.28 sec
+----------------------------------------------------------
+Test Passed.
+"micronotes_tests" end time: Aug 01 17:57 CEST
+"micronotes_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/2 Testing: micronotes_core_manifest
+2/2 Test: micronotes_core_manifest
+Command: "/home/gef/Documents/projects/micronotes/tools/sync-core.sh" "--check"
+Directory: /home/gef/Documents/projects/micronotes
+"micronotes_core_manifest" start time: Aug 01 17:57 CEST
+Output:
+----------------------------------------------------------
+sync-core: micronotes src/core matches its manifest (39 files)
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"micronotes_core_manifest" end time: Aug 01 17:57 CEST
+"micronotes_core_manifest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Aug 01 17:57 CEST

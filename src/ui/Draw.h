@@ -1,5 +1,8 @@
 #pragma once
 
+#include "CoreAliases.h"
+#include "core/perf/PerformanceCounters.h"
+
 #include "ui/Fonts.h"
 #include "ui/Theme.h"
 
@@ -109,6 +112,7 @@ public:
 
   int width(std::string_view value, const ui::TextStyle& style) const {
     if(value.empty()) return 0;
+    perf::addCounter(perf::CounterId::RenderTextMeasureCalls);
     int w = 0;
     if(fonts_.measure(value, style, &w, nullptr)) return toLogical(w);
     return static_cast<int>(value.size() * 8);
@@ -206,10 +210,17 @@ private:
   }
 
   const CachedText* texture(const std::string& text, SDL_Color color, const ui::TextStyle& style) {
-    if(cache_.size() > 4096) clear();
+    perf::addCounter(perf::CounterId::RenderTextCacheQueries);
+    if(cache_.size() > 4096) {
+      perf::addCounter(perf::CounterId::RenderTextCacheEvictions, cache_.size());
+      clear();
+    }
     const auto key = cacheKey(text, color, style);
     auto found = cache_.find(key);
-    if(found == cache_.end()) {
+    if(found != cache_.end()) {
+      perf::addCounter(perf::CounterId::RenderTextCacheHits);
+    } else {
+      perf::addCounter(perf::CounterId::RenderTextRasterizations);
       SDL_Surface* surface = fonts_.render(text, style, color);
       if(!surface) return nullptr;
       SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);

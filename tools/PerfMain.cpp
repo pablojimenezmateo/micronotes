@@ -1,5 +1,6 @@
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
+#include "core/perf/PerformanceCounters.h"
 
 #include "doc/Edits.h"
 #include "doc/Fold.h"
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <cstdio>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -187,11 +189,31 @@ static bool editBudgets(const std::string& source) {
   return true;
 }
 
+// Ranked by total time, because that is the only ordering that answers "what
+// should I look at first". The per-call and max columns separate "slow once"
+// from "fast but called far too often" -- two problems with different fixes
+// that a single total conflates.
 static void printSamples() {
   const auto samples = microcore::perf::Recorder::instance().snapshot();
+  std::cout << "\n=== scope timings (ranked by total) ===\n";
+  std::printf("%-48s %10s %12s %10s %10s\n", "scope", "calls", "total_us", "avg_us", "max_us");
   for(const auto& sample : samples) {
-    std::cout << sample.name << ": " << sample.micros << "us\n";
+    const double avg = sample.calls ? static_cast<double>(sample.totalMicros) / static_cast<double>(sample.calls) : 0.0;
+    std::printf("%-48s %10llu %12llu %10.1f %10llu\n",
+                sample.name.c_str(),
+                static_cast<unsigned long long>(sample.calls),
+                static_cast<unsigned long long>(sample.totalMicros),
+                avg,
+                static_cast<unsigned long long>(sample.maxMicros));
   }
+}
+
+// The counters are the other half of the picture: timings say where the time
+// went, counters say how many times the work happened at all. A scope that
+// looks cheap per call but ran 40,000 times is invisible in the table above.
+static void printCounters() {
+  std::cout << "\n";
+  microcore::perf::writeCounters(stdout);
 }
 
 }
@@ -252,6 +274,7 @@ int main() {
   withinBudget = editBudgets(liveNote) && withinBudget;
 
   printSamples();
+  printCounters();
   std::filesystem::remove_all(root);
   return withinBudget ? 0 : 1;
 }

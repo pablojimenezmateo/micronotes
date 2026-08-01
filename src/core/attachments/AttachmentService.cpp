@@ -1,6 +1,7 @@
 #include "core/attachments/AttachmentService.h"
 
 #include "core/AppIdentity.h"
+#include "core/perf/PerformanceCounters.h"
 #include "core/platform/PathUtils.h"
 #include "core/platform/DefaultOpener.h"
 
@@ -45,6 +46,10 @@ AttachmentLink AttachmentService::attachFile(const std::filesystem::path& librar
   auto link = makeLink(libraryRoot, noteId, source.filename());
   std::filesystem::create_directories(link.managedPath.parent_path());
   std::filesystem::copy_file(source, link.managedPath, std::filesystem::copy_options::overwrite_existing);
+  perf::addCounter(perf::CounterId::AttachmentLinksCreated);
+  std::error_code sizeError;
+  const auto copied = std::filesystem::file_size(link.managedPath, sizeError);
+  if(!sizeError) perf::addCounter(perf::CounterId::AttachmentBytesCopied, copied);
   return link;
 }
 
@@ -52,6 +57,8 @@ AttachmentLink AttachmentService::attachBytes(const std::filesystem::path& libra
   if(!data || size == 0) throw std::runtime_error("attachment data is empty");
   auto link = makeLink(libraryRoot, noteId, fileName);
   std::filesystem::create_directories(link.managedPath.parent_path());
+  perf::addCounter(perf::CounterId::AttachmentLinksCreated);
+  perf::addCounter(perf::CounterId::AttachmentBytesCopied, size);
   std::ofstream out(link.managedPath, std::ios::binary);
   if(!out) throw std::runtime_error("failed to create managed attachment");
   out.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));

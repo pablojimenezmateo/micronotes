@@ -1,5 +1,7 @@
 #include "core/editor/MarkdownEditor.h"
 
+#include "core/perf/PerformanceCounters.h"
+
 #include <algorithm>
 #include <cctype>
 
@@ -59,6 +61,7 @@ void MarkdownEditor::setText(std::string text) {
 
 void MarkdownEditor::insert(std::string_view text) {
   if(text.empty() && !hasSelection()) return;
+  perf::addCounter(perf::CounterId::EditorInsertCalls);
   // Replacing a selection, or typing a line break, is a boundary worth undoing
   // on its own.
   const bool structural = hasSelection() || text.find('\n') != std::string_view::npos;
@@ -80,6 +83,7 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
   start = std::min(start, text_.size());
   end = std::clamp(end, start, text_.size());
   if(start == end && text.empty()) return;
+  perf::addCounter(perf::CounterId::EditorEraseCalls);
   snapshot(EditKind::Structural);
   text_.erase(start, end - start);
   text_.insert(start, text);
@@ -90,6 +94,7 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
 }
 
 void MarkdownEditor::erasePrevious() {
+  perf::addCounter(perf::CounterId::EditorEraseCalls);
   if(hasSelection()) {
     eraseSelection();
     return;
@@ -105,6 +110,7 @@ void MarkdownEditor::erasePrevious() {
 }
 
 void MarkdownEditor::eraseNext() {
+  perf::addCounter(perf::CounterId::EditorEraseCalls);
   if(hasSelection()) {
     eraseSelection();
     return;
@@ -360,6 +366,8 @@ void MarkdownEditor::snapshot(EditKind kind) {
     return;
   }
   if(undo_.empty() || undo_.back().text != text_) {
+    perf::addCounter(perf::CounterId::EditorUndoRecords);
+    perf::addCounter(perf::CounterId::EditorUndoBytesRetained, text_.size());
     undo_.push_back({text_, cursor_});
     if(undo_.size() > kMaxUndoSnapshots) undo_.erase(undo_.begin());
   }

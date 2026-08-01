@@ -123,6 +123,7 @@ set(MICROCORE_SOURCES
   src/core/markdown/MarkdownParser.cpp
   src/core/markdown/RenderModel.cpp
   src/core/perf/Perf.cpp
+  src/core/perf/PerformanceCounters.cpp
   src/core/persistence/SqliteDb.cpp
   src/core/platform/DefaultOpener.cpp
   src/core/platform/DurableFile.cpp
@@ -188,6 +189,7 @@ add_executable(micronotes_tests
   tests/TestMain.cpp
   tests/TreeModelTests.cpp
   tests/AppStateTests.cpp
+  tests/ArchitectureTests.cpp
   tests/AttachmentTests.cpp
   tests/BlockScanTests.cpp
   tests/EditorViewerTests.cpp

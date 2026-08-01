@@ -1,6 +1,7 @@
 #include "core/markdown/MarkdownParser.h"
 
 #include "core/AppIdentity.h"
+#include "core/perf/PerformanceCounters.h"
 
 #include <md4c.h>
 
@@ -473,6 +474,7 @@ static std::vector<Inline> autolinkTextInline(const Inline& item) {
       link.text = item.text.substr(urlStart, trimmedEnd - urlStart);
       link.target = link.text;
       out.push_back(std::move(link));
+      perf::addCounter(perf::CounterId::MarkdownAutolinkRewrites);
       if(trimmedEnd < urlEnd) {
         Inline punctuation = item;
         punctuation.text = item.text.substr(trimmedEnd, urlEnd - trimmedEnd);
@@ -713,6 +715,14 @@ Document MarkdownParser::parse(std::string_view source) const {
   auto doc = parsePreservingBlankLines(source);
   autolinkDocument(doc);
   promoteAlerts(doc);
+
+  perf::addCounter(perf::CounterId::MarkdownParseCalls);
+  perf::addCounter(perf::CounterId::MarkdownParseBytes, source.size());
+  perf::addCounter(perf::CounterId::MarkdownBlocksProduced, doc.blocks.size());
+  std::uint64_t inlines = 0;
+  for(const auto& block : doc.blocks) inlines += block.inlines.size();
+  perf::addCounter(perf::CounterId::MarkdownInlinesProduced, inlines);
+
   return doc;
 }
 

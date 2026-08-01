@@ -1,0 +1,2 @@
+/usr/bin/ar qc libmd4c_html.a "CMakeFiles/md4c_html.dir/third_party/md4c/src/md4c-html.c.o" CMakeFiles/md4c_html.dir/third_party/md4c/src/entity.c.o
+/usr/bin/ranlib libmd4c_html.a

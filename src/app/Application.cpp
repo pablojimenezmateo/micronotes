@@ -11,6 +11,7 @@
 #include "core/markdown/MarkdownParser.h"
 #include "core/platform/DurableFile.h"
 #include "core/perf/Perf.h"
+#include "core/perf/PerformanceCounters.h"
 #include "core/platform/PathUtils.h"
 #include "ui/AppState.h"
 #include "ui/Draw.h"
@@ -2892,6 +2893,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   fill(renderer, {layout.status.x, layout.status.y, layout.status.w, 1}, theme().hairline);
   drawStatus(renderer, text, ui, layout.status);
   ui.overlays.draw(renderer, text, width, height);
+  perf::addCounter(perf::CounterId::FramePresents);
   SDL_RenderPresent(renderer);
 }
 
@@ -4536,6 +4538,7 @@ int run(ApplicationOptions options) {
     SDL_Event event;
     const int waitMs = autosaveWaitMs();
     const bool hasEvent = waitMs < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, waitMs);
+    perf::addCounter(perf::CounterId::FrameEventWakes);
     if(hasEvent) {
       int width = 1280;
       int height = 800;
@@ -4545,8 +4548,10 @@ int run(ApplicationOptions options) {
       if(event.type == SDL_EVENT_QUIT) {
         running = false;
       } else if(event.type == SDL_EVENT_TEXT_INPUT) {
+        perf::addCounter(perf::CounterId::InputTextEvents);
         handleText(ui, event.text.text);
       } else if(event.type == SDL_EVENT_KEY_DOWN) {
+        perf::addCounter(perf::CounterId::InputKeyEvents);
         handleKey(ui, event.key.key, event.key.scancode, event.key.mod);
       } else if(event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         ui.mouseX = event.button.x;
@@ -4624,6 +4629,7 @@ int run(ApplicationOptions options) {
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.shell().paneMode == ui::PaneMode::Live) {
         ui.livePage.setScroll(ui.livePage.scroll() - static_cast<int>(event.wheel.y * 60));
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
+        perf::addCounter(perf::CounterId::InputWheelEvents);
         const AppLayout layout = computeLayout(ui.state.shell(), width, height);
         Rect editorRect = layout.content;
         Rect viewerRect = layout.content;
@@ -4669,8 +4675,12 @@ int run(ApplicationOptions options) {
       SDL_GetWindowSize(window, &width, &height);
       drawApp(renderer, text, images, ui, width, height);
       needsDraw = false;
+    } else {
+      perf::addCounter(perf::CounterId::FrameRepaintsSkipped);
     }
   }
+
+  perf::dumpCountersOnce();
 
   if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty()) (void)saveCurrent(ui, true);
   persistLibraryState(ui);

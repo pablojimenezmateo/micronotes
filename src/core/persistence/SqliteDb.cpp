@@ -1,5 +1,7 @@
 #include "core/persistence/SqliteDb.h"
 
+#include "core/perf/PerformanceCounters.h"
+
 #include <sqlite3.h>
 
 namespace microcore::persistence {
@@ -22,6 +24,7 @@ void SqliteDb::close() {
 
 bool SqliteDb::exec(const std::string& sql) {
   if(!db_) return false;
+  perf::addCounter(perf::CounterId::SqliteExecCalls);
   char* error = nullptr;
   const int rc = sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &error);
   sqlite3_free(error);

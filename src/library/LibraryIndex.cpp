@@ -4,6 +4,7 @@
 #include "library/Library.h"
 #include "library/Metadata.h"
 #include "core/perf/Perf.h"
+#include "core/perf/PerformanceCounters.h"
 
 #include <sqlite3.h>
 
@@ -14,6 +15,15 @@
 #include <unordered_set>
 
 namespace micronotes::library {
+
+// Counted wrapper around sqlite3_prepare_v2. Every prepared statement in this
+// file goes through it, so sqlite.statements_prepared stays accurate without
+// twelve hand-placed increments that the next query added here would silently
+// skip. It also drops the -1/nullptr boilerplate repeated at each call site.
+static int prepare(sqlite3* db, const char* sql, sqlite3_stmt** stmt) {
+  perf::addCounter(perf::CounterId::SqliteStatementsPrepared);
+  return sqlite3_prepare_v2(db, sql, -1, stmt, nullptr);
+}
 
 namespace {
 
@@ -98,6 +108,7 @@ bool LibraryIndex::migrate() {
 
 bool LibraryIndex::rebuild() {
   perf::ScopeTimer timer("library_index.rebuild");
+  perf::addCounter(perf::CounterId::LibraryIndexRebuilds);
   rows_.clear();
   sqlite3* db = nullptr;
   if(sqlite3_open(dbPath_.c_str(), &db) != SQLITE_OK) return false;
@@ -108,11 +119,12 @@ bool LibraryIndex::rebuild() {
 
   sqlite3_stmt* noteStmt = nullptr;
   sqlite3_stmt* ftsStmt = nullptr;
-  sqlite3_prepare_v2(db, "INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?);", -1, &noteStmt, nullptr);
-  sqlite3_prepare_v2(db, "INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);", -1, &ftsStmt, nullptr);
+  prepare(db, "INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?);", &noteStmt);
+  prepare(db, "INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);", &ftsStmt);
 
   Library library(root_);
   for(const auto& path : library.noteFiles()) {
+    perf::addCounter(perf::CounterId::LibraryIndexFilesScanned);
     const auto note = library.loadNote(path);
     const auto relative = path.lexically_relative(root_).generic_string();
     // Files written by other tools have no front matter; index them anyway.
@@ -151,6 +163,7 @@ bool LibraryIndex::rebuild() {
 
 bool LibraryIndex::refreshChangedFiles() {
   perf::ScopeTimer timer("library_index.refresh_changed_files");
+  perf::addCounter(perf::CounterId::LibraryIndexRefreshCalls);
   rows_.clear();
   sqlite3* db = nullptr;
   if(sqlite3_open(dbPath_.c_str(), &db) != SQLITE_OK) return false;
@@ -162,7 +175,7 @@ bool LibraryIndex::refreshChangedFiles() {
   };
   std::unordered_map<std::string, ExistingRow> existing;
   sqlite3_stmt* selectStmt = nullptr;
-  if(sqlite3_prepare_v2(db, "SELECT path,id,mtime,size FROM notes;", -1, &selectStmt, nullptr) == SQLITE_OK) {
+  if(prepare(db, "SELECT path,id,mtime,size FROM notes;", &selectStmt) == SQLITE_OK) {
     while(sqlite3_step(selectStmt) == SQLITE_ROW) {
       existing.emplace(columnText(selectStmt, 0), ExistingRow {
         columnText(selectStmt, 1),
@@ -183,11 +196,11 @@ bool LibraryIndex::refreshChangedFiles() {
   sqlite3_stmt* insertFtsStmt = nullptr;
   sqlite3_stmt* deleteNoteStmt = nullptr;
   sqlite3_stmt* deleteRemovedFtsStmt = nullptr;
-  sqlite3_prepare_v2(db, "INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,body=excluded.body;", -1, &upsertStmt, nullptr);
-  sqlite3_prepare_v2(db, "DELETE FROM notes_fts WHERE id=?;", -1, &deleteFtsStmt, nullptr);
-  sqlite3_prepare_v2(db, "INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);", -1, &insertFtsStmt, nullptr);
-  sqlite3_prepare_v2(db, "DELETE FROM notes WHERE path=?;", -1, &deleteNoteStmt, nullptr);
-  sqlite3_prepare_v2(db, "DELETE FROM notes_fts WHERE id=?;", -1, &deleteRemovedFtsStmt, nullptr);
+  prepare(db, "INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,body=excluded.body;", &upsertStmt);
+  prepare(db, "DELETE FROM notes_fts WHERE id=?;", &deleteFtsStmt);
+  prepare(db, "INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);", &insertFtsStmt);
+  prepare(db, "DELETE FROM notes WHERE path=?;", &deleteNoteStmt);
+  prepare(db, "DELETE FROM notes_fts WHERE id=?;", &deleteRemovedFtsStmt);
 
   bool ok = upsertStmt && deleteFtsStmt && insertFtsStmt && deleteNoteStmt && deleteRemovedFtsStmt;
   std::unordered_set<std::string> seenPaths;
@@ -258,7 +271,7 @@ bool LibraryIndex::refreshChangedFiles() {
   ok = ok && exec(db, "COMMIT;");
   if(!ok) exec(db, "ROLLBACK;");
 
-  if(ok && sqlite3_prepare_v2(db, "SELECT id,path,title FROM notes ORDER BY title;", -1, &selectStmt, nullptr) == SQLITE_OK) {
+  if(ok && prepare(db, "SELECT id,path,title FROM notes ORDER BY title;", &selectStmt) == SQLITE_OK) {
     while(sqlite3_step(selectStmt) == SQLITE_ROW) {
       rows_.push_back({columnText(selectStmt, 0), root_ / columnText(selectStmt, 1), columnText(selectStmt, 2)});
     }
@@ -270,6 +283,7 @@ bool LibraryIndex::refreshChangedFiles() {
 
 std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchScope scope) const {
   perf::ScopeTimer timer("library_index.search");
+  perf::addCounter(perf::CounterId::LibrarySearchCalls);
   std::vector<SearchResult> out;
   if(query.empty()) return out;
   if(!dbPath_.empty() && std::filesystem::exists(dbPath_)) {
@@ -281,7 +295,7 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
         : scope == SearchScope::Content
           ? "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.id = notes_fts.id WHERE notes_fts.body MATCH ? ORDER BY rank LIMIT 200;"
           : "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.id = notes_fts.id WHERE notes_fts MATCH ? ORDER BY rank LIMIT 200;";
-      if(sqlite3_prepare_v2(db, ftsSql, -1, &stmt, nullptr) == SQLITE_OK) {
+      if(prepare(db, ftsSql, &stmt) == SQLITE_OK) {
         const std::string q(query);
         bindText(stmt, 1, q);
         collectRows(stmt, out, query);
@@ -294,7 +308,7 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
           : scope == SearchScope::Content
             ? "SELECT id,path,title,body FROM notes WHERE lower(body) LIKE ? ORDER BY title LIMIT 200;"
             : "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? OR lower(body) LIKE ? OR lower(path) LIKE ? ORDER BY title LIMIT 200;";
-        if(sqlite3_prepare_v2(db, likeSql, -1, &stmt, nullptr) == SQLITE_OK) {
+        if(prepare(db, likeSql, &stmt) == SQLITE_OK) {
           std::string q = lowerCopy(std::string(query));
           q = "%" + q + "%";
           bindText(stmt, 1, q);
