@@ -20,7 +20,9 @@ namespace microcore::markdown {}
 namespace microcore::perf {}
 namespace microcore::persistence {}
 namespace microcore::platform {}
+namespace microcore::render {}
 namespace microcore::ui {}
+namespace microcore::util {}
 namespace microcore::viewer {}
 
 namespace micronotes {
@@ -31,6 +33,8 @@ namespace markdown = microcore::markdown;
 namespace perf = microcore::perf;
 namespace persistence = microcore::persistence;
 namespace platform = microcore::platform;
+namespace render = microcore::render;
+namespace util = microcore::util;
 namespace viewer = microcore::viewer;
 
 }

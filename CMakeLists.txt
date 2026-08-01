@@ -107,6 +107,20 @@ if(MICRONOTES_ASSERT_OFFLINE_BUILD)
   endforeach()
 endif()
 
+# fontconfig resolves the faces the user actually configured, the same way every
+# other app on the desktop does. Optional: without it FontResolver falls back to
+# scanning the standard font directories.
+set(MICRONOTES_FONTCONFIG_TARGET "")
+if(PkgConfig_FOUND)
+  pkg_check_modules(FONTCONFIG QUIET IMPORTED_TARGET fontconfig)
+  if(TARGET PkgConfig::FONTCONFIG)
+    set(MICRONOTES_FONTCONFIG_TARGET PkgConfig::FONTCONFIG)
+  endif()
+endif()
+if(MICRONOTES_FONTCONFIG_TARGET STREQUAL "")
+  message(STATUS "fontconfig not found; font resolution falls back to a directory scan")
+endif()
+
 add_library(md4c STATIC third_party/md4c/src/md4c.c)
 target_include_directories(md4c PUBLIC third_party/md4c/src)
 add_library(md4c_html STATIC third_party/md4c/src/md4c-html.c third_party/md4c/src/entity.c)
@@ -124,6 +138,8 @@ set(MICROCORE_SOURCES
   src/core/markdown/RenderModel.cpp
   src/core/perf/Perf.cpp
   src/core/perf/PerformanceCounters.cpp
+  src/core/render/FontResolver.cpp
+  src/core/render/TextTextureCache.cpp
   src/core/persistence/SqliteDb.cpp
   src/core/platform/DefaultOpener.cpp
   src/core/platform/DurableFile.cpp
@@ -159,7 +175,11 @@ set(MICRONOTES_CORE_SOURCES ${MICROCORE_SOURCES} ${MICRONOTES_APP_SOURCES})
 add_library(micronotes_core STATIC ${MICRONOTES_CORE_SOURCES})
 target_include_directories(micronotes_core PUBLIC src)
 target_link_libraries(micronotes_core PUBLIC md4c md4c_html ${MICRONOTES_SQLITE_TARGET} ${MICRONOTES_SDL3_TARGET})
+if(NOT MICRONOTES_FONTCONFIG_TARGET STREQUAL "")
+  target_link_libraries(micronotes_core PUBLIC ${MICRONOTES_FONTCONFIG_TARGET})
+endif()
 target_compile_definitions(micronotes_core PUBLIC
+  MICROCORE_HAS_FONTCONFIG=$<BOOL:${MICRONOTES_FONTCONFIG_TARGET}>
   MICROCORE_APP_NAME="micronotes"
   MICRONOTES_HAS_SDL3_IMAGE=$<BOOL:${MICRONOTES_SDL3_IMAGE_TARGET}>
   MICRONOTES_HAS_SDL3_TTF=$<BOOL:${MICRONOTES_SDL3_TTF_TARGET}>

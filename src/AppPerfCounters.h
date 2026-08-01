@@ -16,10 +16,6 @@
   X(LibraryIndexRefreshCalls, "library.index_refresh_calls")                           \
   X(LibrarySearchCalls, "library.search_calls")                                        \
   /* --- text rendering --------------------------------------------------- */        \
-  X(RenderTextCacheQueries, "render.text_cache_queries")                               \
-  X(RenderTextCacheHits, "render.text_cache_hits")                                     \
-  X(RenderTextCacheEvictions, "render.text_cache_evictions")                           \
-  X(RenderTextRasterizations, "render.text_rasterizations")                            \
   X(RenderTextMeasureCalls, "render.text_measure_calls")                               \
   /* --- frame loop / input ------------------------------------------------ */       \
   X(FrameEventWakes, "frame.event_wakes")                                              \

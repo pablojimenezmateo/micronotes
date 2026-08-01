@@ -2,6 +2,7 @@
 
 #include "CoreAliases.h"
 #include "core/perf/PerformanceCounters.h"
+#include "core/render/TextTextureCache.h"
 
 #include "ui/Fonts.h"
 #include "ui/Theme.h"
@@ -182,80 +183,51 @@ public:
   }
 
   void clear() {
-    for(auto& [_, texture] : cache_) SDL_DestroyTexture(texture.texture);
     cache_.clear();
+    iconCache_.clear();
   }
 
 private:
-  struct CachedText {
-    SDL_Texture* texture = nullptr;
-    int w = 0;
-    int h = 0;
-  };
+  using CachedText = render::TextTextureCache::Entry;
+
+  static render::TextTextureCache::Style cacheStyle(const ui::TextStyle& style) {
+    return render::TextTextureCache::Style {
+      false, style.family == ui::FontFamily::Mono, style.strong, style.italic, style.size,
+    };
+  }
 
   const CachedText* iconTexture(const std::string& text, SDL_Color color) {
-    if(cache_.size() > 4096) clear();
-    const auto key = "icon:" + cacheKey(text, color, ui::TextStyle {});
-    auto found = cache_.find(key);
-    if(found == cache_.end()) {
-      SDL_Surface* surface = fonts_.renderIcon(text, color);
-      if(!surface) return nullptr;
-      SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);
-      CachedText cached {created, surface->w, surface->h};
-      SDL_DestroySurface(surface);
-      if(!created) return nullptr;
-      found = cache_.emplace(key, cached).first;
-    }
-    return &found->second;
+    if(const auto* hit = iconCache_.find(text, color, render::TextTextureCache::Style {})) return hit;
+    SDL_Surface* surface = fonts_.renderIcon(text, color);
+    if(!surface) return nullptr;
+    SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);
+    CachedText entry {created, surface->w, surface->h};
+    SDL_DestroySurface(surface);
+    if(!created) return nullptr;
+    return iconCache_.insert(text, color, render::TextTextureCache::Style {}, entry);
   }
 
   const CachedText* texture(const std::string& text, SDL_Color color, const ui::TextStyle& style) {
-    perf::addCounter(perf::CounterId::RenderTextCacheQueries);
-    if(cache_.size() > 4096) {
-      perf::addCounter(perf::CounterId::RenderTextCacheEvictions, cache_.size());
-      clear();
-    }
-    const auto key = cacheKey(text, color, style);
-    auto found = cache_.find(key);
-    if(found != cache_.end()) {
-      perf::addCounter(perf::CounterId::RenderTextCacheHits);
-    } else {
-      perf::addCounter(perf::CounterId::RenderTextRasterizations);
-      SDL_Surface* surface = fonts_.render(text, style, color);
-      if(!surface) return nullptr;
-      SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);
-      CachedText cached {created, surface->w, surface->h};
-      SDL_DestroySurface(surface);
-      if(!created) return nullptr;
-      found = cache_.emplace(key, cached).first;
-    }
-    return &found->second;
+    const auto key = cacheStyle(style);
+    if(const auto* hit = cache_.find(text, color, key)) return hit;
+    perf::addCounter(perf::CounterId::RenderTextRasterizations);
+    SDL_Surface* surface = fonts_.render(text, style, color);
+    if(!surface) return nullptr;
+    SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);
+    CachedText entry {created, surface->w, surface->h};
+    SDL_DestroySurface(surface);
+    if(!created) return nullptr;
+    return cache_.insert(text, color, key, entry);
   }
 
-  static std::string cacheKey(const std::string& text, SDL_Color color, const ui::TextStyle& style) {
-    std::string key;
-    key.reserve(text.size() + 24);
-    key += std::to_string(color.r);
-    key += ':';
-    key += std::to_string(color.g);
-    key += ':';
-    key += std::to_string(color.b);
-    key += ':';
-    key += std::to_string(color.a);
-    key += ':';
-    key += style.family == ui::FontFamily::Mono ? 'm' : 's';
-    key += style.strong ? 'b' : '-';
-    key += style.italic ? 'i' : '-';
-    key += ':';
-    key += std::to_string(static_cast<int>(std::lround(style.size * 4.0f)));
-    key += ':';
-    key += text;
-    return key;
-  }
 
   SDL_Renderer* renderer_ = nullptr;
   ui::FontStore fonts_;
-  std::map<std::string, CachedText> cache_;
+  // Sized for a few full screens of text so the working set stays resident
+  // while scrolling; icons get their own small cache so a glyph and a text run
+  // that happen to share a string cannot collide.
+  render::TextTextureCache cache_ {4096};
+  render::TextTextureCache iconCache_ {256};
 };
 
 class ImageCache {

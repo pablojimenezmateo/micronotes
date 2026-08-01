@@ -1,3 +1,5 @@
+#include "CoreAliases.h"
+#include "core/render/FontResolver.h"
 #include "ui/Fonts.h"
 
 #include "ui/Settings.h"
@@ -158,6 +160,12 @@ struct FontStore::Impl {
       const auto candidate = root / relative;
       std::error_code ec;
       if(std::filesystem::exists(candidate, ec)) return candidate.string();
+    }
+    // Ask fontconfig what this system actually uses before falling back to
+    // guessed paths: a machine without the hardcoded files rendered no text at
+    // all, and pinning a face means never picking up the configured UI font.
+    if(const auto resolved = render::resolveFontFile({mono, strong, italic}); !resolved.empty()) {
+      return resolved;
     }
     for(const auto& path : systemFallbacks(mono, strong, italic)) {
       std::error_code ec;

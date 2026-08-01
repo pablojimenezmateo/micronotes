@@ -12,6 +12,8 @@
 #include "core/platform/DurableFile.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
+#include "core/render/FontResolver.h"
+#include "core/render/TextTextureCache.h"
 #include "core/platform/PathUtils.h"
 #include "ui/AppState.h"
 #include "ui/Draw.h"
@@ -438,6 +440,10 @@ struct UiRuntime {
   bool slashInserts = false;
   std::size_t slashAfterBlock = 0;
   bool revealEditorCursor = true;
+  // Caret rectangle in window coordinates, published to SDL each frame so the
+  // IME can position its candidate window. Zero-sized until the editor draws.
+  SDL_Rect caretRect {0, 0, 0, 0};
+  bool caretReported = false;
   Uint64 lastEdit = 0;
   Uint64 lastAutosaveAttempt = 0;
 };

@@ -1,6 +1,8 @@
 #include "TestSupport.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/render/FontResolver.h"
+#include "core/render/TextTextureCache.h"
 
 #include <filesystem>
 #include <fstream>
@@ -133,4 +135,60 @@ MICRONOTES_TEST(architecture_core_does_not_hardcode_the_app_name) {
     "src/core names a specific app: " + offenders +
     " -- use kAppName / kAppDotDir from core/AppIdentity.h so the vendored copy "
     "in microagenda stays byte-identical");
+}
+
+// --- core/render ------------------------------------------------------------
+
+// Hardcoded /usr/share/fonts/truetype/dejavu/ paths meant a machine without
+// DejaVu installed exactly there rendered no text at all: TTF_OpenFont returned
+// null and every draw call silently did nothing.
+MICRONOTES_TEST(font_resolver_finds_a_real_file_for_every_face) {
+  const microcore::render::FontRequest requests[] = {
+    {false, false, false}, {false, true, false}, {false, false, true},
+    {false, true, true},   {true, false, false},
+  };
+  for(const auto& request : requests) {
+    const auto path = microcore::render::resolveFontFile(request);
+    micronotes::tests::require(!path.empty(), "no font resolved for a requested face");
+    micronotes::tests::require(std::filesystem::exists(path), "resolved font does not exist: " + path);
+  }
+}
+
+// The old cache destroyed every texture on reaching 4096 entries. Besides the
+// one-frame cost of thousands of destructions, a full flush discards exactly
+// the entries about to be reused, because it cannot tell which those are.
+MICRONOTES_TEST(text_texture_cache_evicts_least_recently_used_not_everything) {
+  microcore::render::TextTextureCache cache(3);
+  const SDL_Color color {255, 255, 255, 255};
+  const microcore::render::TextTextureCache::Style style {};
+  // Null textures: the cache only ever destroys a non-null one, so this
+  // exercises the eviction policy without needing a live renderer.
+  const microcore::render::TextTextureCache::Entry entry {nullptr, 10, 10};
+
+  cache.insert("a", color, style, entry);
+  cache.insert("b", color, style, entry);
+  cache.insert("c", color, style, entry);
+  MICRONOTES_REQUIRE(cache.size() == 3);
+
+  // Touch "a" so "b" becomes the coldest entry.
+  MICRONOTES_REQUIRE(cache.find("a", color, style) != nullptr);
+  cache.insert("d", color, style, entry);
+
+  MICRONOTES_REQUIRE(cache.size() == 3);
+  MICRONOTES_REQUIRE(cache.find("b", color, style) == nullptr);  // evicted
+  MICRONOTES_REQUIRE(cache.find("a", color, style) != nullptr);  // kept: recently used
+  MICRONOTES_REQUIRE(cache.find("c", color, style) != nullptr);
+  MICRONOTES_REQUIRE(cache.find("d", color, style) != nullptr);
+}
+
+MICRONOTES_TEST(text_texture_cache_distinguishes_colour_and_style) {
+  microcore::render::TextTextureCache cache(16);
+  const microcore::render::TextTextureCache::Entry entry {nullptr, 10, 10};
+  const SDL_Color white {255, 255, 255, 255};
+  const SDL_Color red {255, 0, 0, 255};
+
+  cache.insert("x", white, {}, entry);
+  MICRONOTES_REQUIRE(cache.find("x", red, {}) == nullptr);
+  MICRONOTES_REQUIRE(cache.find("x", white, {true, false, false, false}) == nullptr);
+  MICRONOTES_REQUIRE(cache.find("x", white, {}) != nullptr);
 }

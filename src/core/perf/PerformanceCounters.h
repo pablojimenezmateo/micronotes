@@ -52,7 +52,14 @@ namespace microcore::perf {
   X(SqliteExecCalls, "sqlite.exec_calls")                                              \
   /* --- attachments ------------------------------------------------------ */        \
   X(AttachmentLinksCreated, "attachments.links_created")                               \
-  X(AttachmentBytesCopied, "attachments.bytes_copied")
+  X(AttachmentBytesCopied, "attachments.bytes_copied")                                 \
+  /* --- text rendering ---------------------------------------------------- */       \
+  /* The cache lives in core/render, so its counters do too: core must not     */      \
+  /* reference an id that only exists if the host app happened to declare it.  */      \
+  X(RenderTextCacheQueries, "render.text_cache_queries")                               \
+  X(RenderTextCacheHits, "render.text_cache_hits")                                     \
+  X(RenderTextCacheEvictions, "render.text_cache_evictions")                           \
+  X(RenderTextRasterizations, "render.text_rasterizations")
 
 // Applications add their own ids through MICROCORE_APP_PERF_COUNTERS in
 // src/AppPerfCounters.h, which lives outside src/core so this file stays
