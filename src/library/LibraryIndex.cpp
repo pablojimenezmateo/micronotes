@@ -4,6 +4,8 @@
 #include "library/Library.h"
 #include "library/Metadata.h"
 #include "core/perf/Perf.h"
+#include "core/AppIdentity.h"
+#include "core/persistence/SqliteDb.h"
 #include "core/perf/PerformanceCounters.h"
 
 #include <sqlite3.h>
@@ -16,23 +18,10 @@
 
 namespace micronotes::library {
 
-// Counted wrapper around sqlite3_prepare_v2. Every prepared statement in this
-// file goes through it, so sqlite.statements_prepared stays accurate without
-// twelve hand-placed increments that the next query added here would silently
-// skip. It also drops the -1/nullptr boilerplate repeated at each call site.
-static int prepare(sqlite3* db, const char* sql, sqlite3_stmt** stmt) {
-  perf::addCounter(perf::CounterId::SqliteStatementsPrepared);
-  return sqlite3_prepare_v2(db, sql, -1, stmt, nullptr);
-}
+using persistence::SqliteDb;
+using persistence::Statement;
 
 namespace {
-
-static bool exec(sqlite3* db, const char* sql) {
-  char* error = nullptr;
-  const int rc = sqlite3_exec(db, sql, nullptr, nullptr, &error);
-  sqlite3_free(error);
-  return rc == SQLITE_OK;
-}
 
 static void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
   sqlite3_bind_text(stmt, index, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT);
@@ -89,20 +78,23 @@ static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out, std:
 
 bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
   root_ = libraryRoot;
-  std::filesystem::create_directories(root_ / ".micronotes");
-  dbPath_ = root_ / ".micronotes" / "index.sqlite";
+  std::filesystem::create_directories(root_ / microcore::kAppDotDir);
+  dbPath_ = root_ / microcore::kAppDotDir / "index.sqlite";
+  // The one connection every later call reuses. SqliteDb::open applies the
+  // per-connection pragmas, which is the only place they can take effect.
+  if(!db_.open(dbPath_)) return false;
   return migrate();
 }
 
 bool LibraryIndex::migrate() {
-  sqlite3* db = nullptr;
-  if(sqlite3_open(dbPath_.c_str(), &db) != SQLITE_OK) return false;
+  if(!db_.isOpen()) return false;
+  SqliteDb& db = db_;
+  // No PRAGMA statements here: journal_mode, synchronous and foreign_keys are
+  // applied by SqliteDb::open, because the latter two are per-connection and
+  // setting them during migration configured only migration's own connection.
   const bool ok =
-    exec(db, "PRAGMA journal_mode=WAL;") &&
-    exec(db, "PRAGMA synchronous=NORMAL;") &&
-    exec(db, "CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, mtime INTEGER NOT NULL, size INTEGER NOT NULL, body TEXT NOT NULL);") &&
-    exec(db, "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(id UNINDEXED, title, body, path);");
-  sqlite3_close(db);
+    db.exec("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, mtime INTEGER NOT NULL, size INTEGER NOT NULL, body TEXT NOT NULL);") &&
+    db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(id UNINDEXED, title, body, path);");
   return ok;
 }
 
@@ -110,17 +102,14 @@ bool LibraryIndex::rebuild() {
   perf::ScopeTimer timer("library_index.rebuild");
   perf::addCounter(perf::CounterId::LibraryIndexRebuilds);
   rows_.clear();
-  sqlite3* db = nullptr;
-  if(sqlite3_open(dbPath_.c_str(), &db) != SQLITE_OK) return false;
-  if(!exec(db, "BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM notes_fts;")) {
-    sqlite3_close(db);
+  if(!db_.isOpen()) return false;
+  SqliteDb& db = db_;
+  if(!db.exec("BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM notes_fts;")) {
     return false;
   }
 
-  sqlite3_stmt* noteStmt = nullptr;
-  sqlite3_stmt* ftsStmt = nullptr;
-  prepare(db, "INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?);", &noteStmt);
-  prepare(db, "INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);", &ftsStmt);
+  Statement noteStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?);");
+  Statement ftsStmt = db.prepare("INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);");
 
   Library library(root_);
   for(const auto& path : library.noteFiles()) {
@@ -154,19 +143,15 @@ bool LibraryIndex::rebuild() {
     (void)stat;
   }
 
-  sqlite3_finalize(noteStmt);
-  sqlite3_finalize(ftsStmt);
-  const bool ok = exec(db, "COMMIT;");
-  sqlite3_close(db);
+  const bool ok = db.exec("COMMIT;");
   return ok;
 }
 
 bool LibraryIndex::refreshChangedFiles() {
   perf::ScopeTimer timer("library_index.refresh_changed_files");
   perf::addCounter(perf::CounterId::LibraryIndexRefreshCalls);
-  rows_.clear();
-  sqlite3* db = nullptr;
-  if(sqlite3_open(dbPath_.c_str(), &db) != SQLITE_OK) return false;
+  if(!db_.isOpen()) return false;
+  SqliteDb& db = db_;
 
   struct ExistingRow {
     std::string id;
@@ -174,8 +159,9 @@ bool LibraryIndex::refreshChangedFiles() {
     long long size = 0;
   };
   std::unordered_map<std::string, ExistingRow> existing;
-  sqlite3_stmt* selectStmt = nullptr;
-  if(prepare(db, "SELECT path,id,mtime,size FROM notes;", &selectStmt) == SQLITE_OK) {
+  {
+  perf::ScopeTimer loadTimer("library_index.refresh.load_existing");
+  if(Statement selectStmt = db.prepare("SELECT path,id,mtime,size FROM notes;"); selectStmt) {
     while(sqlite3_step(selectStmt) == SQLITE_ROW) {
       existing.emplace(columnText(selectStmt, 0), ExistingRow {
         columnText(selectStmt, 1),
@@ -184,100 +170,134 @@ bool LibraryIndex::refreshChangedFiles() {
       });
     }
   }
-  if(selectStmt) sqlite3_finalize(selectStmt);
-
-  if(!exec(db, "BEGIN IMMEDIATE;")) {
-    sqlite3_close(db);
-    return false;
   }
 
-  sqlite3_stmt* upsertStmt = nullptr;
-  sqlite3_stmt* deleteFtsStmt = nullptr;
-  sqlite3_stmt* insertFtsStmt = nullptr;
-  sqlite3_stmt* deleteNoteStmt = nullptr;
-  sqlite3_stmt* deleteRemovedFtsStmt = nullptr;
-  prepare(db, "INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,body=excluded.body;", &upsertStmt);
-  prepare(db, "DELETE FROM notes_fts WHERE id=?;", &deleteFtsStmt);
-  prepare(db, "INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);", &insertFtsStmt);
-  prepare(db, "DELETE FROM notes WHERE path=?;", &deleteNoteStmt);
-  prepare(db, "DELETE FROM notes_fts WHERE id=?;", &deleteRemovedFtsStmt);
-
-  bool ok = upsertStmt && deleteFtsStmt && insertFtsStmt && deleteNoteStmt && deleteRemovedFtsStmt;
+  // Pass one: work out what changed, touching nothing. This used to run inside
+  // BEGIN IMMEDIATE, so every refresh took the write lock and forced a WAL
+  // commit -- even the overwhelmingly common case where the answer is "nothing
+  // changed". Refresh runs on every window focus, so that was a write per
+  // focus, for nothing.
+  struct ChangedFile {
+    std::filesystem::path path;
+    std::string relative;
+    long long mtime = 0;
+    long long size = 0;
+  };
+  std::vector<ChangedFile> changed;
   std::unordered_set<std::string> seenPaths;
   std::unordered_set<std::string> seenIds;
   Library library(root_);
-  if(ok) {
-    for(const auto& path : library.noteFiles()) {
-      const auto relative = path.lexically_relative(root_).generic_string();
-      seenPaths.insert(relative);
-      const auto mtime = std::filesystem::last_write_time(path).time_since_epoch().count();
-      const auto size = static_cast<long long>(std::filesystem::file_size(path));
-      const auto found = existing.find(relative);
-      if(found != existing.end() && found->second.mtime == mtime && found->second.size == size) {
-        seenIds.insert(found->second.id);
-        continue;
+
+  {
+  perf::ScopeTimer scanTimer("library_index.refresh.scan_tree");
+  for(const auto& entry : library.noteFileEntries()) {
+    const auto& path = entry.path();
+    auto relative = path.lexically_relative(root_).generic_string();
+    // Both of these read the directory_entry's cached stat, so this is one
+    // syscall per file rather than the two the free functions used to make.
+    std::error_code error;
+    const auto mtime = entry.last_write_time(error).time_since_epoch().count();
+    const auto size = static_cast<long long>(entry.file_size(error));
+    if(error) continue;
+    perf::addCounter(perf::CounterId::LibraryIndexFilesScanned);
+
+    const auto found = existing.find(relative);
+    if(found != existing.end() && found->second.mtime == mtime && found->second.size == size) {
+      seenIds.insert(found->second.id);
+      seenPaths.insert(std::move(relative));
+      continue;
+    }
+    seenPaths.insert(relative);
+    changed.push_back(ChangedFile {path, std::move(relative), mtime, size});
+  }
+  }
+
+  std::vector<std::pair<std::string, std::string>> removed;  // relative path, id
+  for(const auto& [path, row] : existing) {
+    if(seenPaths.contains(path)) continue;
+    removed.emplace_back(path, row.id);
+  }
+
+  bool ok = true;
+  const bool hasWork = !changed.empty() || !removed.empty();
+
+  // Pass two: apply, in one transaction, only if there is anything to apply.
+  if(hasWork) {
+    if(!db.exec("BEGIN IMMEDIATE;")) return false;
+
+    Statement upsertStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,body=excluded.body;");
+    Statement deleteFtsStmt = db.prepare("DELETE FROM notes_fts WHERE id=?;");
+    Statement insertFtsStmt = db.prepare("INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);");
+    Statement deleteNoteStmt = db.prepare("DELETE FROM notes WHERE path=?;");
+    ok = upsertStmt && deleteFtsStmt && insertFtsStmt && deleteNoteStmt;
+
+    if(ok) {
+      for(const auto& file : changed) {
+        perf::addCounter(perf::CounterId::LibraryIndexFilesReread);
+        const auto note = library.loadNote(file.path);
+        // A note without a front-matter id still belongs in the index; it gets
+        // an id derived from its path rather than being skipped.
+        const auto noteId = note.metadata.id.empty() ? fallbackNoteId(file.relative) : note.metadata.id;
+        seenIds.insert(noteId);
+        const auto title = note.metadata.title.empty() ? file.path.stem().string() : note.metadata.title;
+
+        sqlite3_reset(upsertStmt);
+        bindText(upsertStmt, 1, noteId);
+        bindText(upsertStmt, 2, file.relative);
+        bindText(upsertStmt, 3, title);
+        sqlite3_bind_int64(upsertStmt, 4, static_cast<sqlite3_int64>(file.mtime));
+        sqlite3_bind_int64(upsertStmt, 5, static_cast<sqlite3_int64>(file.size));
+        bindText(upsertStmt, 6, note.body);
+        ok = sqlite3_step(upsertStmt) == SQLITE_DONE;
+        if(!ok) break;
+
+        sqlite3_reset(deleteFtsStmt);
+        bindText(deleteFtsStmt, 1, noteId);
+        ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
+        if(!ok) break;
+
+        sqlite3_reset(insertFtsStmt);
+        bindText(insertFtsStmt, 1, noteId);
+        bindText(insertFtsStmt, 2, title);
+        bindText(insertFtsStmt, 3, note.body);
+        bindText(insertFtsStmt, 4, file.relative);
+        ok = sqlite3_step(insertFtsStmt) == SQLITE_DONE;
+        if(!ok) break;
       }
-
-      const auto note = library.loadNote(path);
-      const auto noteId = note.metadata.id.empty() ? fallbackNoteId(relative) : note.metadata.id;
-      seenIds.insert(noteId);
-      const auto title = note.metadata.title.empty() ? path.stem().string() : note.metadata.title;
-
-      sqlite3_reset(upsertStmt);
-      bindText(upsertStmt, 1, noteId);
-      bindText(upsertStmt, 2, relative);
-      bindText(upsertStmt, 3, title);
-      sqlite3_bind_int64(upsertStmt, 4, static_cast<sqlite3_int64>(mtime));
-      sqlite3_bind_int64(upsertStmt, 5, static_cast<sqlite3_int64>(size));
-      bindText(upsertStmt, 6, note.body);
-      ok = sqlite3_step(upsertStmt) == SQLITE_DONE;
-      if(!ok) break;
-
-      sqlite3_reset(deleteFtsStmt);
-      bindText(deleteFtsStmt, 1, noteId);
-      ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
-      if(!ok) break;
-
-      sqlite3_reset(insertFtsStmt);
-      bindText(insertFtsStmt, 1, noteId);
-      bindText(insertFtsStmt, 2, title);
-      bindText(insertFtsStmt, 3, note.body);
-      bindText(insertFtsStmt, 4, relative);
-      ok = sqlite3_step(insertFtsStmt) == SQLITE_DONE;
-      if(!ok) break;
     }
+
+    if(ok) {
+      for(const auto& [path, id] : removed) {
+        // A note that moved keeps its id under a new path; the upsert above
+        // already rewrote the row, so deleting by the old path would drop it.
+        if(seenIds.contains(id)) continue;
+        perf::addCounter(perf::CounterId::LibraryIndexRowsDeleted);
+        sqlite3_reset(deleteNoteStmt);
+        bindText(deleteNoteStmt, 1, path);
+        ok = sqlite3_step(deleteNoteStmt) == SQLITE_DONE;
+        if(!ok) break;
+        sqlite3_reset(deleteFtsStmt);
+        bindText(deleteFtsStmt, 1, id);
+        ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
+        if(!ok) break;
+      }
+    }
+
+    ok = ok && db.exec("COMMIT;");
+    if(!ok) db.exec("ROLLBACK;");
   }
 
-  if(ok) {
-    for(const auto& [path, row] : existing) {
-      if(seenPaths.contains(path)) continue;
-      if(seenIds.contains(row.id)) continue;
-      sqlite3_reset(deleteNoteStmt);
-      bindText(deleteNoteStmt, 1, path);
-      ok = sqlite3_step(deleteNoteStmt) == SQLITE_DONE;
-      if(!ok) break;
-      sqlite3_reset(deleteRemovedFtsStmt);
-      bindText(deleteRemovedFtsStmt, 1, row.id);
-      ok = sqlite3_step(deleteRemovedFtsStmt) == SQLITE_DONE;
-      if(!ok) break;
+  // rows_ is a projection of the table. Reloading it means 1000 rows and 1000
+  // heap allocations, so only do it when the table actually moved -- or when we
+  // have never loaded it.
+  if(ok && (hasWork || rows_.empty())) {
+    rows_.clear();
+    if(Statement selectStmt = db.prepare("SELECT id,path,title FROM notes ORDER BY title;"); selectStmt) {
+      while(sqlite3_step(selectStmt) == SQLITE_ROW) {
+        rows_.push_back({columnText(selectStmt, 0), root_ / columnText(selectStmt, 1), columnText(selectStmt, 2)});
+      }
     }
   }
-
-  sqlite3_finalize(upsertStmt);
-  sqlite3_finalize(deleteFtsStmt);
-  sqlite3_finalize(insertFtsStmt);
-  sqlite3_finalize(deleteNoteStmt);
-  sqlite3_finalize(deleteRemovedFtsStmt);
-  ok = ok && exec(db, "COMMIT;");
-  if(!ok) exec(db, "ROLLBACK;");
-
-  if(ok && prepare(db, "SELECT id,path,title FROM notes ORDER BY title;", &selectStmt) == SQLITE_OK) {
-    while(sqlite3_step(selectStmt) == SQLITE_ROW) {
-      rows_.push_back({columnText(selectStmt, 0), root_ / columnText(selectStmt, 1), columnText(selectStmt, 2)});
-    }
-  }
-  if(selectStmt) sqlite3_finalize(selectStmt);
-  sqlite3_close(db);
   return ok;
 }
 
@@ -286,29 +306,26 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
   perf::addCounter(perf::CounterId::LibrarySearchCalls);
   std::vector<SearchResult> out;
   if(query.empty()) return out;
-  if(!dbPath_.empty() && std::filesystem::exists(dbPath_)) {
-    sqlite3* db = nullptr;
-    if(sqlite3_open(dbPath_.c_str(), &db) == SQLITE_OK) {
-      sqlite3_stmt* stmt = nullptr;
+  if(db_.isOpen()) {
+    SqliteDb& db = db_;
+    {
       const char* ftsSql = scope == SearchScope::Title
         ? "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.id = notes_fts.id WHERE notes_fts.title MATCH ? ORDER BY rank LIMIT 200;"
         : scope == SearchScope::Content
           ? "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.id = notes_fts.id WHERE notes_fts.body MATCH ? ORDER BY rank LIMIT 200;"
           : "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.id = notes_fts.id WHERE notes_fts MATCH ? ORDER BY rank LIMIT 200;";
-      if(prepare(db, ftsSql, &stmt) == SQLITE_OK) {
+      if(Statement stmt = db.prepare(ftsSql); stmt) {
         const std::string q(query);
         bindText(stmt, 1, q);
         collectRows(stmt, out, query);
       }
-      if(stmt) sqlite3_finalize(stmt);
       if(out.empty()) {
-        stmt = nullptr;
         const char* likeSql = scope == SearchScope::Title
           ? "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? ORDER BY title LIMIT 200;"
           : scope == SearchScope::Content
             ? "SELECT id,path,title,body FROM notes WHERE lower(body) LIKE ? ORDER BY title LIMIT 200;"
             : "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? OR lower(body) LIKE ? OR lower(path) LIKE ? ORDER BY title LIMIT 200;";
-        if(prepare(db, likeSql, &stmt) == SQLITE_OK) {
+        if(Statement stmt = db.prepare(likeSql); stmt) {
           std::string q = lowerCopy(std::string(query));
           q = "%" + q + "%";
           bindText(stmt, 1, q);
@@ -318,9 +335,7 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
           }
           collectRows(stmt, out, query);
         }
-        if(stmt) sqlite3_finalize(stmt);
       }
-      sqlite3_close(db);
       for(auto& result : out) result.path = root_ / result.path;
       return out;
     }

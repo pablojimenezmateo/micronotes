@@ -73,34 +73,81 @@ and concatenates the app list onto its own.
 
 Counters first, because they are deterministic: the same workload produces
 byte-identical counter values on every run. Wall-clock timings from this harness
-are *not* reproducible on a loaded machine -- the same scenario varied by more
-than 3x between runs under load, with identical counters throughout. Take
+are *not* reproducible under load -- the same scenario has varied by more than
+3x between runs on a busy machine with identical counters throughout. Take
 timings on an idle machine, and treat a timing change that is not corroborated
 by a counter change as noise.
 
-Measured 2026-08-01 on the `micronotes_perf` fixture (1000 notes, ~104 KB of
-markdown in the heavy-document scenario):
+### Resolved: connection and statement churn in LibraryIndex
 
-```
-library.index_refresh_calls        4
-library.search_calls               1
-sqlite.statements_prepared        29
-markdown.parse_calls               1
-markdown.parse_bytes          104008
-markdown.blocks_produced        1601
-markdown.inlines_produced       3401
-markdown.autolink_rewrites       200
-```
+Measured 2026-08-01 on the `micronotes_perf` fixture (1000 notes):
 
-`library_index.refresh_changed_files` is the dominant scope by a wide margin in
-every run regardless of load, and it runs on window focus. That is the first
-thing to look at. Unlike microagenda's store it does not re-prepare per
-operation -- 29 statements across 4 refreshes -- so the cost is in the work
-itself rather than in connection churn, and the counters to add before changing
-anything are how many files it stats and how many it re-reads.
+| counter | before | after |
+|---|---:|---:|
+| `sqlite.connection_opens` | *unmeasured* | **1 per index** |
+| `sqlite.statements_prepared` | 29 | **9** |
+| `sqlite.exec_calls` | 18 | **14** |
+
+Every method opened its own connection and recompiled its SQL. The index now
+holds one connection for its lifetime and `microcore::persistence::SqliteDb`
+caches statements on it.
+
+Note the first row. `sqlite.connection_opens` previously read **zero**, not
+because there were no connections but because `LibraryIndex` called
+`sqlite3_open` directly and bypassed the instrumented wrapper. A counter that
+reads zero because nothing increments it is indistinguishable from one that
+reads zero because the code path did not run -- which is the exact failure mode
+`architecture_every_perf_counter_has_a_producer` exists to prevent, and it did
+not catch this one because the counter *did* have a producer, just not on this
+path. Prefer routing through `SqliteDb` over opening a handle directly.
+
+### Resolved: refresh did a write per window focus
+
+`refreshChangedFiles` runs on every window focus. It used to take
+`BEGIN IMMEDIATE` -- acquiring the write lock and forcing a WAL commit -- and
+reload all 1000 `rows_` before it had established whether anything had changed.
+It now scans first and only opens a transaction when there is something to
+apply, which is confirmed by `sqlite.exec_calls` falling by two per no-op
+refresh. `library.index_files_reread` distinguishes "walked the tree" from
+"actually re-read a note", so the skip is measurable rather than assumed.
+
+The tree walk also descended into the state directory -- the sqlite index, its
+WAL, and every attachment -- and discarded the results by comparing path
+prefixes, rebuilding `root_ / ".micronotes"` and two `std::string`s for *every*
+entry in the tree. It now prunes that subtree. On a library with attachments
+this is the largest part of the walk.
+
+Reading `last_write_time` and `file_size` through the free functions made two
+stat syscalls per file; going through the `directory_entry` the walk already
+produced makes one, because it caches.
+
+### Where the remaining time actually goes
+
+Splitting the scope answered a question that guessing had got wrong:
+
+| scope | calls | total | per call |
+|---|---:|---:|---:|
+| `library_index.refresh_changed_files` | 4 | 157 ms | — |
+| `library_index.refresh.scan_tree` | 4 | 12.9 ms | 3.2 ms |
+| `library_index.refresh.load_existing` | 4 | 2.5 ms | 0.6 ms |
+
+The scan and the database read together are **15 ms of 157 ms**. The rest is the
+*first* refresh reading and indexing 1000 notes from cold, which is real work,
+not overhead. A steady-state refresh -- the one that runs on window focus -- now
+costs about 4 ms for a 1000-note library, and the irreducible part of that is
+the directory walk.
+
+This is worth stating plainly because the earlier assumption was that the
+database read dominated. It does not: it is 0.6 ms. Caching a tree signature to
+skip that read would have optimised 0.4% of the scope, and the measurement is
+the only reason that work did not get done.
+
+`library_index_uses_one_connection_for_its_lifetime`,
+`library_index_refresh_writes_nothing_when_nothing_changed`, and
+`library_index_scan_does_not_descend_into_the_state_directory` guard all of it.
+
+### Open
 
 Not yet measured: the render path. `render.text_cache_*` and `frame.*` counters
 are wired but the harness is headless, so they only report from a real session
-under `MICROCORE_PERF_COUNTERS=1`. The text cache is now a bounded LRU, so
-`render.text_cache_evictions` should climb steadily under scrolling rather than
-spiking by thousands at once as the old flush-everything cache did.
+under `MICROCORE_PERF_COUNTERS=1`.

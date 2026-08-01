@@ -54,6 +54,12 @@ public:
   bool restoreFromTrash(const std::string& name) const;
   std::vector<std::filesystem::path> noteFiles() const;
 
+  // The same walk, but keeping each directory_entry rather than just its path.
+  // A directory_entry caches the stat it performs, so a caller that needs both
+  // the size and the modification time pays one syscall instead of two -- which
+  // is the whole cost of a refresh that finds nothing changed.
+  std::vector<std::filesystem::directory_entry> noteFileEntries() const;
+
 private:
   std::filesystem::path root_;
 };

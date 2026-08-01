@@ -1,6 +1,9 @@
 #include "CoreAliases.h"
 #include "library/Library.h"
 
+#include "core/AppIdentity.h"
+#include "core/perf/PerformanceCounters.h"
+
 #include "core/platform/PathUtils.h"
 #include "core/platform/DurableFile.h"
 
@@ -379,22 +382,42 @@ bool Library::restoreFromTrash(const std::string& name) const {
   return true;
 }
 
-std::vector<std::filesystem::path> Library::noteFiles() const {
-  std::vector<std::filesystem::path> files;
+std::vector<std::filesystem::directory_entry> Library::noteFileEntries() const {
+  perf::addCounter(perf::CounterId::LibraryNoteFilesCalls);
+  std::vector<std::filesystem::directory_entry> files;
   if(!std::filesystem::exists(root_)) return files;
-  std::error_code ec;
-  const auto internal = (root_ / ".micronotes").string();
+
+  // The state directory holds the sqlite index, its WAL, and every attachment.
+  // The walk used to descend into all of it and then discard the results by
+  // comparing path prefixes -- which also meant building `root_ / kAppDotDir`
+  // and two std::strings for *every* entry in the tree. Prune the subtree
+  // instead: on a library with attachments it is by far the largest part of it.
+  const std::filesystem::path stateDir = root_ / microcore::kAppDotDir;
+
+  std::error_code error;
   std::filesystem::recursive_directory_iterator it(
-      root_, std::filesystem::directory_options::skip_permission_denied, ec);
+    root_, std::filesystem::directory_options::skip_permission_denied, error);
+  if(error) return files;
   const std::filesystem::recursive_directory_iterator end;
-  for(; !ec && it != end; it.increment(ec)) {
-    const auto& entry = *it;
-    if(!entry.is_regular_file(ec)) continue;
-    const auto path = entry.path();
-    if(path.extension() != ".md") continue;
-    if(path.string().find(internal) == 0) continue;
-    files.push_back(path);
+  for(; it != end; it.increment(error)) {
+    if(error) break;
+    perf::addCounter(perf::CounterId::LibraryDirectoryEntriesVisited);
+    if(it->is_directory(error)) {
+      if(it->path() == stateDir) it.disable_recursion_pending();
+      continue;
+    }
+    if(!it->is_regular_file(error)) continue;
+    if(it->path().extension() != ".md") continue;
+    files.push_back(*it);
   }
+  return files;
+}
+
+std::vector<std::filesystem::path> Library::noteFiles() const {
+  const auto entries = noteFileEntries();
+  std::vector<std::filesystem::path> files;
+  files.reserve(entries.size());
+  for(const auto& entry : entries) files.push_back(entry.path());
   return files;
 }
 

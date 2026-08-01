@@ -14,6 +14,10 @@
   X(LibraryIndexRebuilds, "library.index_rebuilds")                                    \
   X(LibraryIndexFilesScanned, "library.index_files_scanned")                           \
   X(LibraryIndexRefreshCalls, "library.index_refresh_calls")                           \
+  X(LibraryIndexFilesReread, "library.index_files_reread")                             \
+  X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
+  X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
+  X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \
   X(LibrarySearchCalls, "library.search_calls")                                        \
   /* --- text rendering --------------------------------------------------- */        \
   X(RenderTextMeasureCalls, "render.text_measure_calls")                               \

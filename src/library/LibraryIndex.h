@@ -2,6 +2,8 @@
 
 #include "CoreAliases.h"
 
+#include "core/persistence/SqliteDb.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -44,6 +46,14 @@ private:
   std::filesystem::path root_;
   std::filesystem::path dbPath_;
   std::vector<SearchResult> rows_;
+  // One connection for the index's lifetime. Every method used to open its own,
+  // which recompiled its SQL each call and left sqlite.connection_opens reading
+  // zero -- the counter looked like "no connections" rather than "not measured".
+  //
+  // mutable because search() is const but still needs the connection and its
+  // statement cache; the database is an implementation detail, not part of the
+  // index's logical value.
+  mutable persistence::SqliteDb db_;
 };
 
 }
