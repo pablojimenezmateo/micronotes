@@ -71,24 +71,36 @@ and concatenates the app list onto its own.
 
 ## Current findings
 
+Counters first, because they are deterministic: the same workload produces
+byte-identical counter values on every run. Wall-clock timings from this harness
+are *not* reproducible on a loaded machine -- the same scenario varied by more
+than 3x between runs under load, with identical counters throughout. Take
+timings on an idle machine, and treat a timing change that is not corroborated
+by a counter change as noise.
+
 Measured 2026-08-01 on the `micronotes_perf` fixture (1000 notes, ~104 KB of
-markdown in the heavy-document scenario).
+markdown in the heavy-document scenario):
 
-| scope | calls | total | max |
-|---|---|---|---|
-| `library_index.refresh_changed_files` | 4 | 748 ms | **669 ms** |
-| `fixture.app_state.open_select_and_list` | 1 | 66 ms | 66 ms |
-| `fixture.large_library.create_1000_notes` | 1 | 60 ms | 60 ms |
-| `fixture.markdown.parse_heavy_document` | 1 | 43 ms | 43 ms |
-| `app_state.open_or_create_library` | 1 | 25 ms | 25 ms |
-| `library_index.search` | 1 | 24 ms | 24 ms |
+```
+library.index_refresh_calls        4
+library.search_calls               1
+sqlite.statements_prepared        29
+markdown.parse_calls               1
+markdown.parse_bytes          104008
+markdown.blocks_produced        1601
+markdown.inlines_produced       3401
+markdown.autolink_rewrites       200
+```
 
-**`refresh_changed_files` dominates everything.** One call costs 669 ms, and it
-runs on window focus. 29 statements are prepared across 4 refreshes. This is the
-first thing to look at.
+`library_index.refresh_changed_files` is the dominant scope by a wide margin in
+every run regardless of load, and it runs on window focus. That is the first
+thing to look at. Unlike microagenda's store it does not re-prepare per
+operation -- 29 statements across 4 refreshes -- so the cost is in the work
+itself rather than in connection churn, and the counters to add before changing
+anything are how many files it stats and how many it re-reads.
 
 Not yet measured: the render path. `render.text_cache_*` and `frame.*` counters
 are wired but the harness is headless, so they only report from a real session
-under `MICROCORE_PERF_COUNTERS=1`. The text cache is known to flush *entirely*
-at 4096 entries rather than evicting least-recently-used, which should show as a
-large `render.text_cache_evictions` spike followed by a rasterization storm.
+under `MICROCORE_PERF_COUNTERS=1`. The text cache is now a bounded LRU, so
+`render.text_cache_evictions` should climb steadily under scrolling rather than
+spiking by thousands at once as the old flush-everything cache did.
