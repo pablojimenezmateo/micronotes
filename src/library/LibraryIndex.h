@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CoreAliases.h"
+
 #include <filesystem>
 #include <optional>
 #include <string>

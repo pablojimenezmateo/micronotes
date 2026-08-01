@@ -1,15 +1,16 @@
+#include "CoreAliases.h"
 #include "TestSupport.h"
 
-#include "markdown/MarkdownParser.h"
-#include "markdown/RenderModel.h"
+#include "core/markdown/MarkdownParser.h"
+#include "core/markdown/RenderModel.h"
 
 #include <md4c-html.h>
 
 #include <string>
 
-using micronotes::markdown::BlockType;
-using micronotes::markdown::InlineType;
-using micronotes::markdown::MarkdownParser;
+using microcore::markdown::BlockType;
+using microcore::markdown::InlineType;
+using microcore::markdown::MarkdownParser;
 
 namespace {
 
@@ -159,13 +160,13 @@ MICRONOTES_TEST(markdown_parser_keeps_gfm_tables) {
   MICRONOTES_REQUIRE(doc.blocks[0].tableRows.size() == 2);
   MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].header);
   MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells.size() == 3);
-  MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells[0].align == micronotes::markdown::Align::Left);
-  MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells[1].align == micronotes::markdown::Align::Center);
-  MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells[2].align == micronotes::markdown::Align::Right);
+  MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells[0].align == microcore::markdown::Align::Left);
+  MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells[1].align == microcore::markdown::Align::Center);
+  MICRONOTES_REQUIRE(doc.blocks[0].tableRows[0].cells[2].align == microcore::markdown::Align::Right);
   const auto html = md4cHtml(source);
   MICRONOTES_REQUIRE(html.find("<table>") != std::string::npos);
   MICRONOTES_REQUIRE(html.find("<th align=\"center\">") != std::string::npos);
-  MICRONOTES_REQUIRE(micronotes::markdown::plainText(doc).find("Center") != std::string::npos);
+  MICRONOTES_REQUIRE(microcore::markdown::plainText(doc).find("Center") != std::string::npos);
 }
 
 MICRONOTES_TEST(markdown_parser_keeps_gfm_task_lists_and_strike_links) {
@@ -193,7 +194,7 @@ MICRONOTES_TEST(markdown_parser_keeps_gfm_task_lists_and_strike_links) {
 MICRONOTES_TEST(markdown_parser_keeps_nested_list_parent_items) {
   const std::string source = "- Parent item\n  - Child item\n    - Grandchild item\n- Second parent item\n\n1. Plan\n   - Research\n   - Implement\n2. Verify\n   1. Build\n   2. Test\n";
   const auto doc = MarkdownParser().parse(source);
-  const auto plain = micronotes::markdown::plainText(doc);
+  const auto plain = microcore::markdown::plainText(doc);
   MICRONOTES_REQUIRE(plain.find("Parent item") != std::string::npos);
   MICRONOTES_REQUIRE(plain.find("Child item") != std::string::npos);
   MICRONOTES_REQUIRE(plain.find("Grandchild item") != std::string::npos);
@@ -225,8 +226,8 @@ MICRONOTES_TEST(markdown_parser_decodes_entities_like_md4c_html) {
   const std::string source = "Fish &amp; chips &#169;\n";
   const auto doc = MarkdownParser().parse(source);
   MICRONOTES_REQUIRE(doc.blocks.size() == 1);
-  MICRONOTES_REQUIRE(micronotes::markdown::plainText(doc).find("Fish & chips") != std::string::npos);
-  MICRONOTES_REQUIRE(micronotes::markdown::plainText(doc).find("©") != std::string::npos);
+  MICRONOTES_REQUIRE(microcore::markdown::plainText(doc).find("Fish & chips") != std::string::npos);
+  MICRONOTES_REQUIRE(microcore::markdown::plainText(doc).find("©") != std::string::npos);
   const auto html = md4cHtml(source);
   MICRONOTES_REQUIRE(html.find("Fish &amp; chips ©") != std::string::npos);
 }

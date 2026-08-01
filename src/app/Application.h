@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/Theme.h"
+#include "CoreAliases.h"
 
 #include <filesystem>
 #include <optional>

@@ -1,12 +1,13 @@
+#include "CoreAliases.h"
 #include "ui/AppState.h"
 
 #include "ui/Settings.h"
 #include "ui/Theme.h"
 
 #include "library/Metadata.h"
-#include "perf/Perf.h"
-#include "platform/PathUtils.h"
-#include "platform/DurableFile.h"
+#include "core/perf/Perf.h"
+#include "core/platform/PathUtils.h"
+#include "core/platform/DurableFile.h"
 
 #include <algorithm>
 #include <cctype>

@@ -1,6 +1,7 @@
+#include "CoreAliases.h"
 #include "ui/FoldState.h"
 
-#include "platform/DurableFile.h"
+#include "core/platform/DurableFile.h"
 
 #include <fstream>
 #include <sstream>

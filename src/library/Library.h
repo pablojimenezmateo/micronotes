@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CoreAliases.h"
+
 #include "library/Metadata.h"
 
 #include <filesystem>

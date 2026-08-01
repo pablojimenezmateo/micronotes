@@ -113,25 +113,37 @@ add_library(md4c_html STATIC third_party/md4c/src/md4c-html.c third_party/md4c/s
 target_include_directories(md4c_html PUBLIC third_party/md4c/src)
 target_link_libraries(md4c_html PUBLIC md4c)
 
-set(MICRONOTES_CORE_SOURCES
-  src/attachments/AttachmentService.cpp
+# Vendored shared core. Byte-identical to microagenda's src/core; see
+# tools/sync-core.sh. micronotes is the canonical copy: change it here, then
+# run tools/sync-core.sh to push the change and refresh both manifests.
+set(MICROCORE_SOURCES
+  src/core/attachments/AttachmentService.cpp
+  src/core/editor/MarkdownEditor.cpp
+  src/core/editor/SoftWrap.cpp
+  src/core/markdown/MarkdownParser.cpp
+  src/core/markdown/RenderModel.cpp
+  src/core/perf/Perf.cpp
+  src/core/persistence/SqliteDb.cpp
+  src/core/platform/DefaultOpener.cpp
+  src/core/platform/DurableFile.cpp
+  src/core/platform/PathUtils.cpp
+  src/core/ui/ShellModel.cpp
+  src/core/viewer/MarkdownViewer.cpp
+  src/core/viewer/SdlMarkdownRenderer.cpp
+)
+
+# micronotes-only code: the live-Markdown document model, the note library,
+# and the app shell state.
+set(MICRONOTES_APP_SOURCES
   src/doc/BlockScan.cpp
   src/doc/Edits.cpp
   src/doc/Fold.cpp
   src/doc/InlineScan.cpp
   src/doc/Layout.cpp
-  src/editor/MarkdownEditor.cpp
-  src/editor/SoftWrap.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp
   src/library/Organization.cpp
-  src/markdown/MarkdownParser.cpp
-  src/markdown/RenderModel.cpp
-  src/perf/Perf.cpp
-  src/platform/DefaultOpener.cpp
-  src/platform/DurableFile.cpp
-  src/platform/PathUtils.cpp
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
@@ -140,10 +152,13 @@ set(MICRONOTES_CORE_SOURCES
   src/ui/TreeModel.cpp
 )
 
+set(MICRONOTES_CORE_SOURCES ${MICROCORE_SOURCES} ${MICRONOTES_APP_SOURCES})
+
 add_library(micronotes_core STATIC ${MICRONOTES_CORE_SOURCES})
 target_include_directories(micronotes_core PUBLIC src)
 target_link_libraries(micronotes_core PUBLIC md4c md4c_html ${MICRONOTES_SQLITE_TARGET} ${MICRONOTES_SDL3_TARGET})
 target_compile_definitions(micronotes_core PUBLIC
+  MICROCORE_APP_NAME="micronotes"
   MICRONOTES_HAS_SDL3_IMAGE=$<BOOL:${MICRONOTES_SDL3_IMAGE_TARGET}>
   MICRONOTES_HAS_SDL3_TTF=$<BOOL:${MICRONOTES_SDL3_TTF_TARGET}>
 )
@@ -191,6 +206,15 @@ target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(micronotes_tests PRIVATE micronotes_core)
 add_test(NAME micronotes_tests COMMAND micronotes_tests)
+
+# src/core is a vendored copy shared with microagenda. Editing it without
+# running tools/sync-core.sh leaves the two apps silently diverging, so make
+# that a test failure rather than something you discover months later.
+add_test(
+  NAME micronotes_core_manifest
+  COMMAND "${CMAKE_SOURCE_DIR}/tools/sync-core.sh" --check
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
 
 if(MICRONOTES_PERF_HARNESS_BUILD)
   add_executable(micronotes_perf tools/PerfMain.cpp)

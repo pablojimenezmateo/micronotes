@@ -1,16 +1,17 @@
+#include "CoreAliases.h"
 #include "app/Application.h"
 
 #include "app/PageView.h"
-#include "attachments/AttachmentService.h"
+#include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
 #include "doc/Fold.h"
-#include "editor/MarkdownEditor.h"
-#include "editor/SoftWrap.h"
-#include "markdown/MarkdownParser.h"
-#include "platform/DurableFile.h"
-#include "perf/Perf.h"
-#include "platform/PathUtils.h"
+#include "core/editor/MarkdownEditor.h"
+#include "core/editor/SoftWrap.h"
+#include "core/markdown/MarkdownParser.h"
+#include "core/platform/DurableFile.h"
+#include "core/perf/Perf.h"
+#include "core/platform/PathUtils.h"
 #include "ui/AppState.h"
 #include "ui/Draw.h"
 #include "ui/FoldState.h"
@@ -1193,7 +1194,7 @@ static std::filesystem::path treeStatePath(const std::filesystem::path& root) {
 }
 
 static std::filesystem::path libraryPathConfigPath() {
-  return micronotes::platform::resolveRuntimePaths().configDir / "library-path";
+  return microcore::platform::resolveRuntimePaths().configDir / "library-path";
 }
 
 static std::optional<std::filesystem::path> readConfiguredLibraryRoot() {
@@ -4417,7 +4418,7 @@ ApplicationOptions parseArgs(int argc, char** argv) {
 }
 
 int run(ApplicationOptions options) {
-  micronotes::perf::ScopeTimer startup("startup");
+  microcore::perf::ScopeTimer startup("startup");
   UiRuntime ui;
   if(options.configuredLibraryRoot) {
     if(!writeConfiguredLibraryRoot(*options.configuredLibraryRoot)) {

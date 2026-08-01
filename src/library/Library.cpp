@@ -1,7 +1,8 @@
+#include "CoreAliases.h"
 #include "library/Library.h"
 
-#include "platform/PathUtils.h"
-#include "platform/DurableFile.h"
+#include "core/platform/PathUtils.h"
+#include "core/platform/DurableFile.h"
 
 #include <cstdlib>
 #include <ctime>

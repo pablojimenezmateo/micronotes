@@ -1,9 +1,10 @@
-#include "perf/Perf.h"
+#include "CoreAliases.h"
+#include "core/perf/Perf.h"
 
 #include "doc/Edits.h"
 #include "doc/Fold.h"
 #include "doc/Layout.h"
-#include "markdown/MarkdownParser.h"
+#include "core/markdown/MarkdownParser.h"
 #include "library/Library.h"
 #include "library/LibraryIndex.h"
 #include "ui/AppState.h"
@@ -187,7 +188,7 @@ static bool editBudgets(const std::string& source) {
 }
 
 static void printSamples() {
-  const auto samples = micronotes::perf::Recorder::instance().snapshot();
+  const auto samples = microcore::perf::Recorder::instance().snapshot();
   for(const auto& sample : samples) {
     std::cout << sample.name << ": " << sample.micros << "us\n";
   }
@@ -200,7 +201,7 @@ int main() {
   std::filesystem::remove_all(root);
   micronotes::library::Library library(root);
   {
-    micronotes::perf::ScopeTimer timer("fixture.large_library.create_1000_notes");
+    microcore::perf::ScopeTimer timer("fixture.large_library.create_1000_notes");
     for(int i = 0; i < 1000; ++i) {
       micronotes::library::NoteMetadata metadata;
       metadata.id = "perf-" + std::to_string(i);
@@ -227,7 +228,7 @@ int main() {
 
   {
     micronotes::ui::AppState state;
-    micronotes::perf::ScopeTimer timer("fixture.app_state.open_select_and_list");
+    microcore::perf::ScopeTimer timer("fixture.app_state.open_select_and_list");
     state.openOrCreateLibrary(root);
     state.selectFolder("work");
     (void)state.folders();
@@ -240,8 +241,8 @@ int main() {
   }
 
   {
-    micronotes::markdown::MarkdownParser parser;
-    micronotes::perf::ScopeTimer timer("fixture.markdown.parse_heavy_document");
+    microcore::markdown::MarkdownParser parser;
+    microcore::perf::ScopeTimer timer("fixture.markdown.parse_heavy_document");
     const auto doc = parser.parse(heavyMarkdown(9999, 200));
     std::cout << "heavy_document.blocks: " << doc.blocks.size() << "\n";
   }

@@ -1,8 +1,9 @@
+#include "CoreAliases.h"
 #include "library/LibraryIndex.h"
 
 #include "library/Library.h"
 #include "library/Metadata.h"
-#include "perf/Perf.h"
+#include "core/perf/Perf.h"
 
 #include <sqlite3.h>
 

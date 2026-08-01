@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CoreAliases.h"
+
 #include <string>
 #include <string_view>
 #include <vector>

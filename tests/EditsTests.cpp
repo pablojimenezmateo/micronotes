@@ -1,7 +1,8 @@
+#include "CoreAliases.h"
 #include "TestSupport.h"
 
 #include "doc/Edits.h"
-#include "editor/MarkdownEditor.h"
+#include "core/editor/MarkdownEditor.h"
 
 #include <string>
 
