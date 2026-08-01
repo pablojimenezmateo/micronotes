@@ -133,6 +133,8 @@ target_link_libraries(md4c_html PUBLIC md4c)
 set(MICROCORE_SOURCES
   src/core/attachments/AttachmentService.cpp
   src/core/editor/MarkdownEditor.cpp
+  src/core/editor/SingleLineEditor.cpp
+  src/core/editor/SingleLineView.cpp
   src/core/editor/SoftWrap.cpp
   src/core/markdown/MarkdownParser.cpp
   src/core/markdown/RenderModel.cpp
@@ -224,6 +226,7 @@ add_executable(micronotes_tests
   tests/PathUtilsTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
+  tests/SingleLineEditorTests.cpp
 )
 target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

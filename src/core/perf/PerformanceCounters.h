@@ -47,6 +47,8 @@ namespace microcore::perf {
   X(EditorUndoRecordsCoalesced, "editor.undo_records_coalesced")                       \
   X(EditorUndoBytesRetained, "editor.undo_bytes_retained")                             \
   X(EditorUndoRecordsDropped, "editor.undo_records_dropped")                           \
+  X(EditorSingleLineLayouts, "editor.single_line_layouts")                              \
+  X(EditorSingleLineMeasures, "editor.single_line_measures")                            \
   /* --- persistence ------------------------------------------------------ */        \
   X(SqliteConnectionOpens, "sqlite.connection_opens")                                  \
   X(SqliteStatementsPrepared, "sqlite.statements_prepared")                            \
