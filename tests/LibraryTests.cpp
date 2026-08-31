@@ -10,30 +10,10 @@
 
 namespace {
 
-class ScopedXdgDataHome {
-public:
-  explicit ScopedXdgDataHome(const std::filesystem::path& path) {
-    if(const char* current = std::getenv("XDG_DATA_HOME")) {
-      previous_ = current;
-      hadPrevious_ = true;
-    }
-    setenv("XDG_DATA_HOME", path.c_str(), 1);
-  }
-
-  ~ScopedXdgDataHome() {
-    if(hadPrevious_) setenv("XDG_DATA_HOME", previous_.c_str(), 1);
-    else unsetenv("XDG_DATA_HOME");
-  }
-
-private:
-  std::string previous_;
-  bool hadPrevious_ = false;
-};
-
-static std::size_t trashFileCount(const std::filesystem::path& xdgDataHome) {
-  const auto trashFiles = xdgDataHome / "Trash" / "files";
-  if(!std::filesystem::exists(trashFiles)) return 0;
-  return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator(trashFiles), std::filesystem::directory_iterator()));
+static std::size_t trashFileCount(const std::filesystem::path& root) {
+  const auto files = root / ".micronotes" / "trash" / "files";
+  if(!std::filesystem::exists(files)) return 0;
+  return static_cast<std::size_t>(std::distance(std::filesystem::directory_iterator(files), std::filesystem::directory_iterator()));
 }
 
 }
@@ -179,10 +159,7 @@ MICRONOTES_TEST(library_persists_tag_updates) {
 
 MICRONOTES_TEST(library_delete_note_moves_note_and_attachments_to_trash) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-note-test";
-  const auto xdg = std::filesystem::temp_directory_path() / "micronotes-trash-note-xdg";
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
-  ScopedXdgDataHome scopedTrash(xdg);
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -199,19 +176,55 @@ MICRONOTES_TEST(library_delete_note_moves_note_and_attachments_to_trash) {
   library.deleteNote(path);
   MICRONOTES_REQUIRE(!std::filesystem::exists(path));
   MICRONOTES_REQUIRE(!std::filesystem::exists(attachmentDir));
-  MICRONOTES_REQUIRE(trashFileCount(xdg) == 2);
-  MICRONOTES_REQUIRE(std::filesystem::exists(xdg / "Trash" / "info" / "Trash-Me.md.trashinfo"));
+  // The note and its attachments, filed inside the library rather than in the
+  // desktop's trash, so restoring is something micronotes can actually do.
+  MICRONOTES_REQUIRE(trashFileCount(root) == 2);
+  // And gone from the library the moment it moved: `.micronotes` is not scanned.
+  MICRONOTES_REQUIRE(library.noteFiles().empty());
+
+  const auto entries = library.trashEntries();
+  MICRONOTES_REQUIRE(entries.size() == 1);
+  MICRONOTES_REQUIRE(entries.front().title == "Trash Me");
+  MICRONOTES_REQUIRE(!entries.front().deletedAt.empty());
+
+  MICRONOTES_REQUIRE(library.restoreFromTrash(entries.front().name));
+  MICRONOTES_REQUIRE(std::filesystem::exists(path));
+  MICRONOTES_REQUIRE(std::filesystem::exists(attachmentDir / "image.png"));
+  MICRONOTES_REQUIRE(library.loadNoteMetadata(path).id == "note-trash");
+  // Restoring takes the entry off the list; it is not an offer twice.
+  MICRONOTES_REQUIRE(library.trashEntries().empty());
+  MICRONOTES_REQUIRE(trashFileCount(root) == 0);
 
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
+}
+
+MICRONOTES_TEST(library_restore_does_not_overwrite_what_took_the_name_back) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-collide-test";
+  std::filesystem::remove_all(root);
+
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "first";
+  metadata.title = "Notes";
+  const auto path = library.createNote(metadata, "original");
+  library.deleteNote(path);
+
+  micronotes::library::NoteMetadata replacement;
+  replacement.id = "second";
+  replacement.title = "Notes";
+  const auto replacementPath = library.createNote(replacement, "replacement");
+  MICRONOTES_REQUIRE(replacementPath == path);
+
+  MICRONOTES_REQUIRE(library.restoreFromTrash(library.trashEntries().front().name));
+  MICRONOTES_REQUIRE(library.loadNoteMetadata(path).id == "second");
+  MICRONOTES_REQUIRE(library.noteFiles().size() == 2);
+
+  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_delete_folder_moves_folder_notes_and_attachments_to_trash) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-folder-test";
-  const auto xdg = std::filesystem::temp_directory_path() / "micronotes-trash-folder-xdg";
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
-  ScopedXdgDataHome scopedTrash(xdg);
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata first;
@@ -233,9 +246,97 @@ MICRONOTES_TEST(library_delete_folder_moves_folder_notes_and_attachments_to_tras
   MICRONOTES_REQUIRE(!std::filesystem::exists(root / "work"));
   MICRONOTES_REQUIRE(!std::filesystem::exists(attachmentOne));
   MICRONOTES_REQUIRE(!std::filesystem::exists(attachmentTwo));
-  MICRONOTES_REQUIRE(trashFileCount(xdg) == 3);
-  MICRONOTES_REQUIRE(std::filesystem::exists(xdg / "Trash" / "info" / "work.trashinfo"));
+  MICRONOTES_REQUIRE(trashFileCount(root) == 3);
+
+  // The folder is one offer, not three: the attachment directories that went
+  // with it are filed so they can be restored, not so they can be chosen.
+  const auto entries = library.trashEntries();
+  MICRONOTES_REQUIRE(entries.size() == 1);
+  MICRONOTES_REQUIRE(entries.front().title == "work");
+
+  MICRONOTES_REQUIRE(library.restoreFromTrash(entries.front().name));
+  MICRONOTES_REQUIRE(std::filesystem::exists(firstPath));
+  MICRONOTES_REQUIRE(std::filesystem::exists(secondPath));
+  MICRONOTES_REQUIRE(std::filesystem::exists(attachmentOne));
+  MICRONOTES_REQUIRE(std::filesystem::exists(attachmentTwo));
+  MICRONOTES_REQUIRE(library.trashEntries().empty());
 
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
+}
+
+MICRONOTES_TEST(metadata_keeps_front_matter_it_does_not_understand) {
+  // The bug this guards: micronotes rewrites the whole header on save, so a key
+  // it cannot parse used to be destroyed by the first autosave after opening a
+  // note written elsewhere.
+  const std::string source =
+      "---\n"
+      "id: outside\n"
+      "title: From Another Tool\n"
+      "icon: \xF0\x9F\x93\x93\n"
+      "tags: alpha beta\n"
+      "aliases:\n"
+      "  - first\n"
+      "  - second\n"
+      "cssclass: wide\n"
+      "---\n\n"
+      "body\n";
+  const auto metadata = micronotes::library::parseMetadata(source);
+  MICRONOTES_REQUIRE(metadata.id == "outside");
+  MICRONOTES_REQUIRE(metadata.icon == "\xF0\x9F\x93\x93");
+  MICRONOTES_REQUIRE(metadata.tags.size() == 2);
+  MICRONOTES_REQUIRE(metadata.extra.size() == 4);
+  MICRONOTES_REQUIRE(metadata.extra.front() == "aliases:");
+  MICRONOTES_REQUIRE(metadata.extra.back() == "cssclass: wide");
+
+  const auto rewritten = micronotes::library::metadataHeader(metadata);
+  MICRONOTES_REQUIRE(rewritten.find("aliases:\n  - first\n  - second\ncssclass: wide\n") != std::string::npos);
+  MICRONOTES_REQUIRE(rewritten.find("icon: \xF0\x9F\x93\x93\n") != std::string::npos);
+  // And a second pass through changes nothing more.
+  MICRONOTES_REQUIRE(micronotes::library::metadataHeader(
+                         micronotes::library::parseMetadata(rewritten + "body\n")) == rewritten);
+}
+
+MICRONOTES_TEST(metadata_does_not_invent_a_tags_key) {
+  // A note that arrived with no tags must come back with no tags. The header is
+  // rewritten in full on every save, so an unconditional `tags:` line meant the
+  // first autosave after opening someone else's note changed it.
+  const auto note = micronotes::library::parseMetadata("---\nid: n\ntitle: Plain\n---\n\nbody\n");
+  MICRONOTES_REQUIRE(note.tags.empty());
+  MICRONOTES_REQUIRE(micronotes::library::metadataHeader(note) == "---\nid: n\ntitle: Plain\n---\n\n");
+}
+
+MICRONOTES_TEST(metadata_writes_tags_back_in_the_form_it_read_them) {
+  const auto block = micronotes::library::parseMetadata(
+      "---\ntitle: Block\ntags:\n  - one\n  - two\n---\n\nbody\n");
+  MICRONOTES_REQUIRE(block.tags.size() == 2 && block.tags[1] == "two");
+  MICRONOTES_REQUIRE(block.extra.empty());
+  MICRONOTES_REQUIRE(micronotes::library::metadataHeader(block).find("tags:\n  - one\n  - two\n") != std::string::npos);
+
+  const auto flow = micronotes::library::parseMetadata("---\ntitle: Flow\ntags: [one, two]\n---\n\nbody\n");
+  MICRONOTES_REQUIRE(flow.tags.size() == 2 && flow.tags[0] == "one");
+  MICRONOTES_REQUIRE(micronotes::library::metadataHeader(flow).find("tags: [one, two]\n") != std::string::npos);
+
+  // No icon means no `icon:` line at all, so a note micronotes never gave one
+  // reads exactly as it did before.
+  MICRONOTES_REQUIRE(micronotes::library::metadataHeader(flow).find("icon:") == std::string::npos);
+}
+
+MICRONOTES_TEST(library_restores_a_folder_without_giving_it_a_file_extension) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-folder-collide";
+  std::filesystem::remove_all(root);
+
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "in-folder";
+  metadata.title = "Inside";
+  library.moveNote(library.createNote(metadata, "one"), "work");
+  library.deleteFolder("work");
+  // A new folder takes the name back before the old one is restored.
+  library.createFolder("work");
+
+  MICRONOTES_REQUIRE(library.restoreFromTrash(library.trashEntries().front().name));
+  MICRONOTES_REQUIRE(std::filesystem::is_directory(root / "work-2"));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "work-2" / "Inside.md"));
+
+  std::filesystem::remove_all(root);
 }

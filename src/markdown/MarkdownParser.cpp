@@ -343,7 +343,9 @@ static int textCallback(MD_TEXTTYPE type, const char* text, unsigned size, void*
   Inline inlineText;
   inlineText.type = activeType(state, type);
   if(type == MD_TEXT_BR) inlineText.text = "\n";
-  else if(type == MD_TEXT_SOFTBR) inlineText.text = "\n";
+  // A CommonMark soft break is a word separator, not a line break. Emitting a
+  // newline here made every source-wrapped paragraph render pre-wrapped.
+  else if(type == MD_TEXT_SOFTBR) inlineText.text = " ";
   else if(type == MD_TEXT_NULLCHAR) inlineText.text = "\xef\xbf\xbd";
   else if(type == MD_TEXT_ENTITY) inlineText.text = decodeEntity(text, size);
   else inlineText.text.assign(text, size);
@@ -646,9 +648,61 @@ static Document parsePreservingBlankLines(std::string_view source) {
 
 }
 
+// GitHub writes an alert as a blockquote whose first line is `[!KIND]`, which
+// md4c has no reason to know about: it reports an ordinary quote. The reading
+// view already draws admonitions, so retagging is all it takes for a callout to
+// look the same here as it does on the live surface.
+void promoteAlerts(Document& document) {
+  for(auto& block : document.blocks) {
+    if(block.type != BlockType::Quote || block.inlines.empty()) continue;
+
+    // md4c hands `[` back as a chunk of its own, so the tag has to be read
+    // across the leading text runs rather than out of the first one.
+    std::string lead;
+    std::size_t last = 0;
+    bool closed = false;
+    for(std::size_t i = 0; i < block.inlines.size() && lead.size() < 32; ++i) {
+      if(block.inlines[i].type != InlineType::Text) break;
+      lead += block.inlines[i].text;
+      if(lead.find(']') == std::string::npos) continue;
+      last = i;
+      closed = true;
+      break;
+    }
+    if(!closed || lead.size() < 4 || lead.compare(0, 2, "[!") != 0) continue;
+    const std::size_t close = lead.find(']');
+    std::string kind = lead.substr(2, close - 2);
+    if(kind.empty()) continue;
+    for(char& c : kind) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if(kind.find_first_not_of("abcdefghijklmnopqrstuvwxyz") != std::string::npos) continue;
+
+    block.type = BlockType::Admonition;
+    block.admonitionType = kind;
+
+    // The tag itself is chrome now, so it comes out of the text.
+    std::size_t drop = close + 1;
+    while(drop < lead.size() && lead[drop] == ' ') ++drop;
+    std::size_t consumed = 0;
+    std::size_t first = 0;
+    for(std::size_t i = 0; i <= last; ++i) {
+      const std::size_t length = block.inlines[i].text.size();
+      if(consumed + length <= drop) {
+        consumed += length;
+        first = i + 1;
+        continue;
+      }
+      block.inlines[i].text.erase(0, drop - consumed);
+      first = i;
+      break;
+    }
+    block.inlines.erase(block.inlines.begin(), block.inlines.begin() + static_cast<std::ptrdiff_t>(first));
+  }
+}
+
 Document MarkdownParser::parse(std::string_view source) const {
   auto doc = parsePreservingBlankLines(source);
   autolinkDocument(doc);
+  promoteAlerts(doc);
   return doc;
 }
 

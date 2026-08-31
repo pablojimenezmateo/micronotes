@@ -1,6 +1,7 @@
 #include "library/LibraryIndex.h"
 
 #include "library/Library.h"
+#include "library/Metadata.h"
 #include "perf/Perf.h"
 
 #include <sqlite3.h>
@@ -112,15 +113,16 @@ bool LibraryIndex::rebuild() {
   Library library(root_);
   for(const auto& path : library.noteFiles()) {
     const auto note = library.loadNote(path);
-    if(note.metadata.id.empty()) continue;
     const auto relative = path.lexically_relative(root_).generic_string();
+    // Files written by other tools have no front matter; index them anyway.
+    const auto noteId = note.metadata.id.empty() ? fallbackNoteId(relative) : note.metadata.id;
     const auto stat = std::filesystem::status(path);
     const auto mtime = std::filesystem::last_write_time(path).time_since_epoch().count();
     const auto size = static_cast<long long>(std::filesystem::file_size(path));
     const auto title = note.metadata.title.empty() ? path.stem().string() : note.metadata.title;
 
     sqlite3_reset(noteStmt);
-    bindText(noteStmt, 1, note.metadata.id);
+    bindText(noteStmt, 1, noteId);
     bindText(noteStmt, 2, relative);
     bindText(noteStmt, 3, title);
     sqlite3_bind_int64(noteStmt, 4, static_cast<sqlite3_int64>(mtime));
@@ -129,13 +131,13 @@ bool LibraryIndex::rebuild() {
     sqlite3_step(noteStmt);
 
     sqlite3_reset(ftsStmt);
-    bindText(ftsStmt, 1, note.metadata.id);
+    bindText(ftsStmt, 1, noteId);
     bindText(ftsStmt, 2, title);
     bindText(ftsStmt, 3, note.body);
     bindText(ftsStmt, 4, relative);
     sqlite3_step(ftsStmt);
 
-    rows_.push_back({note.metadata.id, path, title});
+    rows_.push_back({noteId, path, title});
     (void)stat;
   }
 
@@ -203,12 +205,12 @@ bool LibraryIndex::refreshChangedFiles() {
       }
 
       const auto note = library.loadNote(path);
-      if(note.metadata.id.empty()) continue;
-      seenIds.insert(note.metadata.id);
+      const auto noteId = note.metadata.id.empty() ? fallbackNoteId(relative) : note.metadata.id;
+      seenIds.insert(noteId);
       const auto title = note.metadata.title.empty() ? path.stem().string() : note.metadata.title;
 
       sqlite3_reset(upsertStmt);
-      bindText(upsertStmt, 1, note.metadata.id);
+      bindText(upsertStmt, 1, noteId);
       bindText(upsertStmt, 2, relative);
       bindText(upsertStmt, 3, title);
       sqlite3_bind_int64(upsertStmt, 4, static_cast<sqlite3_int64>(mtime));
@@ -218,12 +220,12 @@ bool LibraryIndex::refreshChangedFiles() {
       if(!ok) break;
 
       sqlite3_reset(deleteFtsStmt);
-      bindText(deleteFtsStmt, 1, note.metadata.id);
+      bindText(deleteFtsStmt, 1, noteId);
       ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
       if(!ok) break;
 
       sqlite3_reset(insertFtsStmt);
-      bindText(insertFtsStmt, 1, note.metadata.id);
+      bindText(insertFtsStmt, 1, noteId);
       bindText(insertFtsStmt, 2, title);
       bindText(insertFtsStmt, 3, note.body);
       bindText(insertFtsStmt, 4, relative);

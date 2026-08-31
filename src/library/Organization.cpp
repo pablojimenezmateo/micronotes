@@ -7,16 +7,17 @@ namespace micronotes::library {
 
 OrganizationService::OrganizationService(const Library& library) : library_(library) {}
 
-const std::vector<NoteListItem>& OrganizationService::allNotes() const {
+const std::vector<NoteListItem>& OrganizationService::notes() const {
   if(notes_) return *notes_;
   std::vector<NoteListItem> notes;
   for(const auto& path : library_.noteFiles()) {
     auto metadata = library_.loadNoteMetadata(path);
     notes.push_back({
-      metadata.id,
+      metadata.id.empty() ? fallbackNoteId(path.lexically_relative(library_.root()).generic_string()) : metadata.id,
       path,
       metadata.title.empty() ? path.stem().string() : metadata.title,
       std::move(metadata.tags),
+      std::move(metadata.icon),
     });
   }
   std::sort(notes.begin(), notes.end(), [](const auto& lhs, const auto& rhs) {
@@ -38,7 +39,7 @@ std::vector<FolderNode> OrganizationService::folders() const {
       folders.push_back({path.lexically_relative(library_.root()), 0});
     }
   }
-  for(const auto& note : allNotes()) {
+  for(const auto& note : notes()) {
     const auto parent = note.path.lexically_relative(library_.root()).parent_path();
     auto found = std::find_if(folders.begin(), folders.end(), [&](const auto& folder) { return folder.path == parent; });
     if(found == folders.end()) folders.push_back({parent, 1});
@@ -52,7 +53,7 @@ std::vector<FolderNode> OrganizationService::folders() const {
 std::vector<std::string> OrganizationService::tags() const {
   if(tags_) return *tags_;
   std::set<std::string> unique;
-  for(const auto& note : allNotes()) {
+  for(const auto& note : notes()) {
     for(const auto& tag : note.tags) unique.insert(tag);
   }
   tags_ = std::vector<std::string> {unique.begin(), unique.end()};
@@ -61,7 +62,7 @@ std::vector<std::string> OrganizationService::tags() const {
 
 std::vector<NoteListItem> OrganizationService::notesInFolder(const std::filesystem::path& relativeFolder) const {
   std::vector<NoteListItem> out;
-  for(auto note : allNotes()) {
+  for(auto note : notes()) {
     const auto relative = note.path.lexically_relative(library_.root());
     if(relative.parent_path() == relativeFolder) out.push_back(std::move(note));
   }
@@ -70,7 +71,7 @@ std::vector<NoteListItem> OrganizationService::notesInFolder(const std::filesyst
 
 std::vector<NoteListItem> OrganizationService::notesWithTag(const std::string& tag) const {
   std::vector<NoteListItem> out;
-  for(auto note : allNotes()) {
+  for(auto note : notes()) {
     if(std::find(note.tags.begin(), note.tags.end(), tag) != note.tags.end()) {
       out.push_back(std::move(note));
     }
@@ -79,7 +80,7 @@ std::vector<NoteListItem> OrganizationService::notesWithTag(const std::string& t
 }
 
 std::optional<NoteListItem> OrganizationService::findNote(std::string_view noteId) const {
-  for(const auto& note : allNotes()) {
+  for(const auto& note : notes()) {
     if(note.id == noteId) return note;
   }
   return std::nullopt;

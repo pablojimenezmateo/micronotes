@@ -7,7 +7,28 @@ micronotes is a small, fast, Linux-only Markdown notes app built with C++ and SD
 > reviewed by a human — none of it was hand-written. Treat it accordingly and
 > use it at your own risk.
 
-See [docs/build.md](docs/build.md) for the required Linux toolchain, SDL3-from-source setup, and local build commands.
+Notes are plain `.md` files in one folder you choose. micronotes reads and
+writes those files and nothing else: no database of record, no sync, no network.
+Delete the app and the notes are still there, in the same Markdown any other
+tool would have written.
+
+You type into formatted content rather than into source: headings, emphasis,
+code spans, links and task checkboxes are drawn where you type them, and a
+block's syntax markers appear only while the caret is inside it. Raw Markdown
+(`Ctrl+2`), a reading view (`Ctrl+3`) and a split (`Ctrl+4`) are all one
+keystroke away.
+
+- Blocks with hover handles: drag to reorder, `/` to insert, `Esc` to select,
+  and a menu for turn-into, duplicate, delete and move.
+- A sidebar tree of notebooks and notes, with drag to re-parent, favorites,
+  recents, and tags as a filter rather than a second hierarchy.
+- `Ctrl+P` jumps to any note; `Ctrl+Shift+P` is every command; `F1` is every
+  shortcut; `Ctrl+,` is theme, text size, page width and which folder to open.
+- Deleting moves to the library's own trash, so it can be undone.
+- Light and dark, HiDPI, and it stays fast: re-layout after a keystroke in a
+  200 KB note is budgeted and measured, not hoped for.
+
+See [docs/build.md](docs/build.md) for the required Linux toolchain, SDL3-from-source setup, local build commands, and the full list of runtime controls.
 
 See [docs/library-format.md](docs/library-format.md) for the local library format, Markdown scope, and attachment behavior.
 
