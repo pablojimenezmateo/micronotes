@@ -49,16 +49,32 @@ MICRONOTES_TEST(markdown_parser_keeps_links_and_images) {
   MICRONOTES_REQUIRE(sawImage);
 }
 
-MICRONOTES_TEST(markdown_parser_renders_single_newlines_as_line_breaks) {
+// docs/markdown-elements.md states the contract: "Soft line breaks in Markdown
+// should render as normal spaces inside the paragraph."
+MICRONOTES_TEST(markdown_parser_renders_soft_line_breaks_as_spaces) {
   const auto doc = MarkdownParser().parse("first line\nsecond line\n");
   MICRONOTES_REQUIRE(doc.blocks.size() == 1);
-  bool sawBreak = false;
   std::string combined;
+  bool sawHardBreak = false;
   for(const auto& item : doc.blocks[0].inlines) {
     combined += item.text;
-    sawBreak = sawBreak || item.text == "\n";
+    sawHardBreak = sawHardBreak || item.hardBreak;
   }
-  MICRONOTES_REQUIRE(sawBreak);
+  MICRONOTES_REQUIRE(!sawHardBreak);
+  MICRONOTES_REQUIRE(combined == "first line second line");
+}
+
+// Two trailing spaces still mean an explicit break, and it stays distinguishable.
+MICRONOTES_TEST(markdown_parser_keeps_hard_line_breaks) {
+  const auto doc = MarkdownParser().parse("first line  \nsecond line\n");
+  MICRONOTES_REQUIRE(doc.blocks.size() == 1);
+  std::string combined;
+  bool sawHardBreak = false;
+  for(const auto& item : doc.blocks[0].inlines) {
+    combined += item.text;
+    sawHardBreak = sawHardBreak || (item.hardBreak && item.text == "\n");
+  }
+  MICRONOTES_REQUIRE(sawHardBreak);
   MICRONOTES_REQUIRE(combined == "first line\nsecond line");
 }
 

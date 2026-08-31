@@ -1,13 +1,22 @@
 #include "perf/Perf.h"
 
+#include "doc/Edits.h"
+#include "doc/Fold.h"
+#include "doc/Layout.h"
 #include "markdown/MarkdownParser.h"
 #include "library/Library.h"
 #include "library/LibraryIndex.h"
 #include "ui/AppState.h"
+#include "ui/FoldState.h"
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -28,6 +37,153 @@ static std::string heavyMarkdown(int seed, int sections) {
     out << "> [!NOTE]\n> A callout with enough text to exercise wrapping and inline spans.\n\n";
   }
   return out.str();
+}
+
+// The live surface has no fonts in the core library, so the budget runs against
+// a fixed-advance stand-in. It exercises the same scan, cache and flow work.
+static micronotes::doc::Metrics stubMetrics() {
+  micronotes::doc::Metrics metrics;
+  metrics.measure = [](std::string_view value, const micronotes::doc::RunStyle& style) {
+    std::size_t glyphs = 0;
+    for(const char c : value) {
+      if((static_cast<unsigned char>(c) & 0xC0) != 0x80) ++glyphs;
+    }
+    return static_cast<float>(glyphs) * style.size * 0.6f;
+  };
+  metrics.lineHeight = [](const micronotes::doc::RunStyle& style) { return std::round(style.size * 1.5f); };
+  return metrics;
+}
+
+// Budget from the design: one keystroke in a 200 KB note re-lays out in ~2 ms.
+static constexpr std::uint64_t kKeystrokeBudgetMicros = 2000;
+
+static bool layoutBudgets(std::string* out) {
+  std::string source;
+  int section = 0;
+  while(source.size() < 200 * 1024) {
+    source += "## Section " + std::to_string(section) + "\n\n";
+    source += "A paragraph with **strong text**, *emphasis*, `code`, a [link](note-" +
+              std::to_string(section) + ".md) and enough words to wrap more than once on screen.\n\n";
+    source += "- bullet " + std::to_string(section) + "\n- [ ] task " + std::to_string(section) + "\n\n";
+    source += "> quoted line " + std::to_string(section) + "\n\n";
+    ++section;
+  }
+
+  micronotes::doc::DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  micronotes::doc::LayoutOptions options;
+  options.width = 700.0f;
+  {
+    micronotes::perf::ScopeTimer timer("layout.initial_200kb");
+    layout.update(source, options);
+  }
+  std::cout << "layout.blocks: " << layout.blockCount() << "\n";
+
+  // Type into a paragraph halfway down and re-lay out, the way a keystroke does.
+  std::size_t caret = source.find("paragraph", source.size() / 2);
+  if(caret == std::string::npos) caret = source.size() / 2;
+  bool ok = true;
+  std::vector<std::uint64_t> samples;
+  for(int i = 0; i < 24; ++i) {
+    source.insert(caret + static_cast<std::size_t>(i), 1, 'x');
+    options.caretOffset = caret;
+    const auto start = std::chrono::steady_clock::now();
+    layout.update(source, options);
+    const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();
+    samples.push_back(static_cast<std::uint64_t>(micros));
+  }
+  std::sort(samples.begin(), samples.end());
+  const std::uint64_t median = samples[samples.size() / 2];
+  const std::uint64_t worst = samples.back();
+  micronotes::perf::Recorder::instance().add("layout.keystroke_relayout_median", median);
+  micronotes::perf::Recorder::instance().add("layout.keystroke_relayout_worst", worst);
+  std::cout << "layout.keystroke_relaid_blocks: " << layout.lastRelaidBlocks() << "\n";
+
+  // Folding puts a predicate on every block of every relayout, so it belongs
+  // under the same keystroke budget as the layout it runs inside.
+  {
+    micronotes::ui::FoldState folds;
+    folds.toggle("perf", micronotes::doc::foldKey(source, micronotes::doc::scanBlocks(source).front()));
+    options.folded = [&folds, &source](const micronotes::doc::SourceBlock& block) {
+      return folds.folded("perf", micronotes::doc::foldKey(source, block));
+    };
+    std::vector<std::uint64_t> folded;
+    for(int i = 0; i < 12; ++i) {
+      source.insert(caret + static_cast<std::size_t>(i), 1, 'y');
+      options.caretOffset = caret;
+      const auto start = std::chrono::steady_clock::now();
+      layout.update(source, options);
+      folded.push_back(static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count()));
+    }
+    std::sort(folded.begin(), folded.end());
+    const std::uint64_t foldedMedian = folded[folded.size() / 2];
+    micronotes::perf::Recorder::instance().add("layout.keystroke_relayout_folded_median", foldedMedian);
+    options.folded = nullptr;
+    if(foldedMedian > kKeystrokeBudgetMicros) {
+      std::cerr << "BUDGET FAILED: layout.keystroke_relayout_folded_median " << foldedMedian
+                << "us exceeds " << kKeystrokeBudgetMicros << "us\n";
+      ok = false;
+    }
+  }
+  if(out) *out = source;
+  if(median > kKeystrokeBudgetMicros) {
+    std::cerr << "BUDGET FAILED: layout.keystroke_relayout_median " << median
+              << "us exceeds " << kKeystrokeBudgetMicros << "us\n";
+    ok = false;
+  }
+  return ok;
+}
+
+// Enter, Tab and Backspace each rescan the note to find the block they act on.
+// That is once per structural key, not once per character, so the budget is
+// looser than the keystroke one - but it still has to stay off the critical path.
+static constexpr std::uint64_t kTransformBudgetMicros = 4000;
+
+static bool editBudgets(const std::string& source) {
+  const std::size_t caret = std::min(source.find("bullet", source.size() / 2) + 6, source.size());
+  const auto time = [&](const char* name, auto&& transform) {
+    std::vector<std::uint64_t> samples;
+    for(int i = 0; i < 16; ++i) {
+      const auto start = std::chrono::steady_clock::now();
+      const auto edit = transform();
+      const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - start).count();
+      samples.push_back(static_cast<std::uint64_t>(micros));
+      if(!edit.valid && i == 0) std::cout << name << ": (declined)\n";
+    }
+    std::sort(samples.begin(), samples.end());
+    const std::uint64_t median = samples[samples.size() / 2];
+    micronotes::perf::Recorder::instance().add(name, median);
+    return median;
+  };
+
+  std::uint64_t worst = 0;
+  worst = std::max(worst, time("edits.continue_list_200kb",
+                               [&] { return micronotes::doc::continueList(source, caret); }));
+  worst = std::max(worst, time("edits.outdent_or_unwrap_200kb",
+                               [&] { return micronotes::doc::outdentOrUnwrap(source, caret); }));
+  worst = std::max(worst, time("edits.toggle_todo_200kb",
+                               [&] { return micronotes::doc::toggleTodo(source, caret); }));
+  // The typing shortcut runs on every space, so it must reject without scanning.
+  worst = std::max(worst, time("edits.typing_shortcut_reject_200kb",
+                               [&] { return micronotes::doc::applyMarkdownShortcut(source, caret); }));
+  // The block affordances: a drag drop, a multi-block turn-into, and the insert
+  // button. Each runs once per gesture, never per keystroke.
+  worst = std::max(worst, time("edits.move_blocks_to_200kb",
+                               [&] { return micronotes::doc::moveBlocksTo(source, caret, caret, 0); }));
+  worst = std::max(worst, time("edits.turn_blocks_into_200kb", [&] {
+    return micronotes::doc::turnBlocksInto(source, caret, caret + 400, micronotes::doc::BlockKind::Bullet);
+  }));
+  worst = std::max(worst, time("edits.insert_block_after_200kb", [&] {
+    return micronotes::doc::insertBlockAfter(source, caret, micronotes::doc::BlockKind::Todo);
+  }));
+  if(worst > kTransformBudgetMicros) {
+    std::cerr << "BUDGET FAILED: a block transform took " << worst
+              << "us, over " << kTransformBudgetMicros << "us\n";
+    return false;
+  }
+  return true;
 }
 
 static void printSamples() {
@@ -90,7 +246,11 @@ int main() {
     std::cout << "heavy_document.blocks: " << doc.blocks.size() << "\n";
   }
 
+  std::string liveNote;
+  bool withinBudget = layoutBudgets(&liveNote);
+  withinBudget = editBudgets(liveNote) && withinBudget;
+
   printSamples();
   std::filesystem::remove_all(root);
-  return 0;
+  return withinBudget ? 0 : 1;
 }

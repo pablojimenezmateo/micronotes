@@ -20,12 +20,16 @@ struct NoteListItem {
   std::filesystem::path path;
   std::string title;
   std::vector<std::string> tags;
+  std::string icon;   // the note's `icon:` front matter, empty when it has none
 };
 
 class OrganizationService {
 public:
   explicit OrganizationService(const Library& library);
 
+  // Every note in the library, sorted by title. The sidebar tree needs all of
+  // them at once, not one folder at a time.
+  const std::vector<NoteListItem>& notes() const;
   std::vector<FolderNode> folders() const;
   std::vector<std::string> tags() const;
   std::vector<NoteListItem> notesInFolder(const std::filesystem::path& relativeFolder) const;
@@ -33,8 +37,6 @@ public:
   std::optional<NoteListItem> findNote(std::string_view noteId) const;
 
 private:
-  const std::vector<NoteListItem>& allNotes() const;
-
   const Library& library_;
   mutable std::optional<std::vector<NoteListItem>> notes_;
   mutable std::optional<std::vector<FolderNode>> folders_;

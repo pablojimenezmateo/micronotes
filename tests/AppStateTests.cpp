@@ -4,33 +4,8 @@
 #include "library/Metadata.h"
 #include "ui/AppState.h"
 
-#include <cstdlib>
 #include <filesystem>
 #include <string>
-
-namespace {
-
-class ScopedXdgDataHome {
-public:
-  explicit ScopedXdgDataHome(const std::filesystem::path& path) {
-    if(const char* current = std::getenv("XDG_DATA_HOME")) {
-      previous_ = current;
-      hadPrevious_ = true;
-    }
-    setenv("XDG_DATA_HOME", path.c_str(), 1);
-  }
-
-  ~ScopedXdgDataHome() {
-    if(hadPrevious_) setenv("XDG_DATA_HOME", previous_.c_str(), 1);
-    else unsetenv("XDG_DATA_HOME");
-  }
-
-private:
-  std::string previous_;
-  bool hadPrevious_ = false;
-};
-
-}
 
 MICRONOTES_TEST(app_state_opens_library_filters_and_persists_state) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-app-state-test";
@@ -66,10 +41,7 @@ MICRONOTES_TEST(app_state_opens_library_filters_and_persists_state) {
 
 MICRONOTES_TEST(app_state_creates_loads_saves_and_refreshes_notes) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-app-state-crud-test";
-  const auto xdg = std::filesystem::temp_directory_path() / "micronotes-app-state-crud-xdg";
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
-  ScopedXdgDataHome scopedTrash(xdg);
 
   micronotes::ui::AppState state;
   MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
@@ -131,7 +103,6 @@ MICRONOTES_TEST(app_state_creates_loads_saves_and_refreshes_notes) {
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
 
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
 }
 
 

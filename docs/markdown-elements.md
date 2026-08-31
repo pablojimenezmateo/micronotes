@@ -1,13 +1,31 @@
 # Markdown Elements Fixture
 
 This file is both documentation for micronotes' Markdown rendering scope and a
-manual regression fixture for the preview renderer. Open it as a note and verify
-that each section below renders cleanly, wraps without overflow, scrolls
-correctly, and preserves clickable link behavior.
+manual regression fixture. Open it as a note and check each section below in
+both renderers, because there are two and they are built differently:
+
+- **Live** (`Ctrl+1`), where the formatting is drawn around a caret you can put
+  anywhere. Its scanner owns the simple blocks and hands tables, raw HTML,
+  footnote definitions and indented code to the reading view's renderer, drawn
+  read-only until you click into one.
+- **Reading** (`Ctrl+3`), the md4c rendering, which owns everything.
+
+In each: the content wraps without overflow, scrolls, and links stay clickable.
+In the live surface, additionally: a block's syntax markers appear only while
+the caret is inside it, `Ctrl+.` folds any heading or list item that owns
+something, and typing anywhere leaves the rest of the file byte-identical.
+
+The last of those is the real test. Type into a section, undo it, save, and
+`git diff` this file: it must come back empty. The scanner describes the buffer
+and never rewrites it, so a pass through micronotes is not allowed to reflow a
+list, normalise a fence, or reorder front matter. The one exception is a file
+that arrived with no front matter at all: its first save adds a header giving it
+a stable id, and nothing else changes.
 
 ## Table Of Contents
 
 - [Paragraphs And Line Breaks](#paragraphs-and-line-breaks)
+- [Folding](#folding)
 - [Inline Formatting](#inline-formatting)
 - [Links And Images](#links-and-images)
 - [Lists](#lists)
@@ -29,6 +47,23 @@ This line should begin directly below it.
 
 Soft line breaks in Markdown
 should render as normal spaces inside the paragraph.
+
+## Folding
+
+Folding is checked here rather than in a section of its own contents, because
+what a fold hides is decided by the structure this file already has: a heading
+owns everything down to the next heading of its rank, and a list item owns the
+items indented beneath it.
+
+- Put the caret on this section's heading and press `Ctrl+.`: the paragraphs
+  under it disappear and the heading keeps a disclosure triangle in the margin.
+- Put the caret on "Parent item" under [Lists](#lists) and press `Ctrl+.`: the
+  children indented under it collapse, and its siblings do not.
+- Collapse something, then edit a paragraph far above it. The fold must still be
+  on the same block afterwards: folds are keyed by what the block says, not by
+  where in the file it sat.
+- Folding never touches the file. After collapsing every heading in this
+  document, `git diff` must still be empty.
 
 ## Inline Formatting
 
@@ -103,7 +138,7 @@ Nested mixed lists:
 Task lists:
 
 - [x] Parse GFM task list syntax
-- [ ] Toggle interaction is not implemented; this is render-only
+- [ ] Checkboxes are clickable in the live surface; tick this one to check
 - [x] Keep checkbox alignment stable
 
 ## Blockquotes And Admonitions

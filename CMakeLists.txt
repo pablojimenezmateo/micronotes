@@ -115,6 +115,11 @@ target_link_libraries(md4c_html PUBLIC md4c)
 
 set(MICRONOTES_CORE_SOURCES
   src/attachments/AttachmentService.cpp
+  src/doc/BlockScan.cpp
+  src/doc/Edits.cpp
+  src/doc/Fold.cpp
+  src/doc/InlineScan.cpp
+  src/doc/Layout.cpp
   src/editor/MarkdownEditor.cpp
   src/editor/SoftWrap.cpp
   src/library/Library.cpp
@@ -128,6 +133,11 @@ set(MICRONOTES_CORE_SOURCES
   src/platform/DurableFile.cpp
   src/platform/PathUtils.cpp
   src/ui/AppState.cpp
+  src/ui/FoldState.cpp
+  src/ui/Fuzzy.cpp
+  src/ui/Settings.cpp
+  src/ui/Theme.cpp
+  src/ui/TreeModel.cpp
 )
 
 add_library(micronotes_core STATIC ${MICRONOTES_CORE_SOURCES})
@@ -138,8 +148,19 @@ target_compile_definitions(micronotes_core PUBLIC
   MICRONOTES_HAS_SDL3_TTF=$<BOOL:${MICRONOTES_SDL3_TTF_TARGET}>
 )
 
-add_executable(micronotes src/app/main.cpp src/app/Application.cpp)
+add_executable(micronotes
+  src/app/main.cpp
+  src/app/Application.cpp
+  src/app/PageView.cpp
+  src/ui/Draw.cpp
+  src/ui/Fonts.cpp
+  src/ui/Overlay.cpp
+)
 target_include_directories(micronotes PRIVATE src)
+# Lets a build-tree run find the vendored faces without an install step.
+target_compile_definitions(micronotes PRIVATE
+  MICRONOTES_SOURCE_FONT_DIR="${CMAKE_SOURCE_DIR}/third_party/fonts"
+)
 target_link_libraries(micronotes PRIVATE micronotes_core ${MICRONOTES_SDL3_TARGET})
 if(NOT MICRONOTES_SDL3_IMAGE_TARGET STREQUAL "")
   target_link_libraries(micronotes PRIVATE ${MICRONOTES_SDL3_IMAGE_TARGET})
@@ -150,13 +171,21 @@ endif()
 
 add_executable(micronotes_tests
   tests/TestMain.cpp
+  tests/TreeModelTests.cpp
   tests/AppStateTests.cpp
   tests/AttachmentTests.cpp
+  tests/BlockScanTests.cpp
   tests/EditorViewerTests.cpp
+  tests/EditsTests.cpp
+  tests/FoldTests.cpp
+  tests/FuzzyTests.cpp
+  tests/InlineScanTests.cpp
+  tests/LayoutTests.cpp
   tests/LibraryTests.cpp
   tests/MarkdownParserTests.cpp
   tests/PathUtilsTests.cpp
   tests/SearchTests.cpp
+  tests/SettingsTests.cpp
 )
 target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -188,6 +217,7 @@ configure_file(
 install(TARGETS micronotes RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES "${MICRONOTES_DESKTOP_FILE}" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/micronotes.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/" DESTINATION ${CMAKE_INSTALL_DATADIR}/micronotes/fonts)
 
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "${PROJECT_NAME}")

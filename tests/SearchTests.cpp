@@ -5,33 +5,8 @@
 #include "library/Metadata.h"
 #include "library/Organization.h"
 
-#include <cstdlib>
 #include <filesystem>
 #include <string>
-
-namespace {
-
-class ScopedXdgDataHome {
-public:
-  explicit ScopedXdgDataHome(const std::filesystem::path& path) {
-    if(const char* current = std::getenv("XDG_DATA_HOME")) {
-      previous_ = current;
-      hadPrevious_ = true;
-    }
-    setenv("XDG_DATA_HOME", path.c_str(), 1);
-  }
-
-  ~ScopedXdgDataHome() {
-    if(hadPrevious_) setenv("XDG_DATA_HOME", previous_.c_str(), 1);
-    else unsetenv("XDG_DATA_HOME");
-  }
-
-private:
-  std::string previous_;
-  bool hadPrevious_ = false;
-};
-
-}
 
 MICRONOTES_TEST(library_index_searches_file_backed_rows) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-index-file-backed-test";
@@ -103,10 +78,7 @@ MICRONOTES_TEST(library_index_refresh_preserves_search_after_note_move) {
 
 MICRONOTES_TEST(library_index_refresh_removes_trashed_note_from_sqlite) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-index-delete-note-test";
-  const auto xdg = std::filesystem::temp_directory_path() / "micronotes-index-delete-note-xdg";
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
-  ScopedXdgDataHome scopedTrash(xdg);
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -124,15 +96,11 @@ MICRONOTES_TEST(library_index_refresh_removes_trashed_note_from_sqlite) {
   MICRONOTES_REQUIRE(index.size() == 0);
 
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
 }
 
 MICRONOTES_TEST(library_index_refresh_removes_trashed_folder_notes_from_sqlite) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-index-delete-folder-test";
-  const auto xdg = std::filesystem::temp_directory_path() / "micronotes-index-delete-folder-xdg";
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
-  ScopedXdgDataHome scopedTrash(xdg);
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata first;
@@ -156,7 +124,6 @@ MICRONOTES_TEST(library_index_refresh_removes_trashed_folder_notes_from_sqlite) 
   MICRONOTES_REQUIRE(index.size() == 0);
 
   std::filesystem::remove_all(root);
-  std::filesystem::remove_all(xdg);
 }
 
 MICRONOTES_TEST(organization_lists_folders_tags_and_notes) {

@@ -93,6 +93,7 @@ MICRONOTES_TEST(editor_caps_undo_history) {
   micronotes::editor::MarkdownEditor editor;
   editor.setText("");
   for(int i = 0; i < 105; ++i) {
+    editor.breakUndoGroup();  // one deliberate edit each, not one typing run
     editor.insert("x");
   }
   int undoCount = 0;
@@ -101,6 +102,118 @@ MICRONOTES_TEST(editor_caps_undo_history) {
   }
   MICRONOTES_REQUIRE(undoCount == 100);
   MICRONOTES_REQUIRE(editor.text().size() == 5);
+}
+
+MICRONOTES_TEST(editor_coalesces_a_typing_run_into_one_undo_step) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("");
+  for(const char* c : {"h", "e", "l", "l", "o"}) editor.insert(c);
+  MICRONOTES_REQUIRE(editor.text() == "hello");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text().empty());
+  MICRONOTES_REQUIRE(!editor.undo());
+
+  // Backspacing is its own run, and a newline is its own step.
+  editor.setText("ab");
+  editor.erasePrevious();
+  editor.erasePrevious();
+  MICRONOTES_REQUIRE(editor.text().empty());
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "ab");
+
+  editor.setText("");
+  editor.insert("one");
+  editor.insert("\n");
+  editor.insert("two");
+  MICRONOTES_REQUIRE(editor.text() == "one\ntwo");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "one\n");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "one");
+}
+
+MICRONOTES_TEST(editor_breaks_the_typing_run_when_the_caret_moves) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("");
+  editor.insert("ab");
+  editor.moveCursor(0);
+  editor.insert("X");
+  MICRONOTES_REQUIRE(editor.text() == "Xab");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "ab");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text().empty());
+}
+
+MICRONOTES_TEST(editor_replaces_a_range_and_restores_it_on_undo) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("hello world");
+  editor.replaceRange(6, 11, "there");
+  MICRONOTES_REQUIRE(editor.text() == "hello there");
+  MICRONOTES_REQUIRE(editor.cursor() == 11);
+  editor.replaceRange(0, 0, "> ");
+  MICRONOTES_REQUIRE(editor.text() == "> hello there");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "hello there");
+  MICRONOTES_REQUIRE(editor.undo());
+  MICRONOTES_REQUIRE(editor.text() == "hello world");
+}
+
+MICRONOTES_TEST(editor_moves_and_erases_by_words) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("alpha beta-gamma delta");
+  editor.moveCursor(editor.text().size());
+  editor.moveWordLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 17);  // start of "delta"
+  editor.moveWordLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 11);  // start of "gamma"
+  editor.moveWordLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 10);  // the hyphen is its own run
+  editor.moveWordRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 11);  // back over the hyphen
+  editor.moveWordRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 16);  // end of "gamma"
+
+  editor.moveCursor(editor.text().size());
+  editor.erasePreviousWord();
+  MICRONOTES_REQUIRE(editor.text() == "alpha beta-gamma ");
+  editor.moveCursor(0);
+  editor.eraseNextWord();
+  MICRONOTES_REQUIRE(editor.text() == " beta-gamma ");
+}
+
+MICRONOTES_TEST(editor_extends_a_selection_with_shifted_movement) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("alpha beta\ngamma");
+  editor.moveCursor(0);
+  editor.moveWordRight(true);
+  MICRONOTES_REQUIRE(editor.hasSelection());
+  MICRONOTES_REQUIRE(editor.selectedText() == "alpha");
+  editor.moveLineEnd(true);
+  MICRONOTES_REQUIRE(editor.selectedText() == "alpha beta");
+  editor.moveLineDown(true);
+  MICRONOTES_REQUIRE(editor.selectedText() == "alpha beta\ngamma");
+  editor.moveDocumentStart(true);
+  MICRONOTES_REQUIRE(!editor.hasSelection());
+
+  // An unshifted arrow collapses the selection instead of stepping past it.
+  editor.selectRange(2, 6);
+  editor.moveLeft();
+  MICRONOTES_REQUIRE(editor.cursor() == 2);
+  MICRONOTES_REQUIRE(!editor.hasSelection());
+  editor.selectRange(2, 6);
+  editor.moveRight();
+  MICRONOTES_REQUIRE(editor.cursor() == 6);
+}
+
+MICRONOTES_TEST(editor_jumps_to_document_bounds) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("one\ntwo\nthree");
+  editor.moveCursor(5);
+  editor.moveDocumentStart();
+  MICRONOTES_REQUIRE(editor.cursor() == 0);
+  editor.moveDocumentEnd();
+  MICRONOTES_REQUIRE(editor.cursor() == editor.text().size());
 }
 
 MICRONOTES_TEST(editor_soft_wraps_by_words_without_changing_source_offsets) {
@@ -214,4 +327,16 @@ MICRONOTES_TEST(markdown_parser_covers_syntax_reference_blocks) {
   MICRONOTES_REQUIRE(quotes >= 2);
   MICRONOTES_REQUIRE(codeBlocks >= 2);
   MICRONOTES_REQUIRE(links >= 8);
+}
+
+MICRONOTES_TEST(editor_anchors_a_new_selection_at_the_caret_after_typing) {
+  micronotes::editor::MarkdownEditor editor;
+  editor.setText("alpha ");
+  editor.moveCursor(editor.text().size());
+  editor.insert("beta");
+  // Typing leaves no selection, so extending starts from where the caret is,
+  // not from wherever the anchor was last parked.
+  MICRONOTES_REQUIRE(!editor.hasSelection());
+  editor.moveWordLeft(true);
+  MICRONOTES_REQUIRE(editor.selectedText() == "beta");
 }
