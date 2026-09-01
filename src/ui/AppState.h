@@ -5,7 +5,7 @@
 #include "library/Library.h"
 #include "library/LibraryIndex.h"
 #include "library/Organization.h"
-#include "core/ui/ShellModel.h"
+#include "ui/WorkspaceModel.h"
 
 #include <filesystem>
 #include <optional>
@@ -13,12 +13,6 @@
 #include <vector>
 
 namespace micronotes::ui {
-
-// The pane/shell model lives in src/core so microagenda shares it verbatim.
-// Re-export it here so app code keeps writing ui::PaneMode rather than caring
-// which side of the core boundary the type came from.
-using microcore::ui::PaneMode;
-using microcore::ui::ShellModel;
 
 struct UiSelection {
   std::filesystem::path folder;
@@ -39,8 +33,8 @@ public:
   bool openOrCreateLibrary(const std::filesystem::path& root);
   bool hasLibrary() const;
   const std::filesystem::path& libraryRoot() const;
-  const ShellModel& shell() const;
-  ShellModel& shell();
+  const WorkspaceModel& workspace() const;
+  WorkspaceModel& workspace();
   const UiSelection& selection() const;
 
   void selectFolder(std::filesystem::path folder);
@@ -88,7 +82,7 @@ public:
   bool loadUiState(const std::filesystem::path& path);
 
 private:
-  ShellModel shell_;
+  WorkspaceModel workspace_;
   UiSelection selection_;
   std::optional<library::Library> library_;
   mutable std::optional<library::OrganizationService> organization_;

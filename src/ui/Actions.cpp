@@ -60,6 +60,10 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::PaneSplit,       "pane-split",     "View: split",                     "Ctrl+4",       "",              S::View, false, true},
   {ActionId::CyclePane,       "cycle-pane",     "Cycle the four views",            "Ctrl+L",       "",              S::View, false, true},
   {ActionId::ToggleTheme,     "theme",          "Toggle light and dark",           "Ctrl+Shift+L", "",              S::View, false, true},
+  {ActionId::ToggleSidebar,   "toggle-sidebar", "Show or hide the sidebar",        "Ctrl+Alt+Left","",              S::View, false, true},
+  {ActionId::ToggleNoteList,  "toggle-notes",   "Show or hide the note list",      "Ctrl+Alt+Down","",              S::View, false, true},
+  {ActionId::ToggleRightPanel,"toggle-right",   "Show or hide the outline panel",  "Ctrl+Alt+Right","",             S::View, false, true},
+  {ActionId::CycleRightPanel, "cycle-right",    "Outline or tags"      ,      "Ctrl+Alt+Up",  "",              S::View, false, true},
 }};
 
 // Named keys, so a chord can say "Enter" rather than a keycode. Only the keys

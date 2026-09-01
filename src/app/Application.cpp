@@ -2,6 +2,8 @@
 #include "app/Application.h"
 
 #include "app/PageView.h"
+#include "app/RightPanel.h"
+#include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
@@ -24,6 +26,7 @@
 #include "ui/Overlay.h"
 #include "ui/ShellLayout.h"
 #include "ui/Settings.h"
+#include "ui/TextUtil.h"
 #include "ui/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/TreeModel.h"
@@ -79,348 +82,15 @@ using micronotes::ui::fill;
 using micronotes::ui::hLine;
 using micronotes::ui::sdlRect;
 using micronotes::ui::stroke;
+using micronotes::ui::trimTitle;
+using micronotes::ui::splitLines;
+using micronotes::ui::ellipsize;
+using micronotes::ui::isRemoteTarget;
+using micronotes::ui::fileNameForMime;
+using micronotes::ui::splitTags;
+using micronotes::ui::joinTags;
 using micronotes::ui::theme;
 
-enum class UiAction {
-  Refresh,
-  NewNote,
-  RenameNote,
-  DeleteNote,
-  Save,
-  Tags,
-  PaneEditor,
-  PaneViewer,
-  PaneSplit
-};
-
-enum class FocusArea {
-  Folders,
-  Notes,
-  Editor,
-  Search,
-  Find,
-  Viewer,
-  TagEditor,
-  RenameNote,
-  RenameFolder
-};
-
-enum class ScrollDragTarget {
-  Live,
-  None,
-  Editor,
-  Viewer
-};
-
-enum class CursorKind {
-  Default,
-  Text,
-  Pointer,
-  ResizeHorizontal,
-  ResizeVertical
-};
-
-static const char* focusName(FocusArea focus) {
-  switch(focus) {
-    case FocusArea::Folders: return "Folders";
-    case FocusArea::Notes: return "Notes";
-    case FocusArea::Editor: return "Editor";
-    case FocusArea::Search: return "Search";
-    case FocusArea::Find: return "Find";
-    case FocusArea::Viewer: return "Viewer";
-    case FocusArea::TagEditor: return "TagEditor";
-    case FocusArea::RenameNote: return "RenameNote";
-    case FocusArea::RenameFolder: return "RenameFolder";
-  }
-  return "Unknown";
-}
-
-static bool inputDebugEnabled() {
-  static const bool enabled = [] {
-    const char* value = std::getenv("MICRONOTES_DEBUG_INPUT");
-    return value && *value && std::string_view(value) != "0";
-  }();
-  return enabled;
-}
-
-struct LinkRegion {
-  Rect rect;
-  std::string target;
-};
-
-struct ButtonRegion {
-  Rect rect;
-  UiAction action = UiAction::Refresh;
-};
-
-// One drawn line of the sidebar. The tree and the tag filter share a single
-// scrolling list, so there is one geometry to draw, one to hit-test, and one
-// thing to scroll.
-struct SidebarRow {
-  enum class Kind {
-    Tree,
-    SectionLabel,
-    Tag
-  };
-
-  Kind kind = Kind::Tree;
-  Rect rect;
-  std::string label;   // section labels only
-  // Only folder rows with something inside them get one; an empty rect means
-  // the whole row selects rather than expands.
-  Rect disclosure;
-  ui::TreeRow tree;
-  std::string tag;
-};
-
-struct SystemCursors {
-  SDL_Cursor* defaultCursor = nullptr;
-  SDL_Cursor* text = nullptr;
-  SDL_Cursor* pointer = nullptr;
-  SDL_Cursor* resizeHorizontal = nullptr;
-  SDL_Cursor* resizeVertical = nullptr;
-  CursorKind active = CursorKind::Default;
-
-  bool init() {
-    defaultCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
-    text = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
-    pointer = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
-    resizeHorizontal = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
-    resizeVertical = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
-    if(!defaultCursor || !text || !pointer || !resizeHorizontal || !resizeVertical) return false;
-    SDL_SetCursor(defaultCursor);
-    return true;
-  }
-
-  void destroy() {
-    if(defaultCursor) SDL_DestroyCursor(defaultCursor);
-    if(text) SDL_DestroyCursor(text);
-    if(pointer) SDL_DestroyCursor(pointer);
-    if(resizeHorizontal) SDL_DestroyCursor(resizeHorizontal);
-    if(resizeVertical) SDL_DestroyCursor(resizeVertical);
-    defaultCursor = nullptr;
-    text = nullptr;
-    pointer = nullptr;
-    resizeHorizontal = nullptr;
-    resizeVertical = nullptr;
-  }
-
-  SDL_Cursor* cursor(CursorKind kind) const {
-    switch(kind) {
-      case CursorKind::Text: return text;
-      case CursorKind::Pointer: return pointer;
-      case CursorKind::ResizeHorizontal: return resizeHorizontal;
-      case CursorKind::ResizeVertical: return resizeVertical;
-      case CursorKind::Default:
-      default: return defaultCursor;
-    }
-  }
-
-  void apply(CursorKind kind) {
-    if(kind == active) return;
-    if(SDL_Cursor* next = cursor(kind)) {
-      SDL_SetCursor(next);
-      active = kind;
-    }
-  }
-};
-
-static std::string trimTitle(std::string_view text) {
-  std::istringstream lines {std::string(text)};
-  std::string line;
-  while(std::getline(lines, line)) {
-    while(!line.empty() && (line.front() == '#' || std::isspace(static_cast<unsigned char>(line.front())))) {
-      line.erase(line.begin());
-    }
-    if(!line.empty()) return line.substr(0, 60);
-  }
-  return "Untitled";
-}
-
-static std::vector<std::string> splitLines(std::string_view text) {
-  std::vector<std::string> lines;
-  std::string current;
-  for(const char c : text) {
-    if(c == '\n') {
-      lines.push_back(current);
-      current.clear();
-    } else {
-      current.push_back(c);
-    }
-  }
-  lines.push_back(current);
-  return lines;
-}
-
-static std::string ellipsize(std::string text, std::size_t limit) {
-  if(text.size() <= limit) return text;
-  if(limit <= 3) return text.substr(0, limit);
-  return text.substr(0, limit - 3) + "...";
-}
-
-static bool isRemoteTarget(std::string_view target) {
-  return target.starts_with("http://") || target.starts_with("https://");
-}
-
-static std::string fileNameForMime(std::string_view mime) {
-  if(mime == "image/png") return "clipboard.png";
-  if(mime == "image/jpeg" || mime == "image/jpg") return "clipboard.jpg";
-  if(mime == "image/bmp") return "clipboard.bmp";
-  if(mime == "image/webp") return "clipboard.webp";
-  return "clipboard-image";
-}
-
-static std::vector<std::string> splitTags(std::string_view value) {
-  std::vector<std::string> tags;
-  std::set<std::string> seen;
-  std::istringstream in {std::string(value)};
-  std::string tag;
-  while(in >> tag) {
-    if(!tag.empty() && tag.front() == '#') tag.erase(tag.begin());
-    if(tag.empty() || seen.contains(tag)) continue;
-    seen.insert(tag);
-    tags.push_back(tag);
-  }
-  return tags;
-}
-
-static std::string joinTags(const std::vector<std::string>& tags) {
-  std::string out;
-  for(const auto& tag : tags) {
-    if(!out.empty()) out += " ";
-    out += tag;
-  }
-  return out;
-}
-
-static bool spawnDetached(const std::vector<std::string>& command) {
-  if(command.empty()) return false;
-  const pid_t pid = fork();
-  if(pid < 0) return false;
-  if(pid == 0) {
-    std::vector<char*> argv;
-    argv.reserve(command.size() + 1);
-    for(const auto& part : command) argv.push_back(const_cast<char*>(part.c_str()));
-    argv.push_back(nullptr);
-    execvp(argv[0], argv.data());
-    _exit(127);
-  }
-  return true;
-}
-
-// One wheel notch scrolls three lines in the editor and roughly three lines'
-// worth of pixels in the viewer, matching the platform convention.
-// Lines moved by PageUp/PageDown. A fixed value rather than the visible line
-// count because handleKey has no layout in scope; it matches a typical viewport.
-constexpr int kEditorPageLines = 20;
-
-constexpr float kEditorScrollLinesPerNotch = 3.0f;
-constexpr float kViewerScrollPixelsPerNotch = 42.0f;
-
-struct UiRuntime {
-  ui::AppState state;
-  editor::MarkdownEditor editor;
-  markdown::MarkdownParser parser;
-  PageView livePage;
-  // md4c documents for the blocks the live surface hands off, keyed by source.
-  std::map<std::string, markdown::Document> complexCache;
-  std::string cachedMarkdownSource;
-  std::optional<markdown::Document> cachedMarkdownDocument;
-  std::string cachedEditorRowsSource;
-  int cachedEditorRowsWidth = -1;
-  std::vector<editor::SoftWrapRow> cachedEditorRows;
-  FocusArea focus = FocusArea::Editor;
-  std::string loadedNoteId;
-  editor::TextField search;
-  library::SearchScope searchScope = library::SearchScope::All;
-  editor::TextField find;
-  editor::TextField tag;
-  editor::TextField rename;
-  editor::TextField folderRename;
-  std::string status;
-  std::vector<LinkRegion> linkRegions;
-  std::map<std::string, int> viewerAnchors;
-  std::vector<ButtonRegion> buttonRegions;
-  int noteCursor = 0;
-  int folderCursor = 0;
-  int editorScroll = 0;
-  // Rows the raw editor last had room for, so PageUp/PageDown match the view.
-  int editorVisibleRows = 20;
-  int viewerScroll = 0;
-  // Fractional remainder of a scroll gesture, in lines (editor) and pixels
-  // (viewer). A high-resolution wheel or a trackpad delivers deltas well below
-  // 1.0 per event; truncating each one to an int discarded them entirely, so
-  // slow gestures scrolled nothing at all and fast ones moved in visible jumps.
-  // Carrying the remainder across events makes the movement track the finger.
-  float editorScrollRemainder = 0.0f;
-  float viewerScrollRemainder = 0.0f;
-  Uint64 lastRefresh = 0;
-  float mouseX = -1;
-  float mouseY = -1;
-  ui::OverlayStack overlays;
-  // The mode the last computed layout settled in. Fed back into the next one so
-  // the compact breakpoint has hysteresis rather than flipping mid-drag.
-  ui::LayoutMode layoutMode = ui::LayoutMode::Regular;
-  // Which toggles each note has collapsed. A view preference, so it lives
-  // beside the library rather than in the `.md` file.
-  ui::FoldState folds;
-  // Which sidebar folders are open. Also a view preference, and also kept out
-  // of the library: a disclosure triangle must not touch a file.
-  ui::TreeModel tree;
-  std::vector<SidebarRow> sidebarRows;
-  // Last frame's sidebar rect, so keyboard navigation can scroll a row into
-  // view without recomputing the whole window layout.
-  Rect sidebarRect;
-  int sidebarScroll = 0;
-  int sidebarMaxScroll = 0;
-  bool creatingFolder = false;
-  bool draggingNote = false;
-  std::string draggingNoteId;
-  // Dragging a folder onto another re-parents it; the row under the pointer is
-  // the drop target, and is highlighted rather than merely guessed at.
-  bool draggingFolder = false;
-  std::filesystem::path draggingFolderPath;
-  std::optional<std::size_t> sidebarDropRow;
-  ScrollDragTarget scrollDragTarget = ScrollDragTarget::None;
-  float scrollDragOffsetY = 0.0f;
-  Rect searchScopeToggle;
-  // The breadcrumb trail above the page, recorded as it is drawn: a crumb is a
-  // folder to jump to, and the star at the end pins the note.
-  std::vector<std::pair<Rect, std::filesystem::path>> crumbs;
-  Rect favoriteButton;
-  bool resizingSidebar = false;
-  bool resizingNotes = false;
-  // Set while a drag inside a single-line field is extending its selection.
-  bool selectingFieldText = false;
-  std::size_t fieldSelectionAnchor = 0;
-
-  bool selectingEditorText = false;
-  std::size_t editorSelectionAnchor = 0;
-  Uint64 lastEditorClick = 0;
-  int editorClickCount = 0;
-  // Block multi-select, held as source offsets rather than block indices so an
-  // edit underneath it cannot silently re-point it at a different block.
-  bool blockSelectActive = false;
-  std::size_t blockSelectAnchor = 0;
-  std::size_t blockSelectFocus = 0;
-  bool draggingBlock = false;
-  std::size_t dragBlockAnchor = 0;
-  std::size_t dragBlockFocus = 0;
-  std::optional<std::size_t> blockDropOffset;
-  // Where the "/" that opened the slash menu sits, so committing can erase it.
-  std::size_t slashStart = 0;
-  // The gutter's insert button opens the same menu, but to add a block after
-  // this one rather than to rewrite the block the caret is in.
-  bool slashInserts = false;
-  std::size_t slashAfterBlock = 0;
-  bool revealEditorCursor = true;
-  // Caret rectangle in window coordinates, published to SDL each frame so the
-  // IME can position its candidate window. Zero-sized until the editor draws.
-  SDL_Rect caretRect {0, 0, 0, 0};
-  bool caretReported = false;
-  Uint64 lastEdit = 0;
-  Uint64 lastAutosaveAttempt = 0;
-};
 
 static bool saveCurrent(UiRuntime& ui, bool quiet = false);
 static void openDeleteNoteConfirm(UiRuntime& ui);
@@ -432,14 +102,8 @@ static void updateFindStatus(UiRuntime& ui);
 // rects. `ui.layoutMode` is both an input and an output: feeding the last mode
 // back in is what gives the compact breakpoint its hysteresis.
 static ShellLayout shellLayout(UiRuntime& ui, int width, int height) {
-  const auto& shell = ui.state.shell();
-  ShellLayoutInputs inputs;
-  inputs.windowWidth = static_cast<float>(width);
-  inputs.windowHeight = static_cast<float>(height);
-  inputs.sidebarWidth = static_cast<float>(shell.sidebarWidth);
-  inputs.noteListWidth = static_cast<float>(shell.noteListWidth);
-  inputs.previousMode = ui.layoutMode;
-  const ShellLayout layout = computeShellLayout(inputs);
+  const ShellLayout layout = computeShellLayout(ui.state.workspace().layoutInputs(
+    static_cast<float>(width), static_cast<float>(height), ui.layoutMode));
   ui.layoutMode = layout.mode;
   return layout;
 }
@@ -1110,14 +774,14 @@ static const char* paneModeName(ui::PaneMode mode) {
 
 static void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
   clearBlockSelection(ui);
-  ui.state.shell().paneMode = mode;
+  ui.state.workspace().paneMode = mode;
   ui.focus = mode == ui::PaneMode::Viewer ? FocusArea::Viewer : FocusArea::Editor;
   ui.revealEditorCursor = true;
   ui.status = paneModeName(mode);
 }
 
 static void cyclePaneMode(UiRuntime& ui) {
-  switch(ui.state.shell().paneMode) {
+  switch(ui.state.workspace().paneMode) {
     case ui::PaneMode::Live: setPaneMode(ui, ui::PaneMode::Editor); break;
     case ui::PaneMode::Editor: setPaneMode(ui, ui::PaneMode::Viewer); break;
     case ui::PaneMode::Viewer: setPaneMode(ui, ui::PaneMode::Split); break;
@@ -1180,15 +844,15 @@ static void performAction(UiRuntime& ui, UiAction action) {
       beginTagEdit(ui);
       break;
     case UiAction::PaneEditor:
-      ui.state.shell().paneMode = ui::PaneMode::Editor;
+      ui.state.workspace().paneMode = ui::PaneMode::Editor;
       ui.focus = FocusArea::Editor;
       break;
     case UiAction::PaneViewer:
-      ui.state.shell().paneMode = ui::PaneMode::Viewer;
+      ui.state.workspace().paneMode = ui::PaneMode::Viewer;
       ui.focus = FocusArea::Viewer;
       break;
     case UiAction::PaneSplit:
-      ui.state.shell().paneMode = ui::PaneMode::Split;
+      ui.state.workspace().paneMode = ui::PaneMode::Split;
       ui.focus = FocusArea::Editor;
       break;
   }
@@ -1292,6 +956,26 @@ static bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
     return false;
   }
 }
+
+static bool spawnDetached(const std::vector<std::string>& command) {
+  if(command.empty()) return false;
+  const pid_t pid = fork();
+  if(pid < 0) return false;
+  if(pid == 0) {
+    std::vector<char*> argv;
+    argv.reserve(command.size() + 1);
+    for(const auto& part : command) argv.push_back(const_cast<char*>(part.c_str()));
+    argv.push_back(nullptr);
+    execvp(argv[0], argv.data());
+    _exit(127);
+  }
+  return true;
+}
+
+// One wheel notch scrolls three lines in the editor and roughly three lines'
+// worth of pixels in the viewer, matching the platform convention.
+// Lines moved by PageUp/PageDown. A fixed value rather than the visible line
+// count because handleKey has no layout in scope; it matches a typical viewport.
 
 static bool hovered(const UiRuntime& ui, Rect rect) {
   return contains(rect, ui.mouseX, ui.mouseY);
@@ -1416,10 +1100,17 @@ static Rect viewerPageRect(Rect viewerRect) {
   return {viewerRect.x + 8.0f, viewerRect.y + 8.0f, viewerRect.w - 16.0f, viewerRect.h - 28.0f};
 }
 
+// A hidden panel has no edge to grab: its width is zero, so its right edge sits
+// on top of the next panel's left one and dragging there would resize a panel
+// nobody can see.
 static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
   if(y < layout.sidebar.y || y > layout.sidebar.y + layout.sidebar.h) return false;
-  return std::abs(x - (layout.sidebar.x + layout.sidebar.w)) <= 4.0f ||
-         std::abs(x - (layout.notes.x + layout.notes.w)) <= 4.0f;
+  const auto nearEdge = [&](const Rect& panel) {
+    return !ui::empty(panel) && std::abs(x - (panel.x + panel.w)) <= ui::kResizeGutterInflate + 1.0f;
+  };
+  return nearEdge(layout.sidebar) || nearEdge(layout.notes) ||
+         (!ui::empty(layout.rightPanel) &&
+          std::abs(x - layout.rightPanel.x) <= ui::kResizeGutterInflate + 1.0f);
 }
 
 static bool noteRowAt(const UiRuntime& ui, Rect notesRect, float x, float y) {
@@ -1954,10 +1645,10 @@ static void buildSidebarRows(UiRuntime& ui, Rect rect) {
     return drawn;
   };
 
-  if(!ui.state.shell().favorites.empty()) {
+  if(!ui.state.workspace().favorites.empty()) {
     const std::size_t before = ui.sidebarRows.size();
     pushLabel("FAVORITES");
-    if(pushNoteShortcuts(ui.state.shell().favorites, 8) == 0) {
+    if(pushNoteShortcuts(ui.state.workspace().favorites, 8) == 0) {
       // Every favourite has been deleted since; the heading would be a lie.
       ui.sidebarRows.resize(before);
       y -= kSidebarLabelHeight;
@@ -1981,10 +1672,10 @@ static void buildSidebarRows(UiRuntime& ui, Rect rect) {
     }
   }
 
-  if(!ui.state.shell().recents.empty()) {
+  if(!ui.state.workspace().recents.empty()) {
     const std::size_t before = ui.sidebarRows.size();
     pushLabel("RECENT");
-    if(pushNoteShortcuts(ui.state.shell().recents, 5) == 0) {
+    if(pushNoteShortcuts(ui.state.workspace().recents, 5) == 0) {
       ui.sidebarRows.resize(before);
       y -= kSidebarLabelHeight;
     }
@@ -2314,7 +2005,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 
   if(!contains(layout.content, x, y)) return CursorKind::Default;
 
-  if(ui.state.shell().paneMode == ui::PaneMode::Live) {
+  if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
     if(scrollbarHit(ui.livePage.pageRect(), ui.livePage.scroll(), ui.livePage.maxScroll(), x, y)) return CursorKind::Pointer;
     if(!ui.livePage.linkAt(x, y).empty()) return CursorKind::Pointer;
     if(ui.livePage.gutterAt(x, y) || !ui.livePage.toolbarAt(x, y).empty()) return CursorKind::Pointer;
@@ -2327,9 +2018,9 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   Rect viewerRect = layout.content;
   bool hasEditor = false;
   bool hasViewer = false;
-  if(ui.state.shell().paneMode == ui::PaneMode::Editor) {
+  if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
     hasEditor = true;
-  } else if(ui.state.shell().paneMode == ui::PaneMode::Viewer) {
+  } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
     hasViewer = true;
   } else {
     hasEditor = true;
@@ -2662,7 +2353,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     }
     if(doc.blocks.empty()) {
       drawEmptyMessage(text, "Nothing to read yet", "This note has no text in it.", page,
-                       ui.state.shell().paneMode == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
+                       ui.state.workspace().paneMode == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
     }
   }
   drawVerticalScrollbar(renderer, page, ui.viewerScroll, maxScroll);
@@ -2819,7 +2510,7 @@ static void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
   // Three anchors and the way to the rest. The line used to name a dozen keys
   // and be truncated before it finished; every one of them is in F1 now, which
   // can hold them all and be searched.
-  std::string help = std::string(paneModeName(ui.state.shell().paneMode)) +
+  std::string help = std::string(paneModeName(ui.state.workspace().paneMode)) +
     "   " + ui::keysFor(ui::ActionId::GoToNote) + " Go to note" +
     "   " + ui::keysFor(ui::ActionId::CommandPalette) + " Commands" +
     "   " + ui::keysFor(ui::ActionId::Shortcuts) + " Shortcuts";
@@ -2896,10 +2587,15 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   ui.linkRegions.clear();
   ui.buttonRegions.clear();
 
-  drawSidebar(renderer, text, ui, layout.sidebar);
-  drawNotes(renderer, text, ui, layout.notes);
-  fill(renderer, {layout.sidebar.x + layout.sidebar.w, 0, 1, layout.sidebar.h}, theme().hairline);
-  fill(renderer, {layout.notes.x + layout.notes.w, 0, 1, layout.notes.h}, theme().hairline);
+  if(!ui::empty(layout.sidebar)) drawSidebar(renderer, text, ui, layout.sidebar);
+  if(!ui::empty(layout.notes)) drawNotes(renderer, text, ui, layout.notes);
+  // One rule per panel that is actually there. A hidden panel is zero wide, and
+  // its rule would land on the edge of whatever took its place.
+  for(const Rect& panel : {layout.sidebar, layout.notes}) {
+    if(ui::empty(panel)) continue;
+    fill(renderer, {panel.x + panel.w, 0, 1, panel.h}, theme().hairline);
+  }
+  if(!ui::empty(layout.rightPanel)) drawRightPanel(renderer, text, ui, layout.rightPanel);
   if(!ui.state.hasLibrary()) {
     fill(renderer, layout.content, theme().editorBg);
     // The one screen someone can arrive at knowing nothing, so it says what
@@ -2921,11 +2617,11 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     // above whichever pane is showing it.
     const Rect content = layout.content;
     drawBreadcrumbs(renderer, text, ui, layout.crumbs);
-    if(ui.state.shell().paneMode == ui::PaneMode::Live) {
+    if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
       drawLive(renderer, text, ui, content);
-    } else if(ui.state.shell().paneMode == ui::PaneMode::Editor) {
+    } else if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
       drawEditor(renderer, text, ui, content);
-    } else if(ui.state.shell().paneMode == ui::PaneMode::Viewer) {
+    } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
       drawViewer(renderer, text, images, ui, content);
     } else {
       const float split = content.w / 2.0f;
@@ -3454,6 +3150,10 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "cycle-pane") cyclePaneMode(ui);
   else if(id == "find") focusFindInNote(ui);
   else if(id == "search") focusSearchAllNotes(ui);
+  else if(id == "toggle-sidebar") togglePanel(ui, &ui::WorkspaceModel::sidebarVisible, "Sidebar");
+  else if(id == "toggle-notes") togglePanel(ui, &ui::WorkspaceModel::noteListVisible, "Note list");
+  else if(id == "toggle-right") togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");
+  else if(id == "cycle-right") cycleRightPanel(ui);
 }
 
 static void openDeleteNoteConfirm(UiRuntime& ui) {
@@ -3588,7 +3288,7 @@ static void handleText(UiRuntime& ui, const char* input) {
     ui.revealEditorCursor = true;
     // "/" opens the block inserter, but only where a block could start: mid-word
     // slashes belong to paths and URLs.
-    if(ui.state.shell().paneMode == ui::PaneMode::Live && std::string_view(input) == "/") {
+    if(ui.state.workspace().paneMode == ui::PaneMode::Live && std::string_view(input) == "/") {
       const std::size_t slash = ui.editor.cursor() - 1;
       const char before = slash == 0 ? '\n' : ui.editor.text()[slash - 1];
       if(before == '\n' || before == ' ' || before == '\t') openSlashMenu(ui, slash);
@@ -3623,6 +3323,25 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
               << " field_selection=" << (focusedField(ui) != nullptr && focusedField(ui)->editor.hasSelection())
               << "\n";
   }
+  // Actions whose meaning does not depend on where the caret is are dispatched
+  // straight from the binding table, so the chord lives in exactly one place.
+  // The chain below is what is left to move: those branches read the focus, the
+  // selection or the pane before deciding what the key meant, and each has to
+  // be untangled before it can join this list.
+  static constexpr ui::ActionId kBoundHere[] = {
+    ui::ActionId::ToggleSidebar,
+    ui::ActionId::ToggleNoteList,
+    ui::ActionId::ToggleRightPanel,
+    ui::ActionId::CycleRightPanel,
+  };
+  const ui::KeyChord pressed {key, ctrl, shift, alt};
+  if(const auto* bound = ui::findActionForChord(pressed)) {
+    if(std::find(std::begin(kBoundHere), std::end(kBoundHere), bound->id) != std::end(kBoundHere)) {
+      performCommand(ui, std::string(bound->name));
+      return;
+    }
+  }
+
   if(key == SDLK_F1) {
     openShortcutHelp(ui);
   } else if(shortcut(SDLK_COMMA, SDL_SCANCODE_COMMA)) {
@@ -3769,7 +3488,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     ui.creatingFolder = false;
     // In the live surface Esc steps out of the text and selects the block
     // itself; a second Esc puts the caret back.
-    if(ui.focus == FocusArea::Editor && ui.state.shell().paneMode == ui::PaneMode::Live) {
+    if(ui.focus == FocusArea::Editor && ui.state.workspace().paneMode == ui::PaneMode::Live) {
       if(ui.blockSelectActive) clearBlockSelection(ui);
       else selectBlockAtCursor(ui);
     }
@@ -3815,7 +3534,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       clearBlockSelection(ui);
     }
   } else if(ui.focus == FocusArea::Editor) {
-    const bool live = ui.state.shell().paneMode == ui::PaneMode::Live;
+    const bool live = ui.state.workspace().paneMode == ui::PaneMode::Live;
     // One visual row up or down: the live surface wraps, the raw editor does not.
     const auto rowStep = [&](int rows) {
       return live ? ui.livePage.rowRelative(ui.editor.cursor(), rows) : ui.editor.cursor();
@@ -3915,6 +3634,14 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
   const ShellLayout layout = shellLayout(ui, width, height);
 
+  // The right panel owns everything inside it, including its own background:
+  // without that, a click between two outline rows would fall through to the
+  // page and move the caret somewhere the reader never pointed at.
+  if(button == SDL_BUTTON_LEFT && !ui::empty(layout.rightPanel) &&
+     handleRightPanelClick(ui, layout.rightPanel, x, y)) {
+    return;
+  }
+
   if(button == SDL_BUTTON_MIDDLE) {
     if(contains(layout.notes, x, y) && y >= layout.notes.y + 12 && y <= layout.notes.y + 46) {
       ui.focus = FocusArea::Search;
@@ -3924,7 +3651,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
       return;
     }
-    if(contains(layout.content, x, y) && ui.state.shell().paneMode == ui::PaneMode::Live) {
+    if(contains(layout.content, x, y) && ui.state.workspace().paneMode == ui::PaneMode::Live) {
       ui.focus = FocusArea::Editor;
       ui.editor.moveCursor(ui.livePage.offsetAt(x, y));
       ui.revealEditorCursor = true;
@@ -3933,8 +3660,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     if(contains(layout.content, x, y)) {
       Rect editorRect = layout.content;
-      bool editorAtPoint = ui.state.shell().paneMode == ui::PaneMode::Editor;
-      if(ui.state.shell().paneMode == ui::PaneMode::Split) {
+      bool editorAtPoint = ui.state.workspace().paneMode == ui::PaneMode::Editor;
+      if(ui.state.workspace().paneMode == ui::PaneMode::Split) {
         editorRect.w = layout.content.w / 2.0f;
         editorAtPoint = contains(editorRect, x, y);
       }
@@ -3960,7 +3687,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     return;
   }
 
-  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.shell().paneMode == ui::PaneMode::Live) {
+  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode == ui::PaneMode::Live) {
     const int maxScroll = ui.livePage.maxScroll();
     const auto thumb = scrollbarThumb(ui.livePage.pageRect(), ui.livePage.scroll(), maxScroll);
     if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
@@ -3971,14 +3698,14 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
   }
 
-  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.shell().paneMode != ui::PaneMode::Live) {
+  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode != ui::PaneMode::Live) {
     Rect editorRect = layout.content;
     Rect viewerRect = layout.content;
     bool hasEditor = false;
     bool hasViewer = false;
-    if(ui.state.shell().paneMode == ui::PaneMode::Editor) {
+    if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
       hasEditor = true;
-    } else if(ui.state.shell().paneMode == ui::PaneMode::Viewer) {
+    } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
       hasViewer = true;
     } else {
       hasEditor = true;
@@ -4132,10 +3859,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   if(contains(layout.content, x, y)) {
     // The live surface's own chrome sits above the text, so a link underneath it
     // must not swallow the click.
-    const bool overLiveChrome = ui.state.shell().paneMode == ui::PaneMode::Live &&
+    const bool overLiveChrome = ui.state.workspace().paneMode == ui::PaneMode::Live &&
                                 (ui.livePage.gutterAt(x, y).has_value() || !ui.livePage.toolbarAt(x, y).empty() ||
                                  ui.livePage.foldAt(x, y).has_value() || ui.livePage.copyButtonAt(x, y).has_value());
-    if(ui.state.shell().paneMode != ui::PaneMode::Editor && !overLiveChrome) {
+    if(ui.state.workspace().paneMode != ui::PaneMode::Editor && !overLiveChrome) {
       for(const auto& link : ui.linkRegions) {
         if(contains(link.rect, x, y)) {
           const auto target = link.target;
@@ -4188,7 +3915,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         }
       }
     }
-    if(ui.state.shell().paneMode == ui::PaneMode::Live) {
+    if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
       ui.focus = FocusArea::Editor;
       if(button == SDL_BUTTON_RIGHT) {
         if(const auto index = ui.livePage.blockAt(x, y)) {
@@ -4308,12 +4035,12 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       }
       return;
     }
-    if(ui.state.shell().paneMode == ui::PaneMode::Viewer) ui.focus = FocusArea::Viewer;
-    else if(ui.state.shell().paneMode == ui::PaneMode::Split && x >= layout.content.x + layout.content.w / 2.0f) ui.focus = FocusArea::Viewer;
+    if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) ui.focus = FocusArea::Viewer;
+    else if(ui.state.workspace().paneMode == ui::PaneMode::Split && x >= layout.content.x + layout.content.w / 2.0f) ui.focus = FocusArea::Viewer;
     else {
       ui.focus = FocusArea::Editor;
       Rect editorRect = layout.content;
-      if(ui.state.shell().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+      if(ui.state.workspace().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
       placeEditorCursor(text, ui, editorRect, x, y);
       ui.selectingEditorText = true;
       ui.editorSelectionAnchor = ui.editor.cursor();
@@ -4414,6 +4141,13 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       options.theme = ui::themeModeFromName(argv[++i]);
     } else if(arg == "--scale" && i + 1 < argc) {
       options.scale = static_cast<float>(std::atof(argv[++i]));
+    } else if(arg == "--panels" && i + 1 < argc) {
+      // A comma-separated list of the panels to show, so a capture pins an
+      // arrangement rather than inheriting whatever the library was left in.
+      const std::string value = argv[++i];
+      options.showSidebar = value.find("sidebar") != std::string::npos;
+      options.showNoteList = value.find("notes") != std::string::npos;
+      options.showRightPanel = value.find("right") != std::string::npos;
     } else if(arg == "--pane" && i + 1 < argc) {
       const std::string value = argv[++i];
       if(value == "editor" || value == "raw") options.paneMode = 0;
@@ -4455,11 +4189,14 @@ int run(ApplicationOptions options) {
     }
   }
   if(options.paneMode) {
-    ui.state.shell().paneMode = *options.paneMode == 0 ? ui::PaneMode::Editor
+    ui.state.workspace().paneMode = *options.paneMode == 0 ? ui::PaneMode::Editor
       : *options.paneMode == 1 ? ui::PaneMode::Viewer
       : *options.paneMode == 2 ? ui::PaneMode::Split
       : ui::PaneMode::Live;
   }
+  if(options.showSidebar) ui.state.workspace().sidebarVisible = *options.showSidebar;
+  if(options.showNoteList) ui.state.workspace().noteListVisible = *options.showNoteList;
+  if(options.showRightPanel) ui.state.workspace().rightPanelVisible = *options.showRightPanel;
   if(!attachFromCli(ui, options.attachPath)) return 1;
   if(options.headless) return 0;
 
@@ -4599,13 +4336,13 @@ int run(ApplicationOptions options) {
         } else if(ui.draggingBlock) {
           ui.blockDropOffset = ui.livePage.dropOffsetAt(event.motion.y);
         } else if(ui.selectingEditorText) {
-          if(ui.state.shell().paneMode == ui::PaneMode::Live) {
+          if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
             ui.editor.selectRange(ui.editorSelectionAnchor, ui.livePage.offsetAt(event.motion.x, event.motion.y));
             ui.revealEditorCursor = true;
           } else {
             const ShellLayout layout = shellLayout(ui, width, height);
             Rect editorRect = layout.content;
-            if(ui.state.shell().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+            if(ui.state.workspace().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
             const auto cursor = editorIndexAtPoint(text, ui, editorRect, event.motion.x, event.motion.y);
             ui.editor.selectRange(ui.editorSelectionAnchor, cursor);
             ui.revealEditorCursor = true;
@@ -4616,14 +4353,14 @@ int run(ApplicationOptions options) {
             ui.livePage.setScroll(scrollFromThumbY(ui.livePage.pageRect(), event.motion.y, ui.scrollDragOffsetY, ui.livePage.maxScroll()));
           } else if(ui.scrollDragTarget == ScrollDragTarget::Editor) {
             Rect editorRect = layout.content;
-            if(ui.state.shell().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+            if(ui.state.workspace().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
             Rect writing {editorRect.x + 8, editorRect.y + 8, editorRect.w - 16, editorRect.h - 28};
             const int maxScroll = editorMaxScroll(text, ui, editorRect);
             ui.editorScroll = scrollFromThumbY(writing, event.motion.y, ui.scrollDragOffsetY, maxScroll);
             ui.revealEditorCursor = false;
           } else if(ui.scrollDragTarget == ScrollDragTarget::Viewer) {
             Rect viewerRect = layout.content;
-            if(ui.state.shell().paneMode == ui::PaneMode::Split) {
+            if(ui.state.workspace().paneMode == ui::PaneMode::Split) {
               const float split = layout.content.w / 2.0f;
               viewerRect = {layout.content.x + split, layout.content.y, layout.content.w - split, layout.content.h};
             }
@@ -4638,10 +4375,10 @@ int run(ApplicationOptions options) {
                                 ? row
                                 : std::optional<std::size_t> {};
         } else if(ui.resizingSidebar) {
-          ui.state.shell().sidebarWidth = std::clamp(static_cast<int>(event.motion.x), 150, std::max(150, width - 520));
+          ui.state.workspace().sidebarWidth = std::clamp(static_cast<int>(event.motion.x), 150, std::max(150, width - 520));
         } else if(ui.resizingNotes) {
           const ShellLayout layout = shellLayout(ui, width, height);
-          ui.state.shell().noteListWidth = std::clamp(static_cast<int>(event.motion.x - layout.sidebar.w), 190, std::max(190, width - static_cast<int>(layout.sidebar.w) - 320));
+          ui.state.workspace().noteListWidth = std::clamp(static_cast<int>(event.motion.x - layout.sidebar.w), 190, std::max(190, width - static_cast<int>(layout.sidebar.w) - 320));
         }
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.overlays.active()) {
@@ -4653,7 +4390,7 @@ int run(ApplicationOptions options) {
         // The tree can be taller than the window, so the pointer's column
         // decides where a wheel goes before the pane mode does.
         ui.sidebarScroll = std::clamp(ui.sidebarScroll - static_cast<int>(event.wheel.y * 48), 0, ui.sidebarMaxScroll);
-      } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.shell().paneMode == ui::PaneMode::Live) {
+      } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.workspace().paneMode == ui::PaneMode::Live) {
         ui.livePage.setScroll(ui.livePage.scroll() - static_cast<int>(event.wheel.y * 60));
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
         perf::addCounter(perf::CounterId::InputWheelEvents);
@@ -4662,9 +4399,9 @@ int run(ApplicationOptions options) {
         Rect viewerRect = layout.content;
         bool wheelEditor = false;
         bool wheelViewer = false;
-        if(ui.state.shell().paneMode == ui::PaneMode::Editor) {
+        if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
           wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Editor;
-        } else if(ui.state.shell().paneMode == ui::PaneMode::Viewer) {
+        } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
           wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Viewer;
         } else {
           editorRect.w = layout.content.w / 2.0f;

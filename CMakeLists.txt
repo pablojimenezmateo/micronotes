@@ -170,9 +170,12 @@ set(MICRONOTES_APP_SOURCES
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
+  src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
+  src/ui/TextUtil.cpp
   src/ui/Theme.cpp
+  src/ui/WorkspaceModel.cpp
   src/ui/TreeModel.cpp
 )
 
@@ -195,6 +198,7 @@ add_executable(micronotes
   src/app/main.cpp
   src/app/Application.cpp
   src/app/PageView.cpp
+  src/app/RightPanel.cpp
   src/ui/Draw.cpp
   src/ui/Fonts.cpp
   src/ui/Overlay.cpp
@@ -228,12 +232,14 @@ add_executable(micronotes_tests
   tests/LayoutTests.cpp
   tests/LibraryTests.cpp
   tests/MarkdownParserTests.cpp
+  tests/OutlineTests.cpp
   tests/PathUtilsTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/ShellLayoutTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TextFieldTests.cpp
+  tests/WorkspaceModelTests.cpp
   tests/WrappedLinesTests.cpp
 )
 target_include_directories(micronotes_tests PRIVATE src tests)

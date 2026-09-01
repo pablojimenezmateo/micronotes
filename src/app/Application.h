@@ -27,6 +27,11 @@ struct ApplicationOptions {
   std::optional<int> paneMode;
   std::string selectTitle;
   std::string openOverlay;
+  // Which panels a captured frame should show, so a screenshot can pin an
+  // arrangement the persisted state does not happen to be in.
+  std::optional<bool> showSidebar;
+  std::optional<bool> showNoteList;
+  std::optional<bool> showRightPanel;
 };
 
 int run(ApplicationOptions options);

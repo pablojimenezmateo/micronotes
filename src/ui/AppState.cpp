@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -61,12 +62,12 @@ const std::filesystem::path& AppState::libraryRoot() const {
   return library_ ? library_->root() : empty;
 }
 
-const ShellModel& AppState::shell() const {
-  return shell_;
+const WorkspaceModel& AppState::workspace() const {
+  return workspace_;
 }
 
-ShellModel& AppState::shell() {
-  return shell_;
+WorkspaceModel& AppState::workspace() {
+  return workspace_;
 }
 
 const UiSelection& AppState::selection() const {
@@ -303,23 +304,23 @@ bool AppState::updateSelectedTags(const std::vector<std::string>& tags) {
 }
 
 bool AppState::favorite(std::string_view noteId) const {
-  return std::find(shell_.favorites.begin(), shell_.favorites.end(), noteId) != shell_.favorites.end();
+  return std::find(workspace_.favorites.begin(), workspace_.favorites.end(), noteId) != workspace_.favorites.end();
 }
 
 bool AppState::toggleFavorite(const std::string& noteId) {
   if(noteId.empty()) return false;
-  const auto found = std::find(shell_.favorites.begin(), shell_.favorites.end(), noteId);
-  if(found != shell_.favorites.end()) {
-    shell_.favorites.erase(found);
+  const auto found = std::find(workspace_.favorites.begin(), workspace_.favorites.end(), noteId);
+  if(found != workspace_.favorites.end()) {
+    workspace_.favorites.erase(found);
     return false;
   }
-  shell_.favorites.push_back(noteId);
+  workspace_.favorites.push_back(noteId);
   return true;
 }
 
 void AppState::noteOpened(const std::string& noteId) {
   if(noteId.empty()) return;
-  auto& recents = shell_.recents;
+  auto& recents = workspace_.recents;
   recents.erase(std::remove(recents.begin(), recents.end(), noteId), recents.end());
   recents.insert(recents.begin(), noteId);
   if(recents.size() > 12) recents.resize(12);
@@ -343,9 +344,16 @@ bool AppState::refreshLibrary() {
 
 bool AppState::saveUiState(const std::filesystem::path& path) const {
   std::ostringstream out;
-  out << "pane=" << static_cast<int>(shell_.paneMode) << "\n";
-  out << "sidebar=" << shell_.sidebarWidth << "\n";
-  out << "notelist=" << shell_.noteListWidth << "\n";
+  out << "pane=" << static_cast<int>(workspace_.paneMode) << "\n";
+  // Rounded on the way out: an older binary parses these with from_chars into
+  // an int, and "240.5" would make it fall back to its default instead.
+  out << "sidebar=" << static_cast<int>(std::lround(workspace_.sidebarWidth)) << "\n";
+  out << "notelist=" << static_cast<int>(std::lround(workspace_.noteListWidth)) << "\n";
+  out << "rightpanel=" << static_cast<int>(std::lround(workspace_.rightPanelWidth)) << "\n";
+  out << "panel_sidebar=" << (workspace_.sidebarVisible ? 1 : 0) << "\n";
+  out << "panel_notelist=" << (workspace_.noteListVisible ? 1 : 0) << "\n";
+  out << "panel_right=" << (workspace_.rightPanelVisible ? 1 : 0) << "\n";
+  out << "right_view=" << rightPanelViewName(workspace_.rightPanelView) << "\n";
   out << "folder=" << selection_.folder.generic_string() << "\n";
   out << "tag=" << selection_.tag << "\n";
   out << "note=" << selection_.noteId << "\n";
@@ -355,8 +363,8 @@ bool AppState::saveUiState(const std::filesystem::path& path) const {
   out << "page_width=" << pageWidthName(pageWidth()) << "\n";
   // One line each rather than a delimited list: a note id never contains a
   // newline, and any other separator would eventually appear inside one.
-  for(const auto& id : shell_.favorites) out << "favorite=" << id << "\n";
-  for(const auto& id : shell_.recents) out << "recent=" << id << "\n";
+  for(const auto& id : workspace_.favorites) out << "favorite=" << id << "\n";
+  for(const auto& id : workspace_.recents) out << "recent=" << id << "\n";
   return platform::writeFileDurably(path, out.str());
 }
 
@@ -364,8 +372,13 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
   // Cleared before the file is even opened: this is "the view state is now
   // whatever that file says", and a library with no state file of its own must
   // not inherit the favorites and the open note of the one before it.
-  shell_.favorites.clear();
-  shell_.recents.clear();
+  workspace_.favorites.clear();
+  workspace_.recents.clear();
+  // A file written before panels could be hidden says nothing about them, and
+  // the arrangement it was written under is the one the defaults describe.
+  workspace_.sidebarVisible = true;
+  workspace_.noteListVisible = true;
+  workspace_.rightPanelVisible = false;
   selection_ = {};
   std::ifstream in(path);
   if(!in) return false;
@@ -384,21 +397,26 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
     const auto key = line.substr(0, eq);
     const auto value = line.substr(eq + 1);
     if(key == "pane") {
-      const int mode = parseInt(value, static_cast<int>(shell_.paneMode));
+      const int mode = parseInt(value, static_cast<int>(workspace_.paneMode));
       if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
-        shell_.paneMode = static_cast<PaneMode>(mode);
+        workspace_.paneMode = static_cast<PaneMode>(mode);
       }
     }
-    else if(key == "sidebar") shell_.sidebarWidth = parseInt(value, shell_.sidebarWidth);
-    else if(key == "notelist") shell_.noteListWidth = parseInt(value, shell_.noteListWidth);
+    else if(key == "sidebar") workspace_.sidebarWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.sidebarWidth)));
+    else if(key == "notelist") workspace_.noteListWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.noteListWidth)));
+    else if(key == "rightpanel") workspace_.rightPanelWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.rightPanelWidth)));
+    else if(key == "panel_sidebar") workspace_.sidebarVisible = parseInt(value, 1) != 0;
+    else if(key == "panel_notelist") workspace_.noteListVisible = parseInt(value, 1) != 0;
+    else if(key == "panel_right") workspace_.rightPanelVisible = parseInt(value, 0) != 0;
+    else if(key == "right_view") workspace_.rightPanelView = rightPanelViewFromName(value);
     else if(key == "folder") selection_.folder = value;
     else if(key == "tag") selection_.tag = value;
     else if(key == "note") selection_.noteId = value;
     else if(key == "theme") setThemeMode(themeModeFromName(value));
     else if(key == "text_size") setTextSize(textSizeFromName(value));
     else if(key == "page_width") setPageWidth(pageWidthFromName(value));
-    else if(key == "favorite" && !value.empty()) shell_.favorites.push_back(value);
-    else if(key == "recent" && !value.empty()) shell_.recents.push_back(value);
+    else if(key == "favorite" && !value.empty()) workspace_.favorites.push_back(value);
+    else if(key == "recent" && !value.empty()) workspace_.recents.push_back(value);
     else if(key == "search_scope") {
       const int scope = parseInt(value, static_cast<int>(selection_.searchScope));
       if(scope >= static_cast<int>(library::SearchScope::All) && scope <= static_cast<int>(library::SearchScope::Content)) {

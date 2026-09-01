@@ -98,17 +98,17 @@ MICRONOTES_TEST(ui_state_load_does_not_inherit_the_previous_library) {
   const auto statePath = dir / "ui.state";
 
   AppState state;
-  state.shell().favorites.push_back("note-a");
+  state.workspace().favorites.push_back("note-a");
   state.selectNote("note-a");
   MICRONOTES_REQUIRE(state.saveUiState(statePath));
   MICRONOTES_REQUIRE(state.loadUiState(statePath));
-  MICRONOTES_REQUIRE(state.shell().favorites.size() == 1);
+  MICRONOTES_REQUIRE(state.workspace().favorites.size() == 1);
 
   // A library with no state file of its own opens empty. Without this, opening
   // one from the settings dialog would show the favorites - and the open note -
   // of the library just left.
   MICRONOTES_REQUIRE(!state.loadUiState(dir / "missing.state"));
-  MICRONOTES_REQUIRE(state.shell().favorites.empty());
+  MICRONOTES_REQUIRE(state.workspace().favorites.empty());
   MICRONOTES_REQUIRE(state.selection().noteId.empty());
 
   std::filesystem::remove_all(dir);

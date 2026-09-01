@@ -59,6 +59,10 @@ enum class ActionId {
   PaneSplit,
   CyclePane,
   ToggleTheme,
+  ToggleSidebar,
+  ToggleNoteList,
+  ToggleRightPanel,
+  CycleRightPanel,
 
   Count
 };
