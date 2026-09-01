@@ -76,13 +76,18 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
 
     const float textLeft = slot.rect.x + ui::kTabClosePadding + 4.0f;
     const int room = static_cast<int>(slot.close.x - textLeft - 4.0f);
-    text.draw(ui::ellipsizeToWidth(text, titles[slot.index], room, style), textLeft, slot.rect.y + 7.0f,
-              active ? theme().text : theme().muted, style);
+    const auto shown = ui::ellipsizeToWidth(text, titles[slot.index], room, style);
+    text.draw(shown, textLeft, slot.rect.y + 7.0f, active ? theme().text : theme().muted, style);
+    // A tab only says what it is when the title did not fit. Repeating a title
+    // that is already legible is noise.
+    if(shown != titles[slot.index]) ui.offerTooltip(slot.rect, titles[slot.index]);
     // The close button appears on the tab you are pointing at and on the one
     // you are reading; a strip of crosses is a strip that reads as a warning.
     if(active || hot) {
       const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.mouseX, ui.mouseY);
       drawCross(renderer, slot.close, overClose ? theme().text : theme().dim);
+      // Offered after the tab's own, so the innermost control wins.
+      ui.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
     }
   }
   ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h - 1.0f, theme().hairline);

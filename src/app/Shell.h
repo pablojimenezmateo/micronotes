@@ -16,6 +16,7 @@
 #include "ui/Overlay.h"
 #include "ui/Rect.h"
 #include "ui/ShellLayout.h"
+#include "ui/Tooltip.h"
 #include "ui/TreeModel.h"
 
 #include <SDL3/SDL.h>
@@ -91,7 +92,13 @@ inline const char* focusName(FocusArea focus) {
     case FocusArea::TagEditor: return "TagEditor";
     case FocusArea::RenameNote: return "RenameNote";
     case FocusArea::RenameFolder: return "RenameFolder";
-  }
+  // A note's icon, or a drawn mark when no emoji face is installed.
+void drawNoteIcon(SDL_Renderer* renderer, ui::TextRenderer& text, std::string_view icon, Rect box, SDL_Color color);
+
+// What the status bar calls the current pane mode.
+const char* paneModeName(ui::PaneMode mode);
+
+}
   return "Unknown";
 }
 
@@ -248,6 +255,21 @@ struct UiRuntime {
     std::string noteId;
   };
   std::vector<BacklinkRow> backlinkRows;
+  // What the pointer is resting on. Cleared at the start of a frame and set by
+  // whichever surface the pointer is over, so exactly one is ever showing.
+  ui::HoverTooltip tooltip;
+
+  // Offers a tooltip for `control` when the pointer is inside it. The last
+  // caller wins, which is the innermost surface: a tooltip on a tab's close
+  // button should beat the one on the tab.
+  bool hovered(Rect control) const {
+    return ui::contains(control, mouseX, mouseY);
+  }
+
+  void offerTooltip(Rect control, std::string text) {
+    if(!ui::contains(control, mouseX, mouseY)) return;
+    tooltip = {std::move(text), control};
+  }
   // The mode the last computed layout settled in. Fed back into the next one so
   // the compact breakpoint has hysteresis rather than flipping mid-drag.
   ui::LayoutMode layoutMode = ui::LayoutMode::Regular;
@@ -326,4 +348,5 @@ struct UiRuntime {
     if(!state.saveSelectedNoteRecovery(editor.text())) status = "Recovery save failed";
   }
 };
+
 }

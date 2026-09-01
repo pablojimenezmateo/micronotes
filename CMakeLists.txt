@@ -176,6 +176,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/ShellLayout.cpp
   src/ui/Tabs.cpp
   src/ui/TextUtil.cpp
+  src/ui/Tooltip.cpp
   src/ui/WikiLink.cpp
   src/ui/Theme.cpp
   src/ui/WorkspaceModel.cpp
@@ -201,6 +202,7 @@ add_executable(micronotes
   src/app/main.cpp
   src/app/Application.cpp
   src/app/PageView.cpp
+  src/app/Chrome.cpp
   src/app/ContextMenus.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
@@ -227,6 +229,7 @@ endif()
 
 add_executable(micronotes_tests
   tests/TestMain.cpp
+  tests/TooltipTests.cpp
   tests/TreeModelTests.cpp
   tests/ActionsTests.cpp
   tests/AppStateTests.cpp

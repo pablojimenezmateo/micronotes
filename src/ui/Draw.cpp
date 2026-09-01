@@ -59,6 +59,17 @@ void drawSurface(SDL_Renderer* renderer, Rect rect) {
   drawSurface(renderer, rect, theme().surface, theme().hairline);
 }
 
+void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip& tooltip, Rect bounds) {
+  if(!tooltip.showing()) return;
+  const TextStyle style {FontFamily::Sans, false, false, type().small};
+  const float width = static_cast<float>(text.width(tooltip.text, style)) + kTooltipPadX * 2.0f;
+  const float height = static_cast<float>(text.lineHeight(style)) + kTooltipPadY * 2.0f;
+  const Rect card = placeTooltip(tooltip.anchor, width, height, bounds);
+  fill(renderer, card, theme().surfaceElevated);
+  stroke(renderer, card, theme().hairline);
+  text.draw(tooltip.text, card.x + kTooltipPadX, card.y + kTooltipPadY, theme().text, style);
+}
+
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, const TextStyle& style) {
   if(maxWidth <= 0) return "";
   if(text.width(value, style) <= maxWidth) return value;

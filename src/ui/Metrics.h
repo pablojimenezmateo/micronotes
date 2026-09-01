@@ -60,6 +60,21 @@ inline constexpr float kCompactNoteListWidth = 240.0f;
 inline constexpr float kSelectionStripWidth = 3.0f;
 inline constexpr float kFocusEdgeWidth = 2.0f;
 
+// The spacing scale. Every gap and inset in the shell is one of these, so a
+// row in the sidebar and a row in a panel are inset by the same amount rather
+// than by whichever number was to hand -- which is how "rect.x + 14" here and
+// "rect.x + 12" there stop being a decision anybody made.
+inline constexpr float kSpace1 = 4.0f;
+inline constexpr float kSpace2 = 8.0f;
+inline constexpr float kSpace3 = 12.0f;
+inline constexpr float kSpace4 = 16.0f;
+inline constexpr float kSpace6 = 24.0f;
+
+// A tooltip sits this far off the control it describes.
+inline constexpr float kTooltipGap = 6.0f;
+inline constexpr float kTooltipPadX = 10.0f;
+inline constexpr float kTooltipPadY = 5.0f;
+
 // Interaction affordances. The grab region and the region that changes the
 // cursor are the same region, so one number governs both and they cannot drift.
 inline constexpr float kResizeGutterInflate = 3.0f;

@@ -6,6 +6,7 @@
 
 #include "ui/Fonts.h"
 #include "ui/Rect.h"
+#include "ui/Tooltip.h"
 #include "ui/Theme.h"
 
 #include <SDL3/SDL.h>
@@ -274,6 +275,9 @@ void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float
 // the rest rather than left out.
 void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
                       std::string_view keys = {});
+
+// Draws a resolved tooltip. Called last in a frame, so nothing paints over it.
+void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip& tooltip, Rect bounds);
 
 // Shortens `value` with an ellipsis until it fits `maxWidth`.
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, const TextStyle& style);
