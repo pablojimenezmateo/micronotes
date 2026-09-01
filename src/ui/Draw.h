@@ -254,6 +254,15 @@ private:
   std::map<std::string, CachedImage> cache_;
 };
 
+// A section heading over a list of rows: FAVORITES, TAGS, RECENT.
+void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y);
+
+// An empty place says what it is, what to do about it, and which keys do that.
+// The third line is what turns a dead end into an offer, so it is dimmer than
+// the rest rather than left out.
+void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
+                      std::string_view keys = {});
+
 // Shortens `value` with an ellipsis until it fits `maxWidth`.
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, const TextStyle& style);
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, bool heading = false, bool mono = false);

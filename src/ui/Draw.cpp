@@ -65,4 +65,24 @@ std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth
   return ellipsizeToWidth(text, std::move(value), maxWidth, TextRenderer::styleFor(heading, mono, false, false));
 }
 
+
+void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y) {
+  text.draw(label, x, y, theme().dim);
+}
+
+void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
+                      std::string_view keys) {
+  const TextStyle titleStyle {FontFamily::Sans, true, false, type().ui};
+  const TextStyle bodyStyle {FontFamily::Sans, false, false, type().small};
+  const TextStyle keyStyle {FontFamily::Sans, false, false, type().tiny};
+  const int room = static_cast<int>(std::max(60.0f, rect.w - 36.0f));
+  float y = rect.y + 14.0f;
+  text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), rect.x + 18.0f, y, theme().text, titleStyle);
+  y += static_cast<float>(text.lineHeight(titleStyle)) + 6.0f;
+  text.draw(ellipsizeToWidth(text, std::string(detail), room, bodyStyle), rect.x + 18.0f, y, theme().muted, bodyStyle);
+  if(keys.empty()) return;
+  y += static_cast<float>(text.lineHeight(bodyStyle)) + 8.0f;
+  text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), rect.x + 18.0f, y, theme().dim, keyStyle);
+}
+
 }

@@ -71,6 +71,8 @@ using micronotes::ui::TextRenderer;
 using micronotes::ui::clipRect;
 using micronotes::ui::contains;
 using micronotes::ui::drawSelection;
+using micronotes::ui::drawEmptyMessage;
+using micronotes::ui::drawSectionLabel;
 using micronotes::ui::drawSurface;
 using micronotes::ui::ellipsizeToWidth;
 using micronotes::ui::fill;
@@ -1295,28 +1297,6 @@ static bool hovered(const UiRuntime& ui, Rect rect) {
   return contains(rect, ui.mouseX, ui.mouseY);
 }
 
-static void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y) {
-  text.draw(label, x, y, theme().dim);
-}
-
-// An empty place says what it is, what to do about it, and which keys do that.
-// The third line is what turns a dead end into an offer, so it is dimmer than
-// the rest rather than left out.
-static void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
-                             std::string_view keys = {}) {
-  const ui::TextStyle titleStyle {ui::FontFamily::Sans, true, false, ui::type().ui};
-  const ui::TextStyle bodyStyle {ui::FontFamily::Sans, false, false, ui::type().small};
-  const ui::TextStyle keyStyle {ui::FontFamily::Sans, false, false, ui::type().tiny};
-  const int room = static_cast<int>(std::max(60.0f, rect.w - 36.0f));
-  float y = rect.y + 14.0f;
-  text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), rect.x + 18.0f, y, theme().text, titleStyle);
-  y += static_cast<float>(text.lineHeight(titleStyle)) + 6.0f;
-  text.draw(ellipsizeToWidth(text, std::string(detail), room, bodyStyle), rect.x + 18.0f, y, theme().muted, bodyStyle);
-  if(keys.empty()) return;
-  y += static_cast<float>(text.lineHeight(bodyStyle)) + 8.0f;
-  text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), rect.x + 18.0f, y, theme().dim, keyStyle);
-}
-
 static void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui, const std::string& line, Rect writing, float y) {
   const std::string& needle = ui.find.text();
   if(needle.empty()) return;
@@ -2118,7 +2098,7 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
   buildSidebarRows(ui, rect);
   if(ui.sidebarRows.empty()) {
     drawEmptyMessage(text, "No library", "No folder of notes is open.",
-                     {rect.x + 8, rect.y + 20, rect.w - 16, 110}, "Ctrl+,  Settings");
+                     {rect.x + 8, rect.y + 20, rect.w - 16, 110}, ui::keysFor(ui::ActionId::Settings) + "  Settings");
     return;
   }
 
@@ -2232,16 +2212,16 @@ static void drawNotes(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
     const Rect where {rect.x + 8, y - 8, rect.w - 16, 110};
     if(!ui.state.hasLibrary()) {
       drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
-                       where, "Ctrl+,  Settings");
+                       where, ui::keysFor(ui::ActionId::Settings) + "  Settings");
     } else if(ui.state.allNotes().empty()) {
       drawEmptyMessage(text, "No notes yet", "Notes here are plain .md files.",
-                       where, "Ctrl+N  write the first one");
+                       where, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
     } else if(!ui.state.selection().tag.empty()) {
       drawEmptyMessage(text, "No notes with this tag", "Nothing carries #" + ui.state.selection().tag + " any more.",
                        where, "click the tag again to clear the filter");
     } else {
       drawEmptyMessage(text, "This notebook is empty", "A note made here lands in this folder.",
-                       where, "Ctrl+N  new note");
+                       where, ui::keysFor(ui::ActionId::NewNote) + "  new note");
     }
     return;
   }
@@ -2682,7 +2662,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     }
     if(doc.blocks.empty()) {
       drawEmptyMessage(text, "Nothing to read yet", "This note has no text in it.", page,
-                       ui.state.shell().paneMode == ui::PaneMode::Split ? "type on the left" : "Ctrl+1  go back and write");
+                       ui.state.shell().paneMode == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
     }
   }
   drawVerticalScrollbar(renderer, page, ui.viewerScroll, maxScroll);
@@ -2840,7 +2820,9 @@ static void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
   // and be truncated before it finished; every one of them is in F1 now, which
   // can hold them all and be searched.
   std::string help = std::string(paneModeName(ui.state.shell().paneMode)) +
-    "   Ctrl+P Go to note   Ctrl+Shift+P Commands   F1 Shortcuts";
+    "   " + ui::keysFor(ui::ActionId::GoToNote) + " Go to note" +
+    "   " + ui::keysFor(ui::ActionId::CommandPalette) + " Commands" +
+    "   " + ui::keysFor(ui::ActionId::Shortcuts) + " Shortcuts";
   if(ui.focus == FocusArea::Search) help = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
   if(ui.focus == FocusArea::Find) help = "Find in note: " + ui.find.text() + "    Esc close";
   fill(renderer, {rect.x + 12, rect.y + 7, 6, 6}, ui.editor.dirty() ? theme().warn : theme().accent);
@@ -2925,14 +2907,15 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     drawEmptyMessage(text, "Open a folder of notes",
                      "micronotes reads and writes plain Markdown files in one local folder. Nothing leaves your disk.",
                      {layout.content.x + 18, layout.content.y + 40, layout.content.w - 36, 130},
-                     "Ctrl+,  Settings          or start with  --library <path>");
+                     ui::keysFor(ui::ActionId::Settings) + "  Settings          or start with  --library <path>");
   } else if(ui.state.selection().noteId.empty()) {
     ui.crumbs.clear();
     ui.favoriteButton = {};
     fill(renderer, layout.content, theme().editorBg);
     drawEmptyMessage(text, "Nothing open", "Pick a note from the sidebar, or start a new one.",
                      {layout.content.x + 18, layout.content.y + 40, layout.content.w - 36, 130},
-                     "Ctrl+P  go to note          Ctrl+N  new note          F1  every shortcut");
+                     ui::keysFor(ui::ActionId::GoToNote) + "  go to note          " + ui::keysFor(ui::ActionId::NewNote) +
+                     "  new note          " + ui::keysFor(ui::ActionId::Shortcuts) + "  every shortcut");
   } else {
     // The breadcrumb belongs to the note rather than to a pane, so it sits
     // above whichever pane is showing it.
@@ -3003,10 +2986,10 @@ static void openNoteMenu(UiRuntime& ui, float x, float y) {
   overlay.width = 220.0f;
   const bool hasNote = !ui.state.selection().noteId.empty();
   overlay.items = {
-    {"new", "New note", "", "Ctrl+N", true, false},
+    {"new", "New note", "", ui::keysFor(ui::ActionId::NewNote), true, false},
     {"rename", "Rename", "", "", hasNote, false},
     {"icon", "Set icon", "", "", hasNote, false},
-    {"tags", "Edit tags", "", "Ctrl+T", hasNote, false},
+    {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false},
     {"favorite", "Toggle favorite", "", "", hasNote, false},
     {"move", "Move to notebook", "", "", hasNote, false},
     {"delete", "Delete", "", "", hasNote, true},
@@ -3067,12 +3050,12 @@ static void openBlockMenu(UiRuntime& ui, float x, float y) {
   const bool folds = head < blocks.size();
   const bool folded = folds && ui.folds.folded(ui.state.selection().noteId, doc::foldKey(ui.editor.text(), blocks[head]));
   overlay.items = {
-    {"turn", "Turn into", "", "Ctrl+Shift+1-9", true, false},
-    {"duplicate", "Duplicate", "", "Ctrl+D", true, false},
-    {"fold", folded ? "Unfold" : "Fold", "", "Ctrl+.", folds, false},
-    {"move-up", "Move up", "", "Alt+Up", true, false},
-    {"move-down", "Move down", "", "Alt+Down", true, false},
-    {"delete", "Delete", "", "Ctrl+Shift+D", true, true},
+    {"turn", "Turn into", "", ui::keysFor(ui::ActionId::TurnInto), true, false},
+    {"duplicate", "Duplicate", "", ui::keysFor(ui::ActionId::DuplicateBlock), true, false},
+    {"fold", folded ? "Unfold" : "Fold", "", ui::keysFor(ui::ActionId::Fold), folds, false},
+    {"move-up", "Move up", "", ui::keysFor(ui::ActionId::MoveBlockUp), true, false},
+    {"move-down", "Move down", "", ui::keysFor(ui::ActionId::MoveBlockDown), true, false},
+    {"delete", "Delete", "", ui::keysFor(ui::ActionId::DeleteBlock), true, true},
   };
   ui.overlays.open(std::move(overlay));
 }
@@ -3251,7 +3234,7 @@ static void openSettings(UiRuntime& ui) {
   overlay.hint = "Enter change   Esc close";
   overlay.width = 480.0f;
   overlay.items.push_back({"theme", "Theme",
-                           ui::themeMode() == ui::ThemeMode::Dark ? "Dark" : "Light", "Ctrl+Shift+L", true, false});
+                           ui::themeMode() == ui::ThemeMode::Dark ? "Dark" : "Light", ui::keysFor(ui::ActionId::ToggleTheme), true, false});
   overlay.items.push_back({"text-size", "Text size", std::string(ui::textSizeLabel(ui::textSize())), "", true, false});
   overlay.items.push_back({"page-width", "Page width", std::string(ui::pageWidthLabel(ui::pageWidth())), "", true, false});
   // Trimmed from the left: a truncated path keeps the half that says which

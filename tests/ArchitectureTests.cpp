@@ -4,6 +4,7 @@
 #include "core/render/FontResolver.h"
 #include "core/render/TextTextureCache.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <regex>
@@ -217,4 +218,67 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
     "sqlite3_open is called outside core/persistence: " + offenders +
     " -- use microcore::persistence::SqliteDb, which applies the per-connection "
     "pragmas and counts the open; a direct handle silently loses both");
+}
+
+// AGENTS.md says of src/app/Application.cpp: "a catch-all doing layout, input,
+// rendering, and persistence. Do not grow it." It said 3,000 lines when that
+// was written and the file had reached 4,820 by the time anyone checked, which
+// is what a rule with no test attached is worth.
+//
+// This is that test. The number below is a ratchet, not a target: a change that
+// moves behaviour out of the file lowers it in the same commit, and nothing
+// raises it. If this fails, the fix is a named unit under src/ -- not a bigger
+// budget.
+constexpr int kApplicationLineBudget = 4733;
+
+MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
+  const auto path = repoRoot() / "src" / "app" / "Application.cpp";
+  const std::string text = readText(path);
+  const auto lines = static_cast<int>(std::count(text.begin(), text.end(), '\n'));
+  micronotes::tests::require(
+    lines <= kApplicationLineBudget,
+    "src/app/Application.cpp is " + std::to_string(lines) + " lines, over its budget of " +
+      std::to_string(kApplicationLineBudget) +
+      ". This file is being decomposed and the budget only goes down: put the new behaviour in a "
+      "named unit under src/ and lower the budget instead of raising it.");
+}
+
+// Actions are named in one table so the palette, the shortcut list and the key
+// handler cannot drift. That only holds while nobody writes a key name out by
+// hand somewhere else: a hint line that says "Ctrl+P" is a fourth copy, and the
+// first one to go stale.
+//
+// The registry is the exception, because it is where the spelling lives.
+MICRONOTES_TEST(architecture_key_names_are_formatted_not_typed) {
+  // A line-by-line scan rather than a regex: std::regex backtracks its way
+  // through a 200 KB translation unit and overflows the stack. Only string
+  // literals count -- a comment naming a key is documentation, not a fourth
+  // copy of the binding.
+  const std::vector<std::string> chords {"Ctrl+", "Alt+"};
+  std::vector<std::string> offenders;
+  for(const auto& file : sourceFiles(repoRoot() / "src")) {
+    if(file.filename() == "Actions.cpp") continue;
+    std::istringstream lines(readText(file));
+    std::string line;
+    while(std::getline(lines, line)) {
+      const auto firstCode = line.find_first_not_of(" \t");
+      const auto quote = line.find('"');
+      if(quote == std::string::npos) continue;
+      // Anything after a // is prose. A chord in a comment is documentation,
+      // not a second copy of the binding.
+      const auto comment = line.find("//");
+      if(comment != std::string::npos && comment < quote) continue;
+      if(comment != std::string::npos) line = line.substr(0, comment);
+      for(const auto& chord : chords) {
+        const auto at = line.find(chord, quote);
+        if(at == std::string::npos) continue;
+        offenders.push_back(file.filename().string() + ":" + line.substr(firstCode));
+        break;
+      }
+    }
+  }
+  std::string message = "a key chord is spelled out by hand here instead of coming from "
+                        "ui::acceleratorText(), so rebinding the key would leave it stale:\n";
+  for(const auto& hit : offenders) message += "  " + hit + "\n";
+  micronotes::tests::require(offenders.empty(), message);
 }

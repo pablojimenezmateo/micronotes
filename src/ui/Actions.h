@@ -50,6 +50,7 @@ enum class ActionId {
   MoveBlockUp,
   MoveBlockDown,
   InsertBlock,
+  TurnInto,
   Fold,
 
   PaneLive,
@@ -136,5 +137,10 @@ const ActionSpec* findActionForChord(const KeyChord& chord);
 
 // What the shortcut list and the palette print beside a row.
 std::string acceleratorText(const ActionSpec& spec);
+
+// The keys an action answers to, spelled the one way this header spells them.
+// Every hint the user reads goes through here rather than repeating the chord,
+// so rebinding a key cannot leave a status line or an empty state behind.
+std::string keysFor(ActionId id);
 
 }
