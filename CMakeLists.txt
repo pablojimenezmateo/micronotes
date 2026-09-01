@@ -170,6 +170,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
   src/ui/Settings.cpp
+  src/ui/ShellLayout.cpp
   src/ui/Theme.cpp
   src/ui/TreeModel.cpp
 )
@@ -228,6 +229,7 @@ add_executable(micronotes_tests
   tests/PathUtilsTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
+  tests/ShellLayoutTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TextFieldTests.cpp
   tests/WrappedLinesTests.cpp

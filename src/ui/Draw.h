@@ -5,6 +5,7 @@
 #include "core/render/TextTextureCache.h"
 
 #include "ui/Fonts.h"
+#include "ui/Rect.h"
 #include "ui/Theme.h"
 
 #include <SDL3/SDL.h>
@@ -21,30 +22,6 @@
 #include <vector>
 
 namespace micronotes::ui {
-
-struct Rect {
-  float x = 0;
-  float y = 0;
-  float w = 0;
-  float h = 0;
-};
-
-inline bool contains(const Rect& rect, float x, float y) {
-  return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
-}
-
-inline SDL_FRect sdlRect(const Rect& rect) {
-  return {rect.x, rect.y, rect.w, rect.h};
-}
-
-inline SDL_Rect clipRect(const Rect& rect) {
-  return {
-    static_cast<int>(std::floor(rect.x)),
-    static_cast<int>(std::floor(rect.y)),
-    static_cast<int>(std::ceil(rect.w)),
-    static_cast<int>(std::ceil(rect.h)),
-  };
-}
 
 class ClipGuard {
 public:

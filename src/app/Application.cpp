@@ -19,7 +19,9 @@
 #include "ui/AppState.h"
 #include "ui/Draw.h"
 #include "ui/FoldState.h"
+#include "ui/Metrics.h"
 #include "ui/Overlay.h"
+#include "ui/ShellLayout.h"
 #include "ui/Settings.h"
 #include "ui/Fonts.h"
 #include "ui/Theme.h"
@@ -61,6 +63,9 @@ namespace {
 using micronotes::ui::ClipGuard;
 using micronotes::ui::ImageCache;
 using micronotes::ui::Rect;
+using micronotes::ui::ShellLayout;
+using micronotes::ui::ShellLayoutInputs;
+using micronotes::ui::computeShellLayout;
 using micronotes::ui::TextRenderer;
 using micronotes::ui::clipRect;
 using micronotes::ui::contains;
@@ -165,16 +170,6 @@ struct SidebarRow {
   std::string tag;
 };
 
-struct AppLayout {
-  Rect sidebar;
-  Rect notes;
-  // The breadcrumb strip above the page. Reserved whether or not a note is open
-  // so that every hit test against `content` agrees with what was drawn.
-  Rect crumbs;
-  Rect content;
-  Rect status;
-};
-
 struct SystemCursors {
   SDL_Cursor* defaultCursor = nullptr;
   SDL_Cursor* text = nullptr;
@@ -258,38 +253,6 @@ static std::string ellipsize(std::string text, std::size_t limit) {
   if(text.size() <= limit) return text;
   if(limit <= 3) return text.substr(0, limit);
   return text.substr(0, limit - 3) + "...";
-}
-
-constexpr float kBreadcrumbHeight = 30.0f;
-
-static AppLayout computeLayout(const ui::ShellModel& shell, int width, int height) {
-  const float statusH = 28.0f;
-  const float usableW = static_cast<float>(std::max(width, 760));
-  float sideW = static_cast<float>(shell.sidebarWidth);
-  float notesW = static_cast<float>(shell.noteListWidth);
-  if(usableW < 1000.0f) {
-    sideW = 190.0f;
-    notesW = 240.0f;
-  }
-  sideW = std::clamp(sideW, 170.0f, std::max(170.0f, usableW * 0.28f));
-  notesW = std::clamp(notesW, 220.0f, std::max(220.0f, usableW * 0.34f));
-  const float contentMin = 320.0f;
-  if(sideW + notesW + contentMin > usableW) {
-    notesW = std::max(190.0f, usableW - sideW - contentMin);
-  }
-  if(sideW + notesW + contentMin > usableW) {
-    sideW = std::max(150.0f, usableW - notesW - contentMin);
-  }
-
-  const float contentW = static_cast<float>(width) - sideW - notesW;
-  const float paneH = static_cast<float>(height) - statusH;
-  return {
-    {0, 0, sideW, paneH},
-    {sideW, 0, notesW, paneH},
-    {sideW + notesW, 0, contentW, kBreadcrumbHeight},
-    {sideW + notesW, kBreadcrumbHeight, contentW, paneH - kBreadcrumbHeight},
-    {0, paneH, static_cast<float>(width), statusH},
-  };
 }
 
 static bool isRemoteTarget(std::string_view target) {
@@ -392,6 +355,9 @@ struct UiRuntime {
   float mouseX = -1;
   float mouseY = -1;
   ui::OverlayStack overlays;
+  // The mode the last computed layout settled in. Fed back into the next one so
+  // the compact breakpoint has hysteresis rather than flipping mid-drag.
+  ui::LayoutMode layoutMode = ui::LayoutMode::Regular;
   // Which toggles each note has collapsed. A view preference, so it lives
   // beside the library rather than in the `.md` file.
   ui::FoldState folds;
@@ -456,6 +422,24 @@ struct UiRuntime {
 static bool saveCurrent(UiRuntime& ui, bool quiet = false);
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
+
+// The shell's geometry, as a pure function of the window and the shell model.
+// Every caller goes through here so that the rects a frame is painted with, the
+// rects it is hit-tested against and the rects the tests assert on are the same
+// rects. `ui.layoutMode` is both an input and an output: feeding the last mode
+// back in is what gives the compact breakpoint its hysteresis.
+static ShellLayout shellLayout(UiRuntime& ui, int width, int height) {
+  const auto& shell = ui.state.shell();
+  ShellLayoutInputs inputs;
+  inputs.windowWidth = static_cast<float>(width);
+  inputs.windowHeight = static_cast<float>(height);
+  inputs.sidebarWidth = static_cast<float>(shell.sidebarWidth);
+  inputs.noteListWidth = static_cast<float>(shell.noteListWidth);
+  inputs.previousMode = ui.layoutMode;
+  const ShellLayout layout = computeShellLayout(inputs);
+  ui.layoutMode = layout.mode;
+  return layout;
+}
 
 static const markdown::Document& previewDocument(UiRuntime& ui) {
   const auto& source = ui.editor.text();
@@ -1451,7 +1435,7 @@ static Rect viewerPageRect(Rect viewerRect) {
   return {viewerRect.x + 8.0f, viewerRect.y + 8.0f, viewerRect.w - 16.0f, viewerRect.h - 28.0f};
 }
 
-static bool isResizeGutter(const AppLayout& layout, float x, float y) {
+static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
   if(y < layout.sidebar.y || y > layout.sidebar.y + layout.sidebar.h) return false;
   return std::abs(x - (layout.sidebar.x + layout.sidebar.w)) <= 4.0f ||
          std::abs(x - (layout.notes.x + layout.notes.w)) <= 4.0f;
@@ -2320,7 +2304,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 
   const float x = ui.mouseX;
   const float y = ui.mouseY;
-  const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+  const ShellLayout layout = shellLayout(ui, width, height);
   if(isResizeGutter(layout, x, y)) return CursorKind::ResizeHorizontal;
   if(contains(layout.crumbs, x, y)) {
     if(contains(ui.favoriteButton, x, y)) return CursorKind::Pointer;
@@ -2925,7 +2909,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   SDL_SetRenderDrawColor(renderer, theme().appBg.r, theme().appBg.g, theme().appBg.b, theme().appBg.a);
   SDL_RenderClear(renderer);
 
-  const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+  const ShellLayout layout = shellLayout(ui, width, height);
   ui.linkRegions.clear();
   ui.buttonRegions.clear();
 
@@ -4000,7 +3984,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     if(result) handleOverlayResult(ui, *result);
     if(handled) return;
   }
-  const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+  const ShellLayout layout = shellLayout(ui, width, height);
 
   if(button == SDL_BUTTON_MIDDLE) {
     if(contains(layout.notes, x, y) && y >= layout.notes.y + 12 && y <= layout.notes.y + 46) {
@@ -4446,7 +4430,7 @@ static void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int wid
     ui.scrollDragTarget = ScrollDragTarget::None;
   }
   if(button != SDL_BUTTON_LEFT || (!ui.draggingNote && !ui.draggingFolder)) return;
-  const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+  const ShellLayout layout = shellLayout(ui, width, height);
   const auto index = sidebarRowAt(ui, layout.sidebar, x, y);
   if(index && ui.sidebarRows[*index].kind == SidebarRow::Kind::Tree) {
     // A note row stands for the folder holding it, so dropping between two
@@ -4690,7 +4674,7 @@ int run(ApplicationOptions options) {
             ui.editor.selectRange(ui.editorSelectionAnchor, ui.livePage.offsetAt(event.motion.x, event.motion.y));
             ui.revealEditorCursor = true;
           } else {
-            const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+            const ShellLayout layout = shellLayout(ui, width, height);
             Rect editorRect = layout.content;
             if(ui.state.shell().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
             const auto cursor = editorIndexAtPoint(text, ui, editorRect, event.motion.x, event.motion.y);
@@ -4698,7 +4682,7 @@ int run(ApplicationOptions options) {
             ui.revealEditorCursor = true;
           }
         } else if(ui.scrollDragTarget != ScrollDragTarget::None) {
-          const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+          const ShellLayout layout = shellLayout(ui, width, height);
           if(ui.scrollDragTarget == ScrollDragTarget::Live) {
             ui.livePage.setScroll(scrollFromThumbY(ui.livePage.pageRect(), event.motion.y, ui.scrollDragOffsetY, ui.livePage.maxScroll()));
           } else if(ui.scrollDragTarget == ScrollDragTarget::Editor) {
@@ -4719,7 +4703,7 @@ int run(ApplicationOptions options) {
             ui.viewerScroll = scrollFromThumbY(page, event.motion.y, ui.scrollDragOffsetY, maxScroll);
           }
         } else if(ui.draggingNote || ui.draggingFolder) {
-          const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+          const ShellLayout layout = shellLayout(ui, width, height);
           const auto row = sidebarRowAt(ui, layout.sidebar, event.motion.x, event.motion.y);
           ui.sidebarDropRow = row && ui.sidebarRows[*row].kind == SidebarRow::Kind::Tree
                                 ? row
@@ -4727,7 +4711,7 @@ int run(ApplicationOptions options) {
         } else if(ui.resizingSidebar) {
           ui.state.shell().sidebarWidth = std::clamp(static_cast<int>(event.motion.x), 150, std::max(150, width - 520));
         } else if(ui.resizingNotes) {
-          const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+          const ShellLayout layout = shellLayout(ui, width, height);
           ui.state.shell().noteListWidth = std::clamp(static_cast<int>(event.motion.x - layout.sidebar.w), 190, std::max(190, width - static_cast<int>(layout.sidebar.w) - 320));
         }
         updateCursor(width, height);
@@ -4736,7 +4720,7 @@ int run(ApplicationOptions options) {
         // scroll the note behind it instead of itself.
         ui.overlays.handleWheel(event.wheel.y);
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL &&
-                contains(computeLayout(ui.state.shell(), width, height).sidebar, ui.mouseX, ui.mouseY)) {
+                contains(shellLayout(ui, width, height).sidebar, ui.mouseX, ui.mouseY)) {
         // The tree can be taller than the window, so the pointer's column
         // decides where a wheel goes before the pane mode does.
         ui.sidebarScroll = std::clamp(ui.sidebarScroll - static_cast<int>(event.wheel.y * 48), 0, ui.sidebarMaxScroll);
@@ -4744,7 +4728,7 @@ int run(ApplicationOptions options) {
         ui.livePage.setScroll(ui.livePage.scroll() - static_cast<int>(event.wheel.y * 60));
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
         perf::addCounter(perf::CounterId::InputWheelEvents);
-        const AppLayout layout = computeLayout(ui.state.shell(), width, height);
+        const ShellLayout layout = shellLayout(ui, width, height);
         Rect editorRect = layout.content;
         Rect viewerRect = layout.content;
         bool wheelEditor = false;
