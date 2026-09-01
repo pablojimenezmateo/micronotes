@@ -166,6 +166,7 @@ set(MICRONOTES_APP_SOURCES
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp
   src/library/Organization.cpp
+  src/ui/Actions.cpp
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
@@ -214,6 +215,7 @@ endif()
 add_executable(micronotes_tests
   tests/TestMain.cpp
   tests/TreeModelTests.cpp
+  tests/ActionsTests.cpp
   tests/AppStateTests.cpp
   tests/ArchitectureTests.cpp
   tests/AttachmentTests.cpp

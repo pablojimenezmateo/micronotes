@@ -19,6 +19,7 @@
 #include "ui/AppState.h"
 #include "ui/Draw.h"
 #include "ui/FoldState.h"
+#include "ui/Actions.h"
 #include "ui/Metrics.h"
 #include "ui/Overlay.h"
 #include "ui/ShellLayout.h"
@@ -3119,45 +3120,12 @@ static void commitSlashMenu(UiRuntime& ui, const std::string& itemId) {
   performBlockCommand(ui, itemId);
 }
 
-// Everything the shell can do, in one list. The palette exists so a feature is
-// discoverable without a status-bar hint line naming it, so a command that is
-// only reachable by shortcut does not belong here - it belongs in both.
-struct PaletteCommand {
-  const char* id;
-  const char* label;
-  const char* shortcut;
-  // Commands that need something selected are listed but refused, rather than
-  // hidden: a palette that changes shape is a palette you cannot learn.
-  bool needsNote;
-};
-
-static constexpr PaletteCommand kCommands[] = {
-  {"jump", "Go to note...", "Ctrl+P", false},
-  {"new-note", "New note", "Ctrl+N", false},
-  {"new-folder", "New notebook", "", false},
-  {"save", "Save note", "Ctrl+S", true},
-  {"rename", "Rename note...", "F2", true},
-  {"icon", "Set note icon...", "", true},
-  {"tags", "Edit tags...", "Ctrl+T", true},
-  {"favorite", "Toggle favorite", "", true},
-  {"move-note", "Move note to notebook...", "", true},
-  {"move-blocks", "Move selected blocks to note...", "", true},
-  {"delete-note", "Delete note...", "", true},
-  {"rename-folder", "Rename notebook...", "", false},
-  {"delete-folder", "Delete notebook...", "", false},
-  {"restore", "Restore from trash...", "", false},
-  {"fold", "Fold or unfold section", "Ctrl+.", true},
-  {"theme", "Toggle light and dark", "Ctrl+Shift+L", false},
-  {"settings", "Settings...", "Ctrl+,", false},
-  {"shortcuts", "Keyboard shortcuts...", "F1", false},
-  {"refresh", "Refresh library", "Ctrl+R", false},
-  {"pane-live", "View: live", "Ctrl+1", false},
-  {"pane-raw", "View: raw Markdown", "Ctrl+2", false},
-  {"pane-reading", "View: reading", "Ctrl+3", false},
-  {"pane-split", "View: split", "Ctrl+4", false},
-};
-
+// The palette is a view of ui::actionSpecs(), not a second list beside it.
+// It used to be its own table, and the rule written above it -- that an action
+// reachable only by shortcut belongs in both -- was enforced by nobody.
 static void performCommand(UiRuntime& ui, const std::string& id);
+static void focusFindInNote(UiRuntime& ui);
+static void focusSearchAllNotes(UiRuntime& ui);
 static void openDeleteFolderConfirm(UiRuntime& ui);
 
 static void openCommandPalette(UiRuntime& ui) {
@@ -3168,8 +3136,13 @@ static void openCommandPalette(UiRuntime& ui) {
   overlay.placeholder = "Type a command";
   overlay.hint = "Enter run   Esc cancel";
   overlay.width = 460.0f;
-  for(const auto& command : kCommands) {
-    overlay.items.push_back({command.id, command.label, "", command.shortcut, true, false});
+  const bool hasNote = !ui.state.selection().noteId.empty();
+  for(const auto& spec : ui::actionSpecs()) {
+    if(!spec.inPalette) continue;
+    // Commands that need something selected are listed but refused, rather
+    // than hidden: a palette that changes shape is a palette you cannot learn.
+    overlay.items.push_back({std::string(spec.name), std::string(spec.label), "",
+                             ui::acceleratorText(spec), !spec.needsNote || hasNote, false});
   }
   ui.overlays.open(std::move(overlay));
 }
@@ -3377,63 +3350,10 @@ static void switchLibrary(UiRuntime& ui, const std::string& typed) {
   ui.status = "Opened " + displayPath(root);
 }
 
-// The shortcut list, and the only place the bindings are written down for the
-// user. A row with no keys is a section heading: it is listed as a disabled
-// item, so the arrows step over it and Enter cannot land on it.
-struct ShortcutRow {
-  const char* keys;
-  const char* what;
-};
-
-static constexpr ShortcutRow kShortcuts[] = {
-  {"", "Getting around"},
-  {"Ctrl+P", "Go to any note"},
-  {"Ctrl+Shift+P", "Command palette"},
-  {"Ctrl+F", "Find in this note"},
-  {"Ctrl+Shift+F", "Search every note"},
-  {"F1", "This list"},
-  {"Ctrl+,", "Settings"},
-  {"Up, Down", "Walk the sidebar"},
-  {"Right, Left", "Open or close a notebook"},
-
-  {"", "Notes and notebooks"},
-  {"Ctrl+N", "New note"},
-  {"Ctrl+S", "Save now"},
-  {"Ctrl+R", "Reload the library from disk"},
-  {"F2", "Rename the note"},
-  {"Ctrl+T", "Edit tags"},
-
-  {"", "Writing"},
-  {"Ctrl+B, Ctrl+I, Ctrl+E", "Bold, italic, code"},
-  {"Ctrl+K", "Link the selection"},
-  {"Ctrl+Z, Ctrl+Y", "Undo, redo"},
-  {"Ctrl+Left, Ctrl+Right", "Move by word"},
-  {"Ctrl+Home, Ctrl+End", "Start and end of the note"},
-  {"PageUp, PageDown", "Move by a screenful"},
-  {"Tab, Shift+Tab", "Indent, outdent a list item"},
-  {"Enter", "Continue the list, or leave it when empty"},
-  {"Ctrl+Enter", "Tick or untick a task"},
-  {"Ctrl+V, Ctrl+Shift+V", "Paste, paste an image as an attachment"},
-
-  {"", "Blocks"},
-  {"/", "Insert a block"},
-  {"Esc", "Select the block, again to go back"},
-  {"Shift+Up, Shift+Down", "Extend the block selection"},
-  {"Alt+Up, Alt+Down", "Move the block"},
-  {"Ctrl+D, Ctrl+Shift+D", "Duplicate, delete the block"},
-  {"Ctrl+.", "Fold or unfold the section"},
-  {"Ctrl+Shift+0..3", "Turn into text or a heading"},
-  {"Ctrl+Shift+7, 8, 9", "Turn into a numbered item, bullet, task"},
-
-  {"", "View"},
-  {"Ctrl+1", "Live"},
-  {"Ctrl+2", "Raw Markdown"},
-  {"Ctrl+3", "Reading"},
-  {"Ctrl+4", "Split"},
-  {"Ctrl+L", "Cycle the four views"},
-  {"Ctrl+Shift+L", "Light or dark"},
-};
-
+// Every binding the shell has, grouped, from the one table that also feeds the
+// palette and the key handler. A row with no keys is a section heading: it is
+// listed as a disabled item, so the arrows step over it and Enter cannot land
+// on it.
 static void openShortcutHelp(UiRuntime& ui) {
   ui::Overlay overlay;
   overlay.id = "shortcuts";
@@ -3445,9 +3365,22 @@ static void openShortcutHelp(UiRuntime& ui) {
   // Reference material, not a menu: as much of it on screen at once as the
   // window will hold.
   overlay.maxRows = 20;
-  for(const auto& row : kShortcuts) {
-    const bool heading = *row.keys == '\0';
-    overlay.items.push_back({"", row.what, row.keys, "", !heading, false});
+  for(int i = 0; i < static_cast<int>(ui::ActionSection::Count); ++i) {
+    const auto section = static_cast<ui::ActionSection>(i);
+    std::vector<ui::OverlayItem> rows;
+    for(const auto& spec : ui::actionSpecs()) {
+      if(spec.section != section) continue;
+      const auto keys = ui::acceleratorText(spec);
+      if(keys.empty()) continue;
+      rows.push_back({"", std::string(spec.label), "", keys, true, false});
+    }
+    for(const auto& row : ui::helpRows()) {
+      if(row.section != section) continue;
+      rows.push_back({"", std::string(row.what), "", std::string(row.keys), true, false});
+    }
+    if(rows.empty()) continue;
+    overlay.items.push_back({"", std::string(ui::sectionLabel(section)), "", "", false, false});
+    for(auto& row : rows) overlay.items.push_back(std::move(row));
   }
   ui.overlays.open(std::move(overlay));
 }
@@ -3480,6 +3413,22 @@ static void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
     clearBlockSelection(ui);
     ui.status = "Moved blocks to " + target->title;
   }
+}
+
+// Focusing a search field is an action like any other, so the key and the
+// palette row run the same code rather than two copies that drift.
+static void focusFindInNote(UiRuntime& ui) {
+  ui.focus = FocusArea::Find;
+  ui.find.editor.selectAll();
+  updateFindStatus(ui);
+}
+
+static void focusSearchAllNotes(UiRuntime& ui) {
+  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  ui.focus = FocusArea::Search;
+  ui.search.editor.selectAll();
+  ui.state.setSearch(ui.search.text(), ui.searchScope);
+  ui.status = "Search all notes";
 }
 
 static void performCommand(UiRuntime& ui, const std::string& id) {
@@ -3519,6 +3468,9 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "pane-raw") setPaneMode(ui, ui::PaneMode::Editor);
   else if(id == "pane-reading") setPaneMode(ui, ui::PaneMode::Viewer);
   else if(id == "pane-split") setPaneMode(ui, ui::PaneMode::Split);
+  else if(id == "cycle-pane") cyclePaneMode(ui);
+  else if(id == "find") focusFindInNote(ui);
+  else if(id == "search") focusSearchAllNotes(ui);
 }
 
 static void openDeleteNoteConfirm(UiRuntime& ui) {
@@ -3822,15 +3774,9 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(shortcut(SDLK_L, SDL_SCANCODE_L)) {
     cyclePaneMode(ui);
   } else if(shortcut(SDLK_F, SDL_SCANCODE_F) && shift) {
-    if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-    ui.focus = FocusArea::Search;
-    ui.search.editor.selectAll();
-    ui.state.setSearch(ui.search.text(), ui.searchScope);
-    ui.status = "Search all notes";
+    focusSearchAllNotes(ui);
   } else if(shortcut(SDLK_F, SDL_SCANCODE_F)) {
-    ui.focus = FocusArea::Find;
-    ui.find.editor.selectAll();
-    updateFindStatus(ui);
+    focusFindInNote(ui);
   } else if(key == SDLK_ESCAPE) {
     if(ui.focus == FocusArea::Search && !ui.search.empty()) {
       ui.search.reset();
