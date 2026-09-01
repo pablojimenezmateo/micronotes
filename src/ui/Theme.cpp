@@ -1,5 +1,7 @@
 #include "ui/Theme.h"
 
+#include "ui/ColorMath.h"
+
 #include <cctype>
 #include <string>
 
@@ -13,14 +15,6 @@ constexpr SDL_Color rgb(unsigned value, Uint8 alpha = 255) {
     static_cast<Uint8>(value & 0xff),
     alpha,
   };
-}
-
-// `weight` of `color` over `onto`.
-constexpr SDL_Color blend(SDL_Color color, SDL_Color onto, float weight) {
-  const auto channel = [weight](Uint8 a, Uint8 b) {
-    return static_cast<Uint8>(static_cast<float>(b) + (static_cast<float>(a) - static_cast<float>(b)) * weight);
-  };
-  return SDL_Color {channel(color.r, onto.r), channel(color.g, onto.g), channel(color.b, onto.b), 255};
 }
 
 Theme makeDark() {
@@ -115,13 +109,44 @@ Theme makeLight() {
   return t;
 }
 
+// The palette as written, corrected so that nothing a reader has to make out
+// falls below the ratio it is held to.
+//
+// Correcting here rather than editing hex values by hand is the point: the
+// author picks the colour they mean, and the one pairing they did not think to
+// check cannot ship illegible. It also means a palette that arrives from
+// somewhere else -- a theme file -- gets the same guarantee as the built-ins.
+//
+// Only the text roles are moved. Surfaces, borders and fills are left exactly
+// as chosen, because nudging a background to satisfy one pairing changes every
+// other pairing that shares it.
+Theme correctContrast(Theme t) {
+  // Each text role against the darkest surface it is drawn on: fixing it there
+  // fixes it everywhere, since every other surface has more contrast to give.
+  const SDL_Color panels[] = {t.sidebarBg, t.notesBg, t.statusBg, t.pageSurface, t.editorBg};
+  const auto worst = [&](SDL_Color foreground, float minimum) {
+    SDL_Color result = foreground;
+    for(const SDL_Color panel : panels) result = ensureContrast(result, panel, minimum);
+    return result;
+  };
+  t.text = worst(t.text, kTextContrast);
+  t.muted = worst(t.muted, kTextContrast);
+  // Section labels, counts and markers are incidental: holding them to the body
+  // ratio would flatten the whole hierarchy into one weight.
+  t.dim = worst(t.dim, kIncidentalContrast);
+  t.onAccent = ensureContrast(t.onAccent, t.accent, kTextContrast);
+  t.accent = worst(t.accent, kIncidentalContrast);
+  t.warn = worst(t.warn, kIncidentalContrast);
+  return t;
+}
+
 const Theme& darkTheme() {
-  static const Theme value = makeDark();
+  static const Theme value = correctContrast(makeDark());
   return value;
 }
 
 const Theme& lightTheme() {
-  static const Theme value = makeLight();
+  static const Theme value = correctContrast(makeLight());
   return value;
 }
 
@@ -151,7 +176,10 @@ CalloutStyle calloutStyle(std::string_view rawKind) {
   // The tint is the accent laid over the page rather than a second constant,
   // so a palette change carries it along.
   const SDL_Color page = light ? lightTheme().pageSurface : darkTheme().pageSurface;
-  style.surface = blend(style.accent, page, light ? 0.09f : 0.14f);
+  style.surface = blend(page, style.accent, light ? 0.09f : 0.14f);
+  // The kind's name is drawn in the accent on that tint, so the accent has to
+  // stay legible against the surface it just tinted.
+  style.accent = ensureContrast(style.accent, style.surface, kIncidentalContrast);
   return style;
 }
 

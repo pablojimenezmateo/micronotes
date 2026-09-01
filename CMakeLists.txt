@@ -170,6 +170,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
+  src/ui/ColorMath.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
@@ -224,6 +225,7 @@ add_executable(micronotes_tests
   tests/ArchitectureTests.cpp
   tests/AttachmentTests.cpp
   tests/BlockScanTests.cpp
+  tests/ColorMathTests.cpp
   tests/EditorViewerTests.cpp
   tests/EditsTests.cpp
   tests/FoldTests.cpp
