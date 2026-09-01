@@ -59,6 +59,44 @@ void drawSurface(SDL_Renderer* renderer, Rect rect) {
   drawSurface(renderer, rect, theme().surface, theme().hairline);
 }
 
+void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
+  if(maxScroll <= 0) return;
+  Rect track {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, std::max(24.0f, viewport.h - 18.0f)};
+  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
+  const float thumbH = std::max(22.0f, track.h * visibleRatio);
+  const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
+  Rect thumb {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
+  fill(renderer, track, theme().scrollTrack);
+  fill(renderer, thumb, theme().scrollThumb);
+  stroke(renderer, thumb, theme().scrollThumbBorder);
+}
+
+Rect scrollbarTrack(Rect viewport) {
+  const float trackH = std::max(24.0f, viewport.h - 18.0f);
+  return {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, trackH};
+}
+
+Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll) {
+  if(maxScroll <= 0) return {};
+  const auto track = scrollbarTrack(viewport);
+  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
+  const float thumbH = std::max(22.0f, track.h * visibleRatio);
+  const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
+  return {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
+}
+
+Rect scrollbarHitRect(Rect thumb) {
+  return {thumb.x - 7.0f, thumb.y - 2.0f, thumb.w + 14.0f, thumb.h + 4.0f};
+}
+
+int scrollFromThumbY(Rect viewport, float y, float dragOffsetY, int maxScroll) {
+  const auto track = scrollbarTrack(viewport);
+  const auto thumb = scrollbarThumb(viewport, 0, maxScroll);
+  const float range = std::max(1.0f, track.h - thumb.h);
+  const float t = std::clamp((y - dragOffsetY - track.y) / range, 0.0f, 1.0f);
+  return static_cast<int>(std::round(t * static_cast<float>(maxScroll)));
+}
+
 void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip& tooltip, Rect bounds) {
   if(!tooltip.showing()) return;
   const TextStyle style {FontFamily::Sans, false, false, type().small};

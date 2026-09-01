@@ -5,6 +5,8 @@
 #include "app/Notes.h"
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
+#include "app/FramePolicy.h"
+#include "app/RawPane.h"
 #include "app/ContextMenus.h"
 #include "app/SettingsDialog.h"
 #include "app/TabStrip.h"
@@ -739,7 +741,7 @@ static void performAction(UiRuntime& ui, UiAction action) {
   switch(action) {
     case UiAction::Refresh:
       ui.wikiNotesValid = false;
-    ui.state.refreshLibrary();
+      ui.state.refreshLibrary();
       ui.status = "Refreshed library";
       break;
     case UiAction::NewNote:
@@ -891,59 +893,11 @@ static bool spawnDetached(const std::vector<std::string>& command) {
 // Lines moved by PageUp/PageDown. A fixed value rather than the visible line
 // count because handleKey has no layout in scope; it matches a typical viewport.
 
-static void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui, const std::string& line, Rect writing, float y) {
-  const std::string& needle = ui.find.text();
-  if(needle.empty()) return;
-  std::size_t pos = line.find(needle);
-  while(pos != std::string::npos) {
-    const auto prefix = std::string_view(line.data(), pos);
-    const float x = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
-    const float w = static_cast<float>(std::max(6, text.width(needle, false, true)));
-    if(x < writing.x + writing.w - 8) {
-      fill(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().findBg);
-      stroke(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().findBorder);
-    }
-    pos = line.find(needle, pos + std::max<std::size_t>(1, needle.size()));
-  }
-}
 
-static void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
-  if(maxScroll <= 0) return;
-  Rect track {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, std::max(24.0f, viewport.h - 18.0f)};
-  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
-  const float thumbH = std::max(22.0f, track.h * visibleRatio);
-  const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
-  Rect thumb {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
-  fill(renderer, track, theme().scrollTrack);
-  fill(renderer, thumb, theme().scrollThumb);
-  stroke(renderer, thumb, theme().scrollThumbBorder);
-}
 
-static Rect scrollbarTrack(Rect viewport) {
-  const float trackH = std::max(24.0f, viewport.h - 18.0f);
-  return {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, trackH};
-}
 
-static Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll) {
-  if(maxScroll <= 0) return {};
-  const auto track = scrollbarTrack(viewport);
-  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
-  const float thumbH = std::max(22.0f, track.h * visibleRatio);
-  const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
-  return {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
-}
 
-static Rect scrollbarHitRect(Rect thumb) {
-  return {thumb.x - 7.0f, thumb.y - 2.0f, thumb.w + 14.0f, thumb.h + 4.0f};
-}
 
-static int scrollFromThumbY(Rect viewport, float y, float dragOffsetY, int maxScroll) {
-  const auto track = scrollbarTrack(viewport);
-  const auto thumb = scrollbarThumb(viewport, 0, maxScroll);
-  const float range = std::max(1.0f, track.h - thumb.h);
-  const float t = std::clamp((y - dragOffsetY - track.y) / range, 0.0f, 1.0f);
-  return static_cast<int>(std::round(t * static_cast<float>(maxScroll)));
-}
 
 static Rect searchBoxRect(Rect notes) {
   return {notes.x + 14.0f, notes.y + 12.0f, notes.w - 28.0f, 34.0f};
@@ -1002,9 +956,6 @@ static std::size_t fieldOffsetAtX(const TextRenderer& text, const editor::TextFi
   return editor::offsetAtX(field.text(), x - box.x + field.scrollX, fieldMeasure(text));
 }
 
-static Rect editorWritingRect(Rect editorRect) {
-  return {editorRect.x + 8.0f, editorRect.y + 8.0f, editorRect.w - 16.0f, editorRect.h - 28.0f};
-}
 
 static Rect viewerPageRect(Rect viewerRect) {
   return {viewerRect.x + 8.0f, viewerRect.y + 8.0f, viewerRect.w - 16.0f, viewerRect.h - 28.0f};
@@ -1837,32 +1788,8 @@ static void drawNotes(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
   }
 }
 
-static editor::MeasureText editorMeasure(TextRenderer& text) {
-  return [&text](std::string_view value) {
-    return text.width(value, false, true);
-  };
-}
 
-static const std::vector<editor::SoftWrapRow>& editorRows(TextRenderer& text, UiRuntime& ui, Rect rect) {
-  const Rect writing = editorWritingRect(rect);
-  const int wrapWidth = static_cast<int>(std::max(1.0f, writing.w - 20.0f));
-  const auto& source = ui.editor.text();
-  if(ui.cachedEditorRowsWidth != wrapWidth || ui.cachedEditorRowsSource != source) {
-    ui.cachedEditorRowsWidth = wrapWidth;
-    ui.cachedEditorRowsSource = source;
-    ui.cachedEditorRows = editor::softWrap(ui.cachedEditorRowsSource, wrapWidth, editorMeasure(text));
-  }
-  return ui.cachedEditorRows;
-}
 
-static int editorMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
-  Rect writing = editorWritingRect(rect);
-  const int lineHeight = text.lineHeight();
-  const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
-  ui.editorVisibleRows = maxLines;
-  const int lineCount = static_cast<int>(editorRows(text, ui, rect).size());
-  return std::max(0, lineCount - maxLines);
-}
 
 static bool scrollbarHit(Rect viewport, int scroll, int maxScroll, float x, float y) {
   if(maxScroll <= 0) return false;
@@ -1946,93 +1873,6 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   }
 
   return CursorKind::Default;
-}
-
-static std::size_t editorIndexAtPoint(TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
-  const int lineHeight = text.lineHeight();
-  const auto& rows = editorRows(text, ui, rect);
-  const Rect writing = editorWritingRect(rect);
-  const int visibleLine = std::max(0, static_cast<int>((y - (writing.y + 12)) / static_cast<float>(lineHeight)));
-  const int rowIndex = std::clamp(ui.editorScroll + visibleLine, 0, std::max(0, static_cast<int>(rows.size()) - 1));
-  return editor::offsetForRowX(rows[static_cast<std::size_t>(rowIndex)], x - (writing.x + 12), editorMeasure(text));
-}
-
-static void placeEditorCursor(TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
-  ui.editor.moveCursor(editorIndexAtPoint(text, ui, rect, x, y));
-  ui.revealEditorCursor = true;
-}
-
-static void selectWordAtCursor(UiRuntime& ui) {
-  const auto& value = ui.editor.text();
-  std::size_t cursor = std::min(ui.editor.cursor(), value.size());
-  if(cursor > 0 && (cursor == value.size() || !std::isalnum(static_cast<unsigned char>(value[cursor])))) --cursor;
-  std::size_t start = cursor;
-  std::size_t end = cursor;
-  while(start > 0 && (std::isalnum(static_cast<unsigned char>(value[start - 1])) || value[start - 1] == '_')) --start;
-  while(end < value.size() && (std::isalnum(static_cast<unsigned char>(value[end])) || value[end] == '_')) ++end;
-  ui.editor.selectRange(start, end);
-}
-
-static void selectLineAtCursor(UiRuntime& ui) {
-  const auto& value = ui.editor.text();
-  const auto cursor = std::min(ui.editor.cursor(), value.size());
-  const auto lineStart = value.rfind('\n', cursor == 0 ? 0 : cursor - 1);
-  const auto lineEnd = value.find('\n', cursor);
-  const std::size_t start = lineStart == std::string::npos ? 0 : lineStart + 1;
-  const std::size_t end = lineEnd == std::string::npos ? value.size() : lineEnd;
-  ui.editor.selectRange(start, end);
-}
-
-static void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  fill(renderer, rect, theme().editorBg);
-  Rect writing {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
-  drawSurface(renderer, writing, theme().pageSurface, ui.focus == FocusArea::Editor ? theme().accentDim : theme().hairline);
-  const int lineHeight = text.lineHeight();
-  const auto& rows = editorRows(text, ui, rect);
-  const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
-  const int cursorRow = editor::rowForOffset(rows, ui.editor.cursor());
-  if(ui.revealEditorCursor) {
-    if(cursorRow < ui.editorScroll) ui.editorScroll = cursorRow;
-    if(cursorRow >= ui.editorScroll + maxLines) ui.editorScroll = cursorRow - maxLines + 1;
-  }
-  const int maxScroll = std::max(0, static_cast<int>(rows.size()) - maxLines);
-  ui.editorScroll = std::clamp(ui.editorScroll, 0, maxScroll);
-  ui.revealEditorCursor = false;
-  {
-    ClipGuard clip(renderer, {writing.x + 1, writing.y + 1, writing.w - 2, writing.h - 2});
-    float y = writing.y + 12;
-    for(int i = ui.editorScroll; i < static_cast<int>(rows.size()) && y < writing.y + writing.h - 12; ++i) {
-      const auto& row = rows[static_cast<std::size_t>(i)];
-      const auto& line = row.text;
-      if(ui.editor.hasSelection()) {
-        const auto selStart = std::max(ui.editor.selectionStart(), row.start);
-        const auto selEnd = std::min(ui.editor.selectionEnd(), row.end);
-        if(selStart < selEnd) {
-          const auto before = std::string_view(line.data(), selStart - row.start);
-          const auto selected = std::string_view(line.data() + (selStart - row.start), selEnd - selStart);
-          const float sx = writing.x + 12 + static_cast<float>(text.width(before, false, true));
-          const float sw = static_cast<float>(text.width(selected, false, true));
-          fill(renderer, {sx, y - 2, std::min(sw, writing.x + writing.w - 8 - sx), static_cast<float>(lineHeight)}, theme().selectionBg);
-        }
-      }
-      drawFindHighlights(renderer, text, ui, line, writing, y);
-      text.draw(line.empty() ? " " : line, writing.x + 12, y, theme().text, false, true);
-      y += lineHeight;
-    }
-    if(ui.focus == FocusArea::Editor && cursorRow >= ui.editorScroll && cursorRow < ui.editorScroll + maxLines) {
-      std::string prefix;
-      if(cursorRow >= 0 && cursorRow < static_cast<int>(rows.size())) {
-        const auto& row = rows[static_cast<std::size_t>(cursorRow)];
-        const auto cursorInRow = ui.editor.cursor() <= row.end ? ui.editor.cursor() - row.start : row.text.size();
-        prefix = row.text.substr(0, std::min<std::size_t>(row.text.size(), cursorInRow));
-      }
-      const float cursorX = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
-      const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.editorScroll) * lineHeight);
-      fill(renderer, {std::min(cursorX, writing.x + writing.w - 8), cursorY, 2, static_cast<float>(lineHeight - 2)}, theme().accent);
-    }
-    if(ui.editor.text().empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, theme().muted);
-  }
-  drawVerticalScrollbar(renderer, writing, ui.editorScroll, maxScroll);
 }
 
 static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, Rect rect) {
@@ -3026,6 +2866,66 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     else if(result.itemId == "new-note") createNoteInFolder(ui, ui.state.selection().folder);
     else if(result.itemId == "rename") beginFolderRename(ui);
     else if(result.itemId == "delete") openDeleteFolderConfirm(ui);
+  }
+}
+
+// Scrolls whichever of the raw editor and the reading view the pointer is over.
+// The live surface does its own scrolling; this is the older pair.
+static void selectWordAtCursor(UiRuntime& ui) {
+  const auto& value = ui.editor.text();
+  std::size_t cursor = std::min(ui.editor.cursor(), value.size());
+  if(cursor > 0 && (cursor == value.size() || !std::isalnum(static_cast<unsigned char>(value[cursor])))) --cursor;
+  std::size_t start = cursor;
+  std::size_t end = cursor;
+  while(start > 0 && (std::isalnum(static_cast<unsigned char>(value[start - 1])) || value[start - 1] == '_')) --start;
+  while(end < value.size() && (std::isalnum(static_cast<unsigned char>(value[end])) || value[end] == '_')) ++end;
+  ui.editor.selectRange(start, end);
+}
+
+
+static void selectLineAtCursor(UiRuntime& ui) {
+  const auto& value = ui.editor.text();
+  const auto cursor = std::min(ui.editor.cursor(), value.size());
+  const auto lineStart = value.rfind('\n', cursor == 0 ? 0 : cursor - 1);
+  const auto lineEnd = value.find('\n', cursor);
+  const std::size_t start = lineStart == std::string::npos ? 0 : lineStart + 1;
+  const std::size_t end = lineEnd == std::string::npos ? value.size() : lineEnd;
+  ui.editor.selectRange(start, end);
+}
+
+static void scrollPaneUnderPointer(TextRenderer& text, UiRuntime& ui, float notches, int width, int height) {
+  perf::addCounter(perf::CounterId::InputWheelEvents);
+  const ShellLayout layout = shellLayout(ui, width, height);
+  Rect editorRect = layout.content;
+  Rect viewerRect = layout.content;
+  bool wheelEditor = false;
+  bool wheelViewer = false;
+  if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
+    wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Editor;
+  } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
+    wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Viewer;
+  } else {
+    editorRect.w = layout.content.w / 2.0f;
+    viewerRect = {layout.content.x + editorRect.w, layout.content.y, layout.content.w - editorRect.w, layout.content.h};
+    wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY);
+    wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY);
+  }
+  // SDL reports wheel.y in notches for a discrete wheel and in fractions
+  // of a notch for precise devices. Accumulate, take the whole part, and
+  // keep the remainder for the next event.
+  if(wheelViewer) {
+    ui.viewerScrollRemainder += -notches * kViewerScrollPixelsPerNotch;
+    const float whole = std::trunc(ui.viewerScrollRemainder);
+    ui.viewerScrollRemainder -= whole;
+    ui.viewerScroll = std::clamp(ui.viewerScroll + static_cast<int>(whole), 0,
+                                 viewerMaxScroll(text, ui, viewerRect));
+  } else if(wheelEditor) {
+    ui.editorScrollRemainder += -notches * kEditorScrollLinesPerNotch;
+    const float whole = std::trunc(ui.editorScrollRemainder);
+    ui.editorScrollRemainder -= whole;
+    ui.editorScroll = std::clamp(ui.editorScroll + static_cast<int>(whole), 0,
+                                 editorMaxScroll(text, ui, editorRect));
+    ui.revealEditorCursor = false;
   }
 }
 
@@ -4026,6 +3926,19 @@ int run(ApplicationOptions options) {
     return std::clamp(static_cast<int>(next - now), 1, 1200);
   };
 
+  // Everything the loop has to be awake for. Autosave used to be the only one,
+  // so it was also the only thing the wait knew about.
+  auto deadlines = [&]() -> FrameDeadlines {
+    FrameDeadlines out;
+    out.autosaveMs = autosaveWaitMs();
+    // A drag past the edge of a list has to keep scrolling while the pointer is
+    // perfectly still, which produces no events at all.
+    out.hint = ui.selectingEditorText || ui.draggingNote || ui.draggingFolder || ui.draggingBlock
+                 ? IdleHint::Busy
+                 : IdleHint::Idle;
+    return out;
+  };
+
   if(!options.openOverlay.empty()) {
     const auto& which = options.openOverlay;
     if(which == "rename") beginRename(ui);
@@ -4054,14 +3967,18 @@ int run(ApplicationOptions options) {
   bool needsDraw = true;
   while(running) {
     SDL_Event event;
-    const int waitMs = autosaveWaitMs();
-    const bool hasEvent = waitMs < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, waitMs);
+    const WaitDecision wait = chooseWait(deadlines());
+    const bool hasEvent = wait.mode == WaitMode::Block
+      ? SDL_WaitEvent(&event)
+      : SDL_WaitEventTimeout(&event, wait.timeoutMs);
     perf::addCounter(perf::CounterId::FrameEventWakes);
     if(hasEvent) {
       int width = 1280;
       int height = 800;
       SDL_GetWindowSize(window, &width, &height);
+      int drained = 0;
       do {
+        ++drained;
         needsDraw = true;
       if(event.type == SDL_EVENT_QUIT) {
         running = false;
@@ -4147,39 +4064,7 @@ int run(ApplicationOptions options) {
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
         ui.livePage.setScroll(ui.livePage.scroll() - static_cast<int>(event.wheel.y * 60));
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
-        perf::addCounter(perf::CounterId::InputWheelEvents);
-        const ShellLayout layout = shellLayout(ui, width, height);
-        Rect editorRect = layout.content;
-        Rect viewerRect = layout.content;
-        bool wheelEditor = false;
-        bool wheelViewer = false;
-        if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
-          wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Editor;
-        } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
-          wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Viewer;
-        } else {
-          editorRect.w = layout.content.w / 2.0f;
-          viewerRect = {layout.content.x + editorRect.w, layout.content.y, layout.content.w - editorRect.w, layout.content.h};
-          wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY);
-          wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY);
-        }
-        // SDL reports wheel.y in notches for a discrete wheel and in fractions
-        // of a notch for precise devices. Accumulate, take the whole part, and
-        // keep the remainder for the next event.
-        if(wheelViewer) {
-          ui.viewerScrollRemainder += -event.wheel.y * kViewerScrollPixelsPerNotch;
-          const float whole = std::trunc(ui.viewerScrollRemainder);
-          ui.viewerScrollRemainder -= whole;
-          ui.viewerScroll = std::clamp(ui.viewerScroll + static_cast<int>(whole), 0,
-                                       viewerMaxScroll(text, ui, viewerRect));
-        } else if(wheelEditor) {
-          ui.editorScrollRemainder += -event.wheel.y * kEditorScrollLinesPerNotch;
-          const float whole = std::trunc(ui.editorScrollRemainder);
-          ui.editorScrollRemainder -= whole;
-          ui.editorScroll = std::clamp(ui.editorScroll + static_cast<int>(whole), 0,
-                                       editorMaxScroll(text, ui, editorRect));
-          ui.revealEditorCursor = false;
-        }
+        scrollPaneUnderPointer(text, ui, event.wheel.y, width, height);
       } else if(event.type == SDL_EVENT_DROP_FILE) {
         if(event.drop.data) attachPathToEditor(ui, event.drop.data);
       } else if(event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||
@@ -4187,9 +4072,18 @@ int run(ApplicationOptions options) {
                 event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
         applyDisplayScale();
       } else if(event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
-        if(ui.state.hasLibrary() && !ui.editor.dirty()) ui.wikiNotesValid = false;
-    ui.state.refreshLibrary();
+        // Only when there is nothing unsaved: reloading under a dirty buffer
+        // would put the note back to what is on disk.
+        if(ui.state.hasLibrary() && !ui.editor.dirty()) {
+          ui.wikiNotesValid = false;
+          ui.state.refreshLibrary();
+        }
       }
+        // A held key or a fast trackpad refills the queue as fast as it
+        // empties, and draining it whole starves the paint: the window stops
+        // updating while input is still arriving. Stop at the budget and let
+        // the frame go out; the rest is still queued.
+        if(shouldYieldEventDrain(drained, needsDraw)) break;
       } while(SDL_PollEvent(&event));
     }
     const Uint64 now = SDL_GetTicks();

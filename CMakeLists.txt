@@ -206,6 +206,7 @@ add_executable(micronotes
   src/app/ContextMenus.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
+  src/app/RawPane.cpp
   src/app/RightPanel.cpp
   src/app/SettingsDialog.cpp
   src/app/TabStrip.cpp
@@ -240,6 +241,7 @@ add_executable(micronotes_tests
   tests/EditorViewerTests.cpp
   tests/EditsTests.cpp
   tests/FoldTests.cpp
+  tests/FramePolicyTests.cpp
   tests/FuzzyTests.cpp
   tests/InlineScanTests.cpp
   tests/LayoutTests.cpp

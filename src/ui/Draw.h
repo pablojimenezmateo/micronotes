@@ -276,6 +276,17 @@ void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float
 void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
                       std::string_view keys = {});
 
+// A vertical scrollbar down the right of a viewport, drawn only when there is
+// something to scroll. The geometry is exposed because the hit test and the
+// drag both have to agree with what was painted.
+void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll);
+Rect scrollbarTrack(Rect viewport);
+Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll);
+// The thumb, grown so it can be grabbed. One inflate governs the grab region
+// and the region that changes the cursor, so they cannot drift apart.
+Rect scrollbarHitRect(Rect thumb);
+int scrollFromThumbY(Rect viewport, float y, float dragOffsetY, int maxScroll);
+
 // Draws a resolved tooltip. Called last in a frame, so nothing paints over it.
 void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip& tooltip, Rect bounds);
 
