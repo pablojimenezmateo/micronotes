@@ -28,14 +28,14 @@ MICRONOTES_TEST(app_state_opens_library_filters_and_persists_state) {
   state.setSearch("search");
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
   state.selectNote("note-1");
-  state.workspace().paneMode = micronotes::ui::PaneMode::Viewer;
+  state.workspace().setPaneMode(micronotes::ui::PaneMode::Viewer);
   const auto statePath = root / ".micronotes" / "ui.state";
   MICRONOTES_REQUIRE(state.saveUiState(statePath));
 
   micronotes::ui::AppState loaded;
   MICRONOTES_REQUIRE(loaded.loadUiState(statePath));
   MICRONOTES_REQUIRE(loaded.selection().noteId == "note-1");
-  MICRONOTES_REQUIRE(loaded.workspace().paneMode == micronotes::ui::PaneMode::Viewer);
+  MICRONOTES_REQUIRE(loaded.workspace().paneMode() == micronotes::ui::PaneMode::Viewer);
   std::filesystem::remove_all(root);
 }
 

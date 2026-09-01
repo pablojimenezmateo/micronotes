@@ -86,8 +86,22 @@ void AppState::selectTag(std::string tag) {
   selection_.search.clear();
 }
 
-void AppState::selectNote(std::string noteId) {
+void AppState::selectNote(std::string noteId, bool inNewTab) {
+  // The tab list and the selection are one thing said twice, so they are kept
+  // in step here rather than at each of the dozen call sites that open a note.
+  workspace_.openNote(noteId, inNewTab);
   selection_.noteId = std::move(noteId);
+}
+
+void AppState::closeTab(std::size_t index) {
+  workspace_.closeTab(index);
+  const auto* tab = workspace_.activeTab_();
+  selection_.noteId = tab ? tab->noteId : std::string();
+}
+
+void AppState::stepTab(int delta) {
+  workspace_.stepTab(delta);
+  if(const auto* tab = workspace_.activeTab_()) selection_.noteId = tab->noteId;
 }
 
 void AppState::setSearch(std::string query, library::SearchScope scope) {
@@ -167,6 +181,7 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
   selection_.tag.clear();
   selection_.search.clear();
   selection_.noteId = metadata.id;
+  workspace_.openNote(metadata.id, false);
   return library::NoteListItem {metadata.id, path, metadata.title, metadata.tags, metadata.icon};
 }
 
@@ -285,7 +300,13 @@ bool AppState::deleteSelectedNote() {
   auto note = selectedNote();
   if(!note) return false;
   library_->deleteNote(note->item.path);
-  selection_.noteId.clear();
+  // A deleted note must not be left open in a tab pointing at nothing; closing
+  // it also chooses what to show next.
+  if(const auto tab = workspace_.findTab(selection_.noteId); tab != std::string::npos) {
+    closeTab(tab);
+  } else {
+    selection_.noteId.clear();
+  }
   return refreshLibrary();
 }
 
@@ -352,7 +373,14 @@ bool AppState::refreshLibrary() {
 
 bool AppState::saveUiState(const std::filesystem::path& path) const {
   std::ostringstream out;
-  out << "pane=" << static_cast<int>(workspace_.paneMode) << "\n";
+  // Written for a version that predates tabs: it reads the pane mode and the
+  // open note from these two and gets a working single-tab session. Keys are
+  // added rather than redefined, so an older binary keeps working too.
+  out << "pane=" << static_cast<int>(workspace_.paneMode()) << "\n";
+  for(const auto& tab : workspace_.tabs) {
+    out << "tab=" << static_cast<int>(tab.paneMode) << "|" << (tab.pinned ? 1 : 0) << "|" << tab.noteId << "\n";
+  }
+  out << "active_tab=" << workspace_.activeTab << "\n";
   // Rounded on the way out: an older binary parses these with from_chars into
   // an int, and "240.5" would make it fall back to its default instead.
   out << "sidebar=" << static_cast<int>(std::lround(workspace_.sidebarWidth)) << "\n";
@@ -387,10 +415,16 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
   workspace_.sidebarVisible = true;
   workspace_.noteListVisible = true;
   workspace_.rightPanelVisible = false;
+  workspace_.tabs.clear();
+  workspace_.activeTab = 0;
   selection_ = {};
   std::ifstream in(path);
   if(!in) return false;
   std::string line;
+  // A file written before tabs existed carries `pane=` and `note=` instead; one
+  // tab is synthesised from them below rather than the session opening empty.
+  std::optional<PaneMode> legacyPane;
+  int activeTab = 0;
   const auto parseInt = [](const std::string& value, int fallback) {
     int result = fallback;
     const auto* first = value.data();
@@ -405,11 +439,27 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
     const auto key = line.substr(0, eq);
     const auto value = line.substr(eq + 1);
     if(key == "pane") {
-      const int mode = parseInt(value, static_cast<int>(workspace_.paneMode));
+      const int mode = parseInt(value, static_cast<int>(PaneMode::Live));
       if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
-        workspace_.paneMode = static_cast<PaneMode>(mode);
+        legacyPane = static_cast<PaneMode>(mode);
       }
     }
+    else if(key == "tab") {
+      // "<pane>|<pinned>|<note id>". The id is last and unsplit, because it is
+      // the only field that could contain a separator.
+      const auto firstBar = value.find('|');
+      const auto secondBar = firstBar == std::string::npos ? std::string::npos : value.find('|', firstBar + 1);
+      if(secondBar == std::string::npos) continue;
+      NoteTab tab;
+      const int mode = parseInt(value.substr(0, firstBar), static_cast<int>(PaneMode::Live));
+      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
+        tab.paneMode = static_cast<PaneMode>(mode);
+      }
+      tab.pinned = parseInt(value.substr(firstBar + 1, secondBar - firstBar - 1), 0) != 0;
+      tab.noteId = value.substr(secondBar + 1);
+      if(!tab.noteId.empty()) workspace_.tabs.push_back(std::move(tab));
+    }
+    else if(key == "active_tab") activeTab = parseInt(value, 0);
     else if(key == "sidebar") workspace_.sidebarWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.sidebarWidth)));
     else if(key == "notelist") workspace_.noteListWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.noteListWidth)));
     else if(key == "rightpanel") workspace_.rightPanelWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.rightPanelWidth)));
@@ -432,6 +482,20 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
       }
     }
   }
+  if(workspace_.tabs.empty() && !selection_.noteId.empty()) {
+    NoteTab tab;
+    tab.noteId = selection_.noteId;
+    tab.paneMode = legacyPane.value_or(PaneMode::Live);
+    workspace_.tabs.push_back(std::move(tab));
+  } else if(legacyPane && !workspace_.tabs.empty()) {
+    // A file with tabs was written by a version that has them, so `pane=` is
+    // only the legacy echo of the active tab and must not override it.
+  }
+  workspace_.activeTab = workspace_.tabs.empty()
+    ? 0
+    : std::min(static_cast<std::size_t>(std::max(activeTab, 0)), workspace_.tabs.size() - 1);
+  // The active tab is what is open, whatever the legacy `note=` line said.
+  if(const auto* tab = workspace_.activeTab_()) selection_.noteId = tab->noteId;
   return true;
 }
 

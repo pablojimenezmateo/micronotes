@@ -63,6 +63,11 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::ToggleSidebar,   "toggle-sidebar", "Show or hide the sidebar",        "Ctrl+Alt+Left","",              S::View, false, true},
   {ActionId::ToggleNoteList,  "toggle-notes",   "Show or hide the note list",      "Ctrl+Alt+Down","",              S::View, false, true},
   {ActionId::ToggleRightPanel,"toggle-right",   "Show or hide the outline panel",  "Ctrl+Alt+Right","",             S::View, false, true},
+  {ActionId::NextTab,         "next-tab",       "Next tab",                        "Ctrl+Tab",     "",              S::View, false, true},
+  {ActionId::PreviousTab,     "previous-tab",   "Previous tab",                    "Ctrl+Shift+Tab","",             S::View, false, true},
+  {ActionId::CloseTab,        "close-tab",      "Close this tab",                  "Ctrl+W",       "",              S::View, true,  true},
+  {ActionId::OpenInNewTab,    "new-tab",        "Open a note in a new tab...",     "Ctrl+Shift+T", "",              S::View, false, true},
+  {ActionId::PinTab,          "pin-tab",        "Pin or unpin this tab",           "",             "",              S::View, true,  true},
   {ActionId::CycleRightPanel, "cycle-right",    "Outline, links or tags",      "Ctrl+Alt+Up",  "",              S::View, false, true},
 }};
 

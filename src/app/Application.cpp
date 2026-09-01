@@ -4,6 +4,9 @@
 #include "app/PageView.h"
 #include "app/Notes.h"
 #include "app/RightPanel.h"
+#include "app/ContextMenus.h"
+#include "app/SettingsDialog.h"
+#include "app/TabStrip.h"
 #include "app/WikiLinks.h"
 #include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
@@ -103,8 +106,12 @@ static void updateFindStatus(UiRuntime& ui);
 // rects. `ui.layoutMode` is both an input and an output: feeding the last mode
 // back in is what gives the compact breakpoint its hysteresis.
 static ShellLayout shellLayout(UiRuntime& ui, int width, int height) {
-  const ShellLayout layout = computeShellLayout(ui.state.workspace().layoutInputs(
-    static_cast<float>(width), static_cast<float>(height), ui.layoutMode));
+  auto inputs = ui.state.workspace().layoutInputs(
+    static_cast<float>(width), static_cast<float>(height), ui.layoutMode);
+  // One tab is still a tab: hiding the strip until a second opens would make
+  // the page jump down the moment it did.
+  inputs.tabStripVisible = !ui.state.workspace().tabs.empty();
+  const ShellLayout layout = computeShellLayout(inputs);
   ui.layoutMode = layout.mode;
   return layout;
 }
@@ -677,14 +684,14 @@ static const char* paneModeName(ui::PaneMode mode) {
 
 static void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
   ui.clearBlockSelection();
-  ui.state.workspace().paneMode = mode;
+  ui.state.workspace().setPaneMode(mode);
   ui.focus = mode == ui::PaneMode::Viewer ? FocusArea::Viewer : FocusArea::Editor;
   ui.revealEditorCursor = true;
   ui.status = paneModeName(mode);
 }
 
 static void cyclePaneMode(UiRuntime& ui) {
-  switch(ui.state.workspace().paneMode) {
+  switch(ui.state.workspace().paneMode()) {
     case ui::PaneMode::Live: setPaneMode(ui, ui::PaneMode::Editor); break;
     case ui::PaneMode::Editor: setPaneMode(ui, ui::PaneMode::Viewer); break;
     case ui::PaneMode::Viewer: setPaneMode(ui, ui::PaneMode::Split); break;
@@ -748,15 +755,15 @@ static void performAction(UiRuntime& ui, UiAction action) {
       beginTagEdit(ui);
       break;
     case UiAction::PaneEditor:
-      ui.state.workspace().paneMode = ui::PaneMode::Editor;
+      ui.state.workspace().setPaneMode(ui::PaneMode::Editor);
       ui.focus = FocusArea::Editor;
       break;
     case UiAction::PaneViewer:
-      ui.state.workspace().paneMode = ui::PaneMode::Viewer;
+      ui.state.workspace().setPaneMode(ui::PaneMode::Viewer);
       ui.focus = FocusArea::Viewer;
       break;
     case UiAction::PaneSplit:
-      ui.state.workspace().paneMode = ui::PaneMode::Split;
+      ui.state.workspace().setPaneMode(ui::PaneMode::Split);
       ui.focus = FocusArea::Editor;
       break;
   }
@@ -1908,7 +1915,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 
   if(!contains(layout.content, x, y)) return CursorKind::Default;
 
-  if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
+  if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
     if(scrollbarHit(ui.livePage.pageRect(), ui.livePage.scroll(), ui.livePage.maxScroll(), x, y)) return CursorKind::Pointer;
     if(!ui.livePage.linkAt(x, y).empty()) return CursorKind::Pointer;
     if(ui.livePage.gutterAt(x, y) || !ui.livePage.toolbarAt(x, y).empty()) return CursorKind::Pointer;
@@ -1921,9 +1928,9 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   Rect viewerRect = layout.content;
   bool hasEditor = false;
   bool hasViewer = false;
-  if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
+  if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
     hasEditor = true;
-  } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
+  } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
     hasViewer = true;
   } else {
     hasEditor = true;
@@ -2256,7 +2263,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     }
     if(doc.blocks.empty()) {
       drawEmptyMessage(text, "Nothing to read yet", "This note has no text in it.", page,
-                       ui.state.workspace().paneMode == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
+                       ui.state.workspace().paneMode() == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
     }
   }
   drawVerticalScrollbar(renderer, page, ui.viewerScroll, maxScroll);
@@ -2418,7 +2425,7 @@ static void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
   // Three anchors and the way to the rest. The line used to name a dozen keys
   // and be truncated before it finished; every one of them is in F1 now, which
   // can hold them all and be searched.
-  std::string help = std::string(paneModeName(ui.state.workspace().paneMode)) +
+  std::string help = std::string(paneModeName(ui.state.workspace().paneMode())) +
     "   " + ui::keysFor(ui::ActionId::GoToNote) + " Go to note" +
     "   " + ui::keysFor(ui::ActionId::CommandPalette) + " Commands" +
     "   " + ui::keysFor(ui::ActionId::Shortcuts) + " Shortcuts";
@@ -2504,6 +2511,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     fill(renderer, {panel.x + panel.w, 0, 1, panel.h}, theme().hairline);
   }
   if(!ui::empty(layout.rightPanel)) drawRightPanel(renderer, text, ui, layout.rightPanel);
+  if(!ui::empty(layout.tabs)) drawTabStrip(renderer, text, ui, layout.tabs);
   if(!ui.state.hasLibrary()) {
     fill(renderer, layout.content, theme().editorBg);
     // The one screen someone can arrive at knowing nothing, so it says what
@@ -2525,11 +2533,11 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     // above whichever pane is showing it.
     const Rect content = layout.content;
     drawBreadcrumbs(renderer, text, ui, layout.crumbs);
-    if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
+    if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       drawLive(renderer, text, ui, content);
-    } else if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
+    } else if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
       drawEditor(renderer, text, ui, content);
-    } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
+    } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
       drawViewer(renderer, text, images, ui, content);
     } else {
       const float split = content.w / 2.0f;
@@ -2580,45 +2588,8 @@ static int captureFrame(SDL_Renderer* renderer, TextRenderer& text, ImageCache& 
   return 0;
 }
 
-static void openNoteMenu(UiRuntime& ui, float x, float y) {
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "note-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 220.0f;
-  const bool hasNote = !ui.state.selection().noteId.empty();
-  overlay.items = {
-    {"new", "New note", "", ui::keysFor(ui::ActionId::NewNote), true, false},
-    {"rename", "Rename", "", "", hasNote, false},
-    {"icon", "Set icon", "", "", hasNote, false},
-    {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false},
-    {"favorite", "Toggle favorite", "", "", hasNote, false},
-    {"move", "Move to notebook", "", "", hasNote, false},
-    {"delete", "Delete", "", "", hasNote, true},
-  };
-  ui.overlays.open(std::move(overlay));
-}
-
-static void openFolderMenu(UiRuntime& ui, float x, float y) {
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "folder-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 220.0f;
-  const bool hasFolder = !ui.state.selection().folder.empty();
-  overlay.items = {
-    {"new-folder", "New notebook", "", "", true, false},
-    {"new-note", "New note here", "", "", hasFolder, false},
-    {"rename", "Rename", "", "", hasFolder, false},
-    {"delete", "Delete", "", "", hasFolder, true},
-  };
-  ui.overlays.open(std::move(overlay));
-}
-
+// The block types, as menu rows. One table feeds the slash menu, the turn-into
+// menu and the block menu, so a new block type appears in all three at once.
 static std::vector<ui::OverlayItem> blockKindItems() {
   std::vector<ui::OverlayItem> items;
   for(const auto& entry : kBlockKinds) items.push_back({entry.id, entry.label, entry.detail, "", true, false});
@@ -2829,62 +2800,6 @@ static std::string displayPath(const std::filesystem::path& path) {
 // list of its own values. A list overlay rather than a panel of widgets,
 // because the keyboard, the filter and the dismissal rules are then the ones
 // already learnt from every other overlay in the app.
-static void openSettings(UiRuntime& ui) {
-  ui::Overlay overlay;
-  overlay.id = "settings";
-  overlay.title = "Settings";
-  overlay.filterable = true;
-  overlay.placeholder = "Type a setting";
-  overlay.hint = "Enter change   Esc close";
-  overlay.width = 480.0f;
-  overlay.items.push_back({"theme", "Theme",
-                           ui::themeMode() == ui::ThemeMode::Dark ? "Dark" : "Light", ui::keysFor(ui::ActionId::ToggleTheme), true, false});
-  overlay.items.push_back({"text-size", "Text size", std::string(ui::textSizeLabel(ui::textSize())), "", true, false});
-  overlay.items.push_back({"page-width", "Page width", std::string(ui::pageWidthLabel(ui::pageWidth())), "", true, false});
-  // Trimmed from the left: a truncated path keeps the half that says which
-  // folder this is, not the half every path on the machine shares.
-  std::string library = ui.state.hasLibrary() ? displayPath(ui.state.libraryRoot()) : std::string("none");
-  if(library.size() > 34) {
-    const auto root = ui.state.libraryRoot();
-    library = "\xe2\x80\xa6/" + root.parent_path().filename().generic_string() + "/" + root.filename().generic_string();
-  }
-  overlay.items.push_back({"library", "Library folder", library, "", true, false});
-  overlay.items.push_back({"shortcuts", "Keyboard shortcuts...", "", "F1", true, false});
-  ui.overlays.open(std::move(overlay));
-}
-
-// The values one setting can take. "current" rather than a tick: the vendored
-// UI face is not guaranteed a check glyph, and a word cannot render as tofu.
-static void openSettingsValues(UiRuntime& ui, const std::string& which) {
-  ui::Overlay overlay;
-  overlay.width = 380.0f;
-  overlay.hint = "Enter apply   Esc back";
-  const auto mark = [](bool active) { return active ? "current" : ""; };
-  if(which == "theme") {
-    overlay.id = "settings-theme";
-    overlay.title = "Theme";
-    overlay.items.push_back({"light", "Light", "", mark(ui::themeMode() == ui::ThemeMode::Light), true, false});
-    overlay.items.push_back({"dark", "Dark", "", mark(ui::themeMode() == ui::ThemeMode::Dark), true, false});
-  } else if(which == "text-size") {
-    overlay.id = "settings-text-size";
-    overlay.title = "Text size";
-    for(const auto size : {ui::TextSize::Small, ui::TextSize::Medium, ui::TextSize::Large}) {
-      overlay.items.push_back({std::string(ui::textSizeName(size)), std::string(ui::textSizeLabel(size)),
-                               "", mark(ui::textSize() == size), true, false});
-    }
-  } else if(which == "page-width") {
-    overlay.id = "settings-page-width";
-    overlay.title = "Page width";
-    for(const auto width : {ui::PageWidth::Narrow, ui::PageWidth::Medium, ui::PageWidth::Wide}) {
-      overlay.items.push_back({std::string(ui::pageWidthName(width)), std::string(ui::pageWidthLabel(width)),
-                               "", mark(ui::pageWidth() == width), true, false});
-    }
-  } else {
-    return;
-  }
-  ui.overlays.open(std::move(overlay));
-}
-
 static void openLibraryPrompt(UiRuntime& ui) {
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::TextPrompt;
@@ -2900,7 +2815,7 @@ static void openLibraryPrompt(UiRuntime& ui) {
 // Opens a different library without restarting. The one being left is written
 // out first, so its open note, favorites and folds go with it rather than
 // following the user into the new one.
-static void switchLibrary(UiRuntime& ui, const std::string& typed) {
+void switchLibrary(UiRuntime& ui, const std::string& typed) {
   std::string value = typed;
   while(!value.empty() && (value.back() == ' ' || value.back() == '/')) value.pop_back();
   if(value.empty()) {
@@ -2941,6 +2856,7 @@ static void switchLibrary(UiRuntime& ui, const std::string& typed) {
 // palette and the key handler. A row with no keys is a section heading: it is
 // listed as a disabled item, so the arrows step over it and Enter cannot land
 // on it.
+
 static void openShortcutHelp(UiRuntime& ui) {
   ui::Overlay overlay;
   overlay.id = "shortcuts";
@@ -3063,6 +2979,17 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "toggle-notes") togglePanel(ui, &ui::WorkspaceModel::noteListVisible, "Note list");
   else if(id == "toggle-right") togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");
   else if(id == "cycle-right") cycleRightPanel(ui);
+  else if(id == "next-tab") stepTab(ui, 1);
+  else if(id == "previous-tab") stepTab(ui, -1);
+  else if(id == "close-tab") closeActiveTab(ui);
+  else if(id == "new-tab") openNotePalette(ui, "jump-note-new", "Open in a new tab");
+  else if(id == "pin-tab") {
+    auto& workspace = ui.state.workspace();
+    if(auto* tab = workspace.activeTab_()) {
+      tab->pinned = !tab->pinned;
+      ui.status = tab->pinned ? "Tab pinned" : "Tab unpinned";
+    }
+  }
 }
 
 static void openDeleteNoteConfirm(UiRuntime& ui) {
@@ -3128,6 +3055,11 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     commitWikiMenu(ui, result.itemId, result.value);
   } else if(result.overlayId == "command-palette") {
     performCommand(ui, result.itemId);
+  } else if(result.overlayId == "jump-note-new") {
+    if(saveCurrent(ui, true)) {
+      ui.state.selectNote(result.itemId, true);
+      loadSelectedIntoEditor(ui);
+    }
   } else if(result.overlayId == "jump-note") {
     selectNoteById(ui, result.itemId);
     if(const auto note = ui.state.findNote(result.itemId)) {
@@ -3199,14 +3131,14 @@ static void handleText(UiRuntime& ui, const char* input) {
     ui.revealEditorCursor = true;
     // "/" opens the block inserter, but only where a block could start: mid-word
     // slashes belong to paths and URLs.
-    if(ui.state.workspace().paneMode == ui::PaneMode::Live && std::string_view(input) == "/") {
+    if(ui.state.workspace().paneMode() == ui::PaneMode::Live && std::string_view(input) == "/") {
       const std::size_t slash = ui.editor.cursor() - 1;
       const char before = slash == 0 ? '\n' : ui.editor.text()[slash - 1];
       if(before == '\n' || before == ' ' || before == '\t') openSlashMenu(ui, slash);
     }
     // The second "[" of a "[[" offers the notes it could mean. A single bracket
     // is left alone: it is how every ordinary link and every task marker starts.
-    if(ui.state.workspace().paneMode == ui::PaneMode::Live && std::string_view(input) == "[") {
+    if(ui.state.workspace().paneMode() == ui::PaneMode::Live && std::string_view(input) == "[") {
       const std::size_t bracket = ui.editor.cursor() - 1;
       if(bracket > 0 && ui.editor.text()[bracket - 1] == '[') openWikiMenu(ui, bracket - 1);
     }
@@ -3246,6 +3178,10 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   // selection or the pane before deciding what the key meant, and each has to
   // be untangled before it can join this list.
   static constexpr ui::ActionId kBoundHere[] = {
+    ui::ActionId::NextTab,
+    ui::ActionId::PreviousTab,
+    ui::ActionId::CloseTab,
+    ui::ActionId::OpenInNewTab,
     ui::ActionId::ToggleSidebar,
     ui::ActionId::ToggleNoteList,
     ui::ActionId::ToggleRightPanel,
@@ -3406,7 +3342,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     ui.creatingFolder = false;
     // In the live surface Esc steps out of the text and selects the block
     // itself; a second Esc puts the caret back.
-    if(ui.focus == FocusArea::Editor && ui.state.workspace().paneMode == ui::PaneMode::Live) {
+    if(ui.focus == FocusArea::Editor && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       if(ui.blockSelectActive) ui.clearBlockSelection();
       else selectBlockAtCursor(ui);
     }
@@ -3452,7 +3388,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       ui.clearBlockSelection();
     }
   } else if(ui.focus == FocusArea::Editor) {
-    const bool live = ui.state.workspace().paneMode == ui::PaneMode::Live;
+    const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
     // One visual row up or down: the live surface wraps, the raw editor does not.
     const auto rowStep = [&](int rows) {
       return live ? ui.livePage.rowRelative(ui.editor.cursor(), rows) : ui.editor.cursor();
@@ -3552,6 +3488,11 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
   const ShellLayout layout = shellLayout(ui, width, height);
 
+  if(!ui::empty(layout.tabs) &&
+     handleTabStripClick(ui, layout.tabs, x, y, button, (SDL_GetModState() & SDL_KMOD_CTRL) != 0)) {
+    return;
+  }
+
   // The right panel owns everything inside it, including its own background:
   // without that, a click between two outline rows would fall through to the
   // page and move the caret somewhere the reader never pointed at.
@@ -3569,7 +3510,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
       return;
     }
-    if(contains(layout.content, x, y) && ui.state.workspace().paneMode == ui::PaneMode::Live) {
+    if(contains(layout.content, x, y) && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       ui.focus = FocusArea::Editor;
       ui.editor.moveCursor(ui.livePage.offsetAt(x, y));
       ui.revealEditorCursor = true;
@@ -3578,8 +3519,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     if(contains(layout.content, x, y)) {
       Rect editorRect = layout.content;
-      bool editorAtPoint = ui.state.workspace().paneMode == ui::PaneMode::Editor;
-      if(ui.state.workspace().paneMode == ui::PaneMode::Split) {
+      bool editorAtPoint = ui.state.workspace().paneMode() == ui::PaneMode::Editor;
+      if(ui.state.workspace().paneMode() == ui::PaneMode::Split) {
         editorRect.w = layout.content.w / 2.0f;
         editorAtPoint = contains(editorRect, x, y);
       }
@@ -3605,7 +3546,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     return;
   }
 
-  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode == ui::PaneMode::Live) {
+  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
     const int maxScroll = ui.livePage.maxScroll();
     const auto thumb = scrollbarThumb(ui.livePage.pageRect(), ui.livePage.scroll(), maxScroll);
     if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
@@ -3616,14 +3557,14 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
   }
 
-  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode != ui::PaneMode::Live) {
+  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode() != ui::PaneMode::Live) {
     Rect editorRect = layout.content;
     Rect viewerRect = layout.content;
     bool hasEditor = false;
     bool hasViewer = false;
-    if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
+    if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
       hasEditor = true;
-    } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
+    } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
       hasViewer = true;
     } else {
       hasEditor = true;
@@ -3776,10 +3717,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   if(contains(layout.content, x, y)) {
     // The live surface's own chrome sits above the text, so a link underneath it
     // must not swallow the click.
-    const bool overLiveChrome = ui.state.workspace().paneMode == ui::PaneMode::Live &&
+    const bool overLiveChrome = ui.state.workspace().paneMode() == ui::PaneMode::Live &&
                                 (ui.livePage.gutterAt(x, y).has_value() || !ui.livePage.toolbarAt(x, y).empty() ||
                                  ui.livePage.foldAt(x, y).has_value() || ui.livePage.copyButtonAt(x, y).has_value());
-    if(ui.state.workspace().paneMode != ui::PaneMode::Editor && !overLiveChrome) {
+    if(ui.state.workspace().paneMode() != ui::PaneMode::Editor && !overLiveChrome) {
       for(const auto& link : ui.linkRegions) {
         if(contains(link.rect, x, y)) {
           const auto target = link.target;
@@ -3836,7 +3777,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         }
       }
     }
-    if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
+    if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       ui.focus = FocusArea::Editor;
       if(button == SDL_BUTTON_RIGHT) {
         if(const auto index = ui.livePage.blockAt(x, y)) {
@@ -3956,12 +3897,12 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       }
       return;
     }
-    if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) ui.focus = FocusArea::Viewer;
-    else if(ui.state.workspace().paneMode == ui::PaneMode::Split && x >= layout.content.x + layout.content.w / 2.0f) ui.focus = FocusArea::Viewer;
+    if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) ui.focus = FocusArea::Viewer;
+    else if(ui.state.workspace().paneMode() == ui::PaneMode::Split && x >= layout.content.x + layout.content.w / 2.0f) ui.focus = FocusArea::Viewer;
     else {
       ui.focus = FocusArea::Editor;
       Rect editorRect = layout.content;
-      if(ui.state.workspace().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+      if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
       placeEditorCursor(text, ui, editorRect, x, y);
       ui.selectingEditorText = true;
       ui.editorSelectionAnchor = ui.editor.cursor();
@@ -4056,17 +3997,29 @@ int run(ApplicationOptions options) {
     }
   }
   if(!options.selectTitle.empty()) {
-    for(const auto& note : ui.state.currentNotes()) {
-      if(note.title.find(options.selectTitle) == std::string::npos) continue;
-      selectNoteById(ui, note.id);
-      break;
+    // Comma-separated: each title after the first opens in a tab of its own, so
+    // a capture can show a strip without having to know any note's id.
+    std::string_view rest = options.selectTitle;
+    bool first = true;
+    while(!rest.empty()) {
+      const auto comma = rest.find(',');
+      const auto title = rest.substr(0, comma);
+      for(const auto& note : ui.state.allNotes()) {
+        if(note.title.find(title) == std::string::npos) continue;
+        ui.state.selectNote(note.id, !first);
+        loadSelectedIntoEditor(ui);
+        first = false;
+        break;
+      }
+      if(comma == std::string_view::npos) break;
+      rest.remove_prefix(comma + 1);
     }
   }
   if(options.paneMode) {
-    ui.state.workspace().paneMode = *options.paneMode == 0 ? ui::PaneMode::Editor
+    ui.state.workspace().setPaneMode(*options.paneMode == 0 ? ui::PaneMode::Editor
       : *options.paneMode == 1 ? ui::PaneMode::Viewer
       : *options.paneMode == 2 ? ui::PaneMode::Split
-      : ui::PaneMode::Live;
+      : ui::PaneMode::Live);
   }
   if(options.showSidebar) ui.state.workspace().sidebarVisible = *options.showSidebar;
   if(options.showNoteList) ui.state.workspace().noteListVisible = *options.showNoteList;
@@ -4214,13 +4167,13 @@ int run(ApplicationOptions options) {
         } else if(ui.draggingBlock) {
           ui.blockDropOffset = ui.livePage.dropOffsetAt(event.motion.y);
         } else if(ui.selectingEditorText) {
-          if(ui.state.workspace().paneMode == ui::PaneMode::Live) {
+          if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
             ui.editor.selectRange(ui.editorSelectionAnchor, ui.livePage.offsetAt(event.motion.x, event.motion.y));
             ui.revealEditorCursor = true;
           } else {
             const ShellLayout layout = shellLayout(ui, width, height);
             Rect editorRect = layout.content;
-            if(ui.state.workspace().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+            if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
             const auto cursor = editorIndexAtPoint(text, ui, editorRect, event.motion.x, event.motion.y);
             ui.editor.selectRange(ui.editorSelectionAnchor, cursor);
             ui.revealEditorCursor = true;
@@ -4231,14 +4184,14 @@ int run(ApplicationOptions options) {
             ui.livePage.setScroll(scrollFromThumbY(ui.livePage.pageRect(), event.motion.y, ui.scrollDragOffsetY, ui.livePage.maxScroll()));
           } else if(ui.scrollDragTarget == ScrollDragTarget::Editor) {
             Rect editorRect = layout.content;
-            if(ui.state.workspace().paneMode == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+            if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
             Rect writing {editorRect.x + 8, editorRect.y + 8, editorRect.w - 16, editorRect.h - 28};
             const int maxScroll = editorMaxScroll(text, ui, editorRect);
             ui.editorScroll = scrollFromThumbY(writing, event.motion.y, ui.scrollDragOffsetY, maxScroll);
             ui.revealEditorCursor = false;
           } else if(ui.scrollDragTarget == ScrollDragTarget::Viewer) {
             Rect viewerRect = layout.content;
-            if(ui.state.workspace().paneMode == ui::PaneMode::Split) {
+            if(ui.state.workspace().paneMode() == ui::PaneMode::Split) {
               const float split = layout.content.w / 2.0f;
               viewerRect = {layout.content.x + split, layout.content.y, layout.content.w - split, layout.content.h};
             }
@@ -4268,7 +4221,7 @@ int run(ApplicationOptions options) {
         // The tree can be taller than the window, so the pointer's column
         // decides where a wheel goes before the pane mode does.
         ui.sidebarScroll = std::clamp(ui.sidebarScroll - static_cast<int>(event.wheel.y * 48), 0, ui.sidebarMaxScroll);
-      } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.workspace().paneMode == ui::PaneMode::Live) {
+      } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
         ui.livePage.setScroll(ui.livePage.scroll() - static_cast<int>(event.wheel.y * 60));
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
         perf::addCounter(perf::CounterId::InputWheelEvents);
@@ -4277,9 +4230,9 @@ int run(ApplicationOptions options) {
         Rect viewerRect = layout.content;
         bool wheelEditor = false;
         bool wheelViewer = false;
-        if(ui.state.workspace().paneMode == ui::PaneMode::Editor) {
+        if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
           wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Editor;
-        } else if(ui.state.workspace().paneMode == ui::PaneMode::Viewer) {
+        } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
           wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Viewer;
         } else {
           editorRect.w = layout.content.w / 2.0f;

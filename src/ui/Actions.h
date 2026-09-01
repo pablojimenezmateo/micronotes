@@ -63,6 +63,11 @@ enum class ActionId {
   ToggleNoteList,
   ToggleRightPanel,
   CycleRightPanel,
+  NextTab,
+  PreviousTab,
+  CloseTab,
+  OpenInNewTab,
+  PinTab,
 
   Count
 };

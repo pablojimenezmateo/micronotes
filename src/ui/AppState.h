@@ -39,7 +39,13 @@ public:
 
   void selectFolder(std::filesystem::path folder);
   void selectTag(std::string tag);
-  void selectNote(std::string noteId);
+  // Opening a note is opening a tab on it. `inNewTab` keeps whatever was open
+  // instead of replacing it, which is what a middle click or Ctrl+click means.
+  void selectNote(std::string noteId, bool inNewTab = false);
+  // Closes a tab and selects whatever is left showing.
+  void closeTab(std::size_t index);
+  // Moves to the next or previous tab, wrapping.
+  void stepTab(int delta);
   void setSearch(std::string query, library::SearchScope scope = library::SearchScope::All);
   std::vector<library::FolderNode> folders() const;
   std::vector<std::string> tags() const;
