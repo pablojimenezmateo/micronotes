@@ -327,7 +327,11 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   foldHits_.clear();
   codeButtons_.clear();
   fill(renderer, rect_, theme().editorBg);
-  ui::drawSurface(renderer, page_, theme().pageSurface, focused ? theme().accentDim : theme().hairline);
+  // Flat, with no outline. The page used to be drawn as a bordered card that
+  // turned accent-coloured when focused, which made the entire writing surface
+  // read as a selected text field -- and the border was doing all the work,
+  // because pageSurface and the pane behind it are the same colour.
+  ui::fill(renderer, page_, theme().pageSurface);
 
   const float ox = originX();
   const float oy = originY();

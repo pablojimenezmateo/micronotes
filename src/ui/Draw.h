@@ -44,7 +44,19 @@ void stroke(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void hLine(SDL_Renderer* renderer, float x1, float x2, float y, SDL_Color color);
 void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor);
 void drawSurface(SDL_Renderer* renderer, Rect rect);
+// A row that is selected, pointed at, or neither.
+//
+// Selection is a fill and a strip of accent down the left edge -- the shape of
+// a marker in a margin. It used to also outline the row, which made a list of
+// rows read as a list of boxes and made "selected" and "focused" look the same
+// as each other.
 void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot);
+
+// Which surface has the keyboard. Drawn as a strip down the edge nearest the
+// rest of the window rather than as an outline round the whole pane: an outline
+// competes with every border already on screen, and at this size reads as a
+// selected control rather than as "typing goes here".
+void drawFocusEdge(SDL_Renderer* renderer, Rect pane, bool focused);
 // A disclosure triangle, drawn rather than typeset: the UI face has no glyph
 // for one, and a triangle assembled from lines stays crisp at any scale.
 void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color);

@@ -54,6 +54,12 @@ inline constexpr float kCompactHysteresis = 12.0f;
 inline constexpr float kCompactSidebarWidth = 190.0f;
 inline constexpr float kCompactNoteListWidth = 240.0f;
 
+// The accent strip down the left of a selected row, and down the edge of the
+// pane that has the keyboard. Two different widths so the two never read as the
+// same thing.
+inline constexpr float kSelectionStripWidth = 3.0f;
+inline constexpr float kFocusEdgeWidth = 2.0f;
+
 // Interaction affordances. The grab region and the region that changes the
 // cursor are the same region, so one number governs both and they cannot drift.
 inline constexpr float kResizeGutterInflate = 3.0f;

@@ -1,5 +1,7 @@
 #include "ui/Draw.h"
 
+#include "ui/Metrics.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -31,12 +33,15 @@ void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme(
 void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot) {
   if(selected) {
     fill(renderer, row, theme().selectedBg);
-    fill(renderer, {row.x, row.y, 3, row.h}, theme().accent);
-    stroke(renderer, row, theme().accentDim);
+    fill(renderer, {row.x, row.y, kSelectionStripWidth, row.h}, theme().accent);
   } else if(hot) {
     fill(renderer, row, theme().hoverBg);
-    stroke(renderer, row, theme().hairline);
   }
+}
+
+void drawFocusEdge(SDL_Renderer* renderer, Rect pane, bool focused) {
+  if(!focused || pane.w <= 0.0f) return;
+  fill(renderer, {pane.x, pane.y, kFocusEdgeWidth, pane.h}, theme().accentDim);
 }
 
 void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color) {
