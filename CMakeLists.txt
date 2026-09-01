@@ -201,6 +201,7 @@ add_executable(micronotes
   src/app/Application.cpp
   src/app/PageView.cpp
   src/app/Notes.cpp
+  src/app/Options.cpp
   src/app/RightPanel.cpp
   src/app/WikiLinks.cpp
   src/ui/Draw.cpp
