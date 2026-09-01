@@ -46,6 +46,8 @@ public:
   std::vector<library::NoteListItem> currentNotes() const;
   std::vector<library::NoteListItem> allNotes() const;
   std::vector<library::SearchResult> currentSearchResults() const;
+  // Notes whose text links to the open one. Empty when nothing is open.
+  std::vector<library::Backlink> backlinksToSelected() const;
   std::optional<LoadedNote> selectedNote() const;
   std::optional<library::NoteListItem> findNote(std::string_view noteId) const;
   std::optional<library::NoteListItem> createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body = "");

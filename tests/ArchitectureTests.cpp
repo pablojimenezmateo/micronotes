@@ -229,7 +229,7 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // moves behaviour out of the file lowers it in the same commit, and nothing
 // raises it. If this fails, the fix is a named unit under src/ -- not a bigger
 // budget.
-constexpr int kApplicationLineBudget = 4395;
+constexpr int kApplicationLineBudget = 4393;
 
 MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
   const auto path = repoRoot() / "src" / "app" / "Application.cpp";

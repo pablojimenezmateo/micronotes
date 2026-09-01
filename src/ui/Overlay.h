@@ -55,6 +55,15 @@ struct Overlay {
 
   std::string confirmLabel = "Confirm";
 
+  // Whether dismissing this overlay is worth telling the caller about.
+  //
+  // A menu that is escaped has simply gone away, and nothing more needs saying.
+  // But an overlay that filters as you type has taken your keystrokes: for the
+  // wikilink picker, escaping after typing "Some" must leave "Some" in the note
+  // rather than swallowing it. Such an overlay comes back with an empty itemId
+  // and whatever was typed in `value`.
+  bool reportDismissal = false;
+
   // Anchored overlays hang off a point (context menus); otherwise the overlay
   // is centred horizontally near the top of the window, like a palette.
   bool anchored = false;

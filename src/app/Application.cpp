@@ -95,10 +95,8 @@ using micronotes::ui::splitTags;
 using micronotes::ui::joinTags;
 using micronotes::ui::theme;
 
-
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
-
 // The shell's geometry, as a pure function of the window and the shell model.
 // Every caller goes through here so that the rects a frame is painted with, the
 // rects it is hit-tested against and the rects the tests assert on are the same
@@ -120,13 +118,6 @@ static const markdown::Document& previewDocument(UiRuntime& ui) {
   return *ui.cachedMarkdownDocument;
 }
 
-static void markEdited(UiRuntime& ui) {
-  ui.lastEdit = SDL_GetTicks();
-  if(ui.state.hasLibrary() && !ui.state.selection().noteId.empty()) {
-    if(!ui.state.saveSelectedNoteRecovery(ui.editor.text())) ui.status = "Recovery save failed";
-  }
-}
-
 // Block transforms arrive as one erase-and-insert, so they land on the editor's
 // single undo stack instead of keeping state of their own.
 static bool applyEdit(UiRuntime& ui, const doc::Edit& edit) {
@@ -134,7 +125,7 @@ static bool applyEdit(UiRuntime& ui, const doc::Edit& edit) {
   ui.editor.replaceRange(edit.start, edit.end, edit.text);
   if(edit.selects) ui.editor.selectRange(edit.anchor, edit.cursor);
   else ui.editor.moveCursor(edit.cursor);
-  markEdited(ui);
+  ui.markEdited();
   ui.revealEditorCursor = true;
   return true;
 }
@@ -457,7 +448,7 @@ static bool pasteClipboardText(UiRuntime& ui) {
   if(!raw) return false;
   if(inputDebugEnabled()) std::cerr << "clipboard paste editor bytes=" << std::strlen(raw) << "\n";
   ui.editor.insert(raw);
-  markEdited(ui);
+  ui.markEdited();
   SDL_free(raw);
   return true;
 }
@@ -517,7 +508,7 @@ static bool pastePrimarySelectionText(UiRuntime& ui) {
   if(!raw) return false;
   if(inputDebugEnabled()) std::cerr << "primary paste editor bytes=" << std::strlen(raw) << "\n";
   ui.editor.insert(raw);
-  markEdited(ui);
+  ui.markEdited();
   SDL_free(raw);
   return true;
 }
@@ -1901,7 +1892,6 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 
   if(ui.overlays.active()) return CursorKind::Pointer;
 
-
   if(contains(layout.sidebar, x, y)) {
     if(sidebarRowAt(ui, layout.sidebar, x, y)) return CursorKind::Pointer;
     return CursorKind::Default;
@@ -2712,7 +2702,7 @@ static void commitSlashMenu(UiRuntime& ui, const std::string& itemId) {
   const std::size_t start = std::min(ui.slashStart, caret);
   if(start < caret) {
     ui.editor.replaceRange(start, caret, "");
-    markEdited(ui);
+    ui.markEdited();
   }
   performBlockCommand(ui, itemId);
 }
@@ -3134,6 +3124,8 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     performBlockCommand(ui, result.itemId);
   } else if(result.overlayId == "slash-menu") {
     commitSlashMenu(ui, result.itemId);
+  } else if(result.overlayId == "wiki-menu") {
+    commitWikiMenu(ui, result.itemId, result.value);
   } else if(result.overlayId == "command-palette") {
     performCommand(ui, result.itemId);
   } else if(result.overlayId == "jump-note") {
@@ -3203,7 +3195,7 @@ static void handleText(UiRuntime& ui, const char* input) {
     if(std::string_view(input).find(' ') != std::string_view::npos) {
       applyTransform(ui, doc::applyMarkdownShortcut);
     }
-    markEdited(ui);
+    ui.markEdited();
     ui.revealEditorCursor = true;
     // "/" opens the block inserter, but only where a block could start: mid-word
     // slashes belong to paths and URLs.
@@ -3211,6 +3203,12 @@ static void handleText(UiRuntime& ui, const char* input) {
       const std::size_t slash = ui.editor.cursor() - 1;
       const char before = slash == 0 ? '\n' : ui.editor.text()[slash - 1];
       if(before == '\n' || before == ' ' || before == '\t') openSlashMenu(ui, slash);
+    }
+    // The second "[" of a "[[" offers the notes it could mean. A single bracket
+    // is left alone: it is how every ordinary link and every task marker starts.
+    if(ui.state.workspace().paneMode == ui::PaneMode::Live && std::string_view(input) == "[") {
+      const std::size_t bracket = ui.editor.cursor() - 1;
+      if(bracket > 0 && ui.editor.text()[bracket - 1] == '[') openWikiMenu(ui, bracket - 1);
     }
   }
 }
@@ -3309,7 +3307,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
       const bool copied = setClipboardText(ui.editor.selectedText());
       ui.editor.eraseSelection();
-      markEdited(ui);
+      ui.markEdited();
       ui.revealEditorCursor = true;
       ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
     } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
@@ -3324,7 +3322,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     if(auto* field = focusedField(ui)) {
       if(field->editor.undo()) syncFocusedInput(ui);
     } else if(ui.focus == FocusArea::Editor && ui.editor.undo()) {
-      markEdited(ui);
+      ui.markEdited();
       ui.revealEditorCursor = true;
       ui.status = "Undo";
     }
@@ -3332,7 +3330,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     if(auto* field = focusedField(ui)) {
       if(field->editor.redo()) syncFocusedInput(ui);
     } else if(ui.focus == FocusArea::Editor && ui.editor.redo()) {
-      markEdited(ui);
+      ui.markEdited();
       ui.revealEditorCursor = true;
       ui.status = "Redo";
     }
@@ -3464,12 +3462,12 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       // Against a block's first character, Backspace strips the block's marker
       // before it starts eating the block above.
       else if(ui.editor.hasSelection() || !applyTransform(ui, doc::outdentOrUnwrap)) ui.editor.erasePrevious();
-      markEdited(ui);
+      ui.markEdited();
       ui.revealEditorCursor = true;
     } else if(key == SDLK_DELETE) {
       if(ctrl) ui.editor.eraseNextWord();
       else ui.editor.eraseNext();
-      markEdited(ui);
+      ui.markEdited();
       ui.revealEditorCursor = true;
     } else if(key == SDLK_RETURN || key == SDLK_KP_ENTER) {
       if(ctrl) {
@@ -3477,7 +3475,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       } else if(ui.editor.hasSelection() ||
                 (!applyTransform(ui, doc::closeFence) && !applyTransform(ui, doc::continueList))) {
         ui.editor.insert("\n");
-        markEdited(ui);
+        ui.markEdited();
         ui.revealEditorCursor = true;
       }
     } else if(key == SDLK_TAB) {
@@ -3485,7 +3483,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
         applyTransform(ui, doc::outdent);
       } else if(!applyTransform(ui, doc::indent)) {
         ui.editor.insert("  ");
-        markEdited(ui);
+        ui.markEdited();
         ui.revealEditorCursor = true;
       }
     } else if(key == SDLK_LEFT) {
@@ -3677,7 +3675,6 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       }
     }
   }
-
 
   if(contains(layout.sidebar, x, y)) {
     ui.focus = FocusArea::Folders;
@@ -4072,6 +4069,9 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       options.showSidebar = value.find("sidebar") != std::string::npos;
       options.showNoteList = value.find("notes") != std::string::npos;
       options.showRightPanel = value.find("right") != std::string::npos;
+    } else if(arg == "--right-panel" && i + 1 < argc) {
+      options.rightPanelView = argv[++i];
+      options.showRightPanel = true;
     } else if(arg == "--pane" && i + 1 < argc) {
       const std::string value = argv[++i];
       if(value == "editor" || value == "raw") options.paneMode = 0;
@@ -4121,6 +4121,9 @@ int run(ApplicationOptions options) {
   if(options.showSidebar) ui.state.workspace().sidebarVisible = *options.showSidebar;
   if(options.showNoteList) ui.state.workspace().noteListVisible = *options.showNoteList;
   if(options.showRightPanel) ui.state.workspace().rightPanelVisible = *options.showRightPanel;
+  if(!options.rightPanelView.empty()) {
+    ui.state.workspace().rightPanelView = ui::rightPanelViewFromName(options.rightPanelView);
+  }
   if(!attachFromCli(ui, options.attachPath)) return 1;
   if(options.headless) return 0;
 
@@ -4208,6 +4211,7 @@ int run(ApplicationOptions options) {
     else if(which == "settings") openSettings(ui);
     else if(which == "shortcuts") openShortcutHelp(ui);
     else if(which == "command-palette") openCommandPalette(ui);
+    else if(which == "wiki-menu") openWikiMenu(ui, ui.editor.cursor());
     else std::cerr << "unknown --open value: " << which << "\n";
   }
 

@@ -125,6 +125,14 @@ std::vector<library::NoteListItem> AppState::currentNotes() const {
   return organization_->notesInFolder(selection_.folder);
 }
 
+std::vector<library::Backlink> AppState::backlinksToSelected() const {
+  const auto note = findNote(selection_.noteId);
+  if(!note) return {};
+  // A link may name the note by its title or by its file name, and the index
+  // stores whatever was written, so both spellings are asked for.
+  return index_.backlinks(note->title, note->path.stem().string());
+}
+
 std::vector<library::SearchResult> AppState::currentSearchResults() const {
   if(!library_ || selection_.search.empty()) return {};
   return index_.search(selection_.search, selection_.searchScope);

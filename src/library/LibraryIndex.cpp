@@ -1,6 +1,8 @@
 #include "CoreAliases.h"
 #include "library/LibraryIndex.h"
 
+#include "ui/WikiLink.h"
+
 #include "library/Library.h"
 #include "library/Metadata.h"
 #include "core/perf/Perf.h"
@@ -22,6 +24,11 @@ using persistence::SqliteDb;
 using persistence::Statement;
 
 namespace {
+
+// Writes one row per wikilink the note carries. Duplicates collapse on the
+// primary key: a note that names the same target three times is one backlink,
+// and the first line it appeared on is the one worth showing.
+static void recordLinks(sqlite3_stmt* stmt, const std::string& noteId, std::string_view body);
 
 static void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
   sqlite3_bind_text(stmt, index, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT);
@@ -74,6 +81,19 @@ static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out, std:
   }
 }
 
+void recordLinks(sqlite3_stmt* stmt, const std::string& noteId, std::string_view body) {
+  if(!stmt) return;
+  for(const auto& reference : ui::wikiReferences(body)) {
+    const auto target = ui::splitWikiTarget(reference.target).note;
+    if(target.empty()) continue;
+    sqlite3_reset(stmt);
+    bindText(stmt, 1, noteId);
+    bindText(stmt, 2, target);
+    bindText(stmt, 3, reference.line);
+    sqlite3_step(stmt);
+  }
+}
+
 }
 
 bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
@@ -94,7 +114,11 @@ bool LibraryIndex::migrate() {
   // setting them during migration configured only migration's own connection.
   const bool ok =
     db.exec("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, mtime INTEGER NOT NULL, size INTEGER NOT NULL, body TEXT NOT NULL);") &&
-    db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(id UNINDEXED, title, body, path);");
+    db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(id UNINDEXED, title, body, path);") &&
+    // One row per (note, target it names). `target` is the text as written --
+    // resolution happens at query time so a rename does not invalidate rows.
+    db.exec("CREATE TABLE IF NOT EXISTS links(src_id TEXT NOT NULL, target TEXT NOT NULL, line TEXT NOT NULL, PRIMARY KEY(src_id, target));") &&
+    db.exec("CREATE INDEX IF NOT EXISTS links_target ON links(target COLLATE NOCASE);");
   return ok;
 }
 
@@ -104,12 +128,13 @@ bool LibraryIndex::rebuild() {
   rows_.clear();
   if(!db_.isOpen()) return false;
   SqliteDb& db = db_;
-  if(!db.exec("BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM notes_fts;")) {
+  if(!db.exec("BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM notes_fts; DELETE FROM links;")) {
     return false;
   }
 
   Statement noteStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?);");
   Statement ftsStmt = db.prepare("INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);");
+  Statement linkStmt = db.prepare("INSERT OR REPLACE INTO links(src_id,target,line) VALUES(?,?,?);");
 
   Library library(root_);
   for(const auto& path : library.noteFiles()) {
@@ -138,6 +163,8 @@ bool LibraryIndex::rebuild() {
     bindText(ftsStmt, 3, note.body);
     bindText(ftsStmt, 4, relative);
     sqlite3_step(ftsStmt);
+
+    recordLinks(linkStmt, noteId, note.body);
 
     rows_.push_back({noteId, path, title});
     (void)stat;
@@ -229,7 +256,9 @@ bool LibraryIndex::refreshChangedFiles() {
     Statement deleteFtsStmt = db.prepare("DELETE FROM notes_fts WHERE id=?;");
     Statement insertFtsStmt = db.prepare("INSERT INTO notes_fts(id,title,body,path) VALUES(?,?,?,?);");
     Statement deleteNoteStmt = db.prepare("DELETE FROM notes WHERE path=?;");
-    ok = upsertStmt && deleteFtsStmt && insertFtsStmt && deleteNoteStmt;
+    Statement deleteLinksStmt = db.prepare("DELETE FROM links WHERE src_id=?;");
+    Statement insertLinkStmt = db.prepare("INSERT OR REPLACE INTO links(src_id,target,line) VALUES(?,?,?);");
+    ok = upsertStmt && deleteFtsStmt && insertFtsStmt && deleteNoteStmt && deleteLinksStmt && insertLinkStmt;
 
     if(ok) {
       for(const auto& file : changed) {
@@ -263,6 +292,15 @@ bool LibraryIndex::refreshChangedFiles() {
         bindText(insertFtsStmt, 4, file.relative);
         ok = sqlite3_step(insertFtsStmt) == SQLITE_DONE;
         if(!ok) break;
+
+        // Rewritten wholesale rather than diffed: a note's links are however
+        // many it has, and working out which ones changed costs more than
+        // writing them all again.
+        sqlite3_reset(deleteLinksStmt);
+        bindText(deleteLinksStmt, 1, noteId);
+        ok = sqlite3_step(deleteLinksStmt) == SQLITE_DONE;
+        if(!ok) break;
+        recordLinks(insertLinkStmt, noteId, note.body);
       }
     }
 
@@ -276,6 +314,9 @@ bool LibraryIndex::refreshChangedFiles() {
         bindText(deleteNoteStmt, 1, path);
         ok = sqlite3_step(deleteNoteStmt) == SQLITE_DONE;
         if(!ok) break;
+        sqlite3_reset(deleteLinksStmt);
+        bindText(deleteLinksStmt, 1, id);
+        sqlite3_step(deleteLinksStmt);
         sqlite3_reset(deleteFtsStmt);
         bindText(deleteFtsStmt, 1, id);
         ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
@@ -347,6 +388,26 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
     }
   }
   return out;
+}
+
+std::vector<Backlink> LibraryIndex::backlinks(std::string_view title, std::string_view stem) const {
+  std::vector<Backlink> found;
+  if(!db_.isOpen() || (title.empty() && stem.empty())) return found;
+  // NOCASE so a link written in a different case still counts, which is the
+  // same latitude resolveWikiLink gives it.
+  Statement stmt = db_.prepare(
+    "SELECT notes.id, notes.path, notes.title, links.line FROM links "
+    "JOIN notes ON notes.id = links.src_id "
+    "WHERE links.target = ?1 COLLATE NOCASE OR links.target = ?2 COLLATE NOCASE "
+    "ORDER BY notes.title;");
+  if(!stmt) return found;
+  bindText(stmt, 1, std::string(title));
+  bindText(stmt, 2, std::string(stem));
+  while(sqlite3_step(stmt) == SQLITE_ROW) {
+    found.push_back({columnText(stmt, 0), std::filesystem::path(columnText(stmt, 1)),
+                     columnText(stmt, 2), columnText(stmt, 3)});
+  }
+  return found;
 }
 
 std::size_t LibraryIndex::size() const {

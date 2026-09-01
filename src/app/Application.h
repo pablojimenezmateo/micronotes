@@ -32,6 +32,8 @@ struct ApplicationOptions {
   std::optional<bool> showSidebar;
   std::optional<bool> showNoteList;
   std::optional<bool> showRightPanel;
+  // Which of the right panel's views a captured frame should be showing.
+  std::string rightPanelView;
 };
 
 int run(ApplicationOptions options);

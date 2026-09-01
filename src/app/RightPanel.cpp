@@ -1,5 +1,6 @@
 #include "app/RightPanel.h"
 
+#include "app/Notes.h"
 #include "app/Shell.h"
 
 #include "ui/Metrics.h"
@@ -20,6 +21,7 @@ constexpr float kHeaderHeight = 34.0f;
 constexpr float kRowHeight = 24.0f;
 constexpr float kPadX = 14.0f;
 constexpr float kIndentStep = 12.0f;
+constexpr float kBacklinkHeight = 44.0f;
 
 struct PanelRow {
   Rect rect;
@@ -37,12 +39,14 @@ Rect tabRect(Rect rect, int index, int count) {
 const char* viewLabel(ui::RightPanelView view) {
   switch(view) {
     case ui::RightPanelView::Outline: return "Outline";
+    case ui::RightPanelView::Backlinks: return "Links";
     case ui::RightPanelView::Tags: return "Tags";
   }
   return "";
 }
 
-constexpr ui::RightPanelView kViews[] = {ui::RightPanelView::Outline, ui::RightPanelView::Tags};
+constexpr ui::RightPanelView kViews[] = {ui::RightPanelView::Outline, ui::RightPanelView::Backlinks,
+                                        ui::RightPanelView::Tags};
 
 std::vector<PanelRow> outlineRows(const std::vector<ui::OutlineEntry>& entries, Rect rect) {
   std::vector<PanelRow> rows;
@@ -108,6 +112,34 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     return;
   }
 
+  if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
+    const auto backlinks = ui.state.backlinksToSelected();
+    if(backlinks.empty()) {
+      ui::drawEmptyMessage(text, "Nothing links here",
+                           "Write [[the title of this note]] in another note and it will show up.",
+                           {rect.x, rect.y + kHeaderHeight, rect.w, 110.0f});
+      return;
+    }
+    const ui::TextStyle lineStyle {ui::FontFamily::Sans, false, false, ui::type().small};
+    float y = rect.y + kHeaderHeight + 4.0f;
+    ui.backlinkRows.clear();
+    for(const auto& link : backlinks) {
+      if(y > rect.y + rect.h) break;
+      const Rect row {rect.x, y, rect.w, kBacklinkHeight};
+      ui::drawSelection(renderer, row, false, ui::contains(row, ui.mouseX, ui.mouseY));
+      const int room = static_cast<int>(rect.w - kPadX * 2.0f);
+      text.draw(ui::ellipsizeToWidth(text, link.title, room, rowStyle),
+                rect.x + kPadX, y + 2.0f, theme().text, rowStyle);
+      // The line the link was written on, which is the whole difference between
+      // a list of titles and a reason to click one.
+      text.draw(ui::ellipsizeToWidth(text, link.line, room, lineStyle),
+                rect.x + kPadX, y + 22.0f, theme().dim, lineStyle);
+      ui.backlinkRows.push_back({row, link.id});
+      y += kBacklinkHeight;
+    }
+    return;
+  }
+
   const auto note = ui.state.selectedNote();
   const auto& tags = note ? note->metadata.tags : std::vector<std::string>();
   if(tags.empty()) {
@@ -133,6 +165,14 @@ bool handleRightPanelClick(UiRuntime& ui, Rect rect, float x, float y) {
   for(int i = 0; i < tabCount; ++i) {
     if(!ui::contains(tabRect(rect, i, tabCount), x, y)) continue;
     workspace.rightPanelView = kViews[i];
+    return true;
+  }
+  if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
+    for(const auto& row : ui.backlinkRows) {
+      if(!ui::contains(row.rect, x, y)) continue;
+      selectNoteById(ui, row.noteId);
+      return true;
+    }
     return true;
   }
   if(workspace.rightPanelView != ui::RightPanelView::Outline) return true;
@@ -167,7 +207,8 @@ void togglePanel(UiRuntime& ui, bool ui::WorkspaceModel::*panel, std::string_vie
 void cycleRightPanel(UiRuntime& ui) {
   auto& workspace = ui.state.workspace();
   switch(workspace.rightPanelView) {
-    case ui::RightPanelView::Outline: workspace.rightPanelView = ui::RightPanelView::Tags; break;
+    case ui::RightPanelView::Outline: workspace.rightPanelView = ui::RightPanelView::Backlinks; break;
+    case ui::RightPanelView::Backlinks: workspace.rightPanelView = ui::RightPanelView::Tags; break;
     case ui::RightPanelView::Tags: workspace.rightPanelView = ui::RightPanelView::Outline; break;
   }
   // Cycling what the panel shows is also a way of asking for it.

@@ -239,6 +239,15 @@ struct UiRuntime {
   // whole library fifty times per keystroke.
   std::vector<library::NoteListItem> wikiNotes;
   bool wikiNotesValid = false;
+  // The first "[" of the "[[" that opened the wikilink picker.
+  std::size_t wikiStart = 0;
+  // Where the backlinks panel drew each row last frame, so a click can find the
+  // note it named without laying the list out a second time.
+  struct BacklinkRow {
+    Rect rect;
+    std::string noteId;
+  };
+  std::vector<BacklinkRow> backlinkRows;
   // The mode the last computed layout settled in. Fed back into the next one so
   // the compact breakpoint has hysteresis rather than flipping mid-drag.
   ui::LayoutMode layoutMode = ui::LayoutMode::Regular;
@@ -307,6 +316,14 @@ struct UiRuntime {
   // agree about which of them owns setting it.
   void clearBlockSelection() {
     blockSelectActive = false;
+  }
+
+  // Records that the buffer has changed. The recovery copy is written here
+  // rather than at save time, so a crash between keystrokes loses nothing.
+  void markEdited() {
+    lastEdit = SDL_GetTicks();
+    if(!state.hasLibrary() || state.selection().noteId.empty()) return;
+    if(!state.saveSelectedNoteRecovery(editor.text())) status = "Recovery save failed";
   }
 };
 }

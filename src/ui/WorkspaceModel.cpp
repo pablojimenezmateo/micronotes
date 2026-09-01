@@ -5,12 +5,14 @@ namespace micronotes::ui {
 std::string_view rightPanelViewName(RightPanelView view) {
   switch(view) {
     case RightPanelView::Outline: return "outline";
+    case RightPanelView::Backlinks: return "backlinks";
     case RightPanelView::Tags: return "tags";
   }
   return "outline";
 }
 
 RightPanelView rightPanelViewFromName(std::string_view name) {
+  if(name == "backlinks") return RightPanelView::Backlinks;
   if(name == "tags") return RightPanelView::Tags;
   return RightPanelView::Outline;
 }

@@ -216,7 +216,10 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
   handled = true;
 
   if(key == SDLK_ESCAPE) {
+    const bool report = overlay->reportDismissal;
+    OverlayResult dismissal {overlay->id, {}, overlay->value.text()};
     close();
+    if(report) return dismissal;
     return std::nullopt;
   }
   if(key == SDLK_RETURN || key == SDLK_KP_ENTER) return commit();
@@ -260,7 +263,10 @@ std::optional<OverlayResult> OverlayStack::handleClick(float x, float y, bool& h
 
   if(!contains(lastLayout_.panel, x, y)) {
     // A click outside dismisses, and does not fall through to what is behind.
+    const bool report = overlay->reportDismissal;
+    OverlayResult dismissal {overlay->id, {}, overlay->value.text()};
     close();
+    if(report) return dismissal;
     return std::nullopt;
   }
   for(std::size_t i = 0; i < lastLayout_.itemRects.size(); ++i) {

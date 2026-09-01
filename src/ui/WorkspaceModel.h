@@ -19,6 +19,7 @@ using microcore::ui::PaneMode;
 // becoming three.
 enum class RightPanelView {
   Outline,
+  Backlinks,
   Tags
 };
 
