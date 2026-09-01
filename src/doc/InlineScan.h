@@ -13,6 +13,11 @@ enum class SpanKind {
   Code,
   Strike,
   Link,
+  // [[Another note]], or [[Another note|what to call it here]]. Not CommonMark,
+  // but the spelling every notes app that has links between notes settled on,
+  // and it survives being read as plain text, which is what the library format
+  // asks of anything written into a .md.
+  WikiLink,
   Image,
   Autolink,
   Escape
@@ -32,7 +37,7 @@ struct SourceSpan {
   std::size_t openEnd = 0;
   std::size_t closeStart = 0;
   std::size_t closeEnd = 0;
-  std::string target;  // link/image destination, or the autolink URL
+  std::string target;  // link/image destination, the autolink URL, or the wikilink target
   int depth = 0;
 };
 

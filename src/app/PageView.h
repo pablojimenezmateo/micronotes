@@ -19,11 +19,19 @@ namespace micronotes::app {
 struct PageViewHooks {
   std::function<float(const doc::SourceBlock&, float width)> measureComplex;
   std::function<void(const doc::SourceBlock&, ui::Rect)> drawComplex;
+  // Whether a `[[target]]` names a note that exists. The page has a buffer, not
+  // a library, so it asks; unset means "assume it does".
+  std::function<bool(std::string_view)> wikiLinkResolves;
 };
 
 struct PageLink {
   ui::Rect rect;
   std::string target;
+  // A [[wikilink]] names a note; every other link names a file or a URL. They
+  // look the same as strings and are followed in completely different ways, so
+  // which one it is travels with the rect rather than being guessed at from the
+  // target's shape.
+  bool wiki = false;
 };
 
 // A task checkbox the user can click. `blockStart` addresses the owning block.

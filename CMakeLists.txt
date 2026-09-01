@@ -175,6 +175,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
   src/ui/TextUtil.cpp
+  src/ui/WikiLink.cpp
   src/ui/Theme.cpp
   src/ui/WorkspaceModel.cpp
   src/ui/TreeModel.cpp
@@ -199,7 +200,9 @@ add_executable(micronotes
   src/app/main.cpp
   src/app/Application.cpp
   src/app/PageView.cpp
+  src/app/Notes.cpp
   src/app/RightPanel.cpp
+  src/app/WikiLinks.cpp
   src/ui/Draw.cpp
   src/ui/Fonts.cpp
   src/ui/Overlay.cpp
@@ -241,6 +244,7 @@ add_executable(micronotes_tests
   tests/ShellLayoutTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TextFieldTests.cpp
+  tests/WikiLinkTests.cpp
   tests/WorkspaceModelTests.cpp
   tests/WrappedLinesTests.cpp
 )

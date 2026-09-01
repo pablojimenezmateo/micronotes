@@ -114,6 +114,7 @@ MICRONOTES_TEST(theme_palettes_stay_legible_in_both_modes) {
     {"section labels in the sidebar", &micronotes::ui::Theme::dim, &micronotes::ui::Theme::sidebarBg, 3.0f},
     {"status bar text", &micronotes::ui::Theme::muted, &micronotes::ui::Theme::statusBg, 4.5f},
     {"links on the page", &micronotes::ui::Theme::accent, &micronotes::ui::Theme::pageSurface, 3.0f},
+    {"links to a note not written yet", &micronotes::ui::Theme::linkPending, &micronotes::ui::Theme::pageSurface, 3.0f},
     {"text on an accent fill", &micronotes::ui::Theme::onAccent, &micronotes::ui::Theme::accent, 4.5f},
     {"code on its own background", &micronotes::ui::Theme::text, &micronotes::ui::Theme::codeBg, 4.5f},
     {"menu text", &micronotes::ui::Theme::text, &micronotes::ui::Theme::surfaceElevated, 4.5f},

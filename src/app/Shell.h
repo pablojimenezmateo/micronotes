@@ -106,6 +106,9 @@ inline bool inputDebugEnabled() {
 struct LinkRegion {
   Rect rect;
   std::string target;
+  // See PageLink::wiki: a link to a note is followed differently from a link
+  // to a file, and the two are indistinguishable once they are just strings.
+  bool wiki = false;
 };
 
 struct ButtonRegion {
@@ -231,6 +234,11 @@ struct UiRuntime {
   float mouseX = -1;
   float mouseY = -1;
   ui::OverlayStack overlays;
+  // Every note in the library, for resolving wikilinks. Invalidated rather than
+  // rebuilt on every layout: a note with fifty links would otherwise list the
+  // whole library fifty times per keystroke.
+  std::vector<library::NoteListItem> wikiNotes;
+  bool wikiNotesValid = false;
   // The mode the last computed layout settled in. Fed back into the next one so
   // the compact breakpoint has hysteresis rather than flipping mid-drag.
   ui::LayoutMode layoutMode = ui::LayoutMode::Regular;
@@ -293,5 +301,12 @@ struct UiRuntime {
   bool caretReported = false;
   Uint64 lastEdit = 0;
   Uint64 lastAutosaveAttempt = 0;
+
+  // Leaving block-selection mode. On the runtime rather than a free function,
+  // because it is one field and two translation units would otherwise have to
+  // agree about which of them owns setting it.
+  void clearBlockSelection() {
+    blockSelectActive = false;
+  }
 };
 }

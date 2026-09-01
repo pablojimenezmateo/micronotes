@@ -164,7 +164,65 @@ std::vector<SourceSpan> scanInlines(std::string_view text, std::size_t base) {
     ++i;
   }
 
-  // Pass 2: links and images. Only their markers are masked, so emphasis inside
+  // Pass 2: wikilinks, before ordinary links, because `[[a]]` would otherwise
+  // be read as the label `[a]` looking for a `(` it never finds -- and worse,
+  // `[[a](b)]` is a link either way round. Claiming them first settles it.
+  //
+  // The whole span is masked, unlike a link: what is between the brackets is a
+  // note's title, so a `*` in it is part of the name rather than emphasis.
+  for(std::size_t i = 0; i + 3 < text.size();) {
+    if(masked[i] || text[i] != '[' || text[i + 1] != '[' || masked[i + 1]) {
+      ++i;
+      continue;
+    }
+    std::size_t close = std::string_view::npos;
+    for(std::size_t scan = i + 2; scan + 1 < text.size(); ++scan) {
+      if(masked[scan]) continue;
+      // A `[` inside would be someone typing, not a nested link: there is no
+      // such thing, so the first `]]` closes.
+      if(text[scan] == ']' && text[scan + 1] == ']') {
+        close = scan;
+        break;
+      }
+    }
+    if(close == std::string_view::npos || close == i + 2) {
+      // Unterminated, or empty. Leave the brackets as the literal text they are.
+      ++i;
+      continue;
+    }
+    const std::size_t innerStart = i + 2;
+    // The first bar splits the target from what to show instead of it.
+    std::size_t bar = std::string_view::npos;
+    for(std::size_t scan = innerStart; scan < close; ++scan) {
+      if(text[scan] == '|') {
+        bar = scan;
+        break;
+      }
+    }
+    SourceSpan span;
+    span.kind = SpanKind::WikiLink;
+    span.start = i;
+    span.end = close + 2;
+    span.openStart = i;
+    // With an alias, the target and the bar are part of the marker, so hiding
+    // the markers leaves exactly the words the writer chose to show.
+    span.openEnd = bar == std::string_view::npos ? innerStart : bar + 1;
+    span.contentStart = span.openEnd;
+    span.contentEnd = close;
+    span.closeStart = close;
+    span.closeEnd = close + 2;
+    span.target = std::string(text.substr(innerStart, (bar == std::string_view::npos ? close : bar) - innerStart));
+    // An alias with nothing before the bar has no target to go to.
+    if(span.target.empty()) {
+      ++i;
+      continue;
+    }
+    add(std::move(span));
+    mask(i, close + 2);
+    i = close + 2;
+  }
+
+  // Pass 3: links and images. Only their markers are masked, so emphasis inside
   // a link label still matches.
   for(std::size_t i = 0; i < text.size();) {
     if(masked[i] || text[i] != '[') {
@@ -199,7 +257,7 @@ std::vector<SourceSpan> scanInlines(std::string_view text, std::size_t base) {
     i = span.contentStart;
   }
 
-  // Pass 3: emphasis, strong and strikethrough delimiter runs.
+  // Pass 4: emphasis, strong and strikethrough delimiter runs.
   std::vector<Delimiter> open;
   for(std::size_t i = 0; i < text.size();) {
     const char c = text[i];

@@ -48,7 +48,9 @@ ui::TextStyle toTextStyle(const doc::RunStyle& style) {
 SDL_Color colorFor(doc::TextRole role) {
   switch(role) {
     case doc::TextRole::Marker: return theme().dim;
-    case doc::TextRole::Link: return theme().accent;
+    case doc::TextRole::Link:
+    case doc::TextRole::WikiLink: return theme().accent;
+    case doc::TextRole::WikiLinkUnresolved: return theme().linkPending;
     case doc::TextRole::Muted: return theme().muted;
     case doc::TextRole::Code: return theme().text;
     case doc::TextRole::Body: break;
@@ -184,6 +186,7 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.caretOffset = caret;
   options.rawOffset = rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone;
   options.folded = folds_.collapsed;
+  options.wikiLinkResolves = hooks_.wikiLinkResolves;
   document_.update(source, options);
 
   // The caret must never be stranded inside something collapsed - Ctrl+End, an
@@ -431,7 +434,10 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         }
         if(run.linkIndex >= 0 && run.linkIndex < static_cast<int>(layout.links.size())) {
           hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accentDim);
-          links_.push_back({{x, lineY, run.rect.w, line.height}, layout.links[static_cast<std::size_t>(run.linkIndex)]});
+          const bool wiki = run.role == doc::TextRole::WikiLink ||
+                            run.role == doc::TextRole::WikiLinkUnresolved;
+          links_.push_back({{x, lineY, run.rect.w, line.height},
+                            layout.links[static_cast<std::size_t>(run.linkIndex)], wiki});
         }
       }
     }

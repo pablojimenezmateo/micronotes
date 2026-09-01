@@ -24,6 +24,10 @@ struct Theme {
 
   // Accent
   SDL_Color accent;          // links, caret, active affordances
+  // A link to a note that is not there yet. Not an error state: writing the
+  // link before the note is the ordinary way round, so this reads as an offer
+  // rather than as a warning.
+  SDL_Color linkPending;
   SDL_Color accentDim;       // accent borders and scrollbar thumbs
   SDL_Color accentSoft;      // accent-tinted fills behind chips and callouts
   SDL_Color warn;            // destructive actions, unsaved indicator

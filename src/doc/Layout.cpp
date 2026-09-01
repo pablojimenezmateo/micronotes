@@ -605,6 +605,17 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
             });
             break;
           }
+          case SpanKind::WikiLink: {
+            out.links.push_back(inlineSpan.target);
+            const int link = static_cast<int>(out.links.size()) - 1;
+            const bool resolves = !options_.wikiLinkResolves || options_.wikiLinkResolves(inlineSpan.target);
+            const auto role = resolves ? TextRole::WikiLink : TextRole::WikiLinkUnresolved;
+            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link, role](Attr& a) {
+              a.link = link;
+              a.role = role;
+            });
+            break;
+          }
           case SpanKind::Escape:
             break;
         }

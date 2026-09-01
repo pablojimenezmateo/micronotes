@@ -27,6 +27,7 @@ Theme makeDark() {
   t.onAccent = rgb(0xFFFFFF);
 
   t.accent = rgb(0x529CCA);
+  t.linkPending = rgb(0x8E7BB8);
   t.accentDim = rgb(0x2F5B78);
   t.accentSoft = rgb(0x1B2B36);
   t.warn = rgb(0xE07B5F);
@@ -73,6 +74,7 @@ Theme makeLight() {
   t.onAccent = rgb(0xFFFFFF);
 
   t.accent = rgb(0x2383E2);
+  t.linkPending = rgb(0x7A5FA8);
   t.accentDim = rgb(0x9CC7EE);
   t.accentSoft = rgb(0xE7F3F8);
   t.warn = rgb(0xD44C47);
@@ -136,6 +138,7 @@ Theme correctContrast(Theme t) {
   t.dim = worst(t.dim, kIncidentalContrast);
   t.onAccent = ensureContrast(t.onAccent, t.accent, kTextContrast);
   t.accent = worst(t.accent, kIncidentalContrast);
+  t.linkPending = worst(t.linkPending, kIncidentalContrast);
   t.warn = worst(t.warn, kIncidentalContrast);
   return t;
 }

@@ -2,7 +2,9 @@
 #include "app/Application.h"
 
 #include "app/PageView.h"
+#include "app/Notes.h"
 #include "app/RightPanel.h"
+#include "app/WikiLinks.h"
 #include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
@@ -26,7 +28,9 @@
 #include "ui/Overlay.h"
 #include "ui/ShellLayout.h"
 #include "ui/Settings.h"
+#include "ui/Outline.h"
 #include "ui/TextUtil.h"
+#include "ui/WikiLink.h"
 #include "ui/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/TreeModel.h"
@@ -92,7 +96,6 @@ using micronotes::ui::joinTags;
 using micronotes::ui::theme;
 
 
-static bool saveCurrent(UiRuntime& ui, bool quiet = false);
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
 
@@ -156,10 +159,6 @@ static void linkEditorSelection(UiRuntime& ui) {
   const std::size_t start = ui.editor.hasSelection() ? ui.editor.selectionStart() : ui.editor.cursor();
   const std::size_t end = ui.editor.hasSelection() ? ui.editor.selectionEnd() : ui.editor.cursor();
   if(applyEdit(ui, doc::makeLink(ui.editor.text(), start, end))) ui.status = "Link: type the destination";
-}
-
-static void clearBlockSelection(UiRuntime& ui) {
-  ui.blockSelectActive = false;
 }
 
 // The blocks a command applies to: the block selection when there is one,
@@ -369,95 +368,6 @@ static bool publishEditorPrimarySelection(UiRuntime& ui) {
     const auto selected = ui.editor.selectedText();
     return SDL_SetPrimarySelectionText(selected.c_str());
   }
-  return false;
-}
-
-static void selectNoteAt(UiRuntime& ui, int index) {
-  auto notes = ui.state.currentNotes();
-  if(notes.empty()) return;
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-  index = std::clamp(index, 0, static_cast<int>(notes.size()) - 1);
-  ui.noteCursor = index;
-  ui.state.selectNote(notes[static_cast<std::size_t>(index)].id);
-  if(auto note = ui.state.selectedNote()) {
-    ui.loadedNoteId = note->metadata.id;
-    const auto recovered = ui.state.selectedRecoveryBody();
-    ui.editor.setText(recovered ? *recovered : note->body);
-    if(recovered && *recovered != note->body) ui.editor.markDirty();
-    ui.editorScroll = 0;
-    ui.viewerScroll = 0;
-    ui.revealEditorCursor = false;
-    ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
-    ui.state.noteOpened(note->metadata.id);
-  }
-}
-
-static void selectNoteById(UiRuntime& ui, const std::string& noteId) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-  ui.state.selectNote(noteId);
-  if(auto note = ui.state.selectedNote()) {
-    ui.loadedNoteId = note->metadata.id;
-    const auto recovered = ui.state.selectedRecoveryBody();
-    ui.editor.setText(recovered ? *recovered : note->body);
-    if(recovered && *recovered != note->body) ui.editor.markDirty();
-    ui.editorScroll = 0;
-    ui.viewerScroll = 0;
-    ui.revealEditorCursor = false;
-    ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
-    ui.state.noteOpened(note->metadata.id);
-  }
-}
-
-static void loadSelectedIntoEditor(UiRuntime& ui) {
-  clearBlockSelection(ui);
-  if(auto note = ui.state.selectedNote()) {
-    if(ui.loadedNoteId != note->metadata.id || !ui.editor.dirty()) {
-      ui.loadedNoteId = note->metadata.id;
-      ui.editor.setText(note->body);
-    }
-  }
-}
-
-static void createNote(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) {
-    ui.status = "Start with --library <path> before creating notes";
-    return;
-  }
-  if(ui.editor.dirty() && !saveCurrent(ui)) return;
-  const auto folder = ui.state.selection().folder;
-  if(auto created = ui.state.createNote("Untitled", folder, "# Untitled\n\n")) {
-    ui.loadedNoteId = created->id;
-    ui.editor.setText("# Untitled\n\n");
-    ui.editorScroll = 0;
-    ui.viewerScroll = 0;
-    ui.revealEditorCursor = true;
-    ui.focus = FocusArea::Editor;
-    ui.status = "Created " + created->title;
-  }
-}
-
-static void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-  const auto previousFolder = ui.state.selection().folder;
-  ui.state.selectFolder(folder);
-  createNote(ui);
-  if(ui.state.selection().noteId.empty()) ui.state.selectFolder(previousFolder);
-}
-
-static bool saveCurrent(UiRuntime& ui, bool quiet) {
-  if(!ui.state.hasLibrary()) {
-    if(!quiet) ui.status = "No library open";
-    return false;
-  }
-  if(ui.state.selection().noteId.empty()) {
-    createNote(ui);
-  }
-  if(ui.state.saveSelectedNote(ui.editor.text())) {
-    ui.editor.markSaved();
-    if(!quiet) ui.status = "Saved " + trimTitle(ui.editor.text());
-    return true;
-  }
-  ui.status = quiet ? "Autosave failed" : "Save failed";
   return false;
 }
 
@@ -680,6 +590,7 @@ static void saveRename(UiRuntime& ui) {
     ui.status = "Rename needs a title";
     return;
   }
+  ui.wikiNotesValid = false;
   if(ui.state.renameSelectedNote(ui.rename.text())) {
     loadSelectedIntoEditor(ui);
     ui.focus = FocusArea::Editor;
@@ -738,6 +649,7 @@ static void saveFolderRename(UiRuntime& ui) {
 }
 
 static void deleteSelected(UiRuntime& ui) {
+  ui.wikiNotesValid = false;
   if(ui.state.deleteSelectedNote()) {
     ui.editor.setText("");
     ui.loadedNoteId.clear();
@@ -773,7 +685,7 @@ static const char* paneModeName(ui::PaneMode mode) {
 }
 
 static void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
-  clearBlockSelection(ui);
+  ui.clearBlockSelection();
   ui.state.workspace().paneMode = mode;
   ui.focus = mode == ui::PaneMode::Viewer ? FocusArea::Viewer : FocusArea::Editor;
   ui.revealEditorCursor = true;
@@ -825,7 +737,8 @@ static library::SearchScope nextSearchScope(library::SearchScope scope) {
 static void performAction(UiRuntime& ui, UiAction action) {
   switch(action) {
     case UiAction::Refresh:
-      ui.state.refreshLibrary();
+      ui.wikiNotesValid = false;
+    ui.state.refreshLibrary();
       ui.status = "Refreshed library";
       break;
     case UiAction::NewNote:
@@ -2451,6 +2364,11 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
   hooks.measureComplex = [&text, &ui](const doc::SourceBlock& block, float width) {
     return measureComplexBlock(text, ui, block, width);
   };
+  // Asked once per wikilink per layout, so the answer is memoised against the
+  // library's refresh generation rather than re-listing every note per link.
+  hooks.wikiLinkResolves = [&ui](std::string_view target) {
+    return wikiLinkResolves(ui, target);
+  };
   hooks.drawComplex = [renderer, &text, &ui](const doc::SourceBlock& block, Rect area) {
     drawComplexBlock(renderer, text, ui, block, area);
   };
@@ -2496,7 +2414,7 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
     selection.end = ui.editor.selectionEnd();
   }
   ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.find.text());
-  for(const auto& link : ui.livePage.links()) ui.linkRegions.push_back({link.rect, link.target});
+  for(const auto& link : ui.livePage.links()) ui.linkRegions.push_back({link.rect, link.target, link.wiki});
   if(ui.editor.text().empty()) {
     // On the content column rather than the page edge, so the prompt sits
     // exactly where the first character typed will appear.
@@ -2761,7 +2679,7 @@ static void openBlockMenu(UiRuntime& ui, float x, float y) {
 static void openSlashMenu(UiRuntime& ui, std::size_t slashStart) {
   ui.slashStart = slashStart;
   ui.slashInserts = false;
-  clearBlockSelection(ui);
+  ui.clearBlockSelection();
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::List;
   overlay.id = "slash-menu";
@@ -3089,7 +3007,7 @@ static void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
     return;
   }
   if(applyEdit(ui, doc::deleteBlocks(source, from, to))) {
-    clearBlockSelection(ui);
+    ui.clearBlockSelection();
     ui.status = "Moved blocks to " + target->title;
   }
 }
@@ -3140,6 +3058,7 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "settings") openSettings(ui);
   else if(id == "shortcuts") openShortcutHelp(ui);
   else if(id == "refresh") {
+    ui.wikiNotesValid = false;
     ui.state.refreshLibrary();
     ui.status = "Refreshed library";
   }
@@ -3277,7 +3196,7 @@ static void handleText(UiRuntime& ui, const char* input) {
   } else if(ui.focus == FocusArea::Editor) {
     // Typing is text editing, so it takes the caret back from a block selection
     // rather than replacing whole blocks with a character.
-    clearBlockSelection(ui);
+    ui.clearBlockSelection();
     ui.editor.insert(input);
     // "[] " only becomes a real task marker once the space lands, so the check
     // is cheap and runs at most once per typed space.
@@ -3356,6 +3275,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(shortcut(SDLK_S, SDL_SCANCODE_S)) {
     saveCurrent(ui);
   } else if(shortcut(SDLK_R, SDL_SCANCODE_R)) {
+    ui.wikiNotesValid = false;
     ui.state.refreshLibrary();
     ui.status = "Refreshed library";
   } else if(shortcut(SDLK_T, SDL_SCANCODE_T)) {
@@ -3489,7 +3409,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     // In the live surface Esc steps out of the text and selects the block
     // itself; a second Esc puts the caret back.
     if(ui.focus == FocusArea::Editor && ui.state.workspace().paneMode == ui::PaneMode::Live) {
-      if(ui.blockSelectActive) clearBlockSelection(ui);
+      if(ui.blockSelectActive) ui.clearBlockSelection();
       else selectBlockAtCursor(ui);
     }
     ui.focus = FocusArea::Editor;
@@ -3527,11 +3447,11 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       // Enter puts the caret back into the first selected block's text.
       const auto blocks = doc::scanBlocks(ui.editor.text());
       const auto content = blocks[doc::blockIndexAt(blocks, blockSelectionCarets(ui).first)].contentStart;
-      clearBlockSelection(ui);
+      ui.clearBlockSelection();
       ui.editor.moveCursor(content);
       ui.revealEditorCursor = true;
     } else if(key == SDLK_LEFT || key == SDLK_RIGHT) {
-      clearBlockSelection(ui);
+      ui.clearBlockSelection();
     }
   } else if(ui.focus == FocusArea::Editor) {
     const bool live = ui.state.workspace().paneMode == ui::PaneMode::Live;
@@ -3866,6 +3786,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       for(const auto& link : ui.linkRegions) {
         if(contains(link.rect, x, y)) {
           const auto target = link.target;
+          if(link.wiki) {
+            openWikiLink(ui, target);
+            return;
+          }
           const auto hash = target.find('#');
           const auto filePart = hash == std::string::npos ? target : target.substr(0, hash);
           const auto anchorPart = hash == std::string::npos ? std::string() : target.substr(hash + 1);
@@ -3990,7 +3914,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         ui.revealEditorCursor = true;
         return;
       }
-      clearBlockSelection(ui);
+      ui.clearBlockSelection();
       // A task checkbox is a control, not text: ticking it must not move the
       // caret or start a selection.
       if(const auto blockStart = ui.livePage.checkboxAt(x, y)) {
@@ -4433,7 +4357,8 @@ int run(ApplicationOptions options) {
                 event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
         applyDisplayScale();
       } else if(event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
-        if(ui.state.hasLibrary() && !ui.editor.dirty()) ui.state.refreshLibrary();
+        if(ui.state.hasLibrary() && !ui.editor.dirty()) ui.wikiNotesValid = false;
+    ui.state.refreshLibrary();
       }
       } while(SDL_PollEvent(&event));
     }

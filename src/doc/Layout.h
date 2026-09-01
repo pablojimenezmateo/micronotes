@@ -42,6 +42,12 @@ enum class TextRole {
   Body,
   Marker,
   Link,
+  // A link to another note. Separate from Link because the interesting state is
+  // whether it goes anywhere: a link to a note that does not exist yet is not a
+  // mistake, it is the most common way to write one, and it has to look
+  // different from one that resolves so the difference is visible at a glance.
+  WikiLink,
+  WikiLinkUnresolved,
   Code,
   Muted
 };
@@ -119,6 +125,11 @@ struct LayoutOptions {
   // up only its height, so nothing below it shifts and the caret has no line
   // there to land on.
   std::function<bool(const SourceBlock&)> folded;
+  // Whether a `[[target]]` names a note that exists. The layout cannot know --
+  // it has a buffer, not a library -- so it asks, exactly as it asks about
+  // folds. Unset means "assume it does", which is what a layout with no library
+  // behind it should draw.
+  std::function<bool(std::string_view)> wikiLinkResolves;
 };
 
 class DocumentLayout {

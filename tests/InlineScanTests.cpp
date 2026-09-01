@@ -127,3 +127,118 @@ MICRONOTES_TEST(inline_scan_never_reports_ranges_outside_the_text) {
     MICRONOTES_REQUIRE(span.closeEnd == span.end && span.end <= text.size());
   }
 }
+
+namespace {
+
+const micronotes::doc::SourceSpan* firstWikiLink(const std::vector<micronotes::doc::SourceSpan>& spans) {
+  for(const auto& span : spans) {
+    if(span.kind == micronotes::doc::SpanKind::WikiLink) return &span;
+  }
+  return nullptr;
+}
+
+std::size_t countWikiLinks(const std::vector<micronotes::doc::SourceSpan>& spans) {
+  std::size_t count = 0;
+  for(const auto& span : spans) {
+    if(span.kind == micronotes::doc::SpanKind::WikiLink) ++count;
+  }
+  return count;
+}
+
+}
+
+MICRONOTES_TEST(inline_scan_reads_a_plain_wikilink) {
+  const std::string text = "see [[Another note]] here";
+  const auto spans = micronotes::doc::scanInlines(text);
+  const auto* link = firstWikiLink(spans);
+  MICRONOTES_REQUIRE(link != nullptr);
+  MICRONOTES_REQUIRE(link->target == "Another note");
+  MICRONOTES_REQUIRE(link->start == text.find("[["));
+  MICRONOTES_REQUIRE(link->end == text.find("]]") + 2);
+  // The markers are the brackets, so hiding them leaves the title.
+  MICRONOTES_REQUIRE(text.substr(link->openStart, link->openEnd - link->openStart) == "[[");
+  MICRONOTES_REQUIRE(text.substr(link->contentStart, link->contentEnd - link->contentStart) == "Another note");
+  MICRONOTES_REQUIRE(text.substr(link->closeStart, link->closeEnd - link->closeStart) == "]]");
+}
+
+// With an alias, the target and the bar are marker: hiding the markers has to
+// leave exactly the words the writer chose to show.
+MICRONOTES_TEST(inline_scan_reads_an_aliased_wikilink) {
+  const std::string text = "[[Some Note|that one]]";
+  const auto spans = micronotes::doc::scanInlines(text);
+  const auto* link = firstWikiLink(spans);
+  MICRONOTES_REQUIRE(link != nullptr);
+  MICRONOTES_REQUIRE(link->target == "Some Note");
+  MICRONOTES_REQUIRE(text.substr(link->openStart, link->openEnd - link->openStart) == "[[Some Note|");
+  MICRONOTES_REQUIRE(text.substr(link->contentStart, link->contentEnd - link->contentStart) == "that one");
+  MICRONOTES_REQUIRE(text.substr(link->closeStart, link->closeEnd - link->closeStart) == "]]");
+}
+
+MICRONOTES_TEST(inline_scan_reads_a_heading_target) {
+  const auto spans = micronotes::doc::scanInlines("[[Note#Section]]");
+  const auto* link = firstWikiLink(spans);
+  MICRONOTES_REQUIRE(link != nullptr);
+  // The fragment stays on the target; splitting it is the resolver's job.
+  MICRONOTES_REQUIRE(link->target == "Note#Section");
+}
+
+MICRONOTES_TEST(inline_scan_reads_two_wikilinks_on_one_line) {
+  const auto spans = micronotes::doc::scanInlines("[[one]] and [[two]]");
+  MICRONOTES_REQUIRE(countWikiLinks(spans) == 2);
+}
+
+// A wikilink is claimed before an ordinary link, or `[[a]]` reads as the label
+// `[a]` and `[[a](b)]` becomes a link with a bracket in its name.
+MICRONOTES_TEST(inline_scan_prefers_a_wikilink_to_a_link) {
+  const auto spans = micronotes::doc::scanInlines("[[a]](b)");
+  MICRONOTES_REQUIRE(countWikiLinks(spans) == 1);
+  for(const auto& span : spans) MICRONOTES_REQUIRE(span.kind != micronotes::doc::SpanKind::Link);
+}
+
+// Code spans win over everything, as they already did for links.
+MICRONOTES_TEST(inline_scan_leaves_a_wikilink_inside_a_code_span_alone) {
+  const auto spans = micronotes::doc::scanInlines("`[[not a link]]`");
+  MICRONOTES_REQUIRE(countWikiLinks(spans) == 0);
+}
+
+// The shapes that are not links, and must stay literal text rather than
+// swallowing the rest of the line.
+MICRONOTES_TEST(inline_scan_ignores_wikilinks_that_are_not_one) {
+  MICRONOTES_REQUIRE(countWikiLinks(micronotes::doc::scanInlines("[[unterminated")) == 0);
+  MICRONOTES_REQUIRE(countWikiLinks(micronotes::doc::scanInlines("[[]]")) == 0);
+  MICRONOTES_REQUIRE(countWikiLinks(micronotes::doc::scanInlines("[[|alias]]")) == 0);
+  MICRONOTES_REQUIRE(countWikiLinks(micronotes::doc::scanInlines("[single]")) == 0);
+  MICRONOTES_REQUIRE(countWikiLinks(micronotes::doc::scanInlines("[[")) == 0);
+  MICRONOTES_REQUIRE(countWikiLinks(micronotes::doc::scanInlines("]]")) == 0);
+}
+
+// An ordinary link on the same line still works, and still has its own target.
+MICRONOTES_TEST(inline_scan_reads_a_wikilink_beside_a_link) {
+  const auto spans = micronotes::doc::scanInlines("[[wiki]] and [text](http://example.com)");
+  MICRONOTES_REQUIRE(countWikiLinks(spans) == 1);
+  bool sawLink = false;
+  for(const auto& span : spans) {
+    if(span.kind != micronotes::doc::SpanKind::Link) continue;
+    sawLink = true;
+    MICRONOTES_REQUIRE(span.target == "http://example.com");
+  }
+  MICRONOTES_REQUIRE(sawLink);
+}
+
+// A title is a name, so punctuation inside it is part of the name.
+MICRONOTES_TEST(inline_scan_does_not_emphasise_inside_a_wikilink) {
+  const auto spans = micronotes::doc::scanInlines("[[a *b* c]]");
+  MICRONOTES_REQUIRE(countWikiLinks(spans) == 1);
+  for(const auto& span : spans) {
+    MICRONOTES_REQUIRE(span.kind != micronotes::doc::SpanKind::Emphasis);
+  }
+}
+
+// Offsets are absolute, so a span found in a block addresses the note buffer.
+MICRONOTES_TEST(inline_scan_wikilink_offsets_honour_the_base) {
+  const auto spans = micronotes::doc::scanInlines("[[x]]", 100);
+  const auto* link = firstWikiLink(spans);
+  MICRONOTES_REQUIRE(link != nullptr);
+  MICRONOTES_REQUIRE(link->start == 100 && link->end == 105);
+  MICRONOTES_REQUIRE(link->contentStart == 102 && link->contentEnd == 103);
+}
