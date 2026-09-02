@@ -1,5 +1,8 @@
 #include "doc/Layout.h"
 
+#include "CoreAliases.h"
+#include "core/perf/Perf.h"
+#include "core/perf/PerformanceCounters.h"
 #include "doc/Fold.h"
 
 #include <algorithm>
@@ -321,9 +324,16 @@ std::size_t DocumentLayout::lastRelaidBlocks() const {
 }
 
 void DocumentLayout::update(std::string_view source, const LayoutOptions& options) {
+  const perf::ScopeTimer timer("layout.update");
+  perf::addCounter(perf::CounterId::LayoutUpdateCalls);
+  perf::addCounter(perf::CounterId::LayoutSourceBytesCopied, source.size());
   source_.assign(source);
   options_ = options;
-  blocks_ = scanBlocks(source_);
+  {
+    const perf::ScopeTimer scanTimer("layout.update.scan_blocks");
+    blocks_ = scanBlocks(source_);
+  }
+  perf::addCounter(perf::CounterId::LayoutBlocksScanned, blocks_.size());
   const std::string_view text = source_;
 
   std::uint64_t geometry = kFnvOffset;
@@ -343,7 +353,9 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   for(std::size_t i = 0; options.folded && i < blocks_.size(); ++i) {
     // A fold nested inside a collapsed one is already hidden, and costs
     // nothing to resolve again.
-    if(hidden_[i] || !foldableKind(blocks_[i].kind) || !options.folded(blocks_[i])) continue;
+    if(hidden_[i] || !foldableKind(blocks_[i].kind)) continue;
+    perf::addCounter(perf::CounterId::LayoutFoldQueries);
+    if(!options.folded(blocks_[i])) continue;
     const std::size_t end = foldEnd(blocks_, i);
     for(std::size_t j = i + 1; j < end; ++j) hidden_[j] = true;
   }
@@ -356,6 +368,13 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   liveKeys_.reserve(blocks_.size());
   lastRelaid_ = 0;
   float top = 0.0f;
+  // Folded over every block key, so it summarises the whole document, its
+  // geometry and its reveal state in one word. Comparing it against the previous
+  // update's is what lets an update that will produce a byte-identical layout
+  // say so -- which is every frame of a scroll.
+  std::uint64_t signature = hashValue(geometry, caretBlock);
+  signature = hashValue(signature, rawBlock);
+  perf::addCounter(perf::CounterId::LayoutBlocksWalked, blocks_.size());
   for(std::size_t i = 0; i < blocks_.size(); ++i) {
     const SourceBlock& block = blocks_[i];
     Flags flags;
@@ -368,6 +387,7 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
     flags.groupFirst = startsQuoteRun(blocks_, i);
     flags.groupLast = endsQuoteRun(blocks_, i);
     const bool first = i == 0;
+    perf::addCounter(perf::CounterId::LayoutKeyBytesHashed, block.end - block.start);
     std::uint64_t key = hashBytes(geometry, text.data() + block.start, block.end - block.start);
     key = hashValue(key, block.kind);
     key = hashValue(key, block.level);
@@ -377,10 +397,15 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
     key = hashBytes(key, &flags, sizeof(flags));
     key = hashValue(key, first);
 
+    signature = hashValue(signature, key);
+
     auto found = cache_.find(key);
     if(found == cache_.end()) {
       ++lastRelaid_;
+      perf::addCounter(perf::CounterId::LayoutBlocksRelaid);
       found = cache_.emplace(key, layoutBlock(i, flags)).first;
+    } else {
+      perf::addCounter(perf::CounterId::LayoutCacheHits);
     }
     placed_[i].blockIndex = i;
     placed_[i].top = top;
@@ -390,6 +415,16 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   }
   totalHeight_ = top;
 
+  // Nothing about this update differed from the last one, so every byte scanned,
+  // hashed and walked above reproduced an answer that was already in hand. On a
+  // scroll -- where the source, the width and the caret are all unchanged and
+  // only the viewport moved -- this is every single frame.
+  if(hadSignature_ && signature == lastSignature_) {
+    perf::addCounter(perf::CounterId::LayoutUnchangedUpdates);
+  }
+  lastSignature_ = signature;
+  hadSignature_ = true;
+
   flatLines_.clear();
   flatLines_.reserve(blocks_.size() + blocks_.size() / 2);
   for(std::size_t i = 0; i < placed_.size(); ++i) {
@@ -398,14 +433,19 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
       flatLines_.push_back({i, line, placed_[i].top + layout.lines[line].y});
     }
   }
+  perf::addCounter(perf::CounterId::LayoutFlatLinesBuilt, flatLines_.size());
 
   // Bounded memory: keep roughly one spare generation of block layouts.
   if(cache_.size() > blocks_.size() * 3 + 256) {
     std::vector<std::uint64_t> live = liveKeys_;
     std::sort(live.begin(), live.end());
     for(auto it = cache_.begin(); it != cache_.end();) {
-      if(std::binary_search(live.begin(), live.end(), it->first)) ++it;
-      else it = cache_.erase(it);
+      if(std::binary_search(live.begin(), live.end(), it->first)) {
+        ++it;
+      } else {
+        perf::addCounter(perf::CounterId::LayoutCacheEvictions);
+        it = cache_.erase(it);
+      }
     }
     for(std::size_t i = 0; i < placed_.size(); ++i) {
       placed_[i].layout = &cache_.find(liveKeys_[i])->second;

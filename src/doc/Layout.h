@@ -206,6 +206,10 @@ private:
   std::vector<std::uint64_t> liveKeys_;
   float totalHeight_ = 0.0f;
   std::size_t lastRelaid_ = 0;
+  // Fingerprint of the last update's inputs and outputs, so an update that will
+  // reproduce the previous layout exactly can be counted as such.
+  std::uint64_t lastSignature_ = 0;
+  bool hadSignature_ = false;
 };
 
 }

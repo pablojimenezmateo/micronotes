@@ -10,6 +10,8 @@
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
 #include "app/FramePolicy.h"
+#include "app/FrameTrace.h"
+#include "app/Screenshot.h"
 #include "app/RawPane.h"
 #include "app/ContextMenus.h"
 #include "app/SettingsDialog.h"
@@ -2028,6 +2030,7 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
 }
 
 static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, int width, int height) {
+  const ScopedFrame frame;
   SDL_SetRenderDrawColor(renderer, theme().appBg.r, theme().appBg.g, theme().appBg.b, theme().appBg.a);
   SDL_RenderClear(renderer);
 
@@ -2095,42 +2098,12 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   ui.overlays.draw(renderer, text, width, height);
   // Last, so nothing paints over it.
   drawTooltip(renderer, text, ui.tooltip, {0, 0, static_cast<float>(width), static_cast<float>(height)});
-  perf::addCounter(perf::CounterId::FramePresents);
   SDL_RenderPresent(renderer);
 }
 
 static int captureFrame(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, const ApplicationOptions& options) {
-  // Pump enough events for the compositor to map and size the window before the
-  // pixels are read back; an unmapped window reads back blank.
-  for(int i = 0; i < 60; ++i) {
-    SDL_Event event;
-    while(SDL_PollEvent(&event)) {}
-    int width = options.windowWidth;
-    int height = options.windowHeight;
-    SDL_GetWindowSize(renderer ? SDL_GetRenderWindow(renderer) : nullptr, &width, &height);
-    drawApp(renderer, text, images, ui, width, height);
-    SDL_Delay(8);
-  }
-
-  SDL_Surface* frame = SDL_RenderReadPixels(renderer, nullptr);
-  if(!frame) {
-    std::cerr << "SDL_RenderReadPixels failed: " << SDL_GetError() << "\n";
-    return 1;
-  }
-
-  const auto path = options.screenshotPath;
-  bool saved = false;
-#if MICRONOTES_HAS_SDL3_IMAGE
-  saved = IMG_SavePNG(frame, path.c_str());
-#endif
-  if(!saved) saved = SDL_SaveBMP(frame, path.c_str());
-  SDL_DestroySurface(frame);
-  if(!saved) {
-    std::cerr << "Saving screenshot failed: " << SDL_GetError() << "\n";
-    return 1;
-  }
-  std::cout << "wrote " << path.string() << "\n";
-  return 0;
+  return captureWindowToFile(renderer, options.screenshotPath, options.windowWidth, options.windowHeight,
+                             [&](int width, int height) { drawApp(renderer, text, images, ui, width, height); });
 }
 
 // The block types, as menu rows. One table feeds the slash menu, the turn-into
@@ -3574,7 +3547,15 @@ static void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int wid
 }
 
 int run(ApplicationOptions options) {
-  microcore::perf::ScopeTimer startup("startup");
+  // Names the thread whose latency the user feels, so the trace summaries can
+  // rank a 30 ms frame above a 200 ms background rescan that blocks nobody.
+  perf::markMainThread();
+  // Every way out reports, not only the one through the event loop: --screenshot
+  // returns after writing its file and --headless returns before a window
+  // exists, and a dump wired into the loop alone is silent for both.
+  perf::dumpAtExit();
+  dumpFrameTraceAtExit();
+  const microcore::perf::StartupScope startup("startup");
   UiRuntime ui;
   if(options.configuredLibraryRoot) {
     if(!writeConfiguredLibraryRoot(*options.configuredLibraryRoot)) {
@@ -3892,8 +3873,6 @@ int run(ApplicationOptions options) {
       perf::addCounter(perf::CounterId::FrameRepaintsSkipped);
     }
   }
-
-  perf::dumpCountersOnce();
 
   if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty()) (void)saveCurrent(ui, true);
   persistLibraryState(ui);

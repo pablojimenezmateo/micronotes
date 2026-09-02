@@ -6,6 +6,7 @@
 #
 # Usage:
 #   tools/run-checks.sh tests        # plain build + ctest       -> /tmp/<app>-tests.log
+#   tools/run-checks.sh perf         # RELEASE perf harness       -> /tmp/<app>-perf.log
 #   tools/run-checks.sh clang-build  # whole tree, clang, -Werror -> /tmp/<app>-clang-build.log
 #   tools/run-checks.sh asan         # AddressSanitizer + ctest   -> /tmp/<app>-asan.log
 #   tools/run-checks.sh ubsan        # UndefinedBehavior + ctest  -> /tmp/<app>-ubsan.log
@@ -68,6 +69,32 @@ check_tests() {
   ' _ "${EXTRA_CMAKE_ARGS[@]}"
   local rc=$?
   echo "run-checks: tests finished (exit $rc); log at $log"
+  return $rc
+}
+
+# The perf harness, in its own Release tree.
+#
+# It has to be Release and it has to be separate. The default `build` tree is a
+# Debug one, and an unoptimised harness reports timings several times the real
+# ones -- which is worse than no number, because it looks like a measurement.
+# The counters are build-independent (they count events, not cycles), so a Debug
+# run is still a valid counter reading; only the milliseconds need this lane.
+#
+# Exit status is the harness's: it fails when a scenario is over its budget.
+check_perf() {
+  local build_dir="build-release"
+  local log="${LOG_DIR}/${APP}-perf.log"
+
+  run_logged "$log" bash -c '
+    set -e
+    cmake -S . -B '"$build_dir"' \
+      -DCMAKE_BUILD_TYPE=Release \
+      -D'"$OPT"'_PERF_HARNESS_BUILD=ON "$@"
+    cmake --build '"$build_dir"' --target '"$APP"'_perf -j'"$JOBS"'
+    ./'"$build_dir"'/bin/'"$APP"'_perf
+  ' _ "${EXTRA_CMAKE_ARGS[@]}"
+  local rc=$?
+  echo "run-checks: perf finished (exit $rc); log at $log"
   return $rc
 }
 
@@ -180,6 +207,7 @@ check_clang_build() {
 TARGET="${1:-tests}"
 case "$TARGET" in
   tests) check_tests ;;
+  perf) check_perf ;;
   clang-build) check_clang_build ;;
   asan|ubsan|tsan) check_sanitizer "$TARGET" ;;
   all)
@@ -187,6 +215,7 @@ case "$TARGET" in
     check_tests || rc=1
     # Before the sanitizers, which are the expensive part.
     check_clang_build || rc=1
+    check_perf || rc=1
     for san in asan ubsan tsan; do
       check_sanitizer "$san" || rc=1
     done
@@ -194,7 +223,7 @@ case "$TARGET" in
     exit $rc
     ;;
   *)
-    echo "usage: run-checks.sh [tests|clang-build|asan|ubsan|tsan|all]" >&2
+    echo "usage: run-checks.sh [tests|perf|clang-build|asan|ubsan|tsan|all]" >&2
     exit 2
     ;;
 esac

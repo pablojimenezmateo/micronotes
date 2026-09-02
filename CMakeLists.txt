@@ -142,6 +142,7 @@ set(MICROCORE_SOURCES
   src/core/markdown/RenderModel.cpp
   src/core/perf/Perf.cpp
   src/core/perf/PerformanceCounters.cpp
+  src/core/perf/TraceChannel.cpp
   src/core/render/FontResolver.cpp
   src/core/render/TextTextureCache.cpp
   src/core/persistence/SqliteDb.cpp
@@ -157,6 +158,7 @@ set(MICROCORE_SOURCES
 # micronotes-only code: the live-Markdown document model, the note library,
 # and the app shell state.
 set(MICRONOTES_APP_SOURCES
+  src/app/FrameTrace.cpp
   src/doc/BlockScan.cpp
   src/doc/Edits.cpp
   src/doc/Fold.cpp
@@ -205,6 +207,7 @@ add_executable(micronotes
   src/app/InlineText.cpp
   src/app/PageHeader.cpp
   src/app/PageView.cpp
+  src/app/Screenshot.cpp
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
   src/app/Notes.cpp
@@ -248,6 +251,7 @@ add_executable(micronotes_tests
   tests/EditsTests.cpp
   tests/FoldTests.cpp
   tests/FramePolicyTests.cpp
+  tests/FrameTraceTests.cpp
   tests/FuzzyTests.cpp
   tests/InlineScanTests.cpp
   tests/LayoutTests.cpp
@@ -256,6 +260,7 @@ add_executable(micronotes_tests
   tests/NotePropertiesTests.cpp
   tests/OutlineTests.cpp
   tests/PathUtilsTests.cpp
+  tests/PerfTraceTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/ShellLayoutTests.cpp

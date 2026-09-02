@@ -1,6 +1,7 @@
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
+#include "core/perf/TraceChannel.h"
 
 #include "doc/Edits.h"
 #include "doc/Fold.h"
@@ -57,6 +58,14 @@ static micronotes::doc::Metrics stubMetrics() {
   return metrics;
 }
 
+// The harness measures whole operations itself and hands the medians to the
+// same ranked table the scopes feed, so one table answers "what is slow" for
+// both. The channel speaks milliseconds; the budgets below are in microseconds,
+// which is the resolution a 2 ms budget needs.
+static void recordMicros(std::string_view name, std::uint64_t micros) {
+  micronotes::perf::traceChannel().recordSample(name, static_cast<double>(micros) / 1000.0);
+}
+
 // Budget from the design: one keystroke in a 200 KB note re-lays out in ~2 ms.
 static constexpr std::uint64_t kKeystrokeBudgetMicros = 2000;
 
@@ -98,8 +107,8 @@ static bool layoutBudgets(std::string* out) {
   std::sort(samples.begin(), samples.end());
   const std::uint64_t median = samples[samples.size() / 2];
   const std::uint64_t worst = samples.back();
-  micronotes::perf::Recorder::instance().add("layout.keystroke_relayout_median", median);
-  micronotes::perf::Recorder::instance().add("layout.keystroke_relayout_worst", worst);
+  recordMicros("layout.keystroke_relayout_median", median);
+  recordMicros("layout.keystroke_relayout_worst", worst);
   std::cout << "layout.keystroke_relaid_blocks: " << layout.lastRelaidBlocks() << "\n";
 
   // Folding puts a predicate on every block of every relayout, so it belongs
@@ -121,7 +130,7 @@ static bool layoutBudgets(std::string* out) {
     }
     std::sort(folded.begin(), folded.end());
     const std::uint64_t foldedMedian = folded[folded.size() / 2];
-    micronotes::perf::Recorder::instance().add("layout.keystroke_relayout_folded_median", foldedMedian);
+    recordMicros("layout.keystroke_relayout_folded_median", foldedMedian);
     options.folded = nullptr;
     if(foldedMedian > kKeystrokeBudgetMicros) {
       std::cerr << "BUDGET FAILED: layout.keystroke_relayout_folded_median " << foldedMedian
@@ -136,6 +145,69 @@ static bool layoutBudgets(std::string* out) {
     ok = false;
   }
   return ok;
+}
+
+// What a scroll costs.
+//
+// This is the scenario the app was missing, and the reason it was missing is
+// instructive: every existing budget here measures an *edit*, so the harness
+// could be green while the most common interaction in the app -- moving the
+// viewport over a note nobody is typing into -- was the slowest thing it did.
+// A scroll changes no bytes, so a frame of it should cost approximately
+// nothing: the layout is already built, the viewport moved, and the only work
+// that has to happen is drawing the rows that came into view.
+//
+// The budget is per frame, not per gesture. At 60 Hz a frame has 16.7 ms for
+// everything -- layout, decoration, text, present -- so a layout pass that eats
+// 2 ms of it is already a quarter of the budget for one of the several passes a
+// frame makes.
+static constexpr std::uint64_t kScrollFrameBudgetMicros = 2000;
+
+static bool scrollBudgets(const std::string& source) {
+  micronotes::doc::DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  micronotes::doc::LayoutOptions options;
+  options.width = 700.0f;
+  options.caretOffset = 0;
+  layout.update(source, options);
+
+  // 120 frames: two seconds of a scroll, which is what the live app's rolling
+  // frame window reports on.
+  constexpr int kFrames = 120;
+  const auto before = microcore::perf::captureCounters();
+  std::vector<std::uint64_t> samples;
+  samples.reserve(kFrames);
+  for(int frame = 0; frame < kFrames; ++frame) {
+    // Exactly what a wheel event does: nothing to the buffer, nothing to the
+    // caret, nothing to the geometry. Only the scroll offset moved, and the
+    // scroll offset is not an input to the layout at all.
+    const auto start = std::chrono::steady_clock::now();
+    layout.update(source, options);
+    samples.push_back(static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count()));
+  }
+  const auto after = microcore::perf::captureCounters();
+  std::sort(samples.begin(), samples.end());
+  const std::uint64_t median = samples[samples.size() / 2];
+  const std::uint64_t worst = samples.back();
+  recordMicros("scroll.frame_relayout_median", median);
+  recordMicros("scroll.frame_relayout_worst", worst);
+
+  // The counters are what turn a slow number into a diagnosis: a frame that
+  // relaid zero blocks and still took milliseconds spent them re-deriving an
+  // answer it already had.
+  std::cout << "\n=== what " << kFrames << " scrolled frames did ===\n";
+  for(const auto& [name, delta] : microcore::perf::nonZeroCounterDelta(before, after)) {
+    std::printf("%-44.*s %12llu  (%.1f per frame)\n", static_cast<int>(name.size()), name.data(),
+                static_cast<unsigned long long>(delta),
+                static_cast<double>(delta) / static_cast<double>(kFrames));
+  }
+
+  if(median <= kScrollFrameBudgetMicros) return true;
+  std::cerr << "BUDGET FAILED: scroll.frame_relayout_median " << median << "us exceeds "
+            << kScrollFrameBudgetMicros << "us -- a frame that changed nothing is re-laying out "
+            << "the whole note\n";
+  return false;
 }
 
 // Enter, Tab and Backspace each rescan the note to find the block they act on.
@@ -157,7 +229,7 @@ static bool editBudgets(const std::string& source) {
     }
     std::sort(samples.begin(), samples.end());
     const std::uint64_t median = samples[samples.size() / 2];
-    micronotes::perf::Recorder::instance().add(name, median);
+    recordMicros(name, median);
     return median;
   };
 
@@ -189,23 +261,14 @@ static bool editBudgets(const std::string& source) {
   return true;
 }
 
-// Ranked by total time, because that is the only ordering that answers "what
-// should I look at first". The per-call and max columns separate "slow once"
-// from "fast but called far too often" -- two problems with different fixes
-// that a single total conflates.
+// Ranked by self time, because that is the only ordering that answers "what
+// should I look at first": an outer scope that merely contains an expensive one
+// must not outrank the expensive one. The per-call and max columns separate
+// "slow once" from "fast but called far too often" -- two problems with
+// different fixes that a single total conflates.
 static void printSamples() {
-  const auto samples = microcore::perf::Recorder::instance().snapshot();
-  std::cout << "\n=== scope timings (ranked by total) ===\n";
-  std::printf("%-48s %10s %12s %10s %10s\n", "scope", "calls", "total_us", "avg_us", "max_us");
-  for(const auto& sample : samples) {
-    const double avg = sample.calls ? static_cast<double>(sample.totalMicros) / static_cast<double>(sample.calls) : 0.0;
-    std::printf("%-48s %10llu %12llu %10.1f %10llu\n",
-                sample.name.c_str(),
-                static_cast<unsigned long long>(sample.calls),
-                static_cast<unsigned long long>(sample.totalMicros),
-                avg,
-                static_cast<unsigned long long>(sample.maxMicros));
-  }
+  std::cout << "\n=== scope timings (ranked by self ms) ===\n";
+  microcore::perf::traceChannel().write(stdout);
 }
 
 // The counters are the other half of the picture: timings say where the time
@@ -219,6 +282,12 @@ static void printCounters() {
 }
 
 int main() {
+  // The harness measures whether or not the developer remembered to export
+  // anything: a benchmark whose instrumentation is off by default measures
+  // nothing. The live app leaves both channels to the environment.
+  microcore::perf::markMainThread();
+  microcore::perf::traceChannel().setAggregateEnabled(true);
+
   const auto root = std::filesystem::temp_directory_path() / "micronotes-perf-fixture";
   std::filesystem::remove_all(root);
   micronotes::library::Library library(root);
@@ -272,6 +341,7 @@ int main() {
   std::string liveNote;
   bool withinBudget = layoutBudgets(&liveNote);
   withinBudget = editBudgets(liveNote) && withinBudget;
+  withinBudget = scrollBudgets(liveNote) && withinBudget;
 
   printSamples();
   printCounters();

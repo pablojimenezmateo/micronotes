@@ -8,12 +8,12 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - `src/core/` is **vendored and shared with `microagenda`**. Read the rule below before touching it.
 - Build with `cmake`, test with `ctest`, and prefer `tools/run-checks.sh` so output lands in a readable log.
-- Performance work is measured, not guessed: `docs/performance.md` explains the counters and the harness.
+- Performance work is measured, not guessed: `docs/performance.md` explains the three instruments and the harness.
 
 ## The Vendored Core Rule
 
 `src/core/` is a byte-identical copy shared with `microagenda`. It holds the
-markdown parser, editor, viewer, perf recorder and counters, sqlite wrapper,
+markdown parser, editor, viewer, perf counters and scope tracer, sqlite wrapper,
 path helpers, attachment service, and pane model.
 
 **micronotes is canonical.** Make core changes here, then push them:
@@ -51,6 +51,7 @@ so results can be read back without rerunning:
 
 ```bash
 tools/run-checks.sh tests   # -> /tmp/micronotes-tests.log
+tools/run-checks.sh perf    # -> /tmp/micronotes-perf.log (Release harness)
 tools/run-checks.sh asan    # -> /tmp/micronotes-asan.log
 tools/run-checks.sh ubsan   # -> /tmp/micronotes-ubsan.log
 tools/run-checks.sh tsan    # -> /tmp/micronotes-tsan.log
@@ -68,24 +69,34 @@ Extra CMake arguments (a hand-pointed SQLite, for instance) go through
 
 ## Performance Instrumentation
 
-Two complementary tools, both in `src/core/perf/`. See `docs/performance.md` for
-the full description; the short version:
+Three complementary instruments. `docs/performance.md` is the full description;
+the short version:
 
-- **Counters** (`PerformanceCounters.h`) answer *how many times did this run*.
-  One relaxed atomic add, cheap enough to leave armed in release.
-- **Scope timers** (`Perf.h`) answer *how long did it take*. Aggregated by
-  scope into calls / total / max.
+- **Counters** (`src/core/perf/PerformanceCounters.h`) answer *how many times
+  did this run*. One relaxed atomic add, armed in release. **Deterministic**:
+  the same workload gives byte-identical values every run and in every build
+  type, which is what makes them proof rather than evidence.
+- **Scope timers** (`src/core/perf/Perf.h`) answer *how long did it take, and
+  who waited on it*. Aggregated per label into calls / total / **self** / **main
+  thread** / max. Ranked by self time, so a caller never outranks its own
+  hotspot. **Off unless armed**, so a timer is safe on a per-block path.
+- **Frame trace** (`src/app/FrameTrace.h`) answers *did the frame make it*.
+  Rolling p50/p95/max over 120 frames plus what the frame drew. Percentiles, not
+  a mean: a mean hides exactly the frames the user notices.
 
-Read them with the harness:
+Read them with the harness, which must be **Release** -- a Debug harness reports
+timings several times the real ones, which looks like a measurement and is not:
 
 ```bash
-./build/bin/micronotes_perf
+tools/run-checks.sh perf          # -> /tmp/micronotes-perf.log
+tools/perf-compare.py main        # working tree vs a commit, in a worktree
 ```
 
-or from a real session:
+or from a real session, which is where the interesting numbers are:
 
 ```bash
-MICROCORE_PERF_COUNTERS=1 ./build/bin/micronotes
+MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 MICRONOTES_TRACE_FRAMES=1 \
+  ./build-release/bin/micronotes
 ```
 
 Adding a counter is two steps, and skipping the second fails the build:
@@ -98,8 +109,12 @@ Adding a counter is two steps, and skipping the second fails the build:
 counter that reads zero forever is worse than an absent one, because a missing
 row is read as "this code path did not run" rather than "nobody wired this up".
 
-When you add code on a hot path, add instrumentation with it. A blind spot found
-later costs far more than a counter added up front.
+When you add code on a hot path, add instrumentation with it, and add the
+*counter* as well as the timer. A timing says how long the work took; only a
+counter says whether it should have happened at all. A blind spot found later
+costs far more than a counter added up front -- the scroll relayout in
+`docs/performance.md` sat in the hottest path in the app, fully cached, passing
+every budget, because nothing counted the work the cache did not cover.
 
 ## Agent Best Practices
 

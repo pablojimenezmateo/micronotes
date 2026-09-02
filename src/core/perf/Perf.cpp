@@ -1,74 +1,73 @@
 #include "core/perf/Perf.h"
 
-#include <algorithm>
-#include <mutex>
-#include <unordered_map>
+#include "core/perf/PerformanceCounters.h"
+
+#include <cstdlib>
 
 namespace microcore::perf {
-namespace {
 
-struct Aggregate {
-  std::uint64_t calls = 0;
-  std::uint64_t totalMicros = 0;
-  std::uint64_t maxMicros = 0;
-};
-
-std::mutex& tableMutex() {
-  static std::mutex mutex;
-  return mutex;
+TraceChannel& traceChannel() {
+  // Function-local so the environment is read on first use rather than during
+  // static initialization of an arbitrary translation unit.
+  static TraceChannel channel("perf", "MICROCORE_PERF_TRACE", "MICROCORE_PERF_SUMMARY",
+                              "MICROCORE_PERF_TRACE_MIN_MS");
+  return channel;
 }
 
-// Keyed by the scope name. Names are string literals owned by the binary, so
-// the map stores views into them rather than copies; only snapshot()
-// materializes strings, and only for the caller that asked to read.
-std::unordered_map<std::string_view, Aggregate>& table() {
-  static std::unordered_map<std::string_view, Aggregate> entries;
-  return entries;
+TraceChannel& startupChannel() {
+  static TraceChannel channel("startup", "MICROCORE_STARTUP_TRACE", "MICROCORE_STARTUP_SUMMARY",
+                              nullptr);
+  return channel;
 }
 
+ScopeLabel::ScopeLabel(TraceChannel& channel, std::string_view base) {
+  if(!channel.enabled()) return;
+  enabled_ = true;
+  text_.assign(base);
 }
 
-Recorder& Recorder::instance() {
-  static Recorder recorder;
-  return recorder;
+ScopeLabel& ScopeLabel::field(std::string_view key, std::string_view value) {
+  if(!enabled_) return *this;
+  text_ += open_ ? ',' : '(';
+  open_ = true;
+  text_.append(key);
+  text_ += '=';
+  text_.append(value);
+  return *this;
 }
 
-void Recorder::add(std::string_view name, std::uint64_t micros) {
-  const std::lock_guard<std::mutex> lock(tableMutex());
-  Aggregate& entry = table()[name];
-  ++entry.calls;
-  entry.totalMicros += micros;
-  entry.maxMicros = std::max(entry.maxMicros, micros);
+ScopeLabel& ScopeLabel::field(std::string_view key, long long value) {
+  if(!enabled_) return *this;
+  const std::string text = std::to_string(value);
+  return field(key, std::string_view(text));
 }
 
-std::vector<Sample> Recorder::snapshot() const {
-  std::vector<Sample> samples;
-  {
-    const std::lock_guard<std::mutex> lock(tableMutex());
-    samples.reserve(table().size());
-    for(const auto& [name, entry] : table()) {
-      samples.push_back(Sample {std::string(name), entry.calls, entry.totalMicros, entry.maxMicros});
-    }
+std::string_view ScopeLabel::view() {
+  if(open_) {
+    text_ += ')';
+    open_ = false;
   }
-  std::sort(samples.begin(), samples.end(), [](const Sample& a, const Sample& b) {
-    if(a.totalMicros != b.totalMicros) return a.totalMicros > b.totalMicros;
-    return a.name < b.name;
-  });
-  return samples;
+  return text_;
 }
 
-void Recorder::clear() {
-  const std::lock_guard<std::mutex> lock(tableMutex());
-  table().clear();
+void dumpAtExit() {
+  static const bool once = [] {
+    // Touch both channels first: a function-local static registers its
+    // destructor when it is constructed, and destructors run before atexit
+    // handlers registered earlier. Constructing them here puts their teardown
+    // after this handler instead of before it, so the handler still finds them
+    // armed.
+    traceChannel();
+    startupChannel();
+    return std::atexit([] { dumpAllOnce(); }) == 0;
+  }();
+  (void)once;
 }
 
-ScopeTimer::ScopeTimer(std::string_view name)
-  : name_(name), start_(std::chrono::steady_clock::now()) {}
-
-ScopeTimer::~ScopeTimer() {
-  const auto end = std::chrono::steady_clock::now();
-  const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(end - start_).count();
-  Recorder::instance().add(name_, static_cast<std::uint64_t>(micros));
+void dumpAllOnce() {
+  startupChannel().dumpOnce();
+  traceChannel().dumpOnce();
+  dumpCountersOnce();
 }
 
 }
