@@ -73,6 +73,15 @@ MICRONOTES_TEST(library_index_rebuilds_sqlite_cache_from_files) {
   MICRONOTES_REQUIRE(results[0].id == "note-search");
   MICRONOTES_REQUIRE(results[0].matchLine == "needle body");
   MICRONOTES_REQUIRE(results[0].snippets.size() == 2);
+  // Where in each line the query landed, so the sidebar can mark the match
+  // rather than the whole line -- and trim a long line around it rather than
+  // ellipsizing the match itself away.
+  MICRONOTES_REQUIRE(results[0].snippets[0].matchStart == 0);
+  MICRONOTES_REQUIRE(results[0].snippets[0].matchLength == 6);
+  MICRONOTES_REQUIRE(results[0].snippets[1].matchLine == "second needle line");
+  MICRONOTES_REQUIRE(results[0].snippets[1].matchStart == 7);
+  MICRONOTES_REQUIRE(results[0].snippets[1].matchLength == 6);
+  MICRONOTES_REQUIRE(results[0].matchStart == results[0].snippets[0].matchStart);
   const auto partial = index.search("eedle bo");
   MICRONOTES_REQUIRE(partial.size() == 1);
   MICRONOTES_REQUIRE(partial[0].id == "note-search");
@@ -399,4 +408,85 @@ MICRONOTES_TEST(index_backlinks_skip_a_link_inside_a_code_span) {
   MICRONOTES_REQUIRE(index.open(fixture.root));
   MICRONOTES_REQUIRE(index.refreshChangedFiles());
   MICRONOTES_REQUIRE(index.backlinks("Target", "Target").empty());
+}
+
+// The match range is a byte offset into the line as written, not into a
+// lowercased copy of it, so a query in the other case still points at the
+// right bytes.
+MICRONOTES_TEST(library_index_locates_a_match_regardless_of_case) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-match-case";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "cased";
+  metadata.title = "Cased";
+  library.createNote(metadata, "The Needle is capitalised here\n");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.rebuild());
+  const auto results = index.search("needle");
+  MICRONOTES_REQUIRE(results.size() == 1);
+  MICRONOTES_REQUIRE(results[0].snippets.size() == 1);
+  const auto& snippet = results[0].snippets.front();
+  MICRONOTES_REQUIRE(snippet.matchStart == 4);
+  MICRONOTES_REQUIRE(snippet.matchLine.substr(snippet.matchStart, snippet.matchLength) == "Needle");
+  std::filesystem::remove_all(root);
+}
+
+// A query matching hundreds of lines of one note used to build a snippet per
+// line, three strings each, and throw all but three away -- per note, on every
+// keystroke of the query.
+MICRONOTES_TEST(library_index_keeps_only_the_snippets_anything_will_draw) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-snippet-cap";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "many";
+  metadata.title = "Many";
+  std::string body;
+  for(int i = 0; i < 500; ++i) body += "a needle on line " + std::to_string(i) + "\n";
+  library.createNote(metadata, body);
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.rebuild());
+  const auto results = index.search("needle");
+  MICRONOTES_REQUIRE(results.size() == 1);
+  MICRONOTES_REQUIRE(results[0].snippets.size() == 3);
+  // Still the first three lines, in order, rather than an arbitrary three.
+  MICRONOTES_REQUIRE(results[0].snippets[0].matchLine == "a needle on line 0");
+  MICRONOTES_REQUIRE(results[0].snippets[2].matchLine == "a needle on line 2");
+  std::filesystem::remove_all(root);
+}
+
+// `%` and `_` are SQL LIKE's own wildcards. A query carrying one used to match
+// notes that do not contain the query at all, and each of those rows drew a
+// title with nothing under it -- the snippet under a result is found by a
+// literal search of the body, and there was nothing literal there to find.
+MICRONOTES_TEST(library_index_treats_sql_wildcards_as_ordinary_characters) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-wildcards";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "w";
+  metadata.title = "Wildcards";
+  library.createNote(metadata, "growth was 50 percent\nand ab_cd here\n");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.rebuild());
+
+  // "a%t" would have matched every note with an `a` somewhere before a `t`.
+  MICRONOTES_REQUIRE(index.search("a%t").empty());
+  MICRONOTES_REQUIRE(index.search("50%").empty());
+  // A literal underscore still finds the text that literally has one, and an
+  // underscore must not stand in for the character beside it.
+  MICRONOTES_REQUIRE(index.search("ab_cd").size() == 1);
+  MICRONOTES_REQUIRE(index.search("ab_d").empty());
+  // A trailing backslash is escaped too, or it would escape the pattern's own
+  // closing wildcard and match nothing at all by accident.
+  MICRONOTES_REQUIRE(index.search("percent\\").empty());
+  MICRONOTES_REQUIRE(index.search("percent").size() == 1);
+  std::filesystem::remove_all(root);
 }

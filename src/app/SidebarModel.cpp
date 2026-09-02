@@ -41,7 +41,7 @@ namespace {
 // relativises a path and builds a map key for every note before it can place
 // the first row, and every row is a string, a path and a rect. Called through
 // buildSidebarRows(), which is what keeps it off the frame path.
-void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
+void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure) {
   ui.sidebarRows.clear();
   const float top = rect.y + 12.0f;
   float y = top - static_cast<float>(ui.sidebarScroll);
@@ -113,17 +113,23 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
   if(!ui.search.empty()) {
     const auto& results = searchResults(ui);
     pushLabel(std::to_string(results.size()) + (results.size() == 1 ? " RESULT" : " RESULTS"));
+    // What the snippets are trimmed to: the row's width, less the indent they
+    // are drawn at and the same margin on the other side.
+    const int snippetRoom = static_cast<int>(rect.w - 16.0f - 28.0f);
+    const auto push = [&](SidebarRow& row, const std::string& line, std::size_t at, std::size_t length) {
+      if(line.empty()) return;
+      row.matchLines.push_back(ui::snippetAroundMatch(line, at, length, snippetRoom, measure));
+    };
     for(const auto& result : results) {
       SidebarRow row;
       row.kind = SidebarRow::Kind::SearchResult;
       row.noteId = result.id;
       row.title = result.title;
       if(result.snippets.empty()) {
-        if(!result.matchLine.empty()) row.matchLines.push_back(result.matchLine);
+        push(row, result.matchLine, result.matchStart, result.matchLength);
       } else {
         for(const auto& snippet : result.snippets) {
-          if(row.matchLines.size() >= 3) break;
-          if(!snippet.matchLine.empty()) row.matchLines.push_back(snippet.matchLine);
+          push(row, snippet.matchLine, snippet.matchStart, snippet.matchLength);
         }
       }
       row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, searchResultRowHeight(row.matchLines.size())};
@@ -202,7 +208,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
 // do, and both are an offset over a list already built. Rebuilding regardless
 // was ~0.7 ms of a ~1.0 ms frame on a 400-note library, which is most of the
 // frame spent re-deriving three dozen visible rows from four hundred notes.
-void buildSidebarRows(UiRuntime& ui, Rect rect) {
+void buildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure) {
   const auto& workspace = ui.state.workspace();
   const auto& previous = ui.sidebarRowsKey;
   const bool reusable = previous.valid &&
@@ -238,7 +244,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect) {
     return;
   }
 
-  rebuildSidebarRows(ui, rect);
+  rebuildSidebarRows(ui, rect, measure);
 
   auto& key = ui.sidebarRowsKey;
   key.valid = true;

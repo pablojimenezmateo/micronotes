@@ -4,7 +4,9 @@
 #include "ui/Rect.h"
 
 #include <cstddef>
+#include <functional>
 #include <optional>
+#include <string_view>
 
 // The sidebar's row list: what rows exist, where each one sits, and which one
 // is under the pointer. Split out of Application.cpp because it is a model
@@ -28,6 +30,9 @@ inline constexpr float kSidebarSnippetHeight = 16.0f;
 
 float searchResultRowHeight(std::size_t matchLines);
 
+// The width of a snippet line, in the font the rows draw it in.
+using SnippetMeasure = std::function<int(std::string_view)>;
+
 // The results the sidebar is listing, recomputed only when the question or the
 // library has changed. Each query is a hit on SQLite.
 const std::vector<library::SearchResult>& searchResults(UiRuntime& ui);
@@ -36,7 +41,13 @@ const std::vector<library::SearchResult>& searchResults(UiRuntime& ui);
 // when nothing it depends on has moved. An empty result means the list holds
 // nothing worth drawing -- the caller draws its empty message instead, and
 // hit-testing finds nothing, which is the same answer.
-void buildSidebarRows(UiRuntime& ui, ui::Rect rect);
+//
+// `measure` gives the width of a search snippet in the font the rows draw it
+// in. Trimming a matching line to the column is a measurement, and it belongs
+// with the build -- which runs when the query, the library or the panel's width
+// changes -- rather than with the draw, which runs on every frame including the
+// ones a hover causes.
+void buildSidebarRows(UiRuntime& ui, ui::Rect rect, const SnippetMeasure& measure);
 
 // The row under the pointer, or nothing when the pointer is off the list.
 std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, ui::Rect sidebar, float x, float y);

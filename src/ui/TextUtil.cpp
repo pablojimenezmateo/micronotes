@@ -104,6 +104,90 @@ std::string ellipsizeToFit(std::string value, int maxWidth,
   return value.substr(0, stops[fits]) + std::string(kEllipsis);
 }
 
+namespace {
+
+// The stop at or before `offset`, so a cut lands on a code point boundary.
+std::size_t stopAtOrBefore(const std::vector<std::size_t>& stops, std::size_t offset) {
+  std::size_t at = 0;
+  while(at + 1 < stops.size() && stops[at + 1] <= offset) ++at;
+  return at;
+}
+
+}
+
+SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, std::size_t matchLength,
+                                 int maxWidth, const std::function<int(std::string_view)>& measure) {
+  static constexpr std::string_view kEllipsis = "...";
+
+  SnippetWindow out;
+  matchStart = std::min(matchStart, line.size());
+  matchLength = std::min(matchLength, line.size() - matchStart);
+  if(maxWidth <= 0) return out;
+
+  // The common case, and the cheap one: the whole line fits and there is
+  // nothing to decide.
+  if(measure(line) <= maxWidth) {
+    out.text = std::string(line);
+    out.start = matchStart;
+    out.length = matchLength;
+    return out;
+  }
+
+  // It does not fit, so something has to go. Whatever goes, the match has to
+  // stay, and the tail is trimmed by ellipsizeToFit below -- which keeps the
+  // longest prefix that fits *with an ellipsis appended*. So the question is
+  // how much of the head to give up for the head ellipsis, the match, and that
+  // trailing one to fit together; anything less and the tail trim eats into the
+  // match, which is the bug this function exists to make unwriteable.
+  std::vector<std::size_t> stops;
+  codePointStops(line, &stops);
+  const std::size_t matchEnd = matchStart + matchLength;
+  const auto survives = [&](std::size_t from) {
+    std::string probe;
+    if(from > 0) probe += kEllipsis;
+    probe.append(line.substr(from, matchEnd - from));
+    probe.append(kEllipsis);
+    return measure(probe) <= maxWidth;
+  };
+
+  // Keeping the whole head is the best answer when it is available: a line
+  // read from its start needs no explaining.
+  std::size_t from = 0;
+  if(!survives(0)) {
+    // Bisect for the smallest head cut that does fit. Monotone: a later cut is
+    // a shorter string, so once one fits every later one does. `over` starts at
+    // the stop just tested and known not to fit, `fits` at the match's own
+    // start, which keeps no run-up at all.
+    std::size_t over = 0;
+    std::size_t fits = stopAtOrBefore(stops, matchStart);
+    if(!survives(stops[fits])) {
+      // The match is wider than the column by itself. Nothing can show all of
+      // it, so show its start and let the trim clip the rest.
+      from = stops[fits];
+    } else {
+      while(over + 1 < fits) {
+        const std::size_t mid = over + (fits - over) / 2;
+        if(survives(stops[mid])) fits = mid;
+        else over = mid;
+      }
+      from = stops[fits];
+    }
+  }
+
+  std::string text;
+  std::size_t start = matchStart - from;
+  if(from > 0) {
+    text += kEllipsis;
+    start += kEllipsis.size();
+  }
+  text.append(line.substr(from));
+
+  out.text = ellipsizeToFit(std::move(text), maxWidth, measure);
+  out.start = std::min(start, out.text.size());
+  out.length = std::min(matchLength, out.text.size() - out.start);
+  return out;
+}
+
 std::size_t breakToFit(std::string_view value, int maxWidth,
                        const std::function<int(std::string_view)>& measure) {
   if(value.empty()) return 0;

@@ -48,6 +48,28 @@ std::string ellipsizeToFit(std::string value, int maxWidth,
 std::size_t breakToFit(std::string_view value, int maxWidth,
                        const std::function<int(std::string_view)>& measure);
 
+// A window onto a matching line, kept inside `maxWidth`, with the match still
+// in it.
+//
+// A search snippet used to be ellipsized like any other label -- from the
+// right -- so a line whose match sat past the column's width was listed as
+// matching and then shown with nothing marked on it. The match is the reason
+// the row is there, so it is the part that cannot be cut: the head goes
+// instead, and what comes back is the text to draw plus where the match landed
+// inside it, which is what lets the row mark the span rather than the line.
+//
+// Ellipses are the same "..." every other truncation here uses. `start` and
+// `length` are clamped to the text that survived, so they are always a range
+// inside `text` -- zero length meaning there was nothing left to mark.
+struct SnippetWindow {
+  std::string text;
+  std::size_t start = 0;
+  std::size_t length = 0;
+};
+
+SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, std::size_t matchLength,
+                                 int maxWidth, const std::function<int(std::string_view)>& measure);
+
 // A link target that leaves the machine, as opposed to one inside the library.
 bool isRemoteTarget(std::string_view target);
 

@@ -17,6 +17,7 @@
 #include "ui/Overlay.h"
 #include "ui/Rect.h"
 #include "ui/ShellLayout.h"
+#include "ui/TextUtil.h"
 #include "ui/Tooltip.h"
 #include "ui/TreeModel.h"
 
@@ -152,7 +153,12 @@ struct SidebarRow {
   // The matching lines alone, without the context either side. A sidebar-width
   // column has no room for three lines per hit, and showing them would triple
   // every row's height for text nobody can read at that width.
-  std::vector<std::string> matchLines;
+  //
+  // Already trimmed to the column, and carrying where the match sits inside
+  // what is left, so the draw marks the span and does not have to measure the
+  // line again on every frame. `length` is zero when there is nothing to mark
+  // -- a note whose title matched but whose text did not.
+  std::vector<ui::SnippetWindow> matchLines;
 };
 
 struct SystemCursors {

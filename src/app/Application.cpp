@@ -40,6 +40,7 @@
 #include "ui/Actions.h"
 #include "ui/Metrics.h"
 #include "ui/Overlay.h"
+#include "ui/SearchScope.h"
 #include "ui/ShellLayout.h"
 #include "ui/Settings.h"
 #include "ui/Outline.h"
@@ -700,35 +701,6 @@ static void updateFindStatus(UiRuntime& ui) {
   ui.status = std::to_string(count) + " matches in note";
 }
 
-// One letter in the badge, because that is all the room there is; the whole
-// word in the tooltip, because "A" tells nobody anything.
-static std::string searchScopeLabel(library::SearchScope scope) {
-  switch(scope) {
-    case library::SearchScope::All: return "A";
-    case library::SearchScope::Title: return "T";
-    case library::SearchScope::Content: return "C";
-  }
-  return "A";
-}
-
-static std::string searchScopeName(library::SearchScope scope) {
-  switch(scope) {
-    case library::SearchScope::All: return "titles and text";
-    case library::SearchScope::Title: return "titles only";
-    case library::SearchScope::Content: return "text only";
-  }
-  return "titles and text";
-}
-
-static library::SearchScope nextSearchScope(library::SearchScope scope) {
-  switch(scope) {
-    case library::SearchScope::All: return library::SearchScope::Title;
-    case library::SearchScope::Title: return library::SearchScope::Content;
-    case library::SearchScope::Content: return library::SearchScope::All;
-  }
-  return library::SearchScope::All;
-}
-
 static void performAction(UiRuntime& ui, UiAction action) {
   switch(action) {
     case UiAction::Refresh:
@@ -1233,13 +1205,21 @@ static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRunt
   ui::drawRoundedSurface(renderer, search, theme().inputBg, focused ? theme().accent : theme().hairline,
                          ui::kRadiusSmall);
   ui.searchScopeToggle = {search.x + search.w - 30.0f, search.y + 5.0f, 24.0f, 24.0f};
-  ui.offerTooltip(ui.searchScopeToggle, "Searching " + searchScopeName(ui.searchScope) + " - click to change");
+  ui.offerTooltip(ui.searchScopeToggle,
+                  "Searching " + std::string(ui::searchScopeName(ui.searchScope)) + " - click to change");
   text.draw("Find", search.x + 10.0f, search.y + 8.0f, focused ? theme().accent : theme().dim);
   drawTextField(renderer, text, ui, ui.search, searchTextRect(rect, text), focused, "Search all notes");
   ui::drawRoundedSurface(renderer, ui.searchScopeToggle, focused ? theme().accentSoft : theme().surface,
                          focused ? theme().accentDim : theme().hairline, ui::kRadiusSmall);
-  text.draw(searchScopeLabel(ui.searchScope), ui.searchScopeToggle.x + 8.0f, ui.searchScopeToggle.y + 4.0f,
+  text.draw(ui::searchScopeLabel(ui.searchScope), ui.searchScopeToggle.x + 8.0f, ui.searchScopeToggle.y + 4.0f,
             focused ? theme().accent : theme().muted);
+}
+
+// The face a search snippet is set in. Read by the draw and by the trim that
+// keeps a match inside the column, which are two places that have to agree
+// about it or the trim is measured against the wrong font.
+static ui::TextStyle snippetTextStyle() {
+  return {ui::FontFamily::Sans, false, false, ui::type().tiny};
 }
 
 // The one place with nothing to list says which nothing it is, because the way
@@ -1268,7 +1248,9 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
 
   const Rect list = sidebarListRect(rect);
   ui.sidebarRect = list;
-  buildSidebarRows(ui, list);
+  buildSidebarRows(ui, list, [&](std::string_view value) {
+    return text.width(value, snippetTextStyle());
+  });
   if(ui.sidebarRows.empty()) {
     drawSidebarEmpty(text, ui, list);
     return;
@@ -1277,7 +1259,7 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
   ClipGuard listClip(renderer, list);
   const auto& selection = ui.state.selection();
   const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
-  const ui::TextStyle snippetStyle {ui::FontFamily::Sans, false, false, ui::type().tiny};
+  const ui::TextStyle snippetStyle = snippetTextStyle();
   for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
     const auto& row = ui.sidebarRows[i];
     if(row.rect.y + row.rect.h < list.y || row.rect.y > list.y + list.h) continue;
@@ -1297,8 +1279,18 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
                 row.rect.x + 12, row.rect.y + 3, selected ? theme().text : theme().muted, rowStyle);
       float snippetY = row.rect.y + kSidebarResultTitleHeight;
       for(const auto& line : row.matchLines) {
-        text.draw(ellipsizeToWidth(text, line, static_cast<int>(row.rect.w - 28), snippetStyle),
-                  row.rect.x + 16, snippetY, selected ? theme().accent : theme().dim, snippetStyle);
+        // The match, marked with the same fill find-in-note uses, so a match is
+        // a match wherever it is shown. Drawn under the text rather than over
+        // it, and the line is already trimmed to keep the span in view.
+        if(line.length > 0) {
+          const std::string_view shown = line.text;
+          const float from = static_cast<float>(text.width(shown.substr(0, line.start), snippetStyle));
+          const float to = static_cast<float>(text.width(shown.substr(0, line.start + line.length), snippetStyle));
+          ui::fillRounded(renderer, {row.rect.x + 16.0f + from, snippetY,
+                                     std::max(2.0f, to - from), kSidebarSnippetHeight - 1.0f},
+                          theme().findBg, 2.0f);
+        }
+        text.draw(line.text, row.rect.x + 16, snippetY, selected ? theme().accent : theme().dim, snippetStyle);
         snippetY += kSidebarSnippetHeight;
       }
       continue;
@@ -3067,9 +3059,9 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     // it takes the click before any row arithmetic happens.
     if(contains(searchBoxRect(layout.sidebar), x, y)) {
       if(contains(ui.searchScopeToggle, x, y)) {
-        ui.searchScope = nextSearchScope(ui.searchScope);
+        ui.searchScope = ui::nextSearchScope(ui.searchScope);
         ui.state.setSearch(ui.search.text(), ui.searchScope);
-        ui.status = "Search scope " + searchScopeLabel(ui.searchScope);
+        ui.status = "Searching " + std::string(ui::searchScopeName(ui.searchScope));
         return;
       }
       // Clicking a text field puts the caret where you clicked. Before, it only

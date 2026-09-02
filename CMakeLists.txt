@@ -175,6 +175,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/ColorMath.cpp
   src/ui/NoteProperties.cpp
   src/ui/RibbonLayout.cpp
+  src/ui/SearchScope.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp

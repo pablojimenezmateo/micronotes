@@ -44,6 +44,32 @@ static std::string lowerCopy(std::string value) {
   return value;
 }
 
+// As many snippets as anything downstream will draw, and not one more. The
+// sidebar shows three lines per result; a query matching a thousand lines of
+// one note used to build a thousand snippets -- three strings each -- and throw
+// all but three away, once per note, on every query.
+static constexpr std::size_t kMaxSnippets = 3;
+
+// A `LIKE` pattern matching `query` anywhere, with LIKE's own wildcards taken
+// literally.
+//
+// `%` and `_` mean "anything" to LIKE, so a query carrying one used to match
+// notes that do not contain the query at all -- "a%t" matched every note with
+// an `a` somewhere before a `t` -- and each of those rows then drew a title
+// with nothing under it, because the snippet beneath a result is found by a
+// literal search of the body and there was nothing literal there to find. The
+// escape character has to be escaped too, or a query ending in a backslash
+// would escape the pattern's own closing wildcard.
+static std::string likePattern(std::string_view query) {
+  std::string out = "%";
+  for(const char c : lowerCopy(std::string(query))) {
+    if(c == '%' || c == '_' || c == '\\') out.push_back('\\');
+    out.push_back(c);
+  }
+  out += "%";
+  return out;
+}
+
 static void fillSnippet(SearchResult& result, std::string_view body, std::string_view query) {
   if(query.empty()) return;
   const auto lowerQuery = lowerCopy(std::string(query));
@@ -52,19 +78,26 @@ static void fillSnippet(SearchResult& result, std::string_view body, std::string
   std::istringstream in {std::string(body)};
   std::string line;
   while(std::getline(in, line)) lines.push_back(line);
-  for(std::size_t i = 0; i < lines.size(); ++i) {
-    if(lowerCopy(lines[i]).find(lowerQuery) != std::string::npos) {
-      SearchResult::Snippet snippet;
-      if(i > 0) snippet.beforeLine = lines[i - 1];
-      snippet.matchLine = lines[i];
-      if(i + 1 < lines.size()) snippet.afterLine = lines[i + 1];
-      result.snippets.push_back(snippet);
-    }
+  for(std::size_t i = 0; i < lines.size() && result.snippets.size() < kMaxSnippets; ++i) {
+    const auto at = lowerCopy(lines[i]).find(lowerQuery);
+    if(at == std::string::npos) continue;
+    SearchResult::Snippet snippet;
+    if(i > 0) snippet.beforeLine = lines[i - 1];
+    snippet.matchLine = lines[i];
+    if(i + 1 < lines.size()) snippet.afterLine = lines[i + 1];
+    // Byte offsets into the line as written. Lowercasing is one-for-one over
+    // the bytes this comparison can match -- ASCII letters -- so the offset
+    // found in the lowered copy addresses the same bytes in the original.
+    snippet.matchStart = at;
+    snippet.matchLength = lowerQuery.size();
+    result.snippets.push_back(std::move(snippet));
   }
   if(!result.snippets.empty()) {
     result.beforeLine = result.snippets.front().beforeLine;
     result.matchLine = result.snippets.front().matchLine;
     result.afterLine = result.snippets.front().afterLine;
+    result.matchStart = result.snippets.front().matchStart;
+    result.matchLength = result.snippets.front().matchLength;
   }
 }
 
@@ -362,13 +395,12 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
       }
       if(out.empty()) {
         const char* likeSql = scope == SearchScope::Title
-          ? "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? ORDER BY title LIMIT 200;"
+          ? "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
           : scope == SearchScope::Content
-            ? "SELECT id,path,title,body FROM notes WHERE lower(body) LIKE ? ORDER BY title LIMIT 200;"
-            : "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? OR lower(body) LIKE ? OR lower(path) LIKE ? ORDER BY title LIMIT 200;";
+            ? "SELECT id,path,title,body FROM notes WHERE lower(body) LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
+            : "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ?1 ESCAPE '\\' OR lower(body) LIKE ?2 ESCAPE '\\' OR lower(path) LIKE ?3 ESCAPE '\\' ORDER BY title LIMIT 200;";
         if(Statement stmt = db.prepare(likeSql); stmt) {
-          std::string q = lowerCopy(std::string(query));
-          q = "%" + q + "%";
+          const std::string q = likePattern(query);
           bindText(stmt, 1, q);
           if(scope == SearchScope::All) {
             bindText(stmt, 2, q);

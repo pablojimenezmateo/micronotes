@@ -32,7 +32,8 @@ keystroke away.
 - One sidebar with the search field on top of it: a tree of notebooks and notes
   with drag to re-parent, favorites, recents, and tags as a filter rather than a
   second hierarchy. Typing a query replaces the tree with the matching notes and
-  the lines that matched; `Esc` brings the tree back.
+  the lines that matched, each marked where it matched and trimmed around the
+  match rather than cut off before it; `Esc` brings the tree back.
 - A borderless window with drawn chrome: the top strip is the breadcrumb, the
   favorite star and minimize / maximize / close, and dragging it moves the
   window. If the platform will not take a hit test, the decorations come back.

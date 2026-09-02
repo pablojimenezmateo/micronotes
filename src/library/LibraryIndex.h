@@ -4,6 +4,7 @@
 
 #include "core/persistence/SqliteDb.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -22,6 +23,15 @@ struct SearchResult {
     std::string beforeLine {};
     std::string matchLine {};
     std::string afterLine {};
+    // Where the query landed inside `matchLine`, in bytes. The sidebar marks
+    // the span rather than the line, and trims a line too long for its column
+    // around the match instead of from its end -- without a range it could do
+    // neither, and listed a note as matching next to a line with no visible
+    // reason why. Length zero means the line matched but the position is not
+    // known, which is what a match on the note's title rather than its text
+    // looks like.
+    std::size_t matchStart = 0;
+    std::size_t matchLength = 0;
   };
 
   std::string id;
@@ -30,6 +40,11 @@ struct SearchResult {
   std::string beforeLine {};
   std::string matchLine {};
   std::string afterLine {};
+  std::size_t matchStart = 0;
+  std::size_t matchLength = 0;
+  // Capped to what anything downstream will draw: the sidebar shows three
+  // lines per result, and a query matching a thousand lines of one note used to
+  // build a thousand snippets and throw all but three of them away.
   std::vector<Snippet> snippets {};
 };
 

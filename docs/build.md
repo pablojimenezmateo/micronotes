@@ -331,6 +331,11 @@ Useful runtime controls:
   each instead of the tree; `Up`/`Down` walk the results while the field keeps
   the typing, and `Esc` clears the query and brings the tree back. Selecting a
   tag does the same thing with that tag's notes.
+- A matching line is marked where it matched, in the same fill find-in-note
+  uses, and a line too long for the column is trimmed around its match rather
+  than from its end - so the match is always the part that stays on screen. A
+  query is matched literally: `%` and `_` are ordinary characters, not
+  wildcards.
 - The sidebar is a tree: notes nest under their notebook, a disclosure triangle
   opens a notebook without selecting it, and clicking a row selects it. `Up` and
   `Down` walk the rows, `Right` opens a notebook or steps into it, and `Left`

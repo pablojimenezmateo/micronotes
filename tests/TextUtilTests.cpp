@@ -127,3 +127,114 @@ MICRONOTES_TEST(break_to_fit_bisects_rather_than_walking) {
   // log2(4001) is under 12, plus the initial "does the whole thing fit" pass.
   MICRONOTES_REQUIRE(measures <= 16);
 }
+
+// --- search snippets ---------------------------------------------------
+//
+// A matching line in the sidebar is the reason its row is there, so the match
+// is the one part of the line that cannot be cut away. These pin that: the
+// answer always contains the match, and always reports where inside the
+// returned text it ended up.
+
+namespace {
+
+using micronotes::ui::SnippetWindow;
+
+// Every window has to name a range inside its own text, and that range has to
+// be the query. Checked on every case rather than eyeballed per assertion,
+// because a start that points past the end of the text is exactly the bug a
+// highlight drawn from it would show as a stripe in the wrong place.
+void requireMarksTheMatch(const SnippetWindow& window, std::string_view query) {
+  MICRONOTES_REQUIRE(window.start <= window.text.size());
+  MICRONOTES_REQUIRE(window.start + window.length <= window.text.size());
+  MICRONOTES_REQUIRE(window.length == query.size());
+  MICRONOTES_REQUIRE(std::string_view(window.text).substr(window.start, window.length) == query);
+}
+
+}
+
+MICRONOTES_TEST(snippet_leaves_a_line_that_already_fits) {
+  const auto window = micronotes::ui::snippetAroundMatch("a needle here", 2, 6, 200, measureEight);
+  MICRONOTES_REQUIRE(window.text == "a needle here");
+  requireMarksTheMatch(window, "needle");
+}
+
+// The match near the front: the head is worth keeping, so the tail goes, which
+// is what an ordinary label truncation does.
+MICRONOTES_TEST(snippet_trims_the_tail_when_the_match_is_near_the_front) {
+  const std::string line = "a needle and then a great deal more text after it";
+  const auto window = micronotes::ui::snippetAroundMatch(line, 2, 6, 160, measureEight);
+  MICRONOTES_REQUIRE(measureEight(window.text) <= 160);
+  MICRONOTES_REQUIRE(window.text.starts_with("a needle"));
+  MICRONOTES_REQUIRE(window.text.ends_with("..."));
+  requireMarksTheMatch(window, "needle");
+}
+
+// The match past the column's width: this is the case the sidebar used to get
+// wrong, listing a note as matching and then showing a line with nothing
+// marked on it because the ellipsis fell before the match.
+MICRONOTES_TEST(snippet_trims_the_head_to_keep_a_late_match_in_view) {
+  const std::string line = "a great deal of run-up before the needle finally appears";
+  const auto at = line.find("needle");
+  const auto window = micronotes::ui::snippetAroundMatch(line, at, 6, 160, measureEight);
+  MICRONOTES_REQUIRE(measureEight(window.text) <= 160);
+  MICRONOTES_REQUIRE(window.text.starts_with("..."));
+  requireMarksTheMatch(window, "needle");
+}
+
+// A match at the very end of a long line still has to be shown.
+MICRONOTES_TEST(snippet_keeps_a_match_at_the_end_of_the_line) {
+  const std::string line = "text that runs on and on and on and ends with the needle";
+  const auto at = line.find("needle");
+  const auto window = micronotes::ui::snippetAroundMatch(line, at, 6, 120, measureEight);
+  MICRONOTES_REQUIRE(measureEight(window.text) <= 120);
+  requireMarksTheMatch(window, "needle");
+}
+
+MICRONOTES_TEST(snippet_handles_a_line_with_nothing_to_mark) {
+  // A note whose title matched but whose text did not: no range, so the line is
+  // shown and nothing is highlighted.
+  const auto window = micronotes::ui::snippetAroundMatch("just a line", 0, 0, 200, measureEight);
+  MICRONOTES_REQUIRE(window.text == "just a line");
+  MICRONOTES_REQUIRE(window.length == 0);
+}
+
+// A range that does not fit the line is clamped rather than trusted: the offset
+// comes from a search over a body the index read, and the line here is one row
+// of it.
+MICRONOTES_TEST(snippet_clamps_a_range_that_runs_past_the_line) {
+  const auto window = micronotes::ui::snippetAroundMatch("short", 3, 40, 200, measureEight);
+  MICRONOTES_REQUIRE(window.text == "short");
+  MICRONOTES_REQUIRE(window.start == 3);
+  MICRONOTES_REQUIRE(window.start + window.length <= window.text.size());
+
+  const auto beyond = micronotes::ui::snippetAroundMatch("short", 99, 4, 200, measureEight);
+  MICRONOTES_REQUIRE(beyond.start <= beyond.text.size());
+  MICRONOTES_REQUIRE(beyond.length == 0);
+}
+
+MICRONOTES_TEST(snippet_survives_no_room_at_all) {
+  const auto window = micronotes::ui::snippetAroundMatch("a needle", 2, 6, 0, measureEight);
+  MICRONOTES_REQUIRE(window.text.empty());
+  MICRONOTES_REQUIRE(window.length == 0);
+}
+
+// Trims land on code point boundaries, never inside a UTF-8 sequence: half a
+// character is not text, and the renderer is handed this string as-is.
+MICRONOTES_TEST(snippet_cuts_multibyte_text_at_a_code_point) {
+  const std::string line = "\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9 needle \xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9";
+  const auto at = line.find("needle");
+  const auto window = micronotes::ui::snippetAroundMatch(line, at, 6, 96, measureEight);
+  MICRONOTES_REQUIRE(measureEight(window.text) <= 96);
+  requireMarksTheMatch(window, "needle");
+  for(std::size_t i = 0; i < window.text.size();) {
+    const auto lead = static_cast<unsigned char>(window.text[i]);
+    const std::size_t width = lead < 0x80 ? 1 : (lead < 0xE0 ? 2 : (lead < 0xF0 ? 3 : 4));
+    // Every continuation byte the lead promised is present, so no sequence was
+    // cut in half.
+    for(std::size_t j = 1; j < width; ++j) {
+      MICRONOTES_REQUIRE(i + j < window.text.size());
+      MICRONOTES_REQUIRE((static_cast<unsigned char>(window.text[i + j]) & 0xC0) == 0x80);
+    }
+    i += width;
+  }
+}
