@@ -62,20 +62,22 @@ ShellLayout computeShellLayout(const ShellLayoutInputs& inputs) {
   squeeze(notes, inputs.noteListVisible, kNoteListSqueezeFloor);
   squeeze(sidebar, inputs.sidebarVisible, kSidebarSqueezeFloor);
 
-  const float paneHeight = inputs.windowHeight - kStatusBarHeight;
+  // The title bar spans the window above everything, so every other region
+  // starts below it and the panels are that much shorter.
+  const float bodyY = kTitleBarHeight;
+  const float paneBottom = inputs.windowHeight - kStatusBarHeight;
+  const float paneHeight = std::max(0.0f, paneBottom - bodyY);
   const float contentX = sidebar + notes;
   const float contentW = inputs.windowWidth - sidebar - notes - right;
   const float tabsH = inputs.tabStripVisible ? kTabStripHeight : 0.0f;
-  const float crumbsY = tabsH;
-  const float contentY = tabsH + kBreadcrumbHeight;
 
-  layout.sidebar = {0.0f, 0.0f, sidebar, paneHeight};
-  layout.notes = {sidebar, 0.0f, notes, paneHeight};
-  layout.tabs = {contentX, 0.0f, contentW, tabsH};
-  layout.crumbs = {contentX, crumbsY, contentW, kBreadcrumbHeight};
-  layout.content = {contentX, contentY, contentW, paneHeight - contentY};
-  layout.rightPanel = {contentX + contentW, 0.0f, right, paneHeight};
-  layout.status = {0.0f, paneHeight, inputs.windowWidth, kStatusBarHeight};
+  layout.titleBar = {0.0f, 0.0f, inputs.windowWidth, kTitleBarHeight};
+  layout.sidebar = {0.0f, bodyY, sidebar, paneHeight};
+  layout.notes = {sidebar, bodyY, notes, paneHeight};
+  layout.tabs = {contentX, bodyY, contentW, tabsH};
+  layout.content = {contentX, bodyY + tabsH, contentW, std::max(0.0f, paneHeight - tabsH)};
+  layout.rightPanel = {contentX + contentW, bodyY, right, paneHeight};
+  layout.status = {0.0f, paneBottom, inputs.windowWidth, kStatusBarHeight};
   return layout;
 }
 

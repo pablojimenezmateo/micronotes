@@ -12,10 +12,11 @@ namespace micronotes::app {
 
 struct UiRuntime;
 
-// The two strips that frame the page: the trail of notebooks down to the open
-// note, and the line along the bottom that says where you are and how to get
-// somewhere else.
-void drawBreadcrumbs(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
+// The two strips that frame the page: the one along the top carrying the trail
+// of notebooks down to the open note, the star that pins it and the controls
+// this borderless window draws for itself; and the line along the bottom that
+// says where you are and how to get somewhere else.
+void drawTitleBar(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 void drawStatus(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
 // A note's icon, or a drawn mark when no emoji face is installed. Shared with

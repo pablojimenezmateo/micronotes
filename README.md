@@ -22,6 +22,9 @@ keystroke away.
   and a menu for turn-into, duplicate, delete and move.
 - A sidebar tree of notebooks and notes, with drag to re-parent, favorites,
   recents, and tags as a filter rather than a second hierarchy.
+- A borderless window with drawn chrome: the top strip is the breadcrumb, the
+  favorite star and minimize / maximize / close, and dragging it moves the
+  window. If the platform will not take a hit test, the decorations come back.
 - `Ctrl+P` jumps to any note; `Ctrl+Shift+P` is every command; `F1` is every
   shortcut; `Ctrl+,` is theme, text size, page width and which folder to open.
 - Deleting moves to the library's own trash, so it can be undone.

@@ -13,10 +13,25 @@ namespace micronotes::ui {
 // belong to ui::TypeScale, which ui::textScale() multiplies. Chrome stays put
 // when the type grows, so chrome is measured here.
 
+// The strip along the very top of the window, full width above the panels: the
+// breadcrumb, the favourite star, and the window controls this borderless
+// window draws for itself. Full width rather than over the page alone, because
+// the close button has to sit in the actual corner of the window -- a control
+// inset from the corner is one the pointer cannot be thrown at.
+inline constexpr float kTitleBarHeight = 30.0f;
+
 // Horizontal strips across the content column, top to bottom.
 inline constexpr float kTabStripHeight = 34.0f;
-inline constexpr float kBreadcrumbHeight = 30.0f;
 inline constexpr float kStatusBarHeight = 28.0f;
+
+// The drawn window controls: minimise, maximise, close, laid out right to left
+// so close ends at the corner.
+inline constexpr float kWindowButtonWidth = 40.0f;
+
+// How wide the invisible resize border around a borderless window is. The hit
+// test and nothing else reads this, but it lives here because it is a chrome
+// size like the rest.
+inline constexpr float kWindowFrameThickness = 6.0f;
 
 // Panel widths a fresh library starts with.
 inline constexpr float kDefaultSidebarWidth = 240.0f;

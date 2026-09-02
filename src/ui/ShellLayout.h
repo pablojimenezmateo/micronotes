@@ -48,10 +48,13 @@ struct ShellLayoutInputs {
 // can lay out, paint and hit-test against the same rect unconditionally and let
 // the clip do the work.
 struct ShellLayout {
+  // Full width along the top, above every panel: the breadcrumb, the star, and
+  // the window controls. Reserved whether or not a note is open, so a hit test
+  // against the rest of the window agrees with what was drawn.
+  Rect titleBar;
   Rect sidebar;      // notebooks, favorites, tags
   Rect notes;        // search box and the note list
   Rect tabs;         // the tab strip above the page
-  Rect crumbs;       // the breadcrumb trail
   Rect content;      // the page itself
   Rect rightPanel;   // outline, backlinks
   Rect status;       // the status bar, full width under everything

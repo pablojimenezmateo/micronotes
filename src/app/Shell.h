@@ -22,6 +22,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdlib>
+#include <array>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -200,6 +201,14 @@ constexpr int kEditorPageLines = 20;
 constexpr float kEditorScrollLinesPerNotch = 3.0f;
 constexpr float kViewerScrollPixelsPerNotch = 42.0f;
 
+// What the drawn window controls ask the run loop to do.
+enum class WindowAction {
+  None,
+  Minimize,
+  ToggleMaximize,
+  Close
+};
+
 struct UiRuntime {
   ui::AppState state;
   editor::MarkdownEditor editor;
@@ -296,10 +305,25 @@ struct UiRuntime {
   ScrollDragTarget scrollDragTarget = ScrollDragTarget::None;
   float scrollDragOffsetY = 0.0f;
   Rect searchScopeToggle;
-  // The breadcrumb trail above the page, recorded as it is drawn: a crumb is a
-  // folder to jump to, and the star at the end pins the note.
+  // The breadcrumb trail along the title bar, recorded as it is drawn: a crumb
+  // is a folder to jump to, and the star at the end pins the note.
   std::vector<std::pair<Rect, std::filesystem::path>> crumbs;
   Rect favoriteButton;
+  // What a click on a window control asked for, held until the frame is over.
+  // The buttons are drawn and hit-tested in shell code that has no business
+  // knowing about SDL_Window; the run loop, which owns the window, acts on it.
+  WindowAction pendingWindowAction = WindowAction::None;
+  // Whether this window draws its own controls instead of wearing the
+  // compositor's. Cleared when the platform refuses a hit test, because a
+  // borderless window nobody can move is worse than a decorated one.
+  bool customChrome = true;
+  // Minimise, maximise, close -- in that order, recorded as they are drawn so
+  // the hit test can exempt them from the draggable strip around them.
+  std::array<Rect, 3> windowButtons {};
+  // Whether the window is maximised, so the middle button can draw the restore
+  // glyph instead. Tracked from window events rather than queried in the draw,
+  // which would ask the display server a question every frame.
+  bool windowMaximized = false;
   bool resizingSidebar = false;
   bool resizingNotes = false;
   // Set while a drag inside a single-line field is extending its selection.
@@ -348,5 +372,20 @@ struct UiRuntime {
     if(!state.saveSelectedNoteRecovery(editor.text())) status = "Recovery save failed";
   }
 };
+
+// Every caller goes through here so that the rects a frame is painted with, the
+// rects it is hit-tested against and the rects the tests assert on are the same
+// rects. `ui.layoutMode` is both an input and an output: feeding the last mode
+// back in is what gives the compact breakpoint its hysteresis.
+inline ShellLayout shellLayout(UiRuntime& ui, int width, int height) {
+  auto inputs = ui.state.workspace().layoutInputs(
+    static_cast<float>(width), static_cast<float>(height), ui.layoutMode);
+  // One tab is still a tab: hiding the strip until a second opens would make
+  // the page jump down the moment it did.
+  inputs.tabStripVisible = !ui.state.workspace().tabs.empty();
+  const ShellLayout layout = ui::computeShellLayout(inputs);
+  ui.layoutMode = layout.mode;
+  return layout;
+}
 
 }

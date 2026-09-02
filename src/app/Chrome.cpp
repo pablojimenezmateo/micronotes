@@ -21,6 +21,38 @@ using ui::hLine;
 using ui::stroke;
 using ui::theme;
 
+// A window button's mark, drawn from lines rather than typeset: the UI face has
+// no glyph for a close cross, and a missing one would leave tofu where the
+// window controls should be.
+void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized, SDL_Color color) {
+  const float cx = std::round(box.x + box.w / 2.0f);
+  const float cy = std::round(box.y + box.h / 2.0f);
+  // The helpers set the draw colour themselves; the raw lines below are the
+  // only ones that have to say so, so they say so immediately before drawing.
+  const auto line = [&](float x1, float y1, float x2, float y2) {
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_RenderLine(renderer, x1, y1, x2, y2);
+  };
+  if(which == 0) {
+    hLine(renderer, cx - 5.0f, cx + 5.0f, cy, color);
+    return;
+  }
+  if(which == 1) {
+    if(maximized) {
+      // Two offset outlines: the restored window in front of the space it
+      // currently fills.
+      stroke(renderer, {cx - 5.0f, cy - 2.0f, 8.0f, 8.0f}, color);
+      hLine(renderer, cx - 2.0f, cx + 3.0f, cy - 5.0f, color);
+      line(cx + 3.0f, cy - 5.0f, cx + 3.0f, cy + 1.0f);
+    } else {
+      stroke(renderer, {cx - 5.0f, cy - 5.0f, 10.0f, 10.0f}, color);
+    }
+    return;
+  }
+  line(cx - 5.0f, cy - 5.0f, cx + 5.0f, cy + 5.0f);
+  line(cx - 5.0f, cy + 5.0f, cx + 5.0f, cy - 5.0f);
+}
+
 }
 
 void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
@@ -44,8 +76,6 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   }
 }
 
-// The trail of folders down to the open note. Clicking a crumb selects that
-// folder, which is the shortest way back up from anywhere in the library.
 const char* paneModeName(ui::PaneMode mode) {
   switch(mode) {
     case ui::PaneMode::Editor: return "Raw Markdown";
@@ -70,17 +100,40 @@ void drawNoteIcon(SDL_Renderer* renderer, TextRenderer& text, std::string_view i
   hLine(renderer, left + 2.0f, left + w - 2.0f, topY + 7.0f, color);
 }
 
-void drawBreadcrumbs(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
+void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   ui.crumbs.clear();
   ui.favoriteButton = {};
-  fill(renderer, rect, theme().editorBg);
+  ui.windowButtons = {};
+  fill(renderer, rect, theme().statusBg);
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h - 1.0f, theme().hairline);
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().small};
-  const auto note = ui.state.findNote(ui.state.selection().noteId);
+  const auto note = ui.state.hasLibrary() ? ui.state.findNote(ui.state.selection().noteId) : std::nullopt;
 
   const float baseline = rect.y + std::max(4.0f, (rect.h - static_cast<float>(text.lineHeight(style))) / 2.0f);
+
+  // The window controls first, right to left so close sits in the actual
+  // corner, where the pointer lands when it is thrown at it. Everything else
+  // in the strip then lays out against whatever they left.
+  float right = rect.x + rect.w;
+  if(ui.customChrome) {
+    for(std::size_t i = 0; i < ui.windowButtons.size(); ++i) {
+      Rect box {rect.x + rect.w - ui::kWindowButtonWidth * static_cast<float>(3 - i), rect.y,
+                ui::kWindowButtonWidth, rect.h - 1.0f};
+      ui.windowButtons[i] = box;
+      const bool hot = ui.hovered(box);
+      // Close goes red on hover; the other two take the ordinary hover fill.
+      if(hot) fill(renderer, box, i == 2 ? theme().warn : theme().hoverBg);
+      const SDL_Color mark = hot ? (i == 2 ? theme().onAccent : theme().text) : theme().dim;
+      drawWindowGlyph(renderer, box, i, ui.windowMaximized, mark);
+    }
+    ui.offerTooltip(ui.windowButtons[0], "Minimize");
+    ui.offerTooltip(ui.windowButtons[1], ui.windowMaximized ? "Restore" : "Maximize");
+    ui.offerTooltip(ui.windowButtons[2], "Close");
+    right = ui.windowButtons.front().x;
+  }
+
   float x = rect.x + 20.0f;
-  const float limit = rect.x + rect.w - 44.0f;
+  const float limit = right - 44.0f;
 
   // Every crumb down to the note's own folder, root first.
   std::vector<std::filesystem::path> trail {{}};
@@ -91,6 +144,7 @@ void drawBreadcrumbs(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
       trail.push_back(walk);
     }
   }
+  if(!ui.state.hasLibrary()) trail.clear();
   for(std::size_t i = 0; i < trail.size() && x < limit; ++i) {
     const auto label = trail[i].empty() ? ui.state.libraryRoot().filename().generic_string()
                                         : trail[i].filename().generic_string();
@@ -112,7 +166,7 @@ void drawBreadcrumbs(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
 
   if(note) {
     // A filled star reads as "kept"; the outline is an offer.
-    ui.favoriteButton = {rect.x + rect.w - 34.0f, rect.y + 4.0f, 26.0f, rect.h - 8.0f};
+    ui.favoriteButton = {right - 34.0f, rect.y + 4.0f, 26.0f, rect.h - 8.0f};
     const bool pinned = ui.state.favorite(note->id);
     ui.offerTooltip(ui.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
     if(ui.hovered(ui.favoriteButton)) fill(renderer, ui.favoriteButton, theme().hoverBg);

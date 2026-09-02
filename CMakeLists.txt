@@ -211,6 +211,7 @@ add_executable(micronotes
   src/app/SettingsDialog.cpp
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
+  src/app/WindowChrome.cpp
   src/ui/Draw.cpp
   src/ui/Fonts.cpp
   src/ui/Overlay.cpp

@@ -11,6 +11,7 @@
 #include "app/SettingsDialog.h"
 #include "app/TabStrip.h"
 #include "app/WikiLinks.h"
+#include "app/WindowChrome.h"
 #include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
@@ -105,21 +106,6 @@ using micronotes::ui::theme;
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
 // The shell's geometry, as a pure function of the window and the shell model.
-// Every caller goes through here so that the rects a frame is painted with, the
-// rects it is hit-tested against and the rects the tests assert on are the same
-// rects. `ui.layoutMode` is both an input and an output: feeding the last mode
-// back in is what gives the compact breakpoint its hysteresis.
-static ShellLayout shellLayout(UiRuntime& ui, int width, int height) {
-  auto inputs = ui.state.workspace().layoutInputs(
-    static_cast<float>(width), static_cast<float>(height), ui.layoutMode);
-  // One tab is still a tab: hiding the strip until a second opens would make
-  // the page jump down the moment it did.
-  inputs.tabStripVisible = !ui.state.workspace().tabs.empty();
-  const ShellLayout layout = computeShellLayout(inputs);
-  ui.layoutMode = layout.mode;
-  return layout;
-}
-
 static const markdown::Document& previewDocument(UiRuntime& ui) {
   const auto& source = ui.editor.text();
   if(!ui.cachedMarkdownDocument || ui.cachedMarkdownSource != source) {
@@ -1804,8 +1790,11 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   const float y = ui.mouseY;
   const ShellLayout layout = shellLayout(ui, width, height);
   if(isResizeGutter(layout, x, y)) return CursorKind::ResizeHorizontal;
-  if(contains(layout.crumbs, x, y)) {
+  if(contains(layout.titleBar, x, y)) {
     if(contains(ui.favoriteButton, x, y)) return CursorKind::Pointer;
+    for(const auto& box : ui.windowButtons) {
+      if(contains(box, x, y)) return CursorKind::Pointer;
+    }
     for(const auto& [rect, folder] : ui.crumbs) {
       (void)folder;
       if(contains(rect, x, y)) return CursorKind::Pointer;
@@ -2260,13 +2249,16 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   // so a frame can never end up with two tooltips resolved.
   ui.tooltip = {};
 
+  // First, whatever is or is not open behind it: it carries the window controls.
+  drawTitleBar(renderer, text, ui, layout.titleBar);
+
   if(!ui::empty(layout.sidebar)) drawSidebar(renderer, text, ui, layout.sidebar);
   if(!ui::empty(layout.notes)) drawNotes(renderer, text, ui, layout.notes);
   // One rule per panel that is actually there. A hidden panel is zero wide, and
   // its rule would land on the edge of whatever took its place.
   for(const Rect& panel : {layout.sidebar, layout.notes}) {
     if(ui::empty(panel)) continue;
-    fill(renderer, {panel.x + panel.w, 0, 1, panel.h}, theme().hairline);
+    fill(renderer, {panel.x + panel.w, panel.y, 1, panel.h}, theme().hairline);
   }
   if(!ui::empty(layout.rightPanel)) drawRightPanel(renderer, text, ui, layout.rightPanel);
   if(!ui::empty(layout.tabs)) drawTabStrip(renderer, text, ui, layout.tabs);
@@ -2279,18 +2271,13 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
                      {layout.content.x + 18, layout.content.y + 40, layout.content.w - 36, 130},
                      ui::keysFor(ui::ActionId::Settings) + "  Settings          or start with  --library <path>");
   } else if(ui.state.selection().noteId.empty()) {
-    ui.crumbs.clear();
-    ui.favoriteButton = {};
     fill(renderer, layout.content, theme().editorBg);
     drawEmptyMessage(text, "Nothing open", "Pick a note from the sidebar, or start a new one.",
                      {layout.content.x + 18, layout.content.y + 40, layout.content.w - 36, 130},
                      ui::keysFor(ui::ActionId::GoToNote) + "  go to note          " + ui::keysFor(ui::ActionId::NewNote) +
                      "  new note          " + ui::keysFor(ui::ActionId::Shortcuts) + "  every shortcut");
   } else {
-    // The breadcrumb belongs to the note rather than to a pane, so it sits
-    // above whichever pane is showing it.
     const Rect content = layout.content;
-    drawBreadcrumbs(renderer, text, ui, layout.crumbs);
     if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       drawLive(renderer, text, ui, content);
     } else if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
@@ -3520,7 +3507,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     return;
   }
-  if(contains(layout.crumbs, x, y)) {
+  if(contains(layout.titleBar, x, y)) {
+    if(pressWindowButton(ui, x, y, button)) return;
     if(contains(ui.favoriteButton, x, y)) {
       const auto noteId = ui.state.selection().noteId;
       ui.status = ui.state.toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
@@ -3860,7 +3848,12 @@ int run(ApplicationOptions options) {
 
   if(options.theme) ui::setThemeMode(*options.theme);
 
-  SDL_Window* window = SDL_CreateWindow("micronotes", options.windowWidth, options.windowHeight, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+  // Borderless at creation rather than SDL_SetWindowBordered afterwards: on
+  // Wayland the decoration is a compositor-side object, so asking for one and
+  // then retracting it costs a blocking round-trip to the display server.
+  SDL_Window* window = SDL_CreateWindow("micronotes", options.windowWidth, options.windowHeight,
+                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                                        SDL_WINDOW_BORDERLESS);
   if(!window) {
     std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
     SDL_Quit();
@@ -3874,6 +3867,11 @@ int run(ApplicationOptions options) {
     SDL_Quit();
     return 1;
   }
+  // Held for the lifetime of the window: SDL keeps the pointer and calls back
+  // into it on every pointer press near the frame.
+  HitTestContext hitTestContext;
+  installWindowHitTest(window, renderer, ui, hitTestContext);
+
   // Present in step with the display. Without this the renderer tears on one
   // frame and stalls on the next, which reads as jitter even when every frame
   // is well inside budget.
@@ -4086,6 +4084,8 @@ int run(ApplicationOptions options) {
         if(shouldYieldEventDrain(drained, needsDraw)) break;
       } while(SDL_PollEvent(&event));
     }
+    if(applyPendingWindowAction(window, ui, running)) needsDraw = true;
+
     const Uint64 now = SDL_GetTicks();
     if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty() &&
        now - ui.lastEdit > 1200 && now - ui.lastAutosaveAttempt > 1000) {

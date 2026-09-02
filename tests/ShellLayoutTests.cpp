@@ -36,18 +36,25 @@ MICRONOTES_TEST(shell_layout_panes_tile_the_window_without_a_gap) {
   MICRONOTES_REQUIRE(nearlyEqual(layout.content.x, layout.notes.x + layout.notes.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x, layout.content.x + layout.content.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x + layout.rightPanel.w, 1600.0f));
-  // The status bar spans everything and the panes stop exactly where it starts.
+  // The panes hang between the title bar and the status bar, meeting both.
+  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.y, micronotes::ui::kTitleBarHeight));
   MICRONOTES_REQUIRE(nearlyEqual(layout.status.y, layout.sidebar.y + layout.sidebar.h));
   MICRONOTES_REQUIRE(nearlyEqual(layout.status.w, 1600.0f));
   MICRONOTES_REQUIRE(nearlyEqual(layout.status.h, micronotes::ui::kStatusBarHeight));
 }
 
-MICRONOTES_TEST(shell_layout_crumbs_sit_directly_above_the_page) {
+// The title bar spans the whole window above every panel, because the window
+// controls at its right end have to reach the actual corner.
+MICRONOTES_TEST(shell_layout_title_bar_spans_the_window_above_every_panel) {
   const ShellLayout layout = computeShellLayout(wideShell());
-  MICRONOTES_REQUIRE(nearlyEqual(layout.crumbs.h, micronotes::ui::kBreadcrumbHeight));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.crumbs.y + layout.crumbs.h, layout.content.y));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.crumbs.x, layout.content.x));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.crumbs.w, layout.content.w));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.x, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.y, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.w, 1600.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.h, micronotes::ui::kTitleBarHeight));
+  // Nothing starts above the bottom of it.
+  for(const auto& region : {layout.sidebar, layout.notes, layout.tabs, layout.content, layout.rightPanel}) {
+    MICRONOTES_REQUIRE(region.y >= layout.titleBar.y + layout.titleBar.h - 0.001f);
+  }
 }
 
 // A hidden panel gives its room to the page rather than leaving a hole, and
@@ -83,18 +90,17 @@ MICRONOTES_TEST(shell_layout_right_panel_takes_room_only_when_shown) {
   MICRONOTES_REQUIRE(with.notes == without.notes);
 }
 
-MICRONOTES_TEST(shell_layout_tab_strip_pushes_the_crumbs_and_page_down) {
+MICRONOTES_TEST(shell_layout_tab_strip_pushes_the_page_down) {
   ShellLayoutInputs inputs = wideShell();
   const ShellLayout without = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(without.tabs.h, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(without.crumbs.y, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(without.content.y, micronotes::ui::kTitleBarHeight));
 
   inputs.tabStripVisible = true;
   const ShellLayout with = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(with.tabs.h, micronotes::ui::kTabStripHeight));
-  MICRONOTES_REQUIRE(nearlyEqual(with.tabs.y, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(with.crumbs.y, micronotes::ui::kTabStripHeight));
-  MICRONOTES_REQUIRE(nearlyEqual(with.content.y, with.crumbs.y + with.crumbs.h));
+  MICRONOTES_REQUIRE(nearlyEqual(with.tabs.y, micronotes::ui::kTitleBarHeight));
+  MICRONOTES_REQUIRE(nearlyEqual(with.content.y, with.tabs.y + with.tabs.h));
   // The page loses exactly the strip's height, and nothing runs past the status bar.
   MICRONOTES_REQUIRE(nearlyEqual(with.content.h, without.content.h - micronotes::ui::kTabStripHeight));
   MICRONOTES_REQUIRE(nearlyEqual(with.content.y + with.content.h, with.status.y));
