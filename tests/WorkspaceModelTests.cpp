@@ -72,9 +72,14 @@ MICRONOTES_TEST(workspace_layout_inputs_carry_the_whole_arrangement) {
 
 // The name is what lands in .micronotes/ui.state, so it has to survive the trip.
 MICRONOTES_TEST(workspace_right_panel_view_round_trips_through_its_name) {
-  for(const auto view : {RightPanelView::Outline, RightPanelView::Tags}) {
+  // Every view, not a selection of them: the one left out of this loop was
+  // Backlinks, which is also the one with an alias to get wrong.
+  for(const auto view : {RightPanelView::Outline, RightPanelView::Backlinks, RightPanelView::Tags}) {
     MICRONOTES_REQUIRE(rightPanelViewFromName(rightPanelViewName(view)) == view);
   }
+  // The name the panel's own tab is labelled with, so a view asked for by what
+  // is on screen resolves to it.
+  MICRONOTES_REQUIRE(rightPanelViewFromName("links") == RightPanelView::Backlinks);
   // A name from a newer version, or a typo, falls back rather than failing.
   MICRONOTES_REQUIRE(rightPanelViewFromName("graph") == RightPanelView::Outline);
   MICRONOTES_REQUIRE(rightPanelViewFromName("") == RightPanelView::Outline);

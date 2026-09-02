@@ -368,7 +368,9 @@ Useful runtime controls:
   running off the screen.
 - Every empty place - no library, a library with no notes, an empty notebook, a
   tag nothing carries any more, a search that matched nothing, a note with no
-  text in it - says which of those it is and which key does something about it.
+  text in it - says which of those it is and which key does something about it,
+  and wraps rather than truncating: half a sentence in a narrow panel says less
+  than nothing.
 - The icon rail does not hide, and a window too short to hold all seven of its
   controls drops them in a stated order - Settings first, the sidebar toggle
   last - so a shell with every panel put away always keeps the button that
@@ -411,7 +413,7 @@ These exist to make UI work reproducible and are not part of normal use:
 --select <title>       # open the first note whose title contains this
 --search <query>       # seed the sidebar's search field, to capture it searching
 --panels sidebar,right # which side panels to show, rather than whatever was stored
---right-panel outline|backlinks
+--right-panel outline|backlinks|links|tags   # "links" is the tab's own label
 --open rename|tags|new-folder|note-menu|folder-menu|delete-note|settings|shortcuts|command-palette
 ```
 

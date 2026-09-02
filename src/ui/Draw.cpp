@@ -1,5 +1,7 @@
+#include "CoreAliases.h"
 #include "ui/Draw.h"
 
+#include "core/editor/SoftWrap.h"
 #include "ui/Metrics.h"
 #include "ui/TextUtil.h"
 
@@ -227,9 +229,29 @@ void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_vi
   float y = rect.y + 14.0f;
   text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), rect.x + 18.0f, y, theme().text, titleStyle);
   y += static_cast<float>(text.lineHeight(titleStyle)) + 6.0f;
-  text.draw(ellipsizeToWidth(text, std::string(detail), room, bodyStyle), rect.x + 18.0f, y, theme().muted, bodyStyle);
+
+  // The detail wraps rather than being cut off at the column. Every one of
+  // these messages is drawn in a panel -- the sidebar, the outline -- narrow
+  // enough that a sentence does not fit on one line, and half a sentence with
+  // an ellipsis after it says less than nothing: "Notes here are plain .md..."
+  // was the whole of what a fresh library had to say for itself.
+  //
+  // Bounded, because the box is: past three lines the message is no longer an
+  // empty state, and the last of them takes the ellipsis instead.
+  static constexpr std::size_t kMaxLines = 3;
+  const auto rows = editor::softWrap(detail, room, [&](std::string_view value) {
+    return text.width(value, bodyStyle);
+  });
+  const float bodyStep = static_cast<float>(text.lineHeight(bodyStyle));
+  for(std::size_t i = 0; i < rows.size() && i < kMaxLines; ++i) {
+    const bool last = i + 1 == kMaxLines && rows.size() > kMaxLines;
+    text.draw(last ? ellipsizeToWidth(text, rows[i].text + "...", room, bodyStyle) : rows[i].text,
+              rect.x + 18.0f, y, theme().muted, bodyStyle);
+    y += bodyStep;
+  }
+
   if(keys.empty()) return;
-  y += static_cast<float>(text.lineHeight(bodyStyle)) + 8.0f;
+  y += 8.0f;
   text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), rect.x + 18.0f, y, theme().dim, keyStyle);
 }
 

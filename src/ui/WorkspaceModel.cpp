@@ -14,7 +14,10 @@ std::string_view rightPanelViewName(RightPanelView view) {
 }
 
 RightPanelView rightPanelViewFromName(std::string_view name) {
-  if(name == "backlinks") return RightPanelView::Backlinks;
+  // "links" as well as "backlinks", because "Links" is what the panel's own
+  // tab is labelled: a name typed from what is on screen has to work, or
+  // `--right-panel links` silently opens the outline instead.
+  if(name == "backlinks" || name == "links") return RightPanelView::Backlinks;
   if(name == "tags") return RightPanelView::Tags;
   return RightPanelView::Outline;
 }

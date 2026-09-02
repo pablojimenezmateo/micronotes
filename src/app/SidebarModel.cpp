@@ -112,6 +112,13 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure)
   // sidebar answers one question at a time, and Esc puts the tree back.
   if(!ui.search.empty()) {
     const auto& results = searchResults(ui);
+    // Nothing at all rather than a heading over a hole: a bare "0 RESULTS" is
+    // a row saying the list is empty, drawn instead of the empty state that
+    // says so and also says how to get out of it.
+    if(results.empty()) {
+      finish();
+      return;
+    }
     pushLabel(std::to_string(results.size()) + (results.size() == 1 ? " RESULT" : " RESULTS"));
     // What the snippets are trimmed to: the row's width, less the indent they
     // are drawn at and the same margin on the other side.
@@ -195,7 +202,16 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure)
   // the draw clearing a list the memo would then hand back next frame.
   const bool onlyLabels = std::none_of(ui.sidebarRows.begin(), ui.sidebarRows.end(),
                                        [](const auto& row) { return row.kind != SidebarRow::Kind::SectionLabel; });
-  if(onlyLabels) ui.sidebarRows.clear();
+  // The library's own root, alone, is the same hole with a disclosure triangle
+  // on it: it opens onto nothing and selects the folder you are already in. A
+  // fresh library showed exactly that one row, so the "no notes yet" message --
+  // which is also where the shortcut for writing the first one is -- was
+  // written and then never reachable.
+  const bool rootAlone = ui.sidebarRows.size() == 1 &&
+    ui.sidebarRows.front().kind == SidebarRow::Kind::Tree &&
+    ui.sidebarRows.front().tree.kind == ui::TreeRowKind::Folder &&
+    ui.sidebarRows.front().tree.folder.empty();
+  if(onlyLabels || rootAlone) ui.sidebarRows.clear();
 }
 
 }
