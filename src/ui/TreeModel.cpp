@@ -1,5 +1,8 @@
 #include "ui/TreeModel.h"
 
+#include "CoreAliases.h"
+#include "core/perf/PerformanceCounters.h"
+
 #include <algorithm>
 #include <map>
 
@@ -28,6 +31,7 @@ bool TreeModel::expanded(const std::filesystem::path& folder) const {
 void TreeModel::setExpanded(const std::filesystem::path& folder, bool value) {
   if(expanded(folder) == value) return;
   dirty_ = true;
+  ++revision_;
   if(folder.empty()) {
     rootExpanded_ = value;
     return;
@@ -106,6 +110,7 @@ std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& fol
     }
   };
   walk(walk, {}, rootNode ? rootNode->noteCount : 0, 0);
+  perf::addCounter(perf::CounterId::TreeRowsBuilt, rows.size());
   return rows;
 }
 
@@ -131,6 +136,7 @@ void TreeModel::load(std::string_view value) {
     from = end + 1;
   }
   dirty_ = false;
+  ++revision_;
 }
 
 bool TreeModel::dirty() const {

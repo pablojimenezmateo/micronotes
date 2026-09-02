@@ -110,19 +110,21 @@ void AppState::setSearch(std::string query, library::SearchScope scope) {
   selection_.searchScope = scope;
 }
 
-std::vector<library::FolderNode> AppState::folders() const {
-  if(!organization_) return {};
-  return organization_->folders();
+// The empties are statics rather than temporaries: these return references, and
+// a library that is not open still has to answer.
+const std::vector<library::FolderNode>& AppState::folders() const {
+  static const std::vector<library::FolderNode> kNone;
+  return organization_ ? organization_->folders() : kNone;
 }
 
-std::vector<std::string> AppState::tags() const {
-  if(!organization_) return {};
-  return organization_->tags();
+const std::vector<std::string>& AppState::tags() const {
+  static const std::vector<std::string> kNone;
+  return organization_ ? organization_->tags() : kNone;
 }
 
-std::vector<library::NoteListItem> AppState::allNotes() const {
-  if(!organization_) return {};
-  return organization_->notes();
+const std::vector<library::NoteListItem>& AppState::allNotes() const {
+  static const std::vector<library::NoteListItem> kNone;
+  return organization_ ? organization_->notes() : kNone;
 }
 
 std::vector<library::NoteListItem> AppState::currentNotes() const {

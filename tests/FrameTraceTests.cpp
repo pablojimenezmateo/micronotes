@@ -7,12 +7,48 @@ using micronotes::app::FrameTrace;
 
 namespace {
 
+std::uint64_t nanos(double ms) {
+  return static_cast<std::uint64_t>(ms * 1'000'000.0);
+}
+
+// A frame that was all work and never reached a present, which is what a
+// sample with no work time marked means.
 FrameSample frameOf(double ms) {
   FrameSample sample;
-  sample.elapsedNanos = static_cast<std::uint64_t>(ms * 1'000'000.0);
+  sample.elapsedNanos = nanos(ms);
   return sample;
 }
 
+// A frame that spent `workMs` building and then waited `presentMs` on the
+// display.
+FrameSample frameOf(double workMs, double presentMs) {
+  FrameSample sample;
+  sample.workNanos = nanos(workMs);
+  sample.elapsedNanos = nanos(workMs + presentMs);
+  return sample;
+}
+
+}
+
+// The trace ranks work, not wall time. With vsync on, the present blocks until
+// the display is ready, so a frame that did 0.4 ms of work and one that did 7 ms
+// of it both take a whole refresh interval -- and a trace that reported that
+// would say every frame on a 120 Hz screen costs 8.3 ms, whatever the app did.
+MICRONOTES_TEST(frame_trace_ranks_the_work_and_not_the_wait_for_the_display) {
+  FrameTrace trace;
+  trace.configure(true, false);
+  for(int i = 0; i < 4; ++i) trace.record(frameOf(0.5, 7.8));
+  MICRONOTES_REQUIRE(trace.percentileMs(50.0) == 0.5);
+  MICRONOTES_REQUIRE(trace.overBudget() == 0);
+}
+
+// And a frame whose *work* overran is over budget even though the present it
+// then skipped waiting for makes the wall time no worse.
+MICRONOTES_TEST(frame_trace_counts_a_frame_whose_work_overran) {
+  FrameTrace trace;
+  trace.configure(true, false);
+  trace.record(frameOf(20.0, 0.1));
+  MICRONOTES_REQUIRE(trace.overBudget() == 1);
 }
 
 // A frame trace that is off has to stay off: it sits in the paint path, and a

@@ -5,6 +5,7 @@
 #include "core/render/TextTextureCache.h"
 
 #include "ui/Fonts.h"
+#include "ui/TextMeasureCache.h"
 #include "ui/Rect.h"
 #include "ui/Tooltip.h"
 #include "ui/Theme.h"
@@ -118,12 +119,21 @@ public:
     return height > 0 ? toLogical(height) + 2 : 16;
   }
 
+  // Measured in physical pixels and cached there, so the logical conversion --
+  // which depends only on the scale already in the key -- stays outside the
+  // cache and the same entry serves every caller.
   int width(std::string_view value, const ui::TextStyle& style) const {
     if(value.empty()) return 0;
     perf::addCounter(perf::CounterId::RenderTextMeasureCalls);
+    const std::uint64_t key = ui::TextMeasureCache::makeKey(value, style, fonts_.displayScale());
     int w = 0;
-    if(fonts_.measure(value, style, &w, nullptr)) return toLogical(w);
-    return static_cast<int>(value.size() * 8);
+    if(measures_.find(key, &w)) {
+      perf::addCounter(perf::CounterId::RenderTextMeasureCacheHits);
+      return toLogical(w);
+    }
+    if(!fonts_.measure(value, style, &w, nullptr)) return static_cast<int>(value.size() * 8);
+    measures_.insert(key, w);
+    return toLogical(w);
   }
 
   void draw(std::string_view value, float x, float y, SDL_Color color, const ui::TextStyle& style) {
@@ -192,6 +202,8 @@ public:
   void clear() {
     cache_.clear();
     iconCache_.clear();
+    // Every stored width was measured with the faces being replaced.
+    measures_.clear();
   }
 
 private:
@@ -235,6 +247,12 @@ private:
   // that happen to share a string cannot collide.
   render::TextTextureCache cache_ {4096};
   render::TextTextureCache iconCache_ {256};
+  // Widths are asked for far more often than textures -- once per word of a
+  // layout pass against once per drawn run -- and an entry is 24 bytes rather
+  // than a texture, so this is sized an order of magnitude larger. Mutable
+  // because measuring is a query: a caller asking how wide a string is has not
+  // changed anything a caller can observe.
+  mutable ui::TextMeasureCache measures_ {1 << 16};
 };
 
 class ImageCache {

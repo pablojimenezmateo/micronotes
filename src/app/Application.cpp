@@ -19,6 +19,7 @@
 #include "app/WikiLinks.h"
 #include "app/WindowChrome.h"
 #include "app/Shell.h"
+#include "app/SidebarModel.h"
 #include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
@@ -840,22 +841,6 @@ static Rect sidebarListRect(Rect sidebar) {
   return {sidebar.x, top, sidebar.w, std::max(0.0f, sidebar.y + sidebar.h - top)};
 }
 
-// The results the sidebar is listing, recomputed only when the question or the
-// library has changed. buildSidebarRows() runs on every frame, and each query
-// is a hit on SQLite.
-static const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
-  const auto& selection = ui.state.selection();
-  if(!ui.searchCacheValid || ui.searchCacheQuery != selection.search ||
-     ui.searchCacheScope != selection.searchScope || ui.searchCacheRevision != ui.state.revision()) {
-    ui.searchCacheQuery = selection.search;
-    ui.searchCacheScope = selection.searchScope;
-    ui.searchCacheRevision = ui.state.revision();
-    ui.searchCache = ui.state.currentSearchResults();
-    ui.searchCacheValid = true;
-  }
-  return ui.searchCache;
-}
-
 // Core measures text through a callback so it stays free of any font
 // dependency; this binds it to the renderer actually drawing the field.
 static editor::TextWidthFn fieldMeasure(const TextRenderer& text) {
@@ -1164,175 +1149,6 @@ static int viewerMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
   return std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
 }
 
-// The tree is drawn as a flat list: one row height, one indent per level, and
-// the nesting carried entirely by that indent.
-constexpr float kSidebarRowHeight = 26.0f;
-constexpr float kSidebarTagHeight = 24.0f;
-constexpr float kSidebarLabelHeight = 34.0f;
-constexpr float kSidebarIndent = 13.0f;
-constexpr float kSidebarResultTitleHeight = 24.0f;
-constexpr float kSidebarSnippetHeight = 16.0f;
-
-static float searchResultRowHeight(std::size_t matchLines) {
-  return kSidebarResultTitleHeight + static_cast<float>(matchLines) * kSidebarSnippetHeight + 4.0f;
-}
-
-// Rebuilt every frame from the library rather than cached: it is a few hundred
-// rows, and a tree that disagrees with the files is a worse problem than one
-// that is rebuilt. Hit-testing then reads the same geometry the draw produced,
-// which is how the gutter affordances already work.
-static void buildSidebarRows(UiRuntime& ui, Rect rect) {
-  ui.sidebarRows.clear();
-  const float top = rect.y + 12.0f;
-  float y = top - static_cast<float>(ui.sidebarScroll);
-
-  const auto pushLabel = [&](std::string label) {
-    SidebarRow row;
-    row.kind = SidebarRow::Kind::SectionLabel;
-    row.label = std::move(label);
-    row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, kSidebarLabelHeight};
-    ui.sidebarRows.push_back(std::move(row));
-    y += kSidebarLabelHeight;
-  };
-  const auto pushTreeRow = [&](ui::TreeRow tree) {
-    SidebarRow row;
-    row.kind = SidebarRow::Kind::Tree;
-    row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, kSidebarRowHeight};
-    if(tree.expandable) {
-      row.disclosure = {rect.x + 10.0f + static_cast<float>(tree.depth) * kSidebarIndent, y + 5.0f, 16.0f, 16.0f};
-    }
-    row.tree = std::move(tree);
-    ui.sidebarRows.push_back(std::move(row));
-    y += kSidebarRowHeight;
-  };
-
-  const auto& notes = ui.state.allNotes();
-  const auto root = ui.state.libraryRoot();
-  // A shortcut list is a flat list of notes, drawn with the same row the tree
-  // uses so a note looks and behaves the same wherever it is listed.
-  const auto pushNoteShortcuts = [&](const std::vector<std::string>& ids, std::size_t limit) {
-    std::size_t drawn = 0;
-    for(const auto& id : ids) {
-      if(drawn >= limit) break;
-      const auto found = std::find_if(notes.begin(), notes.end(), [&](const auto& note) { return note.id == id; });
-      if(found == notes.end()) continue;
-      ui::TreeRow tree;
-      tree.kind = ui::TreeRowKind::Note;
-      tree.depth = 0;
-      tree.folder = found->path.lexically_relative(root).parent_path();
-      tree.noteId = found->id;
-      tree.label = found->title;
-      tree.icon = found->icon;
-      pushTreeRow(std::move(tree));
-      ++drawn;
-    }
-    return drawn;
-  };
-
-  const auto pushFlatNote = [&](const library::NoteListItem& note) {
-    ui::TreeRow tree;
-    tree.kind = ui::TreeRowKind::Note;
-    tree.depth = 0;
-    tree.folder = note.path.lexically_relative(root).parent_path();
-    tree.noteId = note.id;
-    tree.label = note.title;
-    tree.icon = note.icon;
-    pushTreeRow(std::move(tree));
-  };
-  // Whatever the list ended up holding, it scrolls the same way.
-  const auto finish = [&]() {
-    const float contentHeight = y + static_cast<float>(ui.sidebarScroll) - top;
-    ui.sidebarMaxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight - (rect.h - 24.0f))));
-    ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
-  };
-
-  // A running query replaces the tree rather than appearing beside it. The
-  // sidebar answers one question at a time, and Esc puts the tree back.
-  if(!ui.search.empty()) {
-    const auto& results = searchResults(ui);
-    pushLabel(std::to_string(results.size()) + (results.size() == 1 ? " RESULT" : " RESULTS"));
-    for(const auto& result : results) {
-      SidebarRow row;
-      row.kind = SidebarRow::Kind::SearchResult;
-      row.noteId = result.id;
-      row.title = result.title;
-      if(result.snippets.empty()) {
-        if(!result.matchLine.empty()) row.matchLines.push_back(result.matchLine);
-      } else {
-        for(const auto& snippet : result.snippets) {
-          if(row.matchLines.size() >= 3) break;
-          if(!snippet.matchLine.empty()) row.matchLines.push_back(snippet.matchLine);
-        }
-      }
-      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, searchResultRowHeight(row.matchLines.size())};
-      y += row.rect.h;
-      ui.sidebarRows.push_back(std::move(row));
-    }
-    finish();
-    return;
-  }
-
-  // A tag is a filter over the library, so choosing one lists what carries it
-  // instead of the tree it cuts across.
-  if(!ui.state.selection().tag.empty()) {
-    pushLabel("#" + ui.state.selection().tag);
-    for(const auto& note : notes) {
-      if(std::find(note.tags.begin(), note.tags.end(), ui.state.selection().tag) == note.tags.end()) continue;
-      pushFlatNote(note);
-    }
-    finish();
-    return;
-  }
-
-  if(!ui.state.workspace().favorites.empty()) {
-    const std::size_t before = ui.sidebarRows.size();
-    pushLabel("FAVORITES");
-    if(pushNoteShortcuts(ui.state.workspace().favorites, 8) == 0) {
-      // Every favourite has been deleted since; the heading would be a lie.
-      ui.sidebarRows.resize(before);
-      y -= kSidebarLabelHeight;
-    }
-  }
-
-  for(auto& row : ui.tree.rows(ui.state.folders(), notes, root)) pushTreeRow(std::move(row));
-
-  const auto tags = ui.state.tags();
-  if(!tags.empty()) {
-    // Tags are a filter over the tree, not a second way to organise it, so they
-    // sit below it and read quieter.
-    pushLabel("TAGS");
-    for(const auto& tag : tags) {
-      SidebarRow row;
-      row.kind = SidebarRow::Kind::Tag;
-      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, kSidebarTagHeight};
-      row.tag = tag;
-      ui.sidebarRows.push_back(std::move(row));
-      y += kSidebarTagHeight;
-    }
-  }
-
-  if(!ui.state.workspace().recents.empty()) {
-    const std::size_t before = ui.sidebarRows.size();
-    pushLabel("RECENT");
-    if(pushNoteShortcuts(ui.state.workspace().recents, 5) == 0) {
-      ui.sidebarRows.resize(before);
-      y -= kSidebarLabelHeight;
-    }
-  }
-
-  finish();
-}
-
-// The row under the pointer, or nothing when the pointer is off the list.
-static std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, Rect sidebar, float x, float y) {
-  if(!contains(sidebar, x, y)) return std::nullopt;
-  for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
-    if(ui.sidebarRows[i].kind == SidebarRow::Kind::SectionLabel) continue;
-    if(contains(ui.sidebarRows[i].rect, x, y)) return i;
-  }
-  return std::nullopt;
-}
-
 // One place where a sidebar row turns into a selection, so a click, an arrow
 // key and a drop can never disagree about what selecting a row means.
 static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expandFolder) {
@@ -1454,12 +1270,7 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
   const Rect list = sidebarListRect(rect);
   ui.sidebarRect = list;
   buildSidebarRows(ui, list);
-  // A section label with nothing under it is a heading over a hole; the empty
-  // message says what happened instead.
-  const bool onlyLabels = std::none_of(ui.sidebarRows.begin(), ui.sidebarRows.end(),
-                                       [](const auto& row) { return row.kind != SidebarRow::Kind::SectionLabel; });
-  if(onlyLabels) {
-    ui.sidebarRows.clear();
+  if(ui.sidebarRows.empty()) {
     drawSidebarEmpty(text, ui, list);
     return;
   }
@@ -1471,6 +1282,7 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
   for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
     const auto& row = ui.sidebarRows[i];
     if(row.rect.y + row.rect.h < list.y || row.rect.y > list.y + list.h) continue;
+    perf::addCounter(perf::CounterId::SidebarRowsDrawn);
     const bool hot = ui.hovered(row.rect);
     const float indent = list.x + 10.0f + static_cast<float>(row.tree.depth) * kSidebarIndent;
 
@@ -1947,8 +1759,10 @@ static void drawComplexBlock(SDL_Renderer* renderer, TextRenderer& text, UiRunti
       const auto runs = inlineRuns(item, theme().text);
       const auto style = blockTextStyle(item);
       const int step = blockLineStep(text, item);
-      drawInlineRuns(renderer, text, &ui.linkRegions, runs, rect.x, y, static_cast<int>(rect.w), step, style.size);
-      y += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(rect.w), style.size) * step) + 6.0f;
+      // Where the draw left off, rather than a second full inline layout of it.
+      y = drawInlineRuns(renderer, text, &ui.linkRegions, runs, rect.x, y,
+                         static_cast<int>(rect.w), step, style.size) +
+          static_cast<float>(step) + 6.0f;
     }
   }
 }
@@ -1980,6 +1794,12 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
     ui.folds.unfold(noteId, doc::foldKey(ui.editor.text(), block));
   };
   ui.livePage.setFolds(std::move(folds));
+  // What the layout's reuse check needs so it does not re-derive both from the
+  // document. +1 because zero means "cannot say"; the fold stamp mixes in the
+  // note, since switching notes changes what `collapsed` answers on its own.
+  const std::uint64_t foldStamp =
+      ui.folds.revision() * 1000003ull + std::hash<std::string> {}(noteId) + 1ull;
+  ui.livePage.setRevisions(ui.editor.revision() + 1ull, foldStamp);
   ui.livePage.setPointer(ui.mouseX, ui.mouseY);
   ui.livePage.setBlockSelection({ui.blockSelectActive, ui.blockSelectAnchor, ui.blockSelectFocus});
   ui.livePage.setDropOffset(ui.draggingBlock ? ui.blockDropOffset : std::nullopt);
@@ -2029,8 +1849,12 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
   }
 }
 
+// One frame of the whole window. Every surface it calls is timed separately:
+// before that, `page.draw` was the only instrumented part of a frame, so a
+// frame whose cost was the sidebar or the chrome showed up as time that went
+// nowhere.
 static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, int width, int height) {
-  const ScopedFrame frame;
+  ScopedFrame frame;
   SDL_SetRenderDrawColor(renderer, theme().appBg.r, theme().appBg.g, theme().appBg.b, theme().appBg.a);
   SDL_RenderClear(renderer);
 
@@ -2046,20 +1870,33 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   ui.tooltip = {};
 
   // First, whatever is or is not open behind it: it carries the window controls.
-  drawTitleBar(renderer, text, ui, layout.titleBar);
+  {
+    const perf::ScopeTimer timer("shell.title_bar");
+    drawTitleBar(renderer, text, ui, layout.titleBar);
+  }
 
   // The rail, then whatever is beside it. Drawn before the panels because it is
   // the one column that is always there: everything else lays out against it.
-  drawRibbon(renderer, text, ui, layout.ribbon);
+  {
+    const perf::ScopeTimer timer("shell.ribbon");
+    drawRibbon(renderer, text, ui, layout.ribbon);
+  }
 
   // A hidden panel is zero wide, and its rule would land on the edge of
   // whatever took its place.
   if(!ui::empty(layout.sidebar)) {
+    const perf::ScopeTimer timer("shell.sidebar");
     drawSidebar(renderer, text, ui, layout.sidebar);
     fill(renderer, {layout.sidebar.x + layout.sidebar.w, layout.sidebar.y, 1, layout.sidebar.h}, theme().hairline);
   }
-  if(!ui::empty(layout.rightPanel)) drawRightPanel(renderer, text, ui, layout.rightPanel);
-  if(!ui::empty(layout.tabs)) drawTabStrip(renderer, text, ui, layout.tabs);
+  if(!ui::empty(layout.rightPanel)) {
+    const perf::ScopeTimer timer("shell.right_panel");
+    drawRightPanel(renderer, text, ui, layout.rightPanel);
+  }
+  if(!ui::empty(layout.tabs)) {
+    const perf::ScopeTimer timer("shell.tab_strip");
+    drawTabStrip(renderer, text, ui, layout.tabs);
+  }
   if(!ui.state.hasLibrary()) {
     fill(renderer, layout.content, theme().editorBg);
     // The one screen someone can arrive at knowing nothing, so it says what
@@ -2075,6 +1912,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
                      ui::keysFor(ui::ActionId::GoToNote) + "  go to note          " + ui::keysFor(ui::ActionId::NewNote) +
                      "  new note          " + ui::keysFor(ui::ActionId::Shortcuts) + "  every shortcut");
   } else {
+    const perf::ScopeTimer timer("shell.content");
     const Rect content = layout.content;
     if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       drawLive(renderer, text, ui, content);
@@ -2089,16 +1927,29 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
       drawViewer(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
     }
   }
-  fill(renderer, layout.status, theme().statusBg);
-  fill(renderer, {layout.status.x, layout.status.y, layout.status.w, 1}, theme().hairline);
-  drawStatus(renderer, text, ui, layout.status);
+  {
+    const perf::ScopeTimer timer("shell.status");
+    fill(renderer, layout.status, theme().statusBg);
+    fill(renderer, {layout.status.x, layout.status.y, layout.status.w, 1}, theme().hairline);
+    drawStatus(renderer, text, ui, layout.status);
+  }
   // An open overlay is a conversation; a tooltip about what is behind it would
   // be answering a question nobody is asking any more.
   if(ui.overlays.active()) ui.tooltip = {};
-  ui.overlays.draw(renderer, text, width, height);
-  // Last, so nothing paints over it.
-  drawTooltip(renderer, text, ui.tooltip, {0, 0, static_cast<float>(width), static_cast<float>(height)});
-  SDL_RenderPresent(renderer);
+  {
+    const perf::ScopeTimer timer("shell.overlays");
+    ui.overlays.draw(renderer, text, width, height);
+    // Last, so nothing paints over it.
+    drawTooltip(renderer, text, ui.tooltip, {0, 0, static_cast<float>(width), static_cast<float>(height)});
+  }
+  // The frame's work ends here. With vsync on, the present below blocks until
+  // the display is ready, so charging that wait to the frame reports the refresh
+  // interval as if it were the app's cost.
+  frame.markWorkDone();
+  {
+    const perf::ScopeTimer timer("shell.present");
+    SDL_RenderPresent(renderer);
+  }
 }
 
 static int captureFrame(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, const ApplicationOptions& options) {

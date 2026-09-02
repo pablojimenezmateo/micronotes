@@ -315,6 +315,30 @@ struct UiRuntime {
   // of the library: a disclosure triangle must not touch a file.
   ui::TreeModel tree;
   std::vector<SidebarRow> sidebarRows;
+  // What `sidebarRows` was built from. The list is a pure function of these,
+  // and it used to be rebuilt on every frame -- a relativised path, a map key
+  // and a row object per note in the library, to draw the three dozen rows the
+  // panel is tall enough to show. Only the scroll and the panel origin move on
+  // a typical frame, and both are an offset applied to a list already built.
+  struct SidebarRowsKey {
+    bool valid = false;
+    std::uint64_t stateRevision = 0;
+    std::uint64_t treeRevision = 0;
+    std::string search;
+    library::SearchScope searchScope = library::SearchScope::All;
+    std::string tag;
+    std::vector<std::string> favorites;
+    std::vector<std::string> recents;
+    float width = 0.0f;
+    float height = 0.0f;
+    // Where the rows were placed, so a pure scroll shifts them instead of
+    // rebuilding them.
+    float originX = 0.0f;
+    float originY = 0.0f;
+    int scroll = 0;
+    float contentHeight = 0.0f;
+  };
+  SidebarRowsKey sidebarRowsKey;
   // The results the sidebar is currently listing. Held rather than re-queried
   // because the row list is rebuilt on every frame -- including the ones a
   // hover causes -- and each query is a hit on SQLite. Keyed on the library

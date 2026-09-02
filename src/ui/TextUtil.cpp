@@ -75,4 +75,39 @@ std::string joinTags(const std::vector<std::string>& tags) {
   return out;
 }
 
+
+std::string ellipsizeToFit(std::string value, int maxWidth,
+                           const std::function<int(std::string_view)>& measure) {
+  if(maxWidth <= 0) return "";
+  if(measure(value) <= maxWidth) return value;
+
+  // Every code point boundary in the string, including both ends.
+  std::vector<std::size_t> stops;
+  stops.reserve(value.size() + 1);
+  for(std::size_t i = 0; i <= value.size();) {
+    stops.push_back(i);
+    if(i == value.size()) break;
+    ++i;
+    while(i < value.size() && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) ++i;
+  }
+
+  static constexpr std::string_view kEllipsis = "...";
+  std::string candidate;
+  const auto fitsAt = [&](std::size_t stop) {
+    candidate.assign(value, 0, stops[stop]);
+    candidate.append(kEllipsis);
+    return measure(candidate) <= maxWidth;
+  };
+  std::size_t fits = 0;
+  std::size_t over = stops.size() - 1;  // the whole string, already known not to
+  while(fits + 1 < over) {
+    const std::size_t mid = fits + (over - fits) / 2;
+    if(fitsAt(mid)) fits = mid;
+    else over = mid;
+  }
+  // `fits == 0` means not even one character and the ellipsis fit, and the
+  // answer is the ellipsis alone -- which is what an empty prefix produces.
+  return value.substr(0, stops[fits]) + std::string(kEllipsis);
+}
+
 }

@@ -27,7 +27,7 @@ const std::vector<NoteListItem>& OrganizationService::notes() const {
   return *notes_;
 }
 
-std::vector<FolderNode> OrganizationService::folders() const {
+const std::vector<FolderNode>& OrganizationService::folders() const {
   if(folders_) return *folders_;
   std::vector<FolderNode> folders;
   if(std::filesystem::exists(library_.root())) {
@@ -50,7 +50,7 @@ std::vector<FolderNode> OrganizationService::folders() const {
   return *folders_;
 }
 
-std::vector<std::string> OrganizationService::tags() const {
+const std::vector<std::string>& OrganizationService::tags() const {
   if(tags_) return *tags_;
   std::set<std::string> unique;
   for(const auto& note : notes()) {
@@ -60,21 +60,21 @@ std::vector<std::string> OrganizationService::tags() const {
   return *tags_;
 }
 
+// Both filters copy only what they return. Taking the note by value to test it
+// deep-copied a path and three strings for every note in the library, including
+// every note the filter was about to reject.
 std::vector<NoteListItem> OrganizationService::notesInFolder(const std::filesystem::path& relativeFolder) const {
   std::vector<NoteListItem> out;
-  for(auto note : notes()) {
-    const auto relative = note.path.lexically_relative(library_.root());
-    if(relative.parent_path() == relativeFolder) out.push_back(std::move(note));
+  for(const auto& note : notes()) {
+    if(note.path.lexically_relative(library_.root()).parent_path() == relativeFolder) out.push_back(note);
   }
   return out;
 }
 
 std::vector<NoteListItem> OrganizationService::notesWithTag(const std::string& tag) const {
   std::vector<NoteListItem> out;
-  for(auto note : notes()) {
-    if(std::find(note.tags.begin(), note.tags.end(), tag) != note.tags.end()) {
-      out.push_back(std::move(note));
-    }
+  for(const auto& note : notes()) {
+    if(std::find(note.tags.begin(), note.tags.end(), tag) != note.tags.end()) out.push_back(note);
   }
   return out;
 }

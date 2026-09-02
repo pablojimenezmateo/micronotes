@@ -1,6 +1,7 @@
 #include "ui/Draw.h"
 
 #include "ui/Metrics.h"
+#include "ui/TextUtil.h"
 
 #include <algorithm>
 #include <cmath>
@@ -201,10 +202,11 @@ void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip&
 }
 
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, const TextStyle& style) {
-  if(maxWidth <= 0) return "";
-  if(text.width(value, style) <= maxWidth) return value;
-  while(!value.empty() && text.width(value + "...", style) > maxWidth) value.pop_back();
-  return value.empty() ? "..." : value + "...";
+  perf::addCounter(perf::CounterId::ShellEllipsizeCalls);
+  return ellipsizeToFit(std::move(value), maxWidth, [&](std::string_view candidate) {
+    perf::addCounter(perf::CounterId::ShellEllipsizeMeasures);
+    return text.width(candidate, style);
+  });
 }
 
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, bool heading, bool mono) {

@@ -22,6 +22,7 @@ bool FoldState::toggle(std::string_view noteId, std::string_view key) {
   auto& keys = notes_[std::string(noteId)];
   const auto found = keys.find(key);
   dirty_ = true;
+  ++revision_;
   if(found != keys.end()) {
     keys.erase(found);
     if(keys.empty()) notes_.erase(std::string(noteId));
@@ -38,6 +39,7 @@ void FoldState::unfold(std::string_view noteId, std::string_view key) {
   if(found == note->second.end()) return;
   note->second.erase(found);
   dirty_ = true;
+  ++revision_;
   if(note->second.empty()) notes_.erase(note);
 }
 
@@ -46,6 +48,7 @@ void FoldState::clearNote(std::string_view noteId) {
   if(note == notes_.end()) return;
   notes_.erase(note);
   dirty_ = true;
+  ++revision_;
 }
 
 bool FoldState::empty() const {
@@ -59,6 +62,7 @@ bool FoldState::dirty() const {
 bool FoldState::load(const std::filesystem::path& path) {
   notes_.clear();
   dirty_ = false;
+  ++revision_;
   std::ifstream in(path);
   if(!in) return false;
   std::string line;

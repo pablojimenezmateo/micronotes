@@ -217,12 +217,14 @@ add_executable(micronotes
   src/app/RightPanel.cpp
   src/app/SessionState.cpp
   src/app/SettingsDialog.cpp
+  src/app/SidebarModel.cpp
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
   src/app/WindowChrome.cpp
   src/ui/Draw.cpp
   src/ui/Fonts.cpp
   src/ui/Overlay.cpp
+  src/ui/TextMeasureCache.cpp
 )
 target_include_directories(micronotes PRIVATE src)
 # Lets a build-tree run find the vendored faces without an install step.
@@ -266,6 +268,7 @@ add_executable(micronotes_tests
   tests/ShellLayoutTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp
+  tests/TextUtilTests.cpp
   tests/TextFieldTests.cpp
   tests/WikiLinkTests.cpp
   tests/WorkspaceModelTests.cpp

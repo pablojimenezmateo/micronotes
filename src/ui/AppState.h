@@ -48,10 +48,14 @@ public:
   // Moves to the next or previous tab, wrapping.
   void stepTab(int delta);
   void setSearch(std::string query, library::SearchScope scope = library::SearchScope::All);
-  std::vector<library::FolderNode> folders() const;
-  std::vector<std::string> tags() const;
+  // References into the organization service's memos. The sidebar reads all
+  // three every frame; handing back copies meant rebuilding the note list, the
+  // folder list and the tag list once per frame for a library that had not
+  // changed since the last one.
+  const std::vector<library::FolderNode>& folders() const;
+  const std::vector<std::string>& tags() const;
   std::vector<library::NoteListItem> currentNotes() const;
-  std::vector<library::NoteListItem> allNotes() const;
+  const std::vector<library::NoteListItem>& allNotes() const;
   std::vector<library::SearchResult> currentSearchResults() const;
   // Notes whose text links to the open one. Empty when nothing is open.
   std::vector<library::Backlink> backlinksToSelected() const;

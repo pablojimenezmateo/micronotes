@@ -102,6 +102,13 @@ public:
 
   // Lays the note out for this frame. `rect` is the whole content pane.
   void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
+
+  // Stamps for the layout's reuse check: a counter that moves whenever `source`
+  // changes, and one that moves whenever `folds_.collapsed` would answer
+  // differently. Without them an idle frame proves both by walking the whole
+  // note. Zero -- the default -- means "cannot say", and the layout falls back
+  // to comparing bytes and re-asking the fold predicate per block.
+  void setRevisions(std::uint64_t source, std::uint64_t folds);
   void draw(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t caret, const PageSelection& selection,
             bool focused, std::string_view findQuery);
 
@@ -197,6 +204,8 @@ private:
   std::vector<PageFoldHit> foldHits_;
   std::vector<PageCodeButton> codeButtons_;
   PageFolds folds_;
+  std::uint64_t sourceRevision_ = 0;
+  std::uint64_t foldRevision_ = 0;
   PageBlockSelection blockSelection_;
   std::optional<std::size_t> dropOffset_;
   float pointerX_ = -1.0f;

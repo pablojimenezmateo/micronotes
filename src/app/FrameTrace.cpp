@@ -52,20 +52,27 @@ void FrameTrace::configure(bool enabled, bool verbose) {
 void FrameTrace::record(const FrameSample& sample) {
   if(!enabled_) return;
 
+  // A sample that never marked its work done is all work: that is a frame that
+  // did not reach a present, and it is also what a caller constructing a sample
+  // by hand means.
+  const std::uint64_t work = sample.workNanos ? sample.workNanos : sample.elapsedNanos;
+  const std::uint64_t present = sample.elapsedNanos > work ? sample.elapsedNanos - work : 0;
+
   if(verbose_) {
-    std::fprintf(stderr, "[frame] %7.2f ms | blocks %zu/%zu | relaid %zu | runs %zu\n",
-                 toMs(sample.elapsedNanos), sample.blocksDrawn, sample.blocksVisited,
-                 sample.blocksRelaid, sample.runsDrawn);
+    std::fprintf(stderr, "[frame] work %7.2f ms | present %6.2f | blocks %zu/%zu | relaid %zu | runs %zu\n",
+                 toMs(work), toMs(present),
+                 sample.blocksDrawn, sample.blocksVisited, sample.blocksRelaid, sample.runsDrawn);
   }
 
-  samples_.push_back(sample.elapsedNanos);
-  totalNanos_ += sample.elapsedNanos;
-  maxNanos_ = std::max(maxNanos_, sample.elapsedNanos);
+  samples_.push_back(work);
+  totalNanos_ += work;
+  totalPresentNanos_ += present;
+  maxNanos_ = std::max(maxNanos_, work);
   blocksVisited_ += sample.blocksVisited;
   blocksDrawn_ += sample.blocksDrawn;
   blocksRelaid_ += sample.blocksRelaid;
   runsDrawn_ += sample.runsDrawn;
-  if(toMs(sample.elapsedNanos) > kBudgetMs) ++overBudget_;
+  if(toMs(work) > kBudgetMs) ++overBudget_;
 
   if(samples_.size() < kWindow) return;
   flush();
@@ -89,10 +96,11 @@ void FrameTrace::write(std::FILE* out) const {
   if(!out || samples_.empty()) return;
   const auto frames = static_cast<double>(samples_.size());
   std::fprintf(out,
-               "[frame] %zu frames | avg %6.2f ms | p50 %6.2f | p95 %6.2f | max %6.2f | "
-               "%zu over %.1f ms | blocks %.0f/%.0f per frame | relaid %.1f | runs %.0f\n",
+               "[frame] %zu frames | work avg %6.2f ms | p50 %6.2f | p95 %6.2f | max %6.2f | "
+               "present avg %6.2f | %zu over %.1f ms | blocks %.0f/%.0f per frame | relaid %.1f | runs %.0f\n",
                samples_.size(), toMs(totalNanos_) / frames, percentileMs(50.0),
-               percentileMs(95.0), toMs(maxNanos_), overBudget_, kBudgetMs,
+               percentileMs(95.0), toMs(maxNanos_), toMs(totalPresentNanos_) / frames,
+               overBudget_, kBudgetMs,
                static_cast<double>(blocksDrawn_) / frames,
                static_cast<double>(blocksVisited_) / frames,
                static_cast<double>(blocksRelaid_) / frames,
@@ -123,6 +131,7 @@ void FrameTrace::reset() {
   runsDrawn_ = 0;
   maxNanos_ = 0;
   totalNanos_ = 0;
+  totalPresentNanos_ = 0;
 }
 
 void dumpFrameTraceAtExit() {
@@ -141,13 +150,24 @@ ScopedFrame::ScopedFrame() : startNanos_(nowNanos()), previous_(tCurrentFrame) {
 
 ScopedFrame::~ScopedFrame() {
   tCurrentFrame = previous_;
-  sample_.elapsedNanos = nowNanos() - startNanos_;
+  const std::uint64_t end = nowNanos();
+  sample_.elapsedNanos = end - startNanos_;
+  // A frame that never reached the present -- an early return, or a capture
+  // path that draws without one -- was all work.
+  sample_.workNanos = (workDoneNanos_ ? workDoneNanos_ : end) - startNanos_;
   perf::addCounter(perf::CounterId::FramePresents);
-  perf::addCounter(perf::CounterId::FrameDrawMicros, sample_.elapsedNanos / 1000);
-  if(toMs(sample_.elapsedNanos) > FrameTrace::kBudgetMs) {
+  perf::addCounter(perf::CounterId::FrameDrawMicros, sample_.workNanos / 1000);
+  perf::addCounter(perf::CounterId::FramePresentMicros,
+                   (sample_.elapsedNanos - sample_.workNanos) / 1000);
+  if(toMs(sample_.workNanos) > FrameTrace::kBudgetMs) {
     perf::addCounter(perf::CounterId::FrameDrawsOverBudget);
   }
   FrameTrace::instance().record(sample_);
+}
+
+void ScopedFrame::markWorkDone() {
+  if(workDoneNanos_) return;
+  workDoneNanos_ = nowNanos();
 }
 
 ScopedFrame* ScopedFrame::current() {

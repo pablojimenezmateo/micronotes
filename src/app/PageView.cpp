@@ -103,6 +103,11 @@ void drawScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScr
 
 }
 
+void PageView::setRevisions(std::uint64_t source, std::uint64_t folds) {
+  sourceRevision_ = source;
+  foldRevision_ = folds;
+}
+
 void PageView::setHooks(PageViewHooks hooks) {
   hooks_ = std::move(hooks);
 }
@@ -196,6 +201,8 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.rawOffset = rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone;
   options.folded = folds_.collapsed;
   options.wikiLinkResolves = hooks_.wikiLinkResolves;
+  options.sourceRevision = sourceRevision_;
+  options.foldRevision = foldRevision_;
   document_.update(source, options);
 
   // The caret must never be stranded inside something collapsed - Ctrl+End, an
@@ -213,6 +220,11 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
       break;
     }
     if(!expanded) break;
+    // The expand just moved the fold state, so the stamp the caller handed in
+    // no longer describes it. Withdrawing it makes the layout resolve the folds
+    // itself for this pass; the caller's next frame carries a moved stamp and
+    // the fast path picks up again from there.
+    options.foldRevision = 0;
     document_.update(source, options);
   }
   scroll_ = std::clamp(scroll_, 0, maxScroll());

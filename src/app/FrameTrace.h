@@ -9,7 +9,13 @@ namespace micronotes::app {
 
 // What one drawn frame cost, and what it drew.
 struct FrameSample {
+  // Wall time from the top of the draw to the return of the present.
   std::uint64_t elapsedNanos = 0;
+  // The part of that the app spent building the frame, i.e. everything before
+  // the present call. This is the number the app controls and the only one a
+  // budget can be written against: with vsync on, `elapsedNanos` is pinned to
+  // the refresh interval whatever the work was.
+  std::uint64_t workNanos = 0;
   // Blocks the page walked, and the subset that survived the visibility test.
   // The gap between them is the per-frame work a scroll pays for content that
   // is nowhere near the viewport.
@@ -33,6 +39,13 @@ struct FrameSample {
 // Percentiles rather than an average, because an average frame time hides
 // exactly the frames the user notices. A scroll at a mean of 6 ms with a p95 of
 // 45 ms reads as janky, and the mean says it is fine.
+//
+// Work time, not wall time. `SDL_RenderPresent` blocks until the next vsync, so
+// a frame that did 0.2 ms of work and one that did 7 ms of it both report the
+// refresh interval -- which is how this instrument reported a steady p50 of
+// 8.46 ms on a 120 Hz display and looked like it had found something. The
+// percentiles below rank the work; the present wait is reported beside them as
+// its own mean, because it is the display's number rather than the app's.
 //
 //   MICRONOTES_TRACE_FRAMES=1   print a rolling summary every kWindow frames.
 //   MICRONOTES_TRACE_FRAMES=2   also print one line per frame (a firehose; the
@@ -86,6 +99,7 @@ private:
   bool enabled_ = false;
   bool verbose_ = false;
   bool dumped_ = false;
+  // Work nanos per frame; the present wait is aggregated rather than ranked.
   std::vector<std::uint64_t> samples_;
   std::size_t overBudget_ = 0;
   std::size_t blocksVisited_ = 0;
@@ -94,6 +108,7 @@ private:
   std::size_t runsDrawn_ = 0;
   std::uint64_t maxNanos_ = 0;
   std::uint64_t totalNanos_ = 0;
+  std::uint64_t totalPresentNanos_ = 0;
   std::uint64_t windows_ = 0;
 };
 
@@ -123,9 +138,14 @@ public:
   void addBlocks(std::size_t visited, std::size_t drawn, std::size_t relaid);
   void addRuns(std::size_t runs);
 
+  // Called immediately before the present. Everything up to here is the app's
+  // work; everything after it is the display's.
+  void markWorkDone();
+
 private:
   FrameSample sample_;
   std::uint64_t startNanos_ = 0;
+  std::uint64_t workDoneNanos_ = 0;
   ScopedFrame* previous_ = nullptr;
 };
 

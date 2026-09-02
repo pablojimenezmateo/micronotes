@@ -20,7 +20,13 @@
   X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \
   X(LibrarySearchCalls, "library.search_calls")                                        \
   /* --- text rendering --------------------------------------------------- */        \
+  /* Measurements asked for, and the ones that had to be shaped. Shaping a run  */     \
+  /* costs about a microsecond, and laying out a whole note asks for one per    */     \
+  /* word: measure_calls is the demand, cache_hits is how much of it repeats.   */     \
+  /* A hit rate that collapses is the signal that the cache is too small or that */    \
+  /* something is measuring strings nobody measures twice.                      */     \
   X(RenderTextMeasureCalls, "render.text_measure_calls")                               \
+  X(RenderTextMeasureCacheHits, "render.text_measure_cache_hits")                      \
   /* --- status bar --------------------------------------------------------- */     \
   /* Word counts actually walked, against those served from the memo. The walk */    \
   /* used to happen on every frame -- reused reads zero and counts tracks the   */    \
@@ -36,11 +42,33 @@
   /* stutters and one that does not produced identical instrumentation. Divide   */    \
   /* by presents for the mean; over_budget is the count that matters, because a  */    \
   /* mean frame time hides exactly the frames the user notices.                  */    \
+  /*                                                                            */    \
+  /* draw_micros is the WORK: everything before SDL_RenderPresent. present_micros */   \
+  /* is the block inside it, which with vsync on is the refresh interval minus   */    \
+  /* the work and so belongs to the display rather than the app. Summing them    */    \
+  /* was how a steady 0.4 ms frame reported 8.4 ms on a 120 Hz screen and looked */    \
+  /* like a finding.                                                             */    \
   X(FrameDrawMicros, "frame.draw_micros")                                              \
+  X(FramePresentMicros, "frame.present_micros")                                        \
   X(FrameDrawsOverBudget, "frame.draws_over_budget")                                   \
   X(InputWheelEvents, "input.wheel_events")                                            \
   X(InputKeyEvents, "input.key_events")                                                \
   X(InputTextEvents, "input.text_events")                                              \
+  /* --- shell surfaces ------------------------------------------------------ */      \
+  /* The sidebar rebuilds its row list on every frame, and the tree rebuilds     */    \
+  /* every row under every open folder to do it -- a path relativisation, a map  */    \
+  /* key and a TreeRow per note in the library, whatever the viewport shows.     */    \
+  /* rows_built over presents is how many rows a frame pays for; rows_drawn is   */    \
+  /* how many it uses.                                                           */    \
+  X(SidebarRowsBuilt, "sidebar.rows_built")                                            \
+  X(SidebarRowsDrawn, "sidebar.rows_drawn")                                            \
+  X(SidebarRowsReused, "sidebar.rows_reused")                                          \
+  X(TreeRowsBuilt, "tree.rows_built")                                                  \
+  /* Text the shell had to shorten to fit. Each call used to pop one byte at a   */    \
+  /* time and re-measure the whole string, so a long title cost dozens of        */    \
+  /* shaping passes; measures is what says whether that is still true.           */    \
+  X(ShellEllipsizeCalls, "shell.ellipsize_calls")                                      \
+  X(ShellEllipsizeMeasures, "shell.ellipsize_measures")                                \
   /* --- document layout ---------------------------------------------------- */      \
   /* The live surface re-lays the note out once per frame, so everything here is */    \
   /* per-frame cost. update_calls is the rate; the rest say what each call did.  */    \

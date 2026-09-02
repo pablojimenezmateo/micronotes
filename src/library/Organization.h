@@ -32,8 +32,11 @@ public:
   // Every note in the library, sorted by title. The sidebar tree needs all of
   // them at once, not one folder at a time.
   const std::vector<NoteListItem>& notes() const;
-  std::vector<FolderNode> folders() const;
-  std::vector<std::string> tags() const;
+  // References, not copies. All three are memoised, and the sidebar asks for
+  // them on every frame: returning by value deep-copied the whole library --
+  // a path and three strings per note -- to answer a question already answered.
+  const std::vector<FolderNode>& folders() const;
+  const std::vector<std::string>& tags() const;
   std::vector<NoteListItem> notesInFolder(const std::filesystem::path& relativeFolder) const;
   std::vector<NoteListItem> notesWithTag(const std::string& tag) const;
   std::optional<NoteListItem> findNote(std::string_view noteId) const;

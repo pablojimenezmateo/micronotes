@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,24 @@ std::vector<std::string> splitLines(std::string_view text);
 
 // Truncates to `limit` characters, spending three of them on the ellipsis.
 std::string ellipsize(std::string text, std::size_t limit);
+
+// The longest prefix of `value` that fits in `maxWidth` once an ellipsis is
+// appended, or `value` itself when the whole thing fits.
+//
+// Truncation happens at code point boundaries, never mid-character: chopping
+// bytes off a UTF-8 string hands the renderer something that is not text.
+//
+// The prefix is found by bisection, so a label shortened by a word costs a
+// handful of measurements rather than one per character removed -- and
+// `measure` is a shaping pass over the whole candidate, which is the expensive
+// thing here.
+//
+// Split from the renderer so it can be tested without a font: the geometry is
+// deterministic given a measurer, and the measurer is the only part that needs
+// SDL.
+std::string ellipsizeToFit(std::string value, int maxWidth,
+                           const std::function<int(std::string_view)>& measure);
+
 
 // A link target that leaves the machine, as opposed to one inside the library.
 bool isRemoteTarget(std::string_view target);

@@ -2,6 +2,7 @@
 
 #include "library/Organization.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <set>
 #include <string>
@@ -45,11 +46,18 @@ public:
   // hidden behind a parent someone collapsed earlier.
   void reveal(const std::filesystem::path& folder);
 
-  // The rows to draw, top to bottom. Rebuilt from the library rather than
-  // cached: a library is a few hundred entries, and a stale tree is a worse
-  // problem than a rebuilt one.
-  // `root` is the library directory: note paths are absolute, and the tree
-  // speaks in paths relative to it. The root row is labelled with its name.
+  // Bumped by every change to what is open. The sidebar memoises its row list
+  // and this is half of the key: the other half is the library revision, and
+  // between them they say whether the rows the last frame built still stand.
+  std::uint64_t revision() const { return revision_; }
+
+  // The rows to draw, top to bottom. `root` is the library directory: note
+  // paths are absolute, and the tree speaks in paths relative to it. The root
+  // row is labelled with its name.
+  //
+  // This is O(library), not O(viewport): it relativises a path and builds a map
+  // key for every note before it can place the first row. The caller is
+  // expected to hold the result and ask again only when `revision()` moves.
   std::vector<TreeRow> rows(const std::vector<library::FolderNode>& folders,
                             const std::vector<library::NoteListItem>& notes,
                             const std::filesystem::path& root) const;
@@ -67,6 +75,7 @@ private:
   // empty reads as broken rather than tidy.
   bool rootExpanded_ = true;
   bool dirty_ = false;
+  std::uint64_t revision_ = 0;
 };
 
 }
