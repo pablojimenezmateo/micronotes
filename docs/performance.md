@@ -80,8 +80,9 @@ MICRONOTES_TRACE_FRAMES=2 ./build/bin/micronotes   # plus one line per frame
 ```
 
 ```
-[frame] 60 frames | avg 2.78 ms | p50 1.89 | p95 2.30 | max 58.14 | 1 over 16.7 ms
-        | blocks 18/10801 per frame | relaid 100.0 | runs 110
+[frame] 60 frames | work avg 1.68 ms | p50 0.22 | p95 0.34 | max 86.99
+        | present avg 7.48 | 1 over 16.7 ms | blocks 11/11 per frame
+        | relaid 21.9 | runs 503
 ```
 
 It reports **percentiles, not a mean**, because a mean hides exactly the frames
@@ -89,9 +90,17 @@ the user notices: a scroll averaging 6 ms with a p95 of 45 ms reads as janky and
 the mean says it is fine. `blocks drawn/visited` is the other half -- how much of
 each frame is spent deciding *not* to draw something.
 
-`frame.draw_micros` and `frame.draws_over_budget` carry the same facts as plain
-counters, so a session with no tracing armed still reports mean frame cost and
-how many frames missed a vsync.
+It also reports **work, not wall time**. `SDL_RenderPresent` blocks until the
+next vsync, so the wall time of a frame is pinned to the refresh interval
+whatever the app did: a frame that spent 0.2 ms building and one that spent 7 ms
+both measure about 8.3 ms on a 120 Hz display. This instrument was doing exactly
+that, and its steady "p50 8.46 ms" was the monitor rather than the app. The
+percentiles now rank the part before the present; the wait is reported beside
+them as `present avg`, and `ScopedFrame::markWorkDone()` is the split.
+
+`frame.draw_micros` (work), `frame.present_micros` (the wait) and
+`frame.draws_over_budget` carry the same facts as plain counters, so a session
+with no tracing armed still reports them.
 
 ## Reading the numbers
 
@@ -108,6 +117,78 @@ and an unoptimised harness reports timings several times the real ones, which is
 worse than no number because it looks like a measurement. On this repo's fixture
 the same scroll frame reads 4.5 ms in Debug and 0.67 ms in Release. Counters are
 unaffected by build type, so a Debug run is still a valid counter reading.
+
+### What the harness does to a note
+
+One section of the run walks a 200 KB note through what a person actually does
+to one, and prints a line per interaction:
+
+```
+type.middle           24 us median    31 us worst    15 allocs     4.7 KB    2.4 KB max
+caret.block_to_block   1 us median     3 us worst     4 allocs     0.3 KB    0.4 KB max
+open.cold_layout    8477 us median  8938 us worst 32092 allocs 10889.3 KB 1470.2 KB max
+```
+
+The scenarios are chosen so that each one can fail differently, and between them
+they cover the cases where the incremental layout can be *wrong* as well as the
+ones where it can be slow:
+
+| scenario | what it stresses |
+|---|---|
+| `type.near_top` / `type.middle` / `type.at_end` | an edit is asymmetric -- near the top almost nothing above it carries over and everything below shifts, at the end the reverse. A reuse scheme only ever tested in the middle can be silently O(document) at one end. |
+| `backspace.middle` | the other branch of every prefix/suffix comparison |
+| `newline.split_and_join` | the block *partition* changes, so blocks below shift by an index as well as an offset |
+| `caret.block_to_block` | the arrow keys: the source stands completely still and two blocks change which markers they show |
+| `scroll.idle_frame` | the relayout a scroll must **not** do |
+| `scroll.viewport_queries` | the work a scroll genuinely does -- `blockRange`, `offsetAt`, `blockAt` -- which has to stay proportional to the window, not the note |
+| `open.cold_layout` | first paint, the one case here that is meant to be O(document) |
+| `fold.toggle_heading` / `fold.idle_frame_after_toggle` | the toggle, and the idle frame after it that a stamped fold revision should make free |
+| `resize.width_step` | every cached block invalidated at once, at a width never seen before |
+
+Two things about the numbers on those lines.
+
+**The clock is process CPU time, not wall clock.** Nothing in the harness waits
+on IO or on another thread, so every wall-clock microsecond that is not CPU time
+is time the scheduler gave to something else. That is not a small correction on
+a shared machine: the same keystroke measured 292 us at load 1 and 898 us at
+load 11, and neither figure was about the code. Under CPU time the same
+comparison repeats to about a per cent, which is what makes a 5% change
+readable. The clock costs a syscall rather than a vDSO read, a few hundred
+nanoseconds against scenarios that run from 8 to 6,000 microseconds.
+
+**Every scenario runs one untimed pass first.** The layout grows a set of
+buffers once and keeps them, and without a warm-up whichever scenario runs first
+pays for all of them and reports it as the cost of a keystroke. `type.near_top`
+read 189 KB per keystroke against `type.middle`'s 9 KB, and almost all of that
+difference was the warm-up rather than the position in the document. The
+worst-case column was measuring the same thing -- iteration zero was the worst
+iteration nearly everywhere: `scroll.idle_frame`'s worst went 143 us -> 9,
+`caret.block_to_block` 164 -> 91, `type.near_top` 810 -> 423.
+
+**The last column is the biggest single allocation in the scenario.** The count
+and the total together cannot separate "one big buffer" from "a thousand small
+ones", and those are different bugs: the first is a container resizing, the
+second is a loop that should be reusing storage. It was added to answer one
+question and answered it in a line -- see *typing near the top allocated a
+different amount* below -- and it is cheap enough to leave on.
+
+**`peak_rss` at the end of the run is the only number here about a ceiling
+rather than a rate.** Read from `/proc/self/status`, so it covers the fixture as
+well as the layout -- a thousand notes on disk and an SQLite index are in there
+too -- which makes it a number to watch move between runs rather than to
+attribute to any one part. It is what made the block cache's ceiling measurable
+at all: the per-scenario columns say what a keystroke hands straight back, and
+only this says what the process was still holding.
+
+**Allocations sit beside every median, and they are still the number to trust
+first.** An allocation count does not move at all between runs, in any build
+type, on any load. It is also the number that answers two of the three
+priorities directly -- a layout pass that grows a buffer from empty once per
+visual line is burning CPU and memory whatever the clock says. The counting is a
+thread-local `operator new` in `tools/PerfMain.cpp`, so it sees the harness's own
+thread and nothing else. It is what caught a "faster" `pushLine` that allocated
+more, and what proved two versions of the placement walk did byte-for-byte the
+same work when their medians differed by 5%.
 
 For a real session rather than the fixture -- and the workload that is actually
 slow is the one the user just did:
@@ -132,10 +213,19 @@ Builds the comparison commit in a throwaway git worktree, runs both harnesses
 several times, and prints what moved. Counters are compared exactly, because
 every difference in them is real. Timings are compared against a k-sigma band
 built from the per-iteration spread of both sides, and anything inside it is
-dimmed as noise -- the same scenario has varied by more than 3x between runs on
-a busy machine with identical counters throughout.
+dimmed as noise.
 
-**A timing win with no counter movement behind it is usually the machine.**
+**A timing win with no counter movement behind it is usually the machine.** The
+CPU clock narrowed that band a long way but did not close it: `resize.width_step`
+still swings 5% between runs of the same binary, because its median is taken over
+eight iterations and the cache sweep lands in about three of them. When two
+builds disagree there and the counters are identical, the counters are right.
+
+**Interleave the runs.** Building both binaries and alternating them -- rather
+than measuring all of A and then all of B -- costs nothing and removes the drift
+that made a 12% rise appear in `scan_blocks`, a function neither side had
+touched. An unchanged scope is the control: if it moves, the comparison is
+measuring the machine.
 
 ## Adding instrumentation
 
@@ -164,11 +254,12 @@ and concatenates the app list onto its own.
 ## Current findings
 
 Counters first, because they are deterministic: the same workload produces
-byte-identical counter values on every run. Wall-clock timings from this harness
-are *not* reproducible under load -- the same scenario has varied by more than
-3x between runs on a busy machine with identical counters throughout. Take
-timings on an idle machine, and treat a timing change that is not corroborated
-by a counter change as noise.
+byte-identical counter values on every run. The harness times itself on process
+CPU time now, which brought its timings from unusable under load (a 3x spread
+with identical counters throughout) to reproducible within about a per cent --
+but a few per cent of spread is still there, so treat a timing change that no
+counter corroborates as noise, and interleave the two builds rather than
+measuring one after the other.
 
 ### Resolved: connection and statement churn in LibraryIndex
 
@@ -259,7 +350,7 @@ Measured on a 235 KB note (10,801 blocks), Release, 60 frames:
 | `layout.source_bytes_copied` per frame | 235,661 | **0** |
 | `layout.key_bytes_hashed` per frame | 235,661 | **0** |
 | `layout.blocks_scanned` per frame | 10,801 | **0** |
-| `layout.flat_lines_built` per frame | 12,002 | **0** |
+| `layout.visual_rows` per frame (then `flat_lines_built`) | 12,002 | **0** |
 | `status.count_buffer` per frame | 0.10 ms | **0** |
 
 And in the harness, `scroll.frame_relayout_median` went 0.566 ms -> **0.011 ms**.
@@ -306,16 +397,937 @@ it needed to, and only a count says so.
 `scroll` scenario fails its budget if a frame that changed nothing costs more
 than 2 ms again.
 
-### Open: the fold predicate is still asked per block per frame
+### Resolved: the frame trace was measuring the monitor
 
-`layout.fold_queries` is 3,601 per frame on the same note -- the reuse check has
-to resolve the folds to know they have not moved, and the app's predicate hashes
-the note id on every call to answer "nothing is folded". About 0.05 ms a frame,
-roughly a third of what a steady frame's layout now costs. The fix is to hoist
-that lookup out of the per-block lambda in `drawLive`, which is one line in
-`src/app/Application.cpp` -- a file under a shrinking line budget, so it wants to
-happen alongside the decomposition that file is already queued for rather than
-by raising the ratchet for 0.05 ms.
+Everything below was found by running a real session against a 400-note library
+with a 460 KB note open, which is the reading the fixture harness cannot give:
+its budgets all run against a fixed-advance stand-in for a font, and the largest
+single cost in the app turned out to be real glyph shaping.
+
+The first reading said `p50 8.46 ms`, steadily, whatever was on screen. That is
+a 120 Hz refresh interval. `ScopedFrame` wrapped `SDL_RenderPresent`, which
+blocks until the display is ready, so the instrument built to answer "did the
+frame make it" was reporting the display's cadence and would have reported the
+same number for a frame that did nothing. Splitting the sample at
+`markWorkDone()` turned an 8.46 ms non-answer into a p50 of 0.99 ms of work with
+7.5 ms of waiting, and only then was there anything to optimise.
+
+Nothing else in this section would have been visible without that split, and
+nothing in it would have been *attributable* without the second half of the same
+change: `page.draw` was the only timed part of a frame, so a frame spent in the
+sidebar or the chrome showed up as time that went nowhere. `shell.title_bar`,
+`shell.ribbon`, `shell.sidebar`, `shell.right_panel`, `shell.tab_strip`,
+`shell.content`, `shell.status`, `shell.overlays` and `shell.present` now cover
+it end to end.
+
+### Resolved: the sidebar rebuilt the library on every frame
+
+`shell.sidebar` was 0.68 ms of a 0.99 ms frame -- most of a frame, to draw the
+three dozen rows a panel is tall enough to show.
+
+| counter | before | after |
+|---|---:|---:|
+| `sidebar.rows_built` per frame | 111 | **0** (1 on a change) |
+| `tree.rows_built` per frame | 105 | **0** (1 on a change) |
+| `shell.sidebar` self, steady frame | 0.68 ms | **0.10 ms** |
+
+Three things, all the same shape as the scroll relayout above.
+
+`TreeModel::rows` is O(library), not O(viewport): it relativises a path and
+builds a `std::map` key for every note before it can place the first row, then
+allocates a `TreeRow` -- a path and two strings -- per row. It ran every frame.
+
+`AppState::folders()`, `tags()` and `allNotes()` returned their memos **by
+value**, so each frame deep-copied the whole note list to read it.
+
+Neither had anything to recompute. The row list is a pure function of the
+library revision, what the tree has open, the query, the tag filter, the
+shortcut lists and the panel's size; only the scroll and the panel origin move
+on a normal frame, and both are an offset over a list already built.
+`SidebarModel.cpp` -- a new unit, since `Application.cpp` is under a shrinking
+budget -- holds the build and the memo in front of it, and `sidebar.rows_reused`
+against `sidebar.rows_built` says which one ran.
+
+### Resolved: the fold predicate, asked per block per frame
+
+Listed as open above, and it was worse than the 0.05 ms estimated there: on the
+460 KB note it was `layout.fold_queries` **2,801 per frame**, because the reuse
+check has to resolve the folds to establish that they have not moved, and each
+resolution builds a fold key and takes a map lookup on the note id.
+
+The fix is not to make the predicate cheaper but to stop asking. `LayoutOptions`
+now takes two optional identity stamps -- `sourceRevision` and `foldRevision` --
+and when they are unchanged the reuse check skips both the memcmp of the whole
+note and the per-block fold query. Zero means "cannot say", so a caller with no
+revision to offer (the harness, the tests) gets exactly the old behaviour.
+
+| counter | before | after |
+|---|---:|---:|
+| `layout.fold_queries` per frame | 2,801 | **0** |
+| `layout.update` self, steady frame | 0.18 ms | **~0.00 ms** |
+
+`layout_stamped_reuse_asks_the_fold_predicate_nothing`,
+`layout_a_moved_fold_stamp_re_resolves_the_folds` and
+`layout_an_unstamped_caller_still_compares_bytes` guard it. The stamps are a
+promise, so the one place that breaks it is handled explicitly: the caret-unwind
+loop in `PageView::layout` expands a fold mid-pass and withdraws the stamp for
+the pass that follows.
+
+### Resolved: opening a large note shaped every word of it
+
+With the frame path quiet, the remaining cost was the one-off: `layout.update`
+took **147 ms** to open a 460 KB note of unique prose, which is a third of a
+second of dead window between clicking a note and seeing it.
+
+`render.text_measure_calls` said what it was: **154,096** calls for 1,311 blocks
+laid out. `TTF_GetStringSize` shapes the run -- resolves each glyph, applies
+kerning -- for about a microsecond a word, and 120 ms of the 147 ms was inside
+it. No timing said this; a profile would have shown a hot function in SDL_ttf
+and left the reader to guess whether it was called too often.
+
+Two fixes, in that order.
+
+**The same words are measured over and over.** Word frequency in prose is
+Zipfian, every space is the same space, and a scroll re-measures what the last
+frame measured. `ui::TextMeasureCache` is a direct-mapped table of 64-bit hash
+to width in front of `TextRenderer::width`. Direct-mapped rather than LRU
+because a miss here costs one shaping call, not a texture upload, so the
+simplest policy buys the whole win with one array and no allocation.
+
+**Spaces were measured twice each.** `Flow` held whitespace back to decide
+whether a line breaks before or after it, measured the pending run to test the
+fit, and then measured every token of it *again* inside the flush that emitted
+it. Roughly half a document's tokens are whitespace.
+
+| | before | after |
+|---|---:|---:|
+| `layout.update` opening 460 KB | 147 ms | **65 ms** |
+| `render.text_measure_calls` | 154,096 | **106,224** |
+| `render.text_measure_cache_hits` | *unmeasured* | **88,710** (84%) |
+| frame work p50, steady | 0.48 ms | **0.22 ms** |
+
+The cache hit rate is the number to watch: it is measured on genuinely unique
+prose (a 400-word common vocabulary over a full dictionary tail), and a
+collapse in it means either the cache is too small or something has started
+measuring strings nobody measures twice.
+
+### Resolved: an edit re-hashed and re-probed the whole document
+
+A cache key here is a pure function of a block's *bytes and scan fields* -- never
+of where in the buffer it sits. That is what makes an identical block share one
+layout wherever it appears, and it also means an edit cannot invalidate a key it
+did not touch, however far it pushed that block down the document.
+
+The placement loop was not using this. Every update hashed every block's bytes
+and did a hash-map probe per block to rediscover the layout it had resolved to
+last frame: on a 200 KB, 9,612-block note, 200 KB of hashing and 9,612 random
+probes to relay out one changed block. Split out, it was ~70% of a keystroke.
+
+`mapUnchangedBlocks` now pairs the new scan against the standing one -- by index
+across the untouched prefix, and by distance-from-the-end across the untouched
+suffix, which is what makes the edit's shift irrelevant. A paired block keeps its
+key, and with it the layout pointer, so neither the hash nor the probe happens:
+
+| counter, 158 updates over the fixture | before | after |
+|---|---:|---:|
+| `layout.key_bytes_hashed` | 7,784,850 | **415,134** |
+| `layout.cache_hits` (map probes) | 354,531 | **8,542** |
+| `layout.blocks_key_reused` | -- | 345,989 of 365,256 walked |
+| `layout.blocks_relaid` | 10,725 | 10,725 |
+
+`blocks_relaid` not moving is the point: the same layouts get built, they are
+just found without re-deriving how to find them. Interleaved A/B on one binary,
+min of eight pairs: **0.555 -> 0.379 ms** per keystroke.
+
+The identity case falls out of the same machinery. When the source has not moved
+at all -- which is what an arrow key does -- the map is the identity and not one
+key is rebuilt. Moving the caret used to rehash the entire document to discover
+that one block had started showing its markers.
+
+`mapUnchangedBlocks` itself is gone now -- see *the rescan re-derived every block*
+below. Pairing the two lists was still an O(document) comparison; the splice
+that replaced it produces the same two numbers, `head` and `tail`, without
+deriving the new list in the first place. What survives from this section is the
+property it established, which everything since rests on: **a cache key is a
+function of a block's bytes and fields and never of its offsets.**
+
+### Resolved: a keystroke allocated 2.6 MB
+
+`scanBlocks` returned its vector by value, so `blocks_ = scanBlocks(source)`
+freed the old block list and grew a new one from scratch on every keystroke --
+and its reserve estimate was 2x low, so it grew twice on the way. Prose runs
+nearer one block per 20 bytes than the one per 48 the estimate assumed.
+
+`scanBlocksInto` writes into a vector the caller owns and keeps, so the list is
+grown once for the life of the document. The layout's other per-update buffers
+(`placed_`, `liveKeys_`, `flags_`, the source) now ping-pong through spares
+rather than being moved from, which leaves them with capacity to reuse.
+
+| per keystroke, 200 KB note | before | after |
+|---|---:|---:|
+| bytes allocated | 2,597 KB | **9.3 KB** |
+| allocations | 42 | **23** |
+
+### Resolved: laying out a block allocated six times
+
+Opening a 460 KB note is the largest single cost in the app because it all lands
+in one frame, and with the measure cache in place it is no longer font shaping:
+of 145,504 measurements, 143,301 are cache hits. What was left was allocator
+traffic -- six allocations and 2.9 KB per block, for a *staging* buffer that is
+thrown away as soon as the block is flowed.
+
+Four things, all the same shape -- a buffer that lives for one block and is grown
+from empty for every block:
+
+- `Flow`'s run and whitespace vectors are constructed per block, so they never
+  kept their capacity. They are the layout's now, and are grown once per
+  document. (I first tried making `pushLine` hand a right-sized buffer to each
+  line instead of moving its own across; on its own that was a *pessimisation*,
+  because `Flow`'s lifetime meant the buffer it kept was thrown away anyway. The
+  allocation counter is what said so -- the wall clock could not.)
+- The token vector was grown from empty for every block. It is reserved from the
+  span's length now: prose runs about one token per three bytes.
+- The token *groups* are staged in a buffer the layout owns, whose inner vectors
+  keep their token storage between blocks. This meant filling the groups in
+  order rather than splicing the opening fence in afterwards, which the fenced
+  code path was doing.
+- A block with no inline markup -- most of them, 3,502 of 4,202 in real prose --
+  no longer allocates and zero-fills an attribute slot per content byte to
+  conclude that every byte is plain.
+
+| laying out a 200 KB note from scratch | before | after |
+|---|---:|---:|
+| allocations | 58,778 | **41,697** |
+| bytes allocated | 27.7 MB | **14.4 MB** |
+
+### Resolved: the harness was measuring the scheduler
+
+Every budget timed itself with `steady_clock`, which counts the microseconds the
+process spent descheduled as though they were work. On this machine that was
+most of the number once anything else was running: `type.middle` read 293 us at
+load 1, 864 us at load 11, and 326 us at load 1 again -- three measurements of
+one unchanged binary. Worse, the drift was slow enough to survive a whole run,
+so measuring all of A and then all of B produced a confident 12% "regression" in
+`scan_blocks`, a function neither side touched.
+
+Two fixes, both in `tools/PerfMain.cpp`:
+
+- **`CLOCK_PROCESS_CPUTIME_ID`.** Nothing here waits on IO or another thread, so
+  CPU time is the operation's cost. Repeatability went from a factor of three to
+  about a per cent: across an interleaved A/B of twelve scenarios, `scan_blocks`
+  -- untouched by the change under test -- read 24.898 ms and 24.562 ms. That is
+  the control that makes the rest of the table mean something.
+- **One untimed warm-up pass per scenario**, described under *Reading the
+  numbers* above. It was hiding a 20x allocation difference between two
+  scenarios that do the same thing in different places.
+
+The clock was spelled out inline at five call sites, which is also why changing
+it was a five-place edit; there is one `timeMicros` now.
+
+### Resolved: the row index was a list, and both readers walked it
+
+`flatLines_` was a materialised table of visual rows -- `{block, line, top}` per
+row, 13,536 of them on a 460 KB note -- rebuilt from scratch on every update.
+Then both of its readers walked it **from the front**: `offsetAt`, which answers
+"what did this click hit", and `flatLineForOffset`, which answers "what row is
+the caret on". So every click and every up-arrow cost a pass over every row in
+the document, and every keystroke cost building the table to be walked.
+
+None of it needed to exist. A row is a block plus a line index, and the layout
+already holds the blocks and their lines; the only thing the table added was the
+mapping from a flat row number to that pair. That mapping is a **prefix sum**:
+one integer per block, filled by the placement walk that was already running.
+Row tops are non-decreasing across it -- blocks tile the document in order and
+lines tile their block -- so every query is a binary search, and a block folded
+to zero rows repeats its predecessor's value, which `upper_bound` steps over in
+one move.
+
+`selectionRects` was the third reader and had the same shape for a different
+reason: it walked every row in the note to find the handful the selection covers.
+Blocks are ordered by source offset, so it starts at the block containing the
+selection's start and stops at its end. `blockAt` was a fourth: a linear scan
+over the block list, directly above a `blockRange` that was already binary
+searching the same array on the same argument.
+
+| interleaved A/B, min of four runs | before | after |
+|---|---:|---:|
+| `scroll.viewport_queries` | 8 us | **1 us** |
+| `layout.update.place_blocks` + `.flat_lines`, 261 calls | 68.4 ms | **38.7 ms** |
+| `layout.row_index_probes` per query | 13,536 | **13.5** |
+| bytes allocated per cold layout | 14,414 KB | **14,039 KB** |
+
+This change and the counter one below landed together, so the interaction
+scenarios in *Where a frame goes now* carry both. Isolated, this half took
+`place_blocks` + `flat_lines` from 68.4 ms to 56.2 ms and
+`caret.block_to_block` from 134 us to 110 us.
+
+The probe counter is the guard: a linear scan and a binary search return the same
+answer, so nothing about the *results* would show a regression back to a walk.
+`layout_row_lookups_binary_search_the_index` asserts against it, and
+`layout_row_motion_steps_over_collapsed_blocks` covers the case the prefix sum
+gets wrong if it is written carelessly -- a folded block contributes no rows, so
+the index is full of runs of repeated values that one move has to cross. Both
+were mutation-tested: reverting the search to a walk fails the first, and an
+`upper_bound` written as a `lower_bound` fails the second.
+
+### Resolved: the counters were a measurable part of the loop they measured
+
+The placement walk incremented four counters per block. A counter add is one
+relaxed atomic read-modify-write on a process-wide cacheline -- nothing at all
+on a call per frame, and about 25 cycles per block when there are ten thousand
+blocks. Counted into locals and posted once per update instead, with the totals
+byte-for-byte identical:
+
+| isolated A/B, min of three runs | per-block | batched |
+|---|---:|---:|
+| `layout.update.place_blocks`, 261 calls | 56.2 ms | **48.3 ms** |
+| `type.middle` | 267 us | **237 us** |
+| `caret.block_to_block` | 110 us | **83 us** |
+
+That is 11% of a keystroke that was the instrument rather than the work. The
+lesson is not "fewer counters" -- the counters are why any of the rest of this
+page exists -- it is that a counter on a per-item path wants to be a local that
+posts once, the way `blocks_walked` and `key_bytes_hashed` already were.
+
+### Resolved: the cache sweep re-found every block it had not evicted
+
+The sweep that bounds the block cache ended with a loop re-pointing all 9,612
+entries of the placement at the map: one hash probe per block, which is exactly
+the cost the key-reuse path exists to avoid. It was never needed.
+`unordered_map` is node-based, and erasing an element invalidates pointers into
+*that element* only -- every key in `liveKeys_` survives the sweep by
+construction, so every pointer in `placed_` was still valid. The sweep also
+counted its evictions one atomic at a time (up to 19,000 of them) and copied
+`liveKeys_` to sort it, on the one frame it was already the slowest thing in.
+
+`resize.width_step`'s worst iteration went 17.9 ms -> **14.0 ms**. Its median
+moved the other way by about 5%, and the counters say that is measurement: the
+two builds report identical `blocks_relaid`, `cache_hits`, `cache_evictions` and
+`visual_rows`, so they do identically much work. The sweep has a timer of its own
+now (`layout.update.evict_cache`, 7.2 ms across a harness run) so it stops
+hiding inside the update's total.
+
+Leaning on node stability deserved a test rather than a comment, so
+`layout_survives_a_cache_sweep_that_erases_most_of_the_map` forces a sweep and
+then reads the entire layout back -- the read that would fault on a freed node.
+It runs in the ASan and UBSan lanes.
+
+### Resolved: `setMetrics` left the placement pointing into a freed cache
+
+Not a performance finding; found while reading the cache. `setMetrics` drops
+every cached block layout, and every entry in `placed_` is a pointer *into* that
+cache. Its one caller re-lays out on the next line, so nothing reads the
+placement in between -- but "safe as long as nobody asks" is a use-after-free
+waiting for a second caller, and dropping the placement costs nothing on a path
+that has already thrown the whole document's layout away. The layout now answers
+as an empty document until the next update, which every query was already
+written to handle.
+
+### Resolved: the placement rebuilt the whole document on every update
+
+`layout.update.place_blocks` was 64.6 ms over 270 calls and the largest single
+cost in a keystroke. It walked every block in the note, every time: computed the
+block's flags, compared them against the previous generation's, copied a pointer,
+accumulated a running `top` and appended to the row prefix sum -- ten thousand
+iterations to move one paragraph two pixels down.
+
+The walk was there because the placement was *rebuilt*. Four parallel arrays --
+`placed_`, `flags_`, `liveKeys_`, `lineStart_` -- were filled front to back into
+fresh buffers each update, with the previous generation kept in a second set of
+four so the loop could read keys out of it. Rebuilding is O(document) by
+construction, and no amount of making the loop body cheaper changes that.
+
+It is patched in place now, and the shape of the patch is the interesting part:
+
+- **The blocks whose *entry* can have moved are collected as a few ranges, not
+  one span.** The contributors are countable, and each one is local: the blocks
+  the edit re-derived (plus one either side, because `groupFirst`/`groupLast` are
+  decided by a neighbour's kind), the block the caret left and the one it
+  arrived at, the same for the raw block, and the run a fold change hid or
+  revealed. A caret at the top of a note and an edit at the bottom are two
+  ranges of one block each. One interval covering both would have been the whole
+  document, which is how this kind of fix quietly fails to be a fix.
+- **A range is walked absolutely; the gaps between ranges are crossed by a
+  delta.** After recomputing a range, the difference between the running `top`
+  and the one already stored at the next block is what that range moved
+  everything below it by. When the difference is zero -- a keystroke inside a
+  paragraph that does not rewrap -- the rest of the document is *already*
+  correct and the walk stops. When it is not, the tail is a pass of one float
+  add and one integer add per block, with no flags, no hash and no random probe
+  into a map with an entry per block.
+- **An index shift is a memmove rather than a rebuild.** When the block count
+  changes, the four arrays' tails slide to meet the new indexing before the
+  patch runs, so "which old block is this" stays the identity and the entries
+  after the edit keep their key and their cached layout.
+
+That deleted the three spare arrays as well -- 230 KB of vector on a 10k-block
+note, and a generation of state to keep consistent. The `reuse_` map that said
+which old block each new one came from survived this change and did not survive
+the next one: once the splice below produced the carried-over ends as two
+integers, "did this block keep its entry" became
+`i < head || i >= count - tail`, and the `size_t`-per-block array it replaced was
+itself an O(document) write per keystroke.
+
+This was the first change of the pass, so "before" here is the session's
+baseline. Interleaved A/B, CPU time, min of four:
+
+| | before | after |
+|---|---:|---:|
+| `layout.update.place_blocks` self, 270 calls | 64.608 ms | **40.933 ms** |
+| `layout.blocks_walked` | 2,595,028 | **202,593** |
+| `caret.block_to_block` | 116 us | **4 us** |
+| `type.middle` | 345 us | 233 us |
+| `fold.toggle_heading` | 291 us | 151 us |
+| `layout.update.evict_cache` (the control) | 9.999 ms | 10.314 ms |
+
+Nearly all of the 202,593 blocks still walked are the 21 *rebuilds* in the run
+-- the first open of a note, and the resizes. The 249 patches walk about nothing.
+
+**One bug worth recording, because it is the shape of bug this design invites.**
+The cache key mixed in `index == 0` directly, and the old reuse check guarded
+that separately with `(from == 0) == first`. Making the mapping the identity
+removed the guard and left the key: a block that kept its bytes but stopped
+being the *first* block in the document -- inserting a new paragraph above it --
+went on sharing the first block's layout, which has no space above it. It showed
+up as a 14-pixel height difference at block 1 after 307 steps of the random
+edit walk. The fix is that "first block" is now a `Flags` bit like
+`trailingLine`, its symmetric opposite, and `layoutBlock` reads the flag rather
+than re-deriving it from the index: the flags *are* the record of what a cached
+layout depends on beyond the block's own bytes, so anything that belongs in the
+key belongs in them.
+
+### Resolved: the rescan re-derived every block to find the one that changed
+
+`layout.update.scan_blocks` was 41.1 ms over 182 calls -- 226 us a keystroke, and
+once the placement patch landed it was about 80% of what a keystroke cost.
+`scanBlocks` re-derived all 9,612 blocks of a 200 KB note, and then
+`mapUnchangedBlocks` compared the result against the previous list to discover
+that all but one of them were identical.
+
+The page used to say a fix needed "a restart point whose scanner state is
+reproducible (fence open, list depth, ordinals)". Reading the scanner settled
+that: **there is no scanner state.** Every block is decided from its own first
+byte forward -- a paragraph absorbs the lines *after* it, a fence closes on a
+later line, a table is a table because of the row under it, `listDepth` comes
+from the block's own indentation and `ordinal` from its own marker text. No
+branch looks at a byte before the block it is building. So a scan resumed at any
+block boundary produces exactly the blocks a scan from the top produces there,
+and the restart point needs no state at all -- only to be a boundary.
+
+That turns the rescan into a splice with two ends to establish:
+
+- **Where to resume.** A block's classification can depend on the line that
+  follows it, so the finest thing an edit can be said to have touched is the line
+  holding its first changed byte, not the byte. Resume two blocks above that
+  line. One block back is what the argument needs -- the block whose extent the
+  changed line decides -- and the second is margin that costs two cache probes.
+  Removing the margin entirely fails the random edit walk in 39 steps; removing
+  only the second block passes it, which is the difference between a proof and a
+  guess.
+- **Where to stop.** At the first block boundary the scan reaches that (a) lies
+  inside the bytes the edit left alone at the end of the buffer, and (b) the
+  previous scan also started a block at. Together those say the rest of the new
+  buffer is byte-identical to the rest of the old one *from a shared boundary* --
+  and a stateless scan over identical bytes from a shared boundary produces
+  identical blocks. So the rest of the list is the list already in hand, moved by
+  however many bytes the edit added or removed.
+
+`scanBlocksFrom` takes the byte count as a number and the boundary test as a
+predicate, in that order, so the predicate -- which is a binary search -- is
+asked only where it can say yes. An edit at the top reaches the untouched tail
+after one block and stops; an edit at the end never reaches it and scans the
+handful of blocks between the resume point and the end of the buffer. Both are
+O(edit).
+
+`mapUnchangedBlocks` and `sameBlockShape` are gone: the splice knows what carried
+over by construction, so there is nothing left to discover by comparison, and
+`layout.update.map_blocks` -- 9.9 ms over 170 calls -- is not a scope any more.
+
+Measured against the build immediately before it -- so this table is the splice
+alone, not the splice plus the placement patch. Interleaved, CPU time, min of six:
+
+| | before | after |
+|---|---:|---:|
+| `layout.update.scan_blocks` self, 182 calls | 41.092 ms | **8.925 ms** |
+| blocks re-derived per rescan (`layout.blocks_rescanned`) | 9,612 | **3** |
+| `layout.update.map_blocks` self | 9.911 ms | **gone** |
+| `type.middle` | 277 us | **31 us** |
+| `type.at_end` | 272 us | **14 us** |
+| `newline.split_and_join` | 585 us | **111 us** |
+| `caret.block_to_block` | 5 us | **1 us** |
+| `layout.update.place_blocks` (a control) | 49.308 ms | 52.116 ms |
+| `layout.block.flow` (a control) | 55.096 ms | 57.666 ms |
+
+Every control in that run reads 3-5% *higher* on the after side, which is the
+after side's slot in the round being the noisier one -- so the after column is
+if anything pessimistic. `layout.blocks_relaid` and `layout.visual_rows` are
+identical across it, as they have to be.
+
+The safety argument is a property, so it is tested as one.
+`blockscan_resuming_at_every_boundary_matches_a_full_scan` resumes at *every*
+boundary of five documents -- one with a table, a fence, a callout, indented
+code, an unclosed fence, no trailing newline -- and asserts the resumed blocks
+equal the full scan's field for field. A construct added later that looks
+backwards fails there, rather than by leaving a stale block on screen after an
+edit three paragraphs above it.
+
+### Resolved: the layout copied the whole note on every keystroke
+
+The layout keeps its own copy of the buffer, because every run of every cached
+block points into it and the caller's buffer is not the layout's to hold.
+Keeping that copy current was `spareSource_.assign(source)` plus a swap: 200 KB
+memcpy'd per typed character, and a second 200 KB buffer to hold it in.
+
+The prefix/suffix window is computed against the standing `source_` now rather
+than against a copy of it, so it is available *before* anything is written, and
+the copy becomes `source_.replace(prefix, removed, ..., added)` -- the bytes that
+moved, plus a memmove of whatever follows them.
+
+| against the build before it, min of six | before | after |
+|---|---:|---:|
+| `layout.source_bytes_copied` | 37,294,442 | **2,459,143** |
+| `layout.source_bytes_moved` | -- | 18,544,745 |
+| `type.middle` | 31 us | **27 us** |
+| `type.at_end` | 14 us | **10 us** |
+| `type.near_top` allocation | 41.1 KB | **7.7 KB** |
+| `type.at_end` allocation | 0.8 KB | 0.8 KB |
+
+The 18.5 MB that reappears as `source_bytes_moved` is the memmove an insertion
+drags the rest of the buffer through -- averaging 29 KB an edit. That half is
+still O(document) and is named as such in the counter, because a flat buffer has
+no way around it.
+
+The second buffer is gone with it, and so is the ping-pong: `spareSource_` was
+one of two 200 KB strings alternating, and each of them reallocated when it was
+handed a string longer than the capacity it had been sized for.
+
+### Resolved: typing near the top allocated a different amount from typing in the middle
+
+An open item on this page said `type.near_top` allocated 42.2 KB per keystroke
+against `type.middle`'s 8.9 KB at the same 21 allocations, and that the way to
+find out why was "a largest-single-allocation column beside the existing two,
+five lines in `tools/PerfMain.cpp`". That was right, and the answer took one run:
+
+```
+type.near_top    335 us median   21 allocs   42.2 KB    400.2 KB max
+type.middle      338 us median   21 allocs    8.9 KB      2.4 KB max
+type.at_end      335 us median   12 allocs   19.6 KB    300.4 KB max
+```
+
+400 KB and 300 KB are geometric growth steps of a ~200 KB `std::string`. It was
+never about the position of the caret: `type.near_top` runs first, so it is where
+the layout's second copy of the buffer crossed its capacity and doubled, and the
+doubling then left the later scenarios with headroom. The asymmetry was scenario
+order meeting `std::string` growth.
+
+Both allocations belonged to the ping-ponged source copy described above, and
+with that copy gone `type.near_top` allocates 7.7 KB against `type.middle`'s
+7.8 KB, largest 2.4 KB on both. The lesson is not about strings: an averaged
+byte total hid a one-off behind twenty-four iterations, and no amount of staring
+at the count would have found it.
+
+### Resolved: the block cache kept three generations of the document
+
+`cache_` was swept when it exceeded `blocks * 3 + 256` entries, on the theory
+that three generations buy back the case where a key returns -- an undo, a
+retype, a window dragged back to a width it just left. This page said the trade
+was real and that nobody had measured it. Measured, interleaved, on the 200 KB
+fixture:
+
+| | `blocks * 3 + 256` | `blocks + 256` |
+|---|---:|---:|
+| `peak_rss` | 55.1 MB | **28.7 MB** |
+| `resize.width_step` worst frame | 24.1 ms | **11.1 ms** |
+| `resize.width_step` median | 10.9 ms | 10.2 ms |
+| `resize.width_step` largest single allocation | 328.5 KB | **3.0 KB** |
+| `layout.blocks_relaid` | 112,363 | 112,363 |
+| `layout.cache_sweeps` | 1 | 9 |
+| `layout.cache_evictions` | 26,864 | 48,228 |
+| `layout.update.evict_cache` total | 11.3 ms | 24.5 ms |
+| every `type.*`, `fold.*`, `caret.*`, `open.*` median | -- | unchanged |
+
+`blocks_relaid` is *identical*. Not one extra block was laid out at a third of
+the ceiling, which is the whole case for the larger one: on this workload no key
+ever came back.
+
+The rest of the table is one number in two shapes. Fourteen width steps at three
+generations are **one** sweep freeing 26,864 layouts, and that single sweep *is*
+the worst frame of a window drag. At one generation they are nine sweeps of about
+5,400 each: 24 ms of `free` in total rather than 11, and no frame over 11 ms.
+Total work up, spike down -- and the spike is the part anyone sees. Trading the
+total for the spike is the right way round on a 60 Hz surface, and it is a trade
+worth naming rather than hiding, because the total is what a throughput benchmark
+would have reported.
+
+`layout.cache_sweeps` was added alongside the evictions for exactly that reason:
+evictions alone cannot tell one 24 ms sweep from nine small ones.
+
+The number to watch if the smaller ceiling is ever wrong is
+`layout.blocks_relaid` per update -- that is the counter a lost cache hit would
+move, and it did not move at all.
+
+### Resolved: the inline scan allocated two buffers per block, one of them for nothing
+
+`layoutBlock` asked `scanInlines` for the inline spans of every block it laid
+out, and `scanInlines` allocated two vectors per call: the span list it returns,
+and a byte mask over the text saying which bytes structural scanning has claimed.
+The span list is only allocated when there are spans -- and `layout.plain_blocks`
+says four blocks in five have no markup at all -- but **the mask was allocated
+and zero-filled by every one of them**, for a scan that then found nothing to
+put in it.
+
+Both are now caller-owned, which is the pattern the rest of this file already
+follows (`scanBlocksInto`, `resolveFolds`, `flowRuns_`, `flowGroups_`): an
+`InlineScratch` holding the two buffers, held by `DocumentLayout` as a member,
+`assign`ed rather than reallocated per block. `scanInlines` remains as the
+one-off form, implemented on top of it. The per-byte attribute table
+`layoutBlock` fills from the spans got the same treatment, which is why `Attr`
+moved into `Layout.h` beside `Token` -- for the same reason and with the same
+comment: the layout owns the buffer, the code that fills it does not.
+
+| interleaved A/B, min of five | before | after |
+|---|---:|---:|
+| `open.cold_layout` allocations | 41,696 | **32,092** |
+| `open.cold_layout` bytes | 13,981 KB | **10,889 KB** |
+| `resize.width_step` allocations | 36,457 | **28,047** |
+| `resize.width_step` bytes | 9,359 KB | **6,648 KB** |
+| `type.middle` allocations | 20 | **15** |
+| `type.middle` bytes | 7.8 KB | **4.7 KB** |
+| `layout.block.inline_attrs` self | 49.942 ms | **39.050 ms** |
+| `open.cold_layout` | 10,326 us | 10,020 us |
+| `layout.block.flow` (a control) | 46.938 ms | 51.442 ms |
+
+A quarter of everything the layout allocates, and the scope that owned them 22%
+faster. The end-to-end medians are a wash: the controls moved +2% to +10% the
+wrong way in the same run, which is what a loaded machine looks like, and the
+allocation columns are the ones that do not care. `peak_rss` is unchanged at
+28.7 MB, because buffers that are allocated and freed inside a call were never
+what the process was holding at its worst moment.
+
+### Resolved: `wrapText` shortened by bytes, one shaping pass at a time
+
+`InlineText.cpp`'s `wrapText` broke an overlong word by popping one *byte* off
+the end and re-measuring the candidate on each pop. Two bugs in one loop: O(n)
+shaping passes to shorten by a word, and a truncation that can cut a UTF-8
+sequence in half and hand the renderer bytes that are not text.
+
+`ui::breakToFit` is the fixed version -- the same bisection over code point
+boundaries as `ellipsizeToFit`, which had the same two bugs, sharing its
+`codePointStops` helper. `break_to_fit_never_cuts_inside_a_code_point` walks
+every width from -4 to 60 pixels across a string of five two-byte characters and
+asserts the answer is always an even number of bytes and always at least one
+character; `break_to_fit_bisects_rather_than_walking` holds a 4,000-character
+word to 16 measurements. Neither test needs a font.
+
+It is on the empty-state and placeholder paths only, so this is a correctness
+fix rather than a measurable one.
+
+### Where a frame goes now
+
+Three passes have landed on this, and they moved different things, so the numbers
+are split rather than chained -- the first was measured on wall clock and the
+other two on CPU time, and multiplying those together would be arithmetic rather
+than measurement.
+
+**The first pass** (fold stamping, the unchanged-update fast path, the block-key
+carry-over, the allocation work), 460 KB note, 400-note library, 1600x1000,
+Release, idle machine, wall clock:
+
+| | at the commit before it | after |
+|---|---:|---:|
+| frame work p50 | ~8.4 ms (incl. the vsync wait; it could not separate them) | **0.19 ms** |
+| first paint of the note | 126 ms | **33 ms** |
+| `layout.update`, 60 frames | 189 ms | **58 ms** |
+| `layout.fold_queries`, 60 frames | 168,060 | **2,801** |
+| `layout.keystroke_relayout_median` | 1.075 ms | 0.292 ms |
+
+**The second pass** (the harness clock, the row prefix sum, the counter batching,
+the cache sweep, `setMetrics`), interleaved A/B, CPU time, min of four, 200 KB
+fixture:
+
+| | before | after |
+|---|---:|---:|
+| `layout.keystroke_relayout_median` | 0.294 ms | **0.232 ms** |
+| `type.middle` | 292 us | **230 us** |
+| `caret.block_to_block` | 138 us | **78 us** |
+| `scroll.viewport_queries` | 8 us | **1 us** |
+| `layout.update.scan_blocks` (the control) | 24.82 ms | 24.34 ms |
+
+**The third pass** (the placement patch, the spliced rescan, the patched source
+copy, the inline scan's buffers, the cache ceiling, and the `breakToFit`
+correctness fix) is the one that took the remaining O(document) work out of an
+edit. Interleaved A/B, CPU time, eight rounds, median = min and worst = max
+across them, 200 KB fixture:
+
+| | before | after |
+|---|---:|---:|
+| `type.middle` | 405 us | **28 us** |
+| `type.near_top` | 408 us | **46 us** |
+| `type.at_end` | 389 us | **11 us** |
+| `backspace.middle` | 405 us | **28 us** |
+| `newline.split_and_join` | 787 us | **108 us** |
+| `caret.block_to_block` | 137 us | **2 us** |
+| `scroll.idle_frame` | 12 us | **1 us** |
+| `fold.toggle_heading` | 321 us | **196 us** |
+| `type.middle` worst of eight rounds | 1,380 us | **98 us** |
+| `backspace.middle` worst | 1,356 us | **144 us** |
+| `newline.split_and_join` worst | 2,358 us | **269 us** |
+| `resize.width_step` worst | 52,850 us | **24,485 us** |
+| `layout.keystroke_relayout_median` | 0.406 ms | **0.026 ms** |
+| `layout.keystroke_relayout_worst` | 1.337 ms | **0.147 ms** |
+| `layout.keystroke_relayout_folded_median` | 0.561 ms | **0.196 ms** |
+| `scroll.frame_relayout_median` | 0.018 ms | **0.006 ms** |
+| **`peak_rss`** | 57.2 MB | **28.8 MB** |
+| `type.middle` allocations / bytes | 21 / 8.9 KB | **15 / 4.7 KB** |
+| `open.cold_layout` allocations / bytes | 41,696 / 14,039 KB | **32,092 / 10,889 KB** |
+| `layout.blocks_walked` | 2,595,028 | **202,908** |
+| `layout.source_bytes_copied` | 37,294,442 | **2,459,143** |
+| `layout.update` self | 7.605 ms | **3.367 ms** |
+| `layout.update.scan_blocks` self | 39.805 ms | **7.322 ms** |
+| `layout.update.place_blocks` self | 76.597 ms | **40.095 ms** |
+| `layout.update.resolve_folds` self | 10.108 ms | **5.380 ms** |
+| `layout.update.map_blocks` self | 9.669 ms | **gone** |
+| `layout.update.evict_cache` self | 11.295 ms | 24.257 ms |
+| `layout.blocks_relaid` (the invariant) | 112,363 | 112,363 |
+| `layout.visual_rows` (the invariant) | 2,882,912 | 2,882,912 |
+| `layout.block` self (a control) | 25.290 ms | 25.618 ms |
+| `layout.block.flow` (a control) | 52.198 ms | 51.007 ms |
+| `layout.block.content_tokens` (a control) | 27.340 ms | 28.440 ms |
+| `open.cold_layout` | 9,704 us | 9,743 us |
+
+The bottom of that table is the point of it as much as the top.
+`blocks_relaid` and `visual_rows` are *identical*, so both sides laid out exactly
+the same blocks into exactly the same number of rows -- the change is entirely in
+how much was done to find that out, not in what was produced. The three control
+scopes inside `layoutBlock`, which nothing here touched, sit within 4%. And
+`evict_cache` moved the *wrong* way on purpose: that is the cache ceiling trading
+total sweep time for the size of the worst sweep, which is the `resize.width_step`
+worst row four lines up.
+
+It did **not** move first paint, and that is worth stating rather than leaving to
+be inferred. `open.cold_layout` is 9.70 ms before and 9.74 ms after, and a real
+session on a 336 KB note reports the same 40-58 ms of first-paint layout on both
+sides, because that cost is glyph shaping in `layoutBlock`. What it moved there is
+allocation -- 23% fewer, 22% fewer bytes -- and `layout.update` *self* time in the
+same real session: 0.164-0.178 ms per frame before, 0.134-0.144 ms after. Nor did
+it move a resize's *median*, which invalidates every key at once and so takes the
+rebuild path by design; only the worst frame of one.
+
+Rendering is unchanged across all three passes: the same 336 KB note captured
+through `--screenshot` with a 401-note library is pixel-for-pixel identical.
+
+### How the third pass is kept honest
+
+Every change in it is an optimisation, and the only thing that makes an
+optimisation safe is that it cannot be observed. Three tests carry that:
+
+- **`layout_incremental_updates_match_a_layout_built_from_scratch`** walks a
+  document through the edits a person makes and asserts after every one that the
+  incrementally updated layout is indistinguishable from one built from scratch
+  under the same inputs. It compares every block's position, height and every
+  run on every line -- *and* the queries the surface actually asks, because the
+  placement is patched now and a patch can leave a correct block sitting at a
+  stale row. `offsetAt` over a grid, `rowRelative` up and down, `blockAt`,
+  `blockRange`, `caretRect` and `selectionRects` are all in the comparison,
+  because the row index is a separate array and nothing in `layout(i)` reads it.
+- **`layout_incremental_updates_match_under_a_random_edit_sequence`** makes the
+  same claim by machine. The scripted test covers the edits somebody thought of;
+  the bugs a patch has are the ones that need a particular *pair* of consecutive
+  updates -- an edit that shifts the block count, then a caret move above the
+  shift, then a fold whose head is inside the block that moved -- and there are
+  more such pairs than anyone will write out. Three seeds of 250 steps run in
+  the suite; 30 seeds of 1,000 steps were run against the final code. The
+  `index == 0` bug in the placement section was found at step 307 of one of
+  them, and the missing restart margin in the splice at step 39 of another.
+- **`layout_an_edit_rescans_and_replaces_only_what_it_touched`** asserts the
+  *counters*, because a full rescan and a full replacement produce exactly the
+  right answer and no correctness test can see them. It types one character into
+  a 2,400-block document and requires fewer than 12 blocks rescanned, fewer than
+  12 placed, under 64 source bytes copied, and one patch with no rebuild. Force
+  the splice off and it reports "the edit rescanned nothing at all"; force the
+  patch off and it reports "placed 2400 blocks of 2400".
+
+Plus `blockscan_resuming_at_every_boundary_matches_a_full_scan` for the property
+the splice rests on, and the sanitizer lanes, which is where a spliced array or
+a patched buffer with an off-by-one shows up rather than as a wrong pixel.
+
+### What an edit costs now, and what is left in it
+
+A keystroke on a 200 KB note is 23 us and 15 allocations against a 2 ms budget,
+and it is worth naming what is still in it, because none of it is a block walk
+any more:
+
+- **`matchEdges`**, two `memcmp` passes that together cover the note -- prefix
+  until the first difference, suffix until the first difference from the end. On
+  a small edit that sums to about the whole buffer, so ~200 KB of `memcmp`. It
+  is what locates the edit, and the caller does not say where it typed.
+- **The source memmove**, `layout.source_bytes_moved`, averaging 29 KB an edit
+  over the run. A flat buffer has no way around dragging its tail.
+- **The block tail's offsets**, four integer adds per block after the splice
+  point. On an edit near the top that is every block in the note.
+- **`resolveFolds`**, which still resolves the fold state over every block on
+  every edit -- `layout.update.resolve_folds` is 4.8 ms over 513 calls.
+- **The placement's delta pass**, `layout.blocks_shifted`, when the edit changed
+  its block's height or line count: one float add and one integer add per block
+  below it. Zero when it did not, which is most keystrokes.
+
+Every one of those is a linear pass over integers or bytes with no branches, no
+hashing and no pointer chasing, which is why they add up to 23 us where the walks
+they replaced were 337. Three of them are named as open items below.
+
+### Open: an edit still touches every block below it
+
+`layout.blocks_shifted` reads 451,230 over the run and the block tail's offset
+shift is the same shape: an edit near the top of a note updates a position on
+every block under it, even though nothing about those blocks changed except where
+they sit.
+
+Both are the same design decision -- positions are *materialised*, as an absolute
+`top` per block and an absolute row index per block -- and the alternative is to
+store per-block heights and answer `blockTop(i)` from a Fenwick tree or a segment
+tree in O(log n). That makes an edit O(log n) and makes every position query
+O(log n) as well, and the position queries are the ones on the render path, asked
+per visible block per frame. At the current numbers the materialised version wins
+on both counts, so this is written down as the thing to reach for if the shift
+ever shows up rather than as a fix waiting to happen.
+
+The measurement that would justify it is `layout.blocks_shifted` per update
+against `layout.blocks`: today it is 1,812 against 9,612 on average, and a
+keystroke that does not rewrap its own block moves nothing at all.
+
+### Open: `resolveFolds` is still O(blocks) on every edit
+
+Every edit re-resolves the fold state over the whole block list -- a
+`foldableKind` test per block and a predicate call per foldable one --
+and then a `memcmp` of the result against the previous generation tells the
+placement which blocks a fold change moved. 4.8 ms over 513 calls, so about 9 us
+of a 23 us keystroke, and the largest single remaining item in one.
+
+Making it incremental is not hard to state and is fiddly to get right: `hidden`
+at block `i` depends on the fold heads at or before `i` and on how far each one
+reaches, so an edit invalidates the resolution from the nearest enclosing head
+onwards, not from the edit. The splice already knows which blocks changed; what
+it does not have is the enclosing head, and `foldEnd` is the function that would
+have to be run backwards.
+
+Left alone because 9 us is 9 us, and because the fold predicate is a caller's
+closure -- the cost of calling it is not the layout's to bound.
+
+### Open: `SourceBlock` is 88 bytes and holds a `std::string`
+
+This used to be about the *walks* over the block list, and those are gone. What
+it is about now is the two places an edit still moves the array around:
+
+- **A block-count change memmoves the tail of it.** `newline.split_and_join` is
+  92 us against `type.middle`'s 23, and the difference is almost exactly the
+  memmove: 9,612 blocks at 88 bytes is 846 KB, plus the four parallel placement
+  arrays sliding with it, so about 1.2 MB of memmove for one pressed Return.
+- **Every edit shifts the tail's offsets**, and there are four `std::size_t` of
+  them per block -- `start`, `end`, `contentStart`, `contentEnd`.
+
+Both halve if the struct halves. As a `start` plus a 32-bit length and two 32-bit
+content offsets *relative to the block* it would be nearer 40 bytes, and the
+offset shift would touch one field per block instead of four -- which is also
+the form `sameBlockShape` used to compare them in, before the splice made that
+comparison unnecessary. `info` -- the fence language or the callout kind -- is an
+owned `std::string` that is empty for almost every block, and it wants to be an
+offset pair for the same reason: as a `string_view` it dangles when a short
+source is swapped between buffers, because the small-string optimisation puts the
+bytes inside the string object.
+
+Held off because it changes every reader of `contentStart` and `contentEnd`
+across the layout and the renderer, and the payoff is now tens of microseconds
+against a 2 ms budget rather than the hundreds it would have been before the
+walks went.
+
+### Open: the staging tokens are built only to be thrown away
+
+`layoutBlock` tokenizes a block into a `Token` vector and then flows that vector
+into runs. The tokens are read once, in order, by exactly one consumer -- and
+`Flow` needs no lookahead beyond the whitespace it already holds back. So the
+staging vector could go entirely, and with it a share of the ~1.13 KB per block
+that a cold open still allocates -- which is now the largest allocation figure
+left in the layout, at 10,889 KB for a note whose text is a fifth of a megabyte.
+
+The obstacle is the fenced-code path, whose opening marker is either a line of
+its own or rides in front of the first line of code. Filling the groups in order
+(done, above) is the half of that which streaming needs; the rest is turning
+`appendContentTokens` and `appendPlainTokens` inside out to push into `Flow`
+rather than into a vector.
+
+### Open: the harness cannot see the font path
+
+Every budget in `tools/PerfMain.cpp` measures against `stubMetrics()`, a
+fixed-advance stand-in, because the core library has no fonts in it. That is the
+right call for a core-level benchmark and it is also why the largest cost in the
+app -- 120 ms of glyph shaping to open a note -- was invisible to `run-checks.sh
+perf` and only showed up in a real session. Until there is a harness lane that
+runs the real renderer, **a layout change has to be measured with a session, not
+with the fixture**.
+
+The allocation counters narrow this: allocator traffic in the layout is the same
+whether the metrics are real or stubbed, so the churn half of a layout change is
+now measurable in the fixture and reproducible under load. The CPU clock narrows
+it further, in that a fixture timing is now trustworthy enough to compare at all.
+The shaping half still is not -- and now that an edit is 23 us, it is by a wide
+margin the largest number left in the app: first paint of a 336 KB note is
+40-58 ms of layout in a real session against the fixture's 8.8 ms for the same
+document, and the whole of that gap is `Metrics::measure` being a font rather
+than a multiplication.
+
+`src/ui/TextMeasureCache.{h,cpp}` is the beginning of the answer on the app side.
+Nothing in this file can tell whether it is working.
+
+### Open: `matchEdges` compares the whole buffer to find a one-byte edit
+
+Every edit runs two `memcmp` passes -- forward to the first differing byte,
+backward to the first differing byte from the end -- and on a small edit those
+two sum to about the length of the note. ~200 KB of `memcmp` to locate one typed
+character, and it is now one of the larger items in a 23 us keystroke.
+
+It is there because `update` is handed a buffer and no account of what happened
+to it. The caller *does* know: every edit in `src/doc/Edits.h` returns the span it
+changed, and `LayoutOptions` already carries a `sourceRevision` stamp from the
+same caller for the same reason. An edited-span field beside it would make the
+window O(1) and leave the comparison as the fallback for a caller that does not
+offer one -- which is exactly how `sourceRevision` and `sourceMatches` already
+relate.
+
+Not done because a *wrong* span is a silently wrong layout rather than a slow
+one, and the honest form of the change is to keep the comparison and use the
+caller's span to bound it: start the forward scan at the claimed start and the
+backward scan at the claimed end, so a caller that lies costs correctness nothing
+and only loses the speed-up.
+
+### Open: the cold scan's block vector grows twice, and the second growth is the app's largest allocation
+
+`scanBlocksInto` reserves `source.size() / 48 + 8` blocks, and prose runs nearer
+one block per 20 bytes, so a cold vector grows twice: 4,166 -> 8,332 -> 16,664
+entries at 88 bytes each. `open.cold_layout` reports a 1,470 KB largest single
+allocation, which is exactly that last step.
+
+It is one allocation on the first open of a note -- every later scan reuses the
+capacity -- so it is listed for the shape rather than the cost: the estimate is
+deliberately low to avoid over-allocating for a document that is one long block,
+and the new largest-allocation column is what made the consequence visible. A
+better estimate is a count of newlines, which is one pass over bytes already
+being read.
+
+### Open: `pushNoteShortcuts` is O(favorites x notes)
+
+`SidebarModel.cpp` resolves each favourite and each recent by a linear scan of
+the whole note list. Bounded at 8 + 5 shortcuts and now off the per-frame path,
+so it is small -- but it wants an id index on the organization service, which is
+also what `findNote` should be using.
+
+### Open: the library directory is walked twice on startup
+
+`library.note_files_calls` reads 2 and `library.directory_entries_visited` reads
+804 for a 401-file library: the tree is enumerated once by the index refresh and
+once by whoever asks for the note list. 1.7 ms of `library_index.refresh.scan_tree`
+plus a second walk of the same directory, once, at startup -- so it is small, and
+it is listed because two walks is a sign the ownership of "what files are there"
+is split between two callers rather than because of the milliseconds.
 
 ### Open: wikilink resolution does not invalidate a block
 
