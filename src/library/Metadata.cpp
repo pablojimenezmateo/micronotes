@@ -148,6 +148,10 @@ std::string metadataHeader(const NoteMetadata& metadata) {
     out += "\n";
   }
   out += "---\n\n";
+  // The note's own name as its first heading, when that is how the note
+  // arrived. Written here rather than left in the body so the body holds the
+  // name once; see NoteMetadata::titleHeading for why it is not simply dropped.
+  if(metadata.titleHeading) out += "# " + metadata.title + "\n\n";
   return out;
 }
 
@@ -181,6 +185,20 @@ NoteMetadata parseMetadata(std::string_view markdown) {
     i = next;
   }
   return metadata;
+}
+
+std::size_t titleHeadingLength(std::string_view body, std::string_view title) {
+  if(title.empty() || !body.starts_with("# ")) return 0;
+  const auto newline = body.find('\n');
+  const auto line = body.substr(0, newline == std::string_view::npos ? body.size() : newline);
+  if(trim(line.substr(2)) != title) return 0;
+  std::size_t length = newline == std::string_view::npos ? body.size() : newline + 1;
+  // The blank line that separated the heading from the first real block goes
+  // with it, exactly as the blank line under the front matter fence does. Only
+  // one: a run of them is spacing the reader asked for, and the block scanner
+  // draws it.
+  if(length < body.size() && body[length] == '\n') ++length;
+  return length;
 }
 
 std::string stripMetadataHeader(std::string_view markdown) {

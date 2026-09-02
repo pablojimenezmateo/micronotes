@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -37,7 +38,7 @@ MICRONOTES_TEST(library_creates_reads_and_renames_note_without_losing_id) {
   metadata.title = "Original";
   const auto path = library.createNote(metadata, "body");
   MICRONOTES_REQUIRE(std::filesystem::exists(path));
-  MICRONOTES_REQUIRE(library.loadNoteBody(path) == "body");
+  MICRONOTES_REQUIRE(library.loadNote(path).body == "body");
   const auto renamed = library.renameNote(path, "Renamed");
   MICRONOTES_REQUIRE(library.loadNoteMetadata(renamed).id == "stable-id");
   MICRONOTES_REQUIRE(!std::filesystem::exists(path));
@@ -78,7 +79,7 @@ MICRONOTES_TEST(library_reads_metadata_from_header_without_body_scan) {
   const auto loadedMetadata = library.loadNoteMetadata(path);
   MICRONOTES_REQUIRE(loadedMetadata.id == "header-only");
   MICRONOTES_REQUIRE(loadedMetadata.title == "Header Only");
-  MICRONOTES_REQUIRE(library.loadNoteBody(path) == body);
+  MICRONOTES_REQUIRE(library.loadNote(path).body == body);
   std::filesystem::remove_all(root);
 }
 
@@ -132,7 +133,7 @@ MICRONOTES_TEST(library_rejects_paths_outside_root) {
   micronotes::library::Library library(root);
   bool rejected = false;
   try {
-    (void)library.loadNoteBody(root / ".." / "escape.md");
+    (void)library.loadNote(root / ".." / "escape.md");
   } catch(...) {
     rejected = true;
   }
@@ -339,4 +340,149 @@ MICRONOTES_TEST(library_restores_a_folder_without_giving_it_a_file_extension) {
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "work-2" / "Inside.md"));
 
   std::filesystem::remove_all(root);
+}
+
+// --- the note's own name, in the body -----------------------------------
+//
+// The page draws a note's name above its first block, so a note that also
+// carries the name as its first heading printed it twice. The heading is split
+// off with the front matter and written back with it: the body the user edits
+// holds the name once, and the file on disk still holds the heading every other
+// tool expects there.
+
+namespace {
+
+// Writes `markdown` verbatim, bypassing createNote, because what is being
+// tested is what happens to a file micronotes did not write.
+std::filesystem::path writeNote(const std::filesystem::path& root, const std::string& name,
+                                const std::string& markdown) {
+  std::filesystem::create_directories(root);
+  std::ofstream out(root / name, std::ios::binary);
+  out << markdown;
+  out.close();
+  return root / name;
+}
+
+std::string readNote(const std::filesystem::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+}
+
+MICRONOTES_TEST(library_reads_a_leading_title_heading_as_the_note_header) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading";
+  std::filesystem::remove_all(root);
+  const micronotes::library::Library library(root);
+
+  const auto path = writeNote(root, "Welcome.md",
+    "---\nid: welcome\ntitle: Welcome\n---\n\n# Welcome\n\nThe first paragraph.\n");
+  const auto note = library.loadNote(path);
+  MICRONOTES_REQUIRE(note.metadata.titleHeading);
+  MICRONOTES_REQUIRE(note.body == "The first paragraph.\n");
+
+  // And back onto the file exactly as it was found: the heading is the note's
+  // header, not something micronotes is free to drop.
+  MICRONOTES_REQUIRE(library.saveNote(path, note.metadata, note.body));
+  MICRONOTES_REQUIRE(readNote(path) ==
+    "---\nid: welcome\ntitle: Welcome\n---\n\n# Welcome\n\nThe first paragraph.\n");
+  std::filesystem::remove_all(root);
+}
+
+// No front matter at all: the name is the file's stem, and a heading repeating
+// it is still the note's own name.
+MICRONOTES_TEST(library_reads_a_title_heading_against_the_file_stem) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-stem";
+  std::filesystem::remove_all(root);
+  const micronotes::library::Library library(root);
+
+  const auto path = writeNote(root, "Shopping List.md", "# Shopping List\n\nMilk.\n");
+  const auto note = library.loadNote(path);
+  MICRONOTES_REQUIRE(note.metadata.titleHeading);
+  MICRONOTES_REQUIRE(note.body == "Milk.\n");
+  std::filesystem::remove_all(root);
+}
+
+// A heading that says something the name does not is body text, and stays put.
+// This is the case that must not be swallowed: getting it wrong hides a line
+// the reader wrote.
+MICRONOTES_TEST(library_leaves_a_heading_that_is_not_the_notes_name_alone) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-other";
+  std::filesystem::remove_all(root);
+  const micronotes::library::Library library(root);
+
+  const auto differs = library.loadNote(writeNote(root, "Notes.md",
+    "---\nid: n\ntitle: Notes\n---\n\n# Something Else\n\nBody.\n"));
+  MICRONOTES_REQUIRE(!differs.metadata.titleHeading);
+  MICRONOTES_REQUIRE(differs.body == "# Something Else\n\nBody.\n");
+
+  // A deeper heading is a section of the note, however it is spelt.
+  const auto deeper = library.loadNote(writeNote(root, "Deep.md",
+    "---\nid: d\ntitle: Deep\n---\n\n## Deep\n\nBody.\n"));
+  MICRONOTES_REQUIRE(!deeper.metadata.titleHeading);
+  MICRONOTES_REQUIRE(deeper.body == "## Deep\n\nBody.\n");
+
+  // Case is a difference, because re-emitting the name would change the file.
+  const auto cased = library.loadNote(writeNote(root, "Cased.md",
+    "---\nid: c\ntitle: Cased\n---\n\n# cased\n\nBody.\n"));
+  MICRONOTES_REQUIRE(!cased.metadata.titleHeading);
+  MICRONOTES_REQUIRE(cased.body == "# cased\n\nBody.\n");
+  std::filesystem::remove_all(root);
+}
+
+// Renaming a note that carries its name as a heading moves the heading with it.
+// Leaving it behind is what used to happen, and left the file naming the note
+// by a title it no longer had.
+MICRONOTES_TEST(library_rename_carries_the_title_heading_with_it) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-rename";
+  std::filesystem::remove_all(root);
+  const micronotes::library::Library library(root);
+
+  const auto path = writeNote(root, "Before.md",
+    "---\nid: r\ntitle: Before\n---\n\n# Before\n\nBody.\n");
+  const auto renamed = library.renameNote(path, "After");
+  const auto note = library.loadNote(renamed);
+  MICRONOTES_REQUIRE(note.metadata.title == "After");
+  MICRONOTES_REQUIRE(note.metadata.titleHeading);
+  MICRONOTES_REQUIRE(note.body == "Body.\n");
+  MICRONOTES_REQUIRE(readNote(renamed).find("# After\n") != std::string::npos);
+  std::filesystem::remove_all(root);
+}
+
+// A note micronotes creates has no such heading, and must not grow one: the
+// name is drawn from the library, and writing it into the Markdown as well is
+// the duplication this whole split exists to undo.
+MICRONOTES_TEST(library_creates_a_note_without_a_title_heading) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-new";
+  std::filesystem::remove_all(root);
+  const micronotes::library::Library library(root);
+
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "fresh";
+  metadata.title = "Fresh";
+  const auto path = library.createNote(metadata, "");
+  MICRONOTES_REQUIRE(readNote(path).find("# Fresh") == std::string::npos);
+  MICRONOTES_REQUIRE(library.loadNote(path).body.empty());
+  std::filesystem::remove_all(root);
+}
+
+MICRONOTES_TEST(metadata_title_heading_length_measures_only_what_it_claims) {
+  using micronotes::library::titleHeadingLength;
+  // The heading line and the blank line under it.
+  MICRONOTES_REQUIRE(titleHeadingLength("# A\n\nB\n", "A") == 5);
+  // One blank line, not a run of them: the rest is spacing the reader asked for.
+  MICRONOTES_REQUIRE(titleHeadingLength("# A\n\n\nB\n", "A") == 5);
+  // No blank line at all is still a heading.
+  MICRONOTES_REQUIRE(titleHeadingLength("# A\nB\n", "A") == 4);
+  // A heading and nothing else.
+  MICRONOTES_REQUIRE(titleHeadingLength("# A", "A") == 3);
+  // Spaces around the name do not make it a different name.
+  MICRONOTES_REQUIRE(titleHeadingLength("#   A  \n\nB", "A") == 9);
+  // Everything it declines.
+  MICRONOTES_REQUIRE(titleHeadingLength("# A\n", "") == 0);
+  MICRONOTES_REQUIRE(titleHeadingLength("", "A") == 0);
+  MICRONOTES_REQUIRE(titleHeadingLength("#A\n", "A") == 0);
+  MICRONOTES_REQUIRE(titleHeadingLength("# A #\n", "A") == 0);
+  MICRONOTES_REQUIRE(titleHeadingLength("A\n=\n", "A") == 0);
+  MICRONOTES_REQUIRE(titleHeadingLength("Text\n\n# A\n", "A") == 0);
 }

@@ -180,13 +180,18 @@ LoadedNote Library::loadNote(const std::filesystem::path& path) const {
   const auto safePath = platform::normalizeInsideRoot(root_, path);
   std::ifstream in(safePath);
   const auto markdown = readAll(in);
-  return {parseMetadata(markdown), stripMetadataHeader(markdown)};
-}
-
-std::string Library::loadNoteBody(const std::filesystem::path& path) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
-  std::ifstream in(safePath);
-  return stripMetadataHeader(readAll(in));
+  auto metadata = parseMetadata(markdown);
+  auto body = stripMetadataHeader(markdown);
+  // A `# <name>` first line is the note's own header rather than the first
+  // thing it says, so it comes off with the front matter and goes back on with
+  // it. The name is read the way every other reader of the library reads it:
+  // the front matter's title, or the file's stem when it carries none.
+  const auto title = metadata.title.empty() ? safePath.stem().string() : metadata.title;
+  if(const std::size_t heading = titleHeadingLength(body, title); heading > 0) {
+    metadata.titleHeading = true;
+    body.erase(0, heading);
+  }
+  return {std::move(metadata), std::move(body)};
 }
 
 NoteMetadata Library::loadNoteMetadata(const std::filesystem::path& path) const {

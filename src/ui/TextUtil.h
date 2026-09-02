@@ -12,9 +12,6 @@ namespace micronotes::ui {
 // them, which is how "the first non-blank line, with its heading marks stripped"
 // ends up meaning something slightly different in two places.
 
-// A note's title, taken from the first line that has anything on it.
-std::string trimTitle(std::string_view text);
-
 std::vector<std::string> splitLines(std::string_view text);
 
 // Truncates to `limit` characters, spending three of them on the ellipsis.

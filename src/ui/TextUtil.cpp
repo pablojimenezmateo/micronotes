@@ -1,23 +1,10 @@
 #include "ui/TextUtil.h"
 
 #include <algorithm>
-#include <cctype>
 #include <set>
 #include <sstream>
 
 namespace micronotes::ui {
-
-std::string trimTitle(std::string_view text) {
-  std::istringstream lines {std::string(text)};
-  std::string line;
-  while(std::getline(lines, line)) {
-    while(!line.empty() && (line.front() == '#' || std::isspace(static_cast<unsigned char>(line.front())))) {
-      line.erase(line.begin());
-    }
-    if(!line.empty()) return line.substr(0, 60);
-  }
-  return "Untitled";
-}
 
 std::vector<std::string> splitLines(std::string_view text) {
   std::vector<std::string> lines;

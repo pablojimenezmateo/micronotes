@@ -61,6 +61,30 @@ in their original order, including values that span several indented lines. A
 note written by another tool can be opened, edited and saved here without
 losing what that tool stored.
 
+## The Note's Own Name
+
+micronotes draws a note's name above its first block, from the front matter's
+`title` or from the file's stem. A note that *also* opens with a `# <name>`
+heading repeating it - which is what most other editors write - therefore said
+its name twice, once as the page's title and once as its first line.
+
+That heading is read as part of the note's header rather than as body text: it
+is split off with the front matter on load and written back with it on save, so
+the body being edited holds the name once and the file on disk still carries the
+heading every other tool expects there. Renaming the note rewrites the heading
+along with `title`, instead of leaving the file naming the note by a title it no
+longer has.
+
+The rule is deliberately literal. Only an ATX `# ` at the first level whose text
+is the note's name exactly - once the surrounding spaces are off - is claimed. A
+level-2 heading, a closed `# Name #`, a setext underline, and a heading that
+differs by a word or by case are all body text and stay where the reader put
+them.
+
+Notes micronotes creates carry no such heading and never grow one: the name
+lives in the library, and writing it into the Markdown as well is the
+duplication this exists to undo.
+
 ## Markdown Scope
 
 Supported scope is intentionally small:

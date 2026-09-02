@@ -20,7 +20,10 @@ keystroke away.
 
 - Every note is headed by its own name, editable where it is drawn, and by the
   front matter it carries, shown as properties rather than parsed and hidden.
-  Neither is written into the note's Markdown.
+  Neither is written into the note's Markdown. A note that arrived from another
+  editor with a `# Title` first line keeps it in the file and is not made to
+  print its name twice: that line is read as the note's header, and follows a
+  rename.
 - Blocks with hover handles: drag to reorder, `/` to insert, `Esc` to select,
   and a menu for turn-into, duplicate, delete and move.
 - An icon rail down the left edge: new note, go to note, search, commands, and

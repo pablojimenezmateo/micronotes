@@ -3,8 +3,6 @@
 #include "app/Shell.h"
 #include "app/WikiLinks.h"
 
-#include "ui/TextUtil.h"
-
 #include <string>
 #include <vector>
 
@@ -64,9 +62,13 @@ void createNote(UiRuntime& ui) {
   if(ui.editor.dirty() && !saveCurrent(ui)) return;
   const auto folder = ui.state.selection().folder;
   ui.wikiNotesValid = false;
-  if(auto created = ui.state.createNote("Untitled", folder, "# Untitled\n\n")) {
+  // An empty body, not a `# Untitled` heading. The page draws the note's name
+  // above its first block, so seeding one only put the name on screen twice and
+  // left the caret on the second copy; the empty page prompts for a first line
+  // instead, which is where the caret already is.
+  if(auto created = ui.state.createNote("Untitled", folder, "")) {
     ui.loadedNoteId = created->id;
-    ui.editor.setText("# Untitled\n\n");
+    ui.editor.setText("");
     ui.editorScroll = 0;
     ui.viewerScroll = 0;
     ui.revealEditorCursor = true;
@@ -93,7 +95,13 @@ bool saveCurrent(UiRuntime& ui, bool quiet) {
   }
   if(ui.state.saveSelectedNote(ui.editor.text())) {
     ui.editor.markSaved();
-    if(!quiet) ui.status = "Saved " + ui::trimTitle(ui.editor.text());
+    // Named by the library, not by the first line of the buffer. The title
+    // lives in the note's header, and a note whose body happens to be empty is
+    // still not called "Untitled".
+    if(!quiet) {
+      const auto note = ui.state.findNote(ui.state.selection().noteId);
+      ui.status = "Saved " + (note ? note->title : std::string("note"));
+    }
     return true;
   }
   ui.status = quiet ? "Autosave failed" : "Save failed";

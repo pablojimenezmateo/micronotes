@@ -101,7 +101,6 @@ using micronotes::ui::fill;
 using micronotes::ui::hLine;
 using micronotes::ui::sdlRect;
 using micronotes::ui::stroke;
-using micronotes::ui::trimTitle;
 using micronotes::ui::splitLines;
 using micronotes::ui::ellipsize;
 using micronotes::ui::isRemoteTarget;

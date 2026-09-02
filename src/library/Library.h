@@ -36,8 +36,11 @@ public:
   void ensureLayout() const;
   std::filesystem::path notePath(const std::string& title) const;
   std::filesystem::path createNote(const NoteMetadata& metadata, std::string_view body) const;
+  // The note's front matter and the body under it, with a leading `# <name>`
+  // heading counted as part of the header rather than as body text. Every read
+  // of a note goes through here, so nothing downstream has to know that a note
+  // may or may not carry its own name twice.
   LoadedNote loadNote(const std::filesystem::path& path) const;
-  std::string loadNoteBody(const std::filesystem::path& path) const;
   NoteMetadata loadNoteMetadata(const std::filesystem::path& path) const;
   bool saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const;
   bool updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const;
