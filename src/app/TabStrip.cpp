@@ -55,7 +55,11 @@ void drawCross(SDL_Renderer* renderer, Rect box, SDL_Color color) {
 }
 
 void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rect) {
-  ui::fill(renderer, rect, theme().appBg);
+  // The strip is chrome, so it takes the chrome's ground; the active tab is the
+  // page's ground pushed up into it. That contrast is what makes the tab read
+  // as continuous with the note under it, and it is why the strip no longer
+  // needs a rule between one tab and the next.
+  ui::fill(renderer, rect, theme().sidebarBg);
   ui::ClipGuard clip(renderer, rect);
   const auto& workspace = ui.state.workspace();
   const auto titles = tabTitles(ui);
@@ -66,13 +70,16 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     if(!slot.visible) break;
     const bool active = slot.index == workspace.activeTab;
     const bool hot = ui::contains(slot.rect, ui.mouseX, ui.mouseY);
-    if(active) ui::fill(renderer, slot.rect, theme().editorBg);
-    else if(hot) ui::fill(renderer, slot.rect, theme().hoverBg);
-    // The active tab joins the page below it, so its accent sits on top and its
-    // bottom edge is the only one without a rule.
-    if(active) ui::fill(renderer, {slot.rect.x, slot.rect.y, slot.rect.w, 2.0f}, theme().accent);
-    ui::fill(renderer, {slot.rect.x + slot.rect.w - 1.0f, slot.rect.y + 6.0f, 1.0f, slot.rect.h - 12.0f},
-             theme().hairline);
+    if(active) {
+      // Rounded at the top and square at the foot, so the tab meets the page
+      // without a seam: the radius is drawn into a rect a corner taller than
+      // the strip, and the strip's own clip takes the bottom corners off.
+      ui::fillRounded(renderer, {slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h + ui::kRadiusMedium},
+                      theme().editorBg, ui::kRadiusMedium);
+    } else if(hot) {
+      ui::fillRounded(renderer, {slot.rect.x + 2.0f, slot.rect.y + 3.0f, slot.rect.w - 4.0f, slot.rect.h - 3.0f},
+                      theme().hoverBg, ui::kRadiusSmall);
+    }
 
     const float textLeft = slot.rect.x + ui::kTabClosePadding + 4.0f;
     const int room = static_cast<int>(slot.close.x - textLeft - 4.0f);
@@ -90,7 +97,6 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
       ui.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
     }
   }
-  ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h - 1.0f, theme().hairline);
 }
 
 bool handleTabStripClick(UiRuntime& ui, Rect rect, float x, float y, Uint8 button, bool ctrl) {

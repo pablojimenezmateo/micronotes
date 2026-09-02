@@ -123,6 +123,15 @@ public:
 
   void setFolds(PageFolds folds);
 
+  // Room reserved above the note's first block, for whatever the application
+  // wants to draw there. It is taken out of the scrolling space rather than off
+  // the top of the viewport, so the header scrolls away with the content and
+  // the note reads as one document instead of as a pane under a banner.
+  void setHeaderHeight(float height);
+  // Where that room ended up this frame, in window coordinates. Moves with the
+  // scroll, which is the point.
+  ui::Rect headerRect() const;
+
   // Per-frame view state, set before `draw`.
   void setPointer(float x, float y);
   void setBlockSelection(PageBlockSelection selection);
@@ -174,6 +183,7 @@ private:
   float columnLeft_ = 0.0f;
   float columnWidth_ = 640.0f;
   float contentTop_ = 0.0f;
+  float headerHeight_ = 0.0f;
   int scroll_ = 0;
   std::optional<std::size_t> rawOffset_;
   std::vector<PageLink> links_;

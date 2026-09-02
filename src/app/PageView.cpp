@@ -2,6 +2,7 @@
 
 #include "doc/Fold.h"
 #include "ui/Fonts.h"
+#include "ui/Metrics.h"
 #include "ui/Settings.h"
 #include "ui/Theme.h"
 
@@ -17,6 +18,7 @@ using micronotes::ui::Rect;
 using micronotes::ui::TextRenderer;
 using micronotes::ui::drawDisclosure;
 using micronotes::ui::fill;
+using micronotes::ui::fillRounded;
 using micronotes::ui::hLine;
 using micronotes::ui::stroke;
 using micronotes::ui::theme;
@@ -127,7 +129,7 @@ void PageView::setScroll(int value) {
 
 int PageView::maxScroll() const {
   const float visible = std::max(1.0f, page_.h - kContentTopPadding * 2.0f);
-  return std::max(0, static_cast<int>(std::ceil(document_.totalHeight() - visible)));
+  return std::max(0, static_cast<int>(std::ceil(headerHeight_ + document_.totalHeight() - visible)));
 }
 
 void PageView::setRawOffset(std::optional<std::size_t> offset) {
@@ -157,7 +159,9 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
     left = page_.x + kGutterWidth;
   }
   columnLeft_ = left;
-  contentTop_ = page_.y + kContentTopPadding;
+  // The header is part of the scroll, not part of the viewport: the first block
+  // starts below it, and scrolling down takes both away together.
+  contentTop_ = page_.y + kContentTopPadding + headerHeight_;
 
   // Installing metrics drops every cached block layout, so it happens only when
   // the faces actually change, not once a frame.
@@ -213,13 +217,28 @@ void PageView::setFolds(PageFolds folds) {
   folds_ = std::move(folds);
 }
 
+void PageView::setHeaderHeight(float height) {
+  headerHeight_ = std::max(0.0f, height);
+}
+
+Rect PageView::headerRect() const {
+  // Directly above the first block, which is where originY() points. It sits in
+  // the scrolling space, so this rect walks off the top of the page as the note
+  // is scrolled -- exactly as the first paragraph does.
+  return {columnLeft_, originY() - headerHeight_, columnWidth_, headerHeight_};
+}
+
 void PageView::revealCaret(std::size_t offset) {
   const auto caret = document_.caretRect(offset);
   const float visible = std::max(1.0f, page_.h - kContentTopPadding * 2.0f);
-  if(caret.y < static_cast<float>(scroll_)) {
-    scroll_ = static_cast<int>(std::floor(caret.y));
-  } else if(caret.y + caret.h > static_cast<float>(scroll_) + visible) {
-    scroll_ = static_cast<int>(std::ceil(caret.y + caret.h - visible));
+  // In scroll space rather than document space: the scroll counts from the top
+  // of the header, so a caret in the first block is `headerHeight_` further
+  // down than its document coordinate says.
+  const float top = caret.y + headerHeight_;
+  if(top < static_cast<float>(scroll_)) {
+    scroll_ = static_cast<int>(std::floor(top));
+  } else if(top + caret.h > static_cast<float>(scroll_) + visible) {
+    scroll_ = static_cast<int>(std::ceil(top + caret.h - visible));
   }
   scroll_ = std::clamp(scroll_, 0, maxScroll());
 }
@@ -394,17 +413,21 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         const auto label = std::to_string(block.ordinal > 0 ? block.ordinal : 1) + ".";
         text.draw(label, left + 2.0f, markerY, theme().muted, style);
       } else if(block.kind == doc::BlockKind::Todo) {
-        Rect box {left + 3.0f, markerY + 4.0f, 13.0f, 13.0f};
+        Rect box {left + 3.0f, markerY + 4.0f, 14.0f, 14.0f};
         // A generous hit area: the drawn box is deliberately small.
-        checkboxes_.push_back({{box.x - 4.0f, box.y - 4.0f, box.w + 8.0f, box.h + 8.0f}, block.start});
+        const Rect hit {box.x - 4.0f, box.y - 4.0f, box.w + 8.0f, box.h + 8.0f};
+        checkboxes_.push_back({hit, block.start});
+        const bool hot = ui::contains(hit, pointerX_, pointerY_);
         if(block.checked) {
-          fill(renderer, box, theme().accent);
+          fillRounded(renderer, box, theme().accent, ui::kRadiusSmall);
           const SDL_Color tick = theme().onAccent;
           SDL_SetRenderDrawColor(renderer, tick.r, tick.g, tick.b, tick.a);
-          SDL_RenderLine(renderer, box.x + 3.0f, box.y + 6.5f, box.x + 5.5f, box.y + 9.0f);
-          SDL_RenderLine(renderer, box.x + 5.5f, box.y + 9.0f, box.x + 10.0f, box.y + 4.0f);
+          SDL_RenderLine(renderer, box.x + 3.5f, box.y + 7.0f, box.x + 6.0f, box.y + 9.5f);
+          SDL_RenderLine(renderer, box.x + 6.0f, box.y + 9.5f, box.x + 10.5f, box.y + 4.5f);
         } else {
-          stroke(renderer, box, theme().muted);
+          // The box lights up under the pointer, because a control that never
+          // reacts is one people do not learn is clickable.
+          ui::strokeRounded(renderer, box, hot ? theme().accent : theme().dim, ui::kRadiusSmall);
         }
       }
     }
@@ -431,7 +454,16 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         if(run.role == doc::TextRole::Code && !run.isMarker) {
           fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f}, theme().codeBg);
         }
-        const SDL_Color ink = colorFor(run.role, block.kind);
+        SDL_Color ink = colorFor(run.role, block.kind);
+        // A ticked task is done being read. The layout already struck it
+        // through; muting the ink is the other half of saying so.
+        if(block.kind == doc::BlockKind::Todo && block.checked && !layout.revealed &&
+           run.role == doc::TextRole::Body) {
+          ink = theme().dim;
+        }
+        // A callout's head line is its name, so it is drawn in the kind's own
+        // colour rather than in the muted ink the rest of a quote takes.
+        if(layout.calloutTitle && run.role == doc::TextRole::Body) ink = ui::calloutStyle(block.info).accent;
         text.draw(run.text, x, lineY, ink, style);
         if(run.style.strike) {
           hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);
@@ -447,7 +479,6 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     }
     if(clipToColumn) SDL_SetRenderClipRect(renderer, &pageClip);
   }
-
   if(focused && !blockSelection_.active) {
     const auto rect = document_.caretRect(caret);
     const Rect caretRect = toRect(rect, ox, oy);
@@ -481,7 +512,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     if(block.kind == doc::BlockKind::Code) {
       if(layout.complex || top + layout.height < viewTop || top > viewBottom) continue;
       const Rect codeRect {left, top + 2.0f, columnWidth_ - layout.indent, std::max(8.0f, layout.height - 8.0f)};
-      ui::drawSurface(renderer, codeRect, theme().codeBg, theme().hairline);
+      fillRounded(renderer, codeRect, theme().codeBg, ui::kRadiusSmall);
       continue;
     }
 
@@ -509,29 +540,36 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
 
     const ui::CalloutStyle style = ui::calloutStyle(block.info);
     const Rect callout {left, top, columnWidth_ - layout.indent, height + 2.0f};
-    ui::drawSurface(renderer, callout, style.surface, style.surface);
-    fill(renderer, {callout.x, callout.y, 3.0f, callout.h}, style.accent);
-    if(document_.layout(i).revealed || block.info.empty()) continue;
-    // The kind reads as a badge in the corner rather than a word in the text:
-    // the first line of a callout is the user's sentence, not our label.
+    // No rule down the left edge. The tint is already the whole shape, and a
+    // bar beside it makes the box read as a quote wearing a colour rather than
+    // as a callout.
+    ui::drawRoundedSurface(renderer, callout, style.surface, style.surface, ui::kRadiusMedium);
+    if(!layout.calloutTitle) continue;
+
+    // The head line is the title: a mark in the gutter, and the kind's own name
+    // when the author did not write one after `[!KIND]`.
+    const float lineY = callout.y + (layout.lines.empty() ? 8.0f : layout.lines.front().y);
+    const float lineH = layout.lines.empty() ? 20.0f : layout.lines.front().height;
+    // Sized and placed to sit inside the quote gutter the layout already
+    // reserves, so the mark never crowds the title beside it.
+    const float markSize = 7.0f;
+    fillRounded(renderer, {std::round(callout.x + 6.0f), std::round(lineY + (lineH - markSize) / 2.0f),
+                           markSize, markSize},
+                style.accent, markSize / 2.0f);
+
+    bool titled = false;
+    if(!layout.lines.empty()) {
+      for(const auto& run : layout.lines.front().runs) titled = titled || !run.text.empty();
+    }
+    if(titled) continue;
     std::string name = block.info;
     for(std::size_t c = 1; c < name.size(); ++c) {
       name[c] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[c])));
     }
     ui::TextStyle label;
-    label.size = ui::type().tiny;
+    label.size = ui::type().body;
     label.strong = true;
-    const float badgeLeft = callout.x + callout.w - static_cast<float>(text.width(name, label)) - 9.0f;
-    // Skipped rather than overlapped when the first line reaches that far: the
-    // accent already says which kind this is, and the words matter more.
-    float firstLineRight = ox + layout.textLeft;
-    if(!layout.lines.empty()) {
-      for(const auto& run : layout.lines.front().runs) {
-        if(!run.text.empty()) firstLineRight = std::max(firstLineRight, ox + run.rect.x + run.rect.w);
-      }
-    }
-    if(firstLineRight + 8.0f > badgeLeft) continue;
-    text.draw(name, badgeLeft, callout.y + 5.0f, style.accent, label);
+    text.draw(name, ox + layout.textLeft, lineY, style.accent, label);
   }
 }
 
@@ -555,11 +593,18 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
     const std::string copy = "Copy";
     const Rect button {right - static_cast<float>(text.width(copy, label)) - 14.0f, y, 
                        static_cast<float>(text.width(copy, label)) + 14.0f, 19.0f};
-    codeButtons_.push_back({button, block.start});
-    const bool hot = ui::contains(button, pointerX_, pointerY_);
-    // Drawn over the code, so it needs its own ground to stay readable.
-    ui::drawSurface(renderer, button, hot ? theme().surfaceElevated : theme().codeBg, hot ? theme().hairline : theme().codeBg);
-    text.draw(copy, button.x + 7.0f, button.y + 3.0f, hot ? theme().text : theme().dim, label);
+    // The button is only there while the pointer is on the block it copies. A
+    // control sitting on every code block in a long note is a column of
+    // "Copy" down the page saying nothing about the code beside it.
+    const Rect blockRect {ox, top, columnWidth_, layout.height};
+    if(ui::contains(blockRect, pointerX_, pointerY_)) {
+      codeButtons_.push_back({button, block.start});
+      const bool hot = ui::contains(button, pointerX_, pointerY_);
+      // Drawn over the code, so it needs its own ground to stay readable.
+      ui::drawRoundedSurface(renderer, button, hot ? theme().surfaceElevated : theme().surface,
+                             hot ? theme().hairline : theme().surface, ui::kRadiusSmall);
+      text.draw(copy, button.x + 7.0f, button.y + 3.0f, hot ? theme().text : theme().muted, label);
+    }
 
     if(block.info.empty()) continue;
     text.draw(block.info, button.x - static_cast<float>(text.width(block.info, label)) - 10.0f, y + 3.0f,

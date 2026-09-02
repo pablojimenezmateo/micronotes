@@ -74,8 +74,8 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     const Rect tab = tabRect(rect, i, tabCount);
     const bool active = workspace.rightPanelView == kViews[i];
     const bool hot = ui::contains(tab, ui.mouseX, ui.mouseY);
-    if(active) ui::fill(renderer, tab, theme().selectedBg);
-    else if(hot) ui::fill(renderer, tab, theme().hoverBg);
+    if(active) ui::fillRounded(renderer, tab, theme().selectedBg, ui::kRadiusSmall);
+    else if(hot) ui::fillRounded(renderer, tab, theme().hoverBg, ui::kRadiusSmall);
     const auto label = viewLabel(kViews[i]);
     const float labelX = tab.x + (tab.w - static_cast<float>(text.width(label, tabStyle))) / 2.0f;
     text.draw(label, labelX, tab.y + 4.0f, active ? theme().text : theme().dim, tabStyle);

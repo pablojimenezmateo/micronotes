@@ -50,6 +50,11 @@ struct ShellLayout {
   // the window controls. Reserved whether or not a note is open, so a hit test
   // against the rest of the window agrees with what was drawn.
   Rect titleBar;
+  // The icon rail down the leading edge, outside the sidebar rather than inside
+  // it: it is always there, at one width, whether or not any panel is showing.
+  // That is the whole point of it -- with every panel hidden it is still the
+  // way back to them.
+  Rect ribbon;
   Rect sidebar;      // search field, notebooks, favorites, tags
   Rect tabs;         // the tab strip above the page
   Rect content;      // the page itself

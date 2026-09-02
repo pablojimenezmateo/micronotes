@@ -18,8 +18,14 @@ block's syntax markers appear only while the caret is inside it. Raw Markdown
 (`Ctrl+2`), a reading view (`Ctrl+3`) and a split (`Ctrl+4`) are all one
 keystroke away.
 
+- Every note is headed by its own name, editable where it is drawn, and by the
+  front matter it carries, shown as properties rather than parsed and hidden.
+  Neither is written into the note's Markdown.
 - Blocks with hover handles: drag to reorder, `/` to insert, `Esc` to select,
   and a menu for turn-into, duplicate, delete and move.
+- An icon rail down the left edge: new note, go to note, search, commands, and
+  at its foot the two panel toggles and settings. It does not hide, so putting
+  every panel away is something you can undo without knowing a shortcut.
 - One sidebar with the search field on top of it: a tree of notebooks and notes
   with drag to re-parent, favorites, recents, and tags as a filter rather than a
   second hierarchy. Typing a query replaces the tree with the matching notes and
@@ -27,8 +33,10 @@ keystroke away.
 - A borderless window with drawn chrome: the top strip is the breadcrumb, the
   favorite star and minimize / maximize / close, and dragging it moves the
   window. If the platform will not take a hit test, the decorations come back.
-- `Ctrl+P` jumps to any note; `Ctrl+Shift+P` is every command; `F1` is every
-  shortcut; `Ctrl+,` is theme, text size, page width and which folder to open.
+  The bar at the foot carries the word and character count.
+- `Ctrl+P` or `Ctrl+O` jumps to any note; `Ctrl+Shift+P` is every command; `F1`
+  is every shortcut; `Ctrl+,` is theme, text size, page width and which folder
+  to open.
 - Deleting moves to the library's own trash, so it can be undone.
 - Light and dark, HiDPI, and it stays fast: re-layout after a keystroke in a
   200 KB note is budgeted and measured, not hoped for.

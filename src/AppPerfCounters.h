@@ -21,6 +21,8 @@
   X(LibrarySearchCalls, "library.search_calls")                                        \
   /* --- text rendering --------------------------------------------------- */        \
   X(RenderTextMeasureCalls, "render.text_measure_calls")                               \
+  /* --- status bar --------------------------------------------------------- */     \
+  X(StatusWordCounts, "status.word_counts")                                            \
   /* --- frame loop / input ------------------------------------------------ */       \
   X(FrameEventWakes, "frame.event_wakes")                                              \
   X(FramePresents, "frame.presents")                                                   \

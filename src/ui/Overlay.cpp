@@ -2,6 +2,7 @@
 #include "ui/Overlay.h"
 
 #include "ui/Fuzzy.h"
+#include "ui/Metrics.h"
 
 #include <algorithm>
 #include <cmath>
@@ -318,7 +319,9 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   const auto layout = layoutFor(*overlay, text, windowWidth, windowHeight);
   lastLayout_ = layout;
 
-  drawSurface(renderer, layout.panel, theme().surfaceElevated, theme().divider);
+  // Rounded, like every other floating surface: a square-cornered card over a
+  // page of rounded blocks reads as a screenshot pasted on top of the window.
+  drawRoundedSurface(renderer, layout.panel, theme().surfaceElevated, theme().divider, kRadiusLarge);
 
   const TextStyle titleStyle {FontFamily::Sans, true, false, type().small};
   const TextStyle bodyStyle {FontFamily::Sans, false, false, type().ui};
@@ -331,7 +334,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   }
 
   if(usesField(*overlay)) {
-    drawSurface(renderer, layout.field, theme().inputBg, theme().accentDim);
+    drawRoundedSurface(renderer, layout.field, theme().inputBg, theme().accentDim, kRadiusSmall);
     const float textY = layout.field.y + (layout.field.h - static_cast<float>(text.lineHeight(bodyStyle))) / 2.0f;
     if(overlay->value.empty()) {
       text.draw(overlay->placeholder, layout.field.x + 10.0f, textY, theme().dim, bodyStyle);
@@ -362,8 +365,8 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       const bool isConfirm = index == -1;
       const bool hot = contains(rect, mouseX_, mouseY_);
       const SDL_Color face = isConfirm ? (overlay->items.empty() ? theme().warn : theme().warn) : theme().surface;
-      fill(renderer, rect, isConfirm ? face : (hot ? theme().hoverBg : theme().surface));
-      stroke(renderer, rect, isConfirm ? face : theme().hairline);
+      drawRoundedSurface(renderer, rect, isConfirm ? face : (hot ? theme().hoverBg : theme().surface),
+                         isConfirm ? face : theme().hairline, kRadiusSmall);
       const auto label = isConfirm ? overlay->confirmLabel : std::string("Cancel");
       const int labelW = text.width(label, bodyStyle);
       text.draw(label, rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f,
@@ -375,9 +378,9 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     const auto& item = overlay->items[static_cast<std::size_t>(index)];
     const bool selected = index == overlay->highlighted;
     if(selected) {
-      fill(renderer, rect, theme().selectedBg);
+      fillRounded(renderer, rect, theme().selectedBg, kRadiusSmall);
     } else if(contains(rect, mouseX_, mouseY_) && item.enabled) {
-      fill(renderer, rect, theme().hoverBg);
+      fillRounded(renderer, rect, theme().hoverBg, kRadiusSmall);
     }
     const SDL_Color label = !item.enabled ? theme().dim : (item.destructive ? theme().warn : theme().text);
     const float labelY = rect.y + (rect.h - static_cast<float>(text.lineHeight(bodyStyle))) / 2.0f;

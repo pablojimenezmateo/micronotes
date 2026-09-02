@@ -43,8 +43,25 @@ private:
 void fill(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void stroke(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void hLine(SDL_Renderer* renderer, float x1, float x2, float y, SDL_Color color);
+
+// A filled rectangle with rounded corners, assembled from horizontal spans: a
+// centre block, and one span per scanline of the two corner bands. At the radii
+// the shell actually uses that is a couple of dozen spans submitted in a single
+// SDL_RenderFillRects, which is cheaper than the texture a general rounded-rect
+// routine would want to cache and invalidate.
+//
+// A radius of zero, or one too large for the rect to hold, degrades to the
+// square fill rather than to a shape nobody asked for -- callers pass a token,
+// and a token has no idea how small the rect it lands in has been squeezed.
+void fillRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius);
+void strokeRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius);
 void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor);
 void drawSurface(SDL_Renderer* renderer, Rect rect);
+// The rounded counterpart of drawSurface: fill, border, and no sheen. The sheen
+// is a Notion device -- a 1px lit top edge on a raised panel -- and it reads as
+// a seam once the corners are round.
+void drawRoundedSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor,
+                        float radius);
 // A row that is selected, pointed at, or neither.
 //
 // Selection is a fill and a strip of accent down the left edge -- the shape of

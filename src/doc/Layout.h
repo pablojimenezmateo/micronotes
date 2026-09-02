@@ -84,6 +84,12 @@ struct BlockLayout {
   bool raw = false;        // laid out as plain source lines
   bool complex = false;    // drawn by the md4c render model
   bool hidden = false;     // inside a collapsed fold: no lines, no height
+  // The `> [!KIND]` line at the head of a callout, with its marker hidden. Its
+  // text is the callout's title rather than the first sentence of its body,
+  // which is what `[!KIND] Some title` means everywhere these files are read.
+  // The view draws it in the kind's colour and puts the kind's mark beside it;
+  // an empty one is where the view falls back to naming the kind itself.
+  bool calloutTitle = false;
   std::vector<VisualLine> lines;
   std::vector<std::string> links;
 };

@@ -3,6 +3,10 @@
 
 #include "app/PageView.h"
 #include "app/Notes.h"
+#include "app/InlineText.h"
+#include "app/PageHeader.h"
+#include "app/SessionState.h"
+#include "app/Ribbon.h"
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
 #include "app/FramePolicy.h"
@@ -760,79 +764,6 @@ static void performAction(UiRuntime& ui, UiAction action) {
   }
 }
 
-static std::filesystem::path uiStatePath(const std::filesystem::path& root) {
-  return root / ".micronotes" / "ui.state";
-}
-
-static std::filesystem::path foldStatePath(const std::filesystem::path& root) {
-  return root / ".micronotes" / "folds.state";
-}
-
-static std::filesystem::path treeStatePath(const std::filesystem::path& root) {
-  return root / ".micronotes" / "tree.state";
-}
-
-static std::filesystem::path libraryPathConfigPath() {
-  return microcore::platform::resolveRuntimePaths().configDir / "library-path";
-}
-
-static std::optional<std::filesystem::path> readConfiguredLibraryRoot() {
-  std::ifstream in(libraryPathConfigPath());
-  if(!in) return std::nullopt;
-  std::string line;
-  std::getline(in, line);
-  if(line.empty()) return std::nullopt;
-  return std::filesystem::path(line);
-}
-
-static bool writeConfiguredLibraryRoot(const std::filesystem::path& root) {
-  const auto configPath = libraryPathConfigPath();
-  return platform::writeFileDurably(configPath, root.generic_string() + "\n");
-}
-
-// Everything about a library that lives outside its notes. Written when the
-// app closes, and again before it opens a different library, so the view state
-// of the one being left is never spent on the one being opened.
-static void persistLibraryState(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) return;
-  ui.state.saveUiState(uiStatePath(ui.state.libraryRoot()));
-  if(ui.folds.dirty()) ui.folds.save(foldStatePath(ui.state.libraryRoot()));
-  if(ui.tree.dirty()) {
-    platform::writeFileDurably(treeStatePath(ui.state.libraryRoot()), ui.tree.serialize());
-  }
-}
-
-// Opens a library and restores the view state stored beside it. The one path
-// into a library, taken by startup and by the settings dialog alike, so a
-// library opened from inside the app comes up exactly as it would on the next
-// launch.
-static bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
-  if(!ui.state.openOrCreateLibrary(root)) return false;
-  ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
-  ui.folds.load(foldStatePath(ui.state.libraryRoot()));
-  std::ostringstream treeBuffer;
-  if(std::ifstream treeState(treeStatePath(ui.state.libraryRoot())); treeState) {
-    treeBuffer << treeState.rdbuf();
-  }
-  ui.tree.load(treeBuffer.str());
-  // Whatever was open last time still has to be reachable, so the folder
-  // holding it is opened even if its parent was left collapsed.
-  ui.tree.reveal(ui.state.selection().folder);
-  ui.search.beginWith(ui.state.selection().search, false);
-  ui.searchScope = ui.state.selection().searchScope;
-  // The editor is emptied first: the previous library's note is gone, and a
-  // library with nothing in it has no note to overwrite it with.
-  ui.loadedNoteId.clear();
-  ui.editor.setText("");
-  ui.editor.markSaved();
-  ui.sidebarScroll = 0;
-  ui.editorScroll = 0;
-  ui.viewerScroll = 0;
-  loadSelectedIntoEditor(ui);
-  if(ui.state.selection().noteId.empty()) selectNoteAt(ui, 0);
-  return true;
-}
-
 static bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
   if(source.empty()) return true;
   if(!ui.state.hasLibrary()) {
@@ -1019,222 +950,6 @@ static std::vector<markdown::Inline> blockImages(const markdown::Block& block) {
   return out;
 }
 
-struct InlineRun {
-  std::string text;
-  std::string target;
-  SDL_Color color = theme().text;
-  bool mono = false;
-  bool strong = false;
-  bool emphasis = false;
-  bool strikethrough = false;
-};
-
-static std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines, SDL_Color baseColor = theme().text) {
-  std::vector<InlineRun> runs;
-  for(const auto& inlineItem : inlines) {
-    if(inlineItem.type == markdown::InlineType::Image) continue;
-    InlineRun run;
-    run.text = inlineItem.text;
-    run.color = baseColor;
-    run.strong = inlineItem.strong;
-    run.emphasis = inlineItem.emphasis;
-    run.strikethrough = inlineItem.strikethrough;
-    if(inlineItem.type == markdown::InlineType::Link) {
-      run.text = inlineItem.text.empty() ? inlineItem.target : inlineItem.text;
-      run.target = inlineItem.target;
-      run.color = theme().accent;
-    } else if(inlineItem.type == markdown::InlineType::Code) {
-      run.mono = true;
-      run.color = theme().warn;
-    } else if(inlineItem.type == markdown::InlineType::Emphasis) {
-      run.emphasis = true;
-    } else if(inlineItem.type == markdown::InlineType::Strong) {
-      run.strong = true;
-    } else if(inlineItem.type == markdown::InlineType::Strikethrough) {
-      run.strikethrough = true;
-    } else if(inlineItem.type == markdown::InlineType::FootnoteRef) {
-      run.text = "[" + inlineItem.text + "]";
-      run.target = "#fn-" + inlineItem.text;
-      run.color = theme().accent;
-    } else if(inlineItem.type == markdown::InlineType::Html) {
-      run.color = theme().dim;
-    }
-    if(!run.text.empty()) runs.push_back(std::move(run));
-  }
-  return runs;
-}
-
-static std::vector<InlineRun> inlineRuns(const markdown::Block& block, SDL_Color baseColor = theme().text) {
-  return inlineRuns(block.inlines, baseColor);
-}
-
-// One layout token. Whitespace between tokens is recorded as a flag rather than
-// kept as text, so a run boundary never invents a space that the source did not
-// have (the "[link](url)." case) and never drops one that it did.
-struct LaidWord {
-  const InlineRun* run = nullptr;
-  std::string text;
-  bool spaceBefore = false;
-  bool lineBreak = false;
-};
-
-static std::vector<LaidWord> layoutWords(const std::vector<InlineRun>& runs) {
-  std::vector<LaidWord> out;
-  bool pendingSpace = false;
-  bool atStart = true;
-  std::string token;
-  const InlineRun* tokenRun = nullptr;
-
-  auto flush = [&]() {
-    if(token.empty()) return;
-    LaidWord word;
-    word.run = tokenRun;
-    word.text = token;
-    word.spaceBefore = pendingSpace && !atStart;
-    out.push_back(std::move(word));
-    token.clear();
-    pendingSpace = false;
-    atStart = false;
-  };
-
-  for(const auto& run : runs) {
-    for(const char c : run.text) {
-      if(c == '\n') {
-        flush();
-        LaidWord br;
-        br.run = &run;
-        br.lineBreak = true;
-        out.push_back(std::move(br));
-        pendingSpace = false;
-        atStart = true;
-      } else if(std::isspace(static_cast<unsigned char>(c))) {
-        flush();
-        pendingSpace = true;
-      } else {
-        if(token.empty()) tokenRun = &run;
-        token.push_back(c);
-      }
-    }
-    flush();
-  }
-  flush();
-  return out;
-}
-
-static ui::TextStyle runStyle(const InlineRun& run, float size) {
-  ui::TextStyle style;
-  style.family = run.mono ? ui::FontFamily::Mono : ui::FontFamily::Sans;
-  style.strong = run.strong;
-  style.italic = run.emphasis;
-  style.size = size;
-  return style;
-}
-
-static int measureInlineLines(TextRenderer& text, const std::vector<InlineRun>& runs, int maxWidth, float size) {
-  int lines = 1;
-  int x = 0;
-  for(const auto& word : layoutWords(runs)) {
-    if(word.lineBreak) {
-      ++lines;
-      x = 0;
-      continue;
-    }
-    const auto style = runStyle(*word.run, size);
-    const int wordW = text.width(word.text, style);
-    const int spaceW = (x == 0 || !word.spaceBefore) ? 0 : text.width(" ", style);
-    if(x > 0 && x + spaceW + wordW > maxWidth) {
-      ++lines;
-      x = wordW;
-    } else {
-      x += spaceW + wordW;
-    }
-  }
-  return std::max(1, lines);
-}
-
-static float drawInlineRuns(SDL_Renderer* renderer, TextRenderer& text, std::vector<LinkRegion>* links, const std::vector<InlineRun>& runs, float x, float y, int maxWidth, int lineStep, float size) {
-  float cursorX = x;
-  float cursorY = y;
-  // Remembers where the previous word of the same link ended, so the underline
-  // runs through the spaces inside a multi-word link instead of breaking up.
-  const InlineRun* previousRun = nullptr;
-  float previousEndX = 0.0f;
-  float previousY = -1.0f;
-  for(const auto& word : layoutWords(runs)) {
-    if(word.lineBreak) {
-      cursorX = x;
-      cursorY += static_cast<float>(lineStep);
-      previousRun = nullptr;
-      continue;
-    }
-    const auto& run = *word.run;
-    const auto style = runStyle(run, size);
-    const int lineH = text.lineHeight(style);
-    const int wordW = text.width(word.text, style);
-    const int spaceW = (cursorX == x || !word.spaceBefore) ? 0 : text.width(" ", style);
-    if(cursorX > x && cursorX + static_cast<float>(spaceW + wordW) > x + static_cast<float>(maxWidth)) {
-      cursorX = x;
-      cursorY += static_cast<float>(lineStep);
-    } else {
-      cursorX += static_cast<float>(spaceW);
-    }
-    text.draw(word.text, cursorX, cursorY, run.color, style);
-    if(run.strikethrough) {
-      const float lineY = cursorY + static_cast<float>(lineH) * 0.55f;
-      hLine(renderer, cursorX, cursorX + static_cast<float>(wordW), lineY, run.color);
-    }
-    if(!run.target.empty()) {
-      const bool continues = previousRun == &run && std::abs(previousY - cursorY) < 0.5f;
-      const float underlineFrom = continues ? previousEndX : cursorX;
-      hLine(renderer, underlineFrom, cursorX + static_cast<float>(wordW), cursorY + static_cast<float>(lineH - 2), theme().accentDim);
-      if(links) {
-        links->push_back({{underlineFrom, cursorY, cursorX + static_cast<float>(wordW) - underlineFrom, static_cast<float>(lineH)}, run.target});
-      }
-    }
-    cursorX += static_cast<float>(wordW);
-    previousRun = run.target.empty() ? nullptr : &run;
-    previousEndX = cursorX;
-    previousY = cursorY;
-  }
-  return cursorY;
-}
-
-static std::vector<std::string> wrapText(TextRenderer& text, std::string_view value, int maxWidth, bool heading = false, bool mono = false) {
-  std::vector<std::string> out;
-  if(maxWidth <= 0) {
-    out.emplace_back(value);
-    return out;
-  }
-  std::istringstream logicalLines {std::string(value)};
-  std::string logicalLine;
-  while(std::getline(logicalLines, logicalLine)) {
-    if(logicalLine.empty()) {
-      out.emplace_back();
-      continue;
-    }
-    std::string line;
-    std::istringstream words {logicalLine};
-    std::string word;
-    while(words >> word) {
-      const std::string candidate = line.empty() ? word : line + " " + word;
-      if(!line.empty() && text.width(candidate, heading, mono) > maxWidth) {
-        out.push_back(line);
-        line = word;
-        while(text.width(line, heading, mono) > maxWidth && line.size() > 1) {
-          std::string chunk = line;
-          while(chunk.size() > 1 && text.width(chunk, heading, mono) > maxWidth) chunk.pop_back();
-          out.push_back(chunk);
-          line.erase(0, chunk.size());
-        }
-      } else {
-        line = candidate;
-      }
-    }
-    out.push_back(line);
-  }
-  if(out.empty()) out.emplace_back();
-  return out;
-}
 
 static std::string inlinePlainText(const std::vector<markdown::Inline>& inlines) {
   std::string out;
@@ -1307,10 +1022,17 @@ static float blockBottomSpacing(const markdown::Block& block, bool heading, bool
   return heading ? 14.0f : html ? 8.0f : 10.0f;
 }
 
+// The room a callout's chrome takes before its first word: the mark in the
+// gutter, the kind's name, and the gaps either side. The measure and the draw
+// both read it, so the label cannot be drawn into space nobody reserved.
+// Where a callout's name starts, measured from the box's left edge: clear of
+// the mark that sits in the gutter beside it.
+constexpr float kAdmonitionLabelLeft = 18.0f;
+
 static float admonitionLabelWidth(TextRenderer& text, const markdown::Block& block) {
   if(block.type != markdown::BlockType::Admonition) return 0.0f;
   const auto label = block.admonitionType.empty() ? "note" : block.admonitionType;
-  return static_cast<float>(text.width(label, false, false, true)) + 18.0f;
+  return kAdmonitionLabelLeft + static_cast<float>(text.width(label, false, false, true)) + 10.0f;
 }
 
 static float footnoteLabelWidth(TextRenderer& text, const markdown::Block& block) {
@@ -1393,7 +1115,13 @@ static int viewerMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
   Rect page {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
   attachments::AttachmentService attachmentService;
   const auto& doc = previewDocument(ui);
-  const float contentTop = page.y + 14.0f;
+  // The header belongs to the note, not to the surface it is read on, so the
+  // reading view reserves the same room for it and scrolls it away the same
+  // way. `scrollTop` is where the scroll counts from; `contentTop` is where the
+  // note's own first block starts, which is that plus the header.
+  const float headerHeight = pageHeaderHeight(text, ui);
+  const float scrollTop = page.y + 14.0f;
+  const float contentTop = scrollTop + headerHeight;
   float contentLeft = 0.0f;
   float contentWidth = 0.0f;
   contentColumn(page, contentLeft, contentWidth);
@@ -1431,7 +1159,7 @@ static int viewerMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
       }
     }
   }
-  return std::max(0, static_cast<int>(std::ceil(measureY - contentTop - page.h + 24.0f)));
+  return std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
 }
 
 // The tree is drawn as a flat list: one row height, one indent per level, and
@@ -1685,13 +1413,14 @@ static void expandTreeCursor(UiRuntime& ui, bool open) {
 static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   const Rect search = searchBoxRect(rect);
   const bool focused = ui.focus == FocusArea::Search;
-  drawSurface(renderer, search, theme().inputBg, focused ? theme().accentDim : theme().hairline);
+  ui::drawRoundedSurface(renderer, search, theme().inputBg, focused ? theme().accent : theme().hairline,
+                         ui::kRadiusSmall);
   ui.searchScopeToggle = {search.x + search.w - 30.0f, search.y + 5.0f, 24.0f, 24.0f};
   ui.offerTooltip(ui.searchScopeToggle, "Searching " + searchScopeName(ui.searchScope) + " - click to change");
   text.draw("Find", search.x + 10.0f, search.y + 8.0f, focused ? theme().accent : theme().dim);
   drawTextField(renderer, text, ui, ui.search, searchTextRect(rect, text), focused, "Search all notes");
-  fill(renderer, ui.searchScopeToggle, focused ? theme().accentSoft : theme().surface);
-  stroke(renderer, ui.searchScopeToggle, focused ? theme().accentDim : theme().hairline);
+  ui::drawRoundedSurface(renderer, ui.searchScopeToggle, focused ? theme().accentSoft : theme().surface,
+                         focused ? theme().accentDim : theme().hairline, ui::kRadiusSmall);
   text.draw(searchScopeLabel(ui.searchScope), ui.searchScopeToggle.x + 8.0f, ui.searchScopeToggle.y + 4.0f,
             focused ? theme().accent : theme().muted);
 }
@@ -1769,6 +1498,10 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
       continue;
     }
 
+    // Nesting guides: one hairline per level above this row, drawn under it
+    // rather than beside it, so a run of siblings reads as one branch. Drawn
+    // before the row's own fill would be wrong -- the fill is what a selected
+    // row is -- so they go on top of it and stop short of the text.
     const bool isNote = row.tree.kind == ui::TreeRowKind::Note;
     // A folder is the current context and a note is the open document, so only
     // the note wears the strong selection: two accent bars at once would read
@@ -1779,6 +1512,11 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
     if(current) fill(renderer, row.rect, theme().hoverBg);
     drawSelection(renderer, row.rect, selected, hot || dropTarget);
     if(dropTarget) stroke(renderer, row.rect, theme().accent);
+
+    for(int depth = 0; depth < row.tree.depth; ++depth) {
+      const float guideX = std::round(list.x + 17.0f + static_cast<float>(depth) * kSidebarIndent);
+      fill(renderer, {guideX, row.rect.y, ui::kTreeGuideWidth, row.rect.h}, theme().hairline);
+    }
 
     if(row.disclosure.w > 0.0f) {
       drawDisclosure(renderer, row.disclosure, row.tree.expanded,
@@ -1826,6 +1564,10 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   }
 
   if(ui.overlays.active()) return CursorKind::Pointer;
+
+  if(contains(layout.ribbon, x, y)) {
+    return ribbonHasControlAt(ui, layout.ribbon, x, y) ? CursorKind::Pointer : CursorKind::Default;
+  }
 
   if(contains(layout.sidebar, x, y)) {
     const Rect search = searchBoxRect(layout.sidebar);
@@ -1886,10 +1628,17 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, Rect rect) {
   fill(renderer, rect, theme().viewerBg);
   Rect page {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
-  drawSurface(renderer, page, theme().pageSurface, ui.focus == FocusArea::Viewer ? theme().accentDim : theme().hairline);
+  // No border. A rule around a page that fills its pane draws a box nobody is
+  // outside of; which pane has the keyboard is said by the focus edge instead.
+  ui::fillRounded(renderer, page, theme().pageSurface, ui::kRadiusMedium);
+  ui::drawFocusEdge(renderer, page, ui.focus == FocusArea::Viewer);
   attachments::AttachmentService attachmentService;
   const auto& doc = previewDocument(ui);
-  const float contentTop = page.y + 14.0f;
+  // The same reservation viewerMaxScroll() makes, for the same reason: the
+  // header is part of the note's scrolling space, above its first block.
+  const float headerHeight = pageHeaderHeight(text, ui);
+  const float scrollTop = page.y + 14.0f;
+  const float contentTop = scrollTop + headerHeight;
   float contentLeft = 0.0f;
   float contentWidth = 0.0f;
   contentColumn(page, contentLeft, contentWidth);
@@ -1957,10 +1706,12 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     }
     if(ordered) ++orderedIndex;
   }
-  const int maxScroll = std::max(0, static_cast<int>(std::ceil(measureY - contentTop - page.h + 24.0f)));
+  const int maxScroll = std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
   ui.viewerScroll = std::clamp(ui.viewerScroll, 0, maxScroll);
   {
     ClipGuard clip(renderer, {page.x + 1, page.y + 1, page.w - 2, page.h - 2});
+    drawPageHeader(renderer, text, ui, {contentLeft, scrollTop, contentWidth, headerHeight},
+                   scrollTop - static_cast<float>(ui.viewerScroll));
     float y = contentTop - static_cast<float>(ui.viewerScroll);
     orderedIndex = 1;
     for(const auto& block : doc.blocks) {
@@ -1999,7 +1750,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
         const float blockH = static_cast<float>(std::max<std::size_t>(1, lines.size()) * lineStepFor(text, blockStyle, 1.5f)) + 10.0f;
         Rect codeRect {contentLeft + indentW, y - 6.0f, contentWidth - indentW, blockH};
         if(codeRect.y + codeRect.h >= page.y && codeRect.y <= page.y + page.h) {
-          drawSurface(renderer, codeRect, theme().codeBg, theme().hairline);
+          ui::fillRounded(renderer, codeRect, theme().codeBg, ui::kRadiusSmall);
           float codeY = y;
           for(const auto& codeLine : lines) {
             text.draw(ellipsizeToWidth(text, codeLine, static_cast<int>(codeRect.w - 20.0f), false, true), codeRect.x + 10.0f, codeY, theme().text, blockStyle);
@@ -2022,10 +1773,14 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
             // change colour when the note is read instead of edited.
             const ui::CalloutStyle callStyle = ui::calloutStyle(block.admonitionType);
             Rect callout {contentLeft + indentW, y - 7.0f, contentWidth - indentW, blockH + 12.0f};
-            drawSurface(renderer, callout, callStyle.surface, callStyle.surface);
-            fill(renderer, {callout.x, callout.y, 3.0f, callout.h}, callStyle.accent);
+            ui::fillRounded(renderer, callout, callStyle.surface, ui::kRadiusMedium);
+            const float markSize = 7.0f;
+            ui::fillRounded(renderer, {std::round(callout.x + 6.0f),
+                                       std::round(y + (static_cast<float>(text.lineHeight()) - markSize) / 2.0f),
+                                       markSize, markSize},
+                            callStyle.accent, markSize / 2.0f);
             const auto label = block.admonitionType.empty() ? "note" : block.admonitionType;
-            text.draw(label, callout.x + 10.0f, y, callStyle.accent, false, false, true);
+            text.draw(label, callout.x + kAdmonitionLabelLeft, y, callStyle.accent, false, false, true);
           }
           if(footnote && y + blockH >= page.y && y <= page.y + page.h) {
             const auto label = block.footnoteLabel.empty() ? "*" : block.footnoteLabel;
@@ -2036,11 +1791,15 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
             text.draw(std::to_string(number) + ".", contentLeft + indentW, y, theme().muted);
           } else if(unordered && y + blockH >= page.y && y <= page.y + page.h) {
             if(block.task) {
-              Rect box {contentLeft + indentW, y + 3.0f, 12.0f, 12.0f};
-              stroke(renderer, box, block.taskChecked ? theme().accent : theme().muted);
+              Rect box {contentLeft + indentW, y + 3.0f, 13.0f, 13.0f};
               if(block.taskChecked) {
-                hLine(renderer, box.x + 2.0f, box.x + 5.0f, box.y + 7.0f, theme().accent);
-                hLine(renderer, box.x + 5.0f, box.x + 10.0f, box.y + 3.0f, theme().accent);
+                ui::fillRounded(renderer, box, theme().accent, ui::kRadiusSmall);
+                const SDL_Color tick = theme().onAccent;
+                SDL_SetRenderDrawColor(renderer, tick.r, tick.g, tick.b, tick.a);
+                SDL_RenderLine(renderer, box.x + 3.0f, box.y + 6.5f, box.x + 5.5f, box.y + 9.0f);
+                SDL_RenderLine(renderer, box.x + 5.5f, box.y + 9.0f, box.x + 10.0f, box.y + 4.0f);
+              } else {
+                ui::strokeRounded(renderer, box, theme().dim, ui::kRadiusSmall);
               }
             } else {
               text.draw("\u2022", contentLeft + indentW, y, theme().muted);
@@ -2223,6 +1982,10 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
   ui.livePage.setBlockSelection({ui.blockSelectActive, ui.blockSelectAnchor, ui.blockSelectFocus});
   ui.livePage.setDropOffset(ui.draggingBlock ? ui.blockDropOffset : std::nullopt);
   ui.livePage.setSelecting(ui.selectingEditorText);
+  // Measured before the layout, because the header is room the page has to
+  // reserve at the top of its scrolling space rather than something drawn over
+  // it afterwards.
+  ui.livePage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), rect);
 
   // Leaving a block that was dropped to raw text hands it back to md4c.
@@ -2247,6 +2010,13 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
     selection.end = ui.editor.selectionEnd();
   }
   ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.find.text());
+  {
+    // Clipped to the page, so the header scrolls off the top rather than
+    // running up over the tab strip on its way out.
+    const ui::ClipGuard clip(renderer, ui.livePage.pageRect());
+    const Rect header = ui.livePage.headerRect();
+    drawPageHeader(renderer, text, ui, header, header.y);
+  }
   for(const auto& link : ui.livePage.links()) ui.linkRegions.push_back({link.rect, link.target, link.wiki});
   if(ui.editor.text().empty()) {
     // On the content column rather than the page edge, so the prompt sits
@@ -2264,12 +2034,20 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   const ShellLayout layout = shellLayout(ui, width, height);
   ui.linkRegions.clear();
   ui.buttonRegions.clear();
+  // Set by whichever surface draws the header this frame, and by none of them
+  // in raw mode -- so it is cleared here rather than left pointing at where the
+  // title was the last time a pane that has one was showing.
+  ui.headerTitleRect = {};
   // Cleared here and set by whichever surface the pointer turns out to be over,
   // so a frame can never end up with two tooltips resolved.
   ui.tooltip = {};
 
   // First, whatever is or is not open behind it: it carries the window controls.
   drawTitleBar(renderer, text, ui, layout.titleBar);
+
+  // The rail, then whatever is beside it. Drawn before the panels because it is
+  // the one column that is always there: everything else lays out against it.
+  drawRibbon(renderer, text, ui, layout.ribbon);
 
   // A hidden panel is zero wide, and its rule would land on the edge of
   // whatever took its place.
@@ -3314,6 +3092,17 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
   const ShellLayout layout = shellLayout(ui, width, height);
 
+  // The rail first. It owns its whole column, so a click that lands between two
+  // of its buttons is swallowed rather than falling through to the sidebar
+  // behind it -- which is not behind it at all, but next to it.
+  if(contains(layout.ribbon, x, y)) {
+    if(button != SDL_BUTTON_LEFT) return;
+    if(const auto action = handleRibbonClick(ui, layout.ribbon, x, y)) {
+      if(const auto* spec = ui::findAction(*action)) performCommand(ui, std::string(spec->name));
+    }
+    return;
+  }
+
   if(!ui::empty(layout.tabs) &&
      handleTabStripClick(ui, layout.tabs, x, y, button, (SDL_GetModState() & SDL_KMOD_CTRL) != 0)) {
     return;
@@ -3369,6 +3158,16 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       }
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
     }
+    return;
+  }
+
+  if(pageHeaderClickAway(ui, x, y) == TitleEdit::Kept) saveRename(ui);
+
+  // The inline title, before the page beneath it: a click on the note's name is
+  // a rename, not a caret placed in the first paragraph. Not gated on the pane
+  // mode -- the title's rect is cleared every frame and set only by a surface
+  // that actually drew one, so a mode with no header has nothing to hit.
+  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && handlePageHeaderClick(ui, x, y)) {
     return;
   }
 

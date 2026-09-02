@@ -31,8 +31,13 @@ LayoutMode resolveLayoutMode(float windowWidth, LayoutMode previous) {
 ShellLayout computeShellLayout(const ShellLayoutInputs& inputs) {
   ShellLayout layout;
 
-  const float usable = std::max(inputs.windowWidth, kMinUsableWidth);
-  layout.mode = resolveLayoutMode(usable, inputs.previousMode);
+  const float window = std::max(inputs.windowWidth, kMinUsableWidth);
+  // The mode is a question about the window, so it is asked of the window. The
+  // panel arithmetic below is a question about the room left over, so it is
+  // asked of that -- the ribbon's width is spoken for before anything else has
+  // a say in it.
+  layout.mode = resolveLayoutMode(window, inputs.previousMode);
+  const float usable = std::max(kMinContentWidth, window - kRibbonWidth);
 
   float sidebar = inputs.sidebarWidth;
   if(layout.mode == LayoutMode::Compact) sidebar = kCompactSidebarWidth;
@@ -60,12 +65,16 @@ ShellLayout computeShellLayout(const ShellLayoutInputs& inputs) {
   const float bodyY = kTitleBarHeight;
   const float paneBottom = inputs.windowHeight - kStatusBarHeight;
   const float paneHeight = std::max(0.0f, paneBottom - bodyY);
-  const float contentX = sidebar;
-  const float contentW = inputs.windowWidth - sidebar - right;
+  const float contentX = kRibbonWidth + sidebar;
+  // Floored at zero. On a window too narrow to hold the ribbon, both panels and
+  // a page at once, the panels overhang rather than the page being handed a
+  // negative width that every hit test downstream would have to defend against.
+  const float contentW = std::max(0.0f, inputs.windowWidth - contentX - right);
   const float tabsH = inputs.tabStripVisible ? kTabStripHeight : 0.0f;
 
   layout.titleBar = {0.0f, 0.0f, inputs.windowWidth, kTitleBarHeight};
-  layout.sidebar = {0.0f, bodyY, sidebar, paneHeight};
+  layout.ribbon = {0.0f, bodyY, kRibbonWidth, paneHeight};
+  layout.sidebar = {kRibbonWidth, bodyY, sidebar, paneHeight};
   layout.tabs = {contentX, bodyY, contentW, tabsH};
   layout.content = {contentX, bodyY + tabsH, contentW, std::max(0.0f, paneHeight - tabsH)};
   layout.rightPanel = {contentX + contentW, bodyY, right, paneHeight};

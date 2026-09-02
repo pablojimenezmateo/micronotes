@@ -30,7 +30,8 @@ bool nearlyEqual(float a, float b) {
 
 MICRONOTES_TEST(shell_layout_panes_tile_the_window_without_a_gap) {
   const ShellLayout layout = computeShellLayout(wideShell());
-  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.x, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.x, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.x, layout.ribbon.x + layout.ribbon.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.content.x, layout.sidebar.x + layout.sidebar.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x, layout.content.x + layout.content.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x + layout.rightPanel.w, 1600.0f));
@@ -65,8 +66,36 @@ MICRONOTES_TEST(shell_layout_hidden_panels_give_their_room_to_the_page) {
   const ShellLayout hidden = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(hidden.sidebar.w, 0.0f));
   MICRONOTES_REQUIRE(hidden.content.w > withPanels);
-  MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x, 0.0f));
+  // The page starts where the ribbon ends. The ribbon is not a panel and does
+  // not hide, so this is the leftmost the page can ever be.
+  MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x, micronotes::ui::kRibbonWidth));
   MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x + hidden.content.w, 1600.0f));
+}
+
+// The ribbon is the way back to a panel that has been hidden, so it keeps its
+// width whatever else is showing and whatever the window is doing.
+MICRONOTES_TEST(shell_layout_ribbon_keeps_its_width_at_every_size) {
+  const float widths[] = {320.0f, 700.0f, 1000.0f, 1600.0f, 3840.0f};
+  for(const float width : widths) {
+    ShellLayoutInputs inputs = wideShell();
+    inputs.windowWidth = width;
+    for(const bool sidebar : {true, false}) {
+      for(const bool right : {true, false}) {
+        inputs.sidebarVisible = sidebar;
+        inputs.rightPanelVisible = right;
+        const ShellLayout layout = computeShellLayout(inputs);
+        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.w, micronotes::ui::kRibbonWidth));
+        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.x, 0.0f));
+        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.y, layout.sidebar.y));
+        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.h, layout.sidebar.h));
+        // Nothing overlaps it, and no region is ever handed a negative width.
+        MICRONOTES_REQUIRE(layout.sidebar.x >= layout.ribbon.w - 0.001f);
+        MICRONOTES_REQUIRE(layout.content.w >= 0.0f);
+        MICRONOTES_REQUIRE(layout.rightPanel.w >= 0.0f);
+        MICRONOTES_REQUIRE(layout.sidebar.w >= 0.0f);
+      }
+    }
+  }
 }
 
 MICRONOTES_TEST(shell_layout_right_panel_takes_room_only_when_shown) {

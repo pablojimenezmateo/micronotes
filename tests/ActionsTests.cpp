@@ -59,13 +59,37 @@ MICRONOTES_TEST(actions_every_chord_round_trips) {
 
 // One key, one action. Two rows claiming the same chord is a binding conflict
 // the user would meet as "this shortcut does the wrong thing".
+//
+// Aliases are held to the same rule as primary bindings, and to the same rule
+// against each other. An alias exists to match a chord people arrive already
+// knowing; one that quietly shadows a binding this app already had would take
+// away a habit in the course of adding one.
 MICRONOTES_TEST(actions_no_two_bindings_claim_the_same_keys) {
   for(const auto& spec : actionSpecs()) {
-    if(spec.chord.empty()) continue;
-    const auto chord = parseKeyChord(spec.chord);
-    MICRONOTES_REQUIRE(chord.has_value());
-    micronotes::tests::require(findActionForChord(*chord) == &spec,
-                               "chord claimed twice: " + std::string(spec.chord));
+    for(const std::string_view bound : {spec.chord, spec.altChord}) {
+      if(bound.empty()) continue;
+      const auto chord = parseKeyChord(bound);
+      MICRONOTES_REQUIRE(chord.has_value());
+      micronotes::tests::require(findActionForChord(*chord) == &spec,
+                                 "chord claimed twice: " + std::string(bound));
+    }
+  }
+}
+
+// An alias spells its keys the one way the registry spells keys, so the
+// shortcut list and any future rebinding UI can print it without a special case.
+MICRONOTES_TEST(actions_every_alias_round_trips) {
+  for(const auto& spec : actionSpecs()) {
+    if(spec.altChord.empty()) continue;
+    const auto chord = parseKeyChord(spec.altChord);
+    micronotes::tests::require(chord.has_value(), "unparseable alias: " + std::string(spec.altChord));
+    micronotes::tests::require(formatKeyChord(*chord) == spec.altChord,
+                               "alias does not print as itself: " + std::string(spec.altChord) +
+                                 " -> " + formatKeyChord(*chord));
+    // An alias on an action with no primary binding is a primary binding that
+    // was written in the wrong column.
+    micronotes::tests::require(!spec.chord.empty(),
+                               "alias with no primary chord: " + std::string(spec.name));
   }
 }
 

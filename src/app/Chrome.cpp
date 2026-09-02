@@ -2,6 +2,8 @@
 
 #include "app/Shell.h"
 
+#include "core/perf/Perf.h"
+
 #include "ui/Actions.h"
 #include "ui/Metrics.h"
 #include "ui/TextUtil.h"
@@ -53,27 +55,80 @@ void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool m
   line(cx - 5.0f, cy + 5.0f, cx + 5.0f, cy - 5.0f);
 }
 
+// Words and characters in the buffer, in one pass.
+//
+// Counted on the frame that draws them rather than cached. Frames here are
+// event-driven, so this runs about once per keystroke -- the same keystroke
+// that already re-scanned the blocks and re-laid out the page, work this is
+// small beside. It is counted rather than assumed to be small: the counter
+// below is what a later reading of the harness will judge it on.
+//
+// A word is a run of non-space bytes, which is what every editor's status bar
+// means by the word and what a reader checking a word budget expects.
+// Characters are bytes of the note as stored, not codepoints; saying so here
+// is cheaper than a UTF-8 walk nobody asked for.
+struct BufferCounts {
+  std::size_t words = 0;
+  std::size_t characters = 0;
+};
+
+BufferCounts countBuffer(std::string_view text) {
+  perf::ScopeTimer timer("status.count_buffer");
+  perf::addCounter(perf::CounterId::StatusWordCounts);
+  BufferCounts counts;
+  counts.characters = text.size();
+  bool inWord = false;
+  for(const unsigned char c : text) {
+    const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    if(space) {
+      inWord = false;
+      continue;
+    }
+    if(!inWord) ++counts.words;
+    inWord = true;
+  }
+  return counts;
+}
+
+std::string plural(std::size_t count, std::string_view noun) {
+  return std::to_string(count) + " " + std::string(noun) + (count == 1 ? "" : "s");
+}
+
 }
 
 void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  // Three anchors and the way to the rest. The line used to name a dozen keys
-  // and be truncated before it finished; every one of them is in F1 now, which
-  // can hold them all and be searched.
-  std::string help = std::string(paneModeName(ui.state.workspace().paneMode())) +
-    "   " + ui::keysFor(ui::ActionId::GoToNote) + " Go to note" +
-    "   " + ui::keysFor(ui::ActionId::CommandPalette) + " Commands" +
-    "   " + ui::keysFor(ui::ActionId::Shortcuts) + " Shortcuts";
-  if(ui.focus == FocusArea::Search) help = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
-  if(ui.focus == FocusArea::Find) help = "Find in note: " + ui.find.text() + "    Esc close";
-  fill(renderer, {rect.x + 12, rect.y + 7, 6, 6}, ui.editor.dirty() ? theme().warn : theme().accent);
-  text.draw(ui::ellipsize(help, 100), rect.x + 28, rect.y + 6, theme().muted);
-  if(!ui.status.empty()) {
-    const auto message = ui::ellipsize(ui.status, 72);
-    Rect pill {std::max(rect.x + 12, rect.x + rect.w - static_cast<float>(text.width(message)) - 30), rect.y + 3, static_cast<float>(text.width(message)) + 18, 22};
-    fill(renderer, pill, theme().surface);
-    stroke(renderer, pill, theme().hairline);
-    text.draw(message, pill.x + 9, rect.y + 6, theme().muted);
+  // What the note is, on the right, and what just happened, on the left.
+  //
+  // The left of this bar used to be a key legend -- go to note, commands,
+  // shortcuts -- which is a menu bar written in a font too small to be one. F1
+  // holds every shortcut, can be searched, and is itself in the legend, so the
+  // legend was three keys advertising the fourth. The counts that replace it
+  // are the one thing about the open note that nothing else on screen says.
+  fill(renderer, {rect.x + 12, rect.y + 7, 6, 6}, ui.editor.dirty() ? theme().warn : theme().accentDim);
+
+  std::string left = ui.status;
+  if(ui.focus == FocusArea::Search) left = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
+  else if(ui.focus == FocusArea::Find) left = "Find in note: " + ui.find.text() + "    Esc close";
+  else if(ui.editor.dirty()) left = "Unsaved changes";
+
+  // The right first, so the left knows how much room it was left with.
+  float right = rect.x + rect.w - 14.0f;
+  if(!ui.state.selection().noteId.empty()) {
+    const BufferCounts counts = countBuffer(ui.editor.text());
+    const std::string tally = plural(counts.words, "word") + "    " + plural(counts.characters, "character");
+    const float width = static_cast<float>(text.width(tally));
+    text.draw(tally, right - width, rect.y + 6, theme().dim);
+    right -= width + 16.0f;
   }
+  const std::string mode = paneModeName(ui.state.workspace().paneMode());
+  const float modeWidth = static_cast<float>(text.width(mode));
+  text.draw(mode, right - modeWidth, rect.y + 6, theme().dim);
+  right -= modeWidth;
+
+  if(left.empty()) return;
+  const float room = right - (rect.x + 28.0f) - 16.0f;
+  text.draw(ellipsizeToWidth(text, left, static_cast<int>(room), false, false), rect.x + 28, rect.y + 6,
+            theme().muted);
 }
 
 const char* paneModeName(ui::PaneMode mode) {

@@ -171,6 +171,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
   src/ui/ColorMath.cpp
+  src/ui/NoteProperties.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
@@ -201,13 +202,17 @@ target_compile_definitions(micronotes_core PUBLIC
 add_executable(micronotes
   src/app/main.cpp
   src/app/Application.cpp
+  src/app/InlineText.cpp
+  src/app/PageHeader.cpp
   src/app/PageView.cpp
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
   src/app/RawPane.cpp
+  src/app/Ribbon.cpp
   src/app/RightPanel.cpp
+  src/app/SessionState.cpp
   src/app/SettingsDialog.cpp
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
@@ -248,6 +253,7 @@ add_executable(micronotes_tests
   tests/LayoutTests.cpp
   tests/LibraryTests.cpp
   tests/MarkdownParserTests.cpp
+  tests/NotePropertiesTests.cpp
   tests/OutlineTests.cpp
   tests/PathUtilsTests.cpp
   tests/SearchTests.cpp

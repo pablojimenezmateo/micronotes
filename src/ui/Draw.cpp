@@ -24,6 +24,84 @@ void hLine(SDL_Renderer* renderer, float x1, float x2, float y, SDL_Color color)
   SDL_RenderLine(renderer, x1, y, x2, y);
 }
 
+namespace {
+
+// The largest radius the span buffer below is sized for. Nothing in the shell
+// asks for a corner this round; the cap is here so a bad number cannot walk off
+// the end of the array rather than because a rounder corner was refused.
+constexpr int kMaxCornerRadius = 24;
+
+// How far in from the edge the fill starts on scanline `i` of a corner band.
+// Measured from the middle of the scanline, so the curve sits where the eye
+// expects rather than half a pixel high.
+float cornerInset(float radius, int i) {
+  const float dy = radius - static_cast<float>(i) - 0.5f;
+  const float inner = radius * radius - dy * dy;
+  return radius - std::sqrt(std::max(0.0f, inner));
+}
+
+// The radius a rect can actually hold. A token is chosen for how the shape
+// should read, not for how small the rect will be when a panel is dragged
+// narrow, so the clamp belongs here and not at every call site.
+float usableRadius(Rect rect, float radius) {
+  return std::clamp(radius, 0.0f, std::min({static_cast<float>(kMaxCornerRadius), rect.w / 2.0f, rect.h / 2.0f}));
+}
+
+}
+
+void fillRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius) {
+  const float r = usableRadius(rect, radius);
+  if(r < 1.0f || rect.w <= 0.0f || rect.h <= 0.0f) {
+    fill(renderer, rect, color);
+    return;
+  }
+  const int band = static_cast<int>(r);
+  // Two spans per corner scanline plus the block between them.
+  SDL_FRect spans[kMaxCornerRadius * 2 + 1];
+  int count = 0;
+  spans[count++] = SDL_FRect {rect.x, rect.y + r, rect.w, rect.h - 2.0f * r};
+  for(int i = 0; i < band; ++i) {
+    const float inset = cornerInset(r, i);
+    const float width = rect.w - 2.0f * inset;
+    if(width <= 0.0f) continue;
+    spans[count++] = SDL_FRect {rect.x + inset, rect.y + static_cast<float>(i), width, 1.0f};
+    spans[count++] = SDL_FRect {rect.x + inset, rect.y + rect.h - static_cast<float>(i) - 1.0f, width, 1.0f};
+  }
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  SDL_RenderFillRects(renderer, spans, count);
+}
+
+void strokeRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius) {
+  const float r = usableRadius(rect, radius);
+  if(r < 1.0f || rect.w <= 0.0f || rect.h <= 0.0f) {
+    stroke(renderer, rect, color);
+    return;
+  }
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  const float right = rect.x + rect.w;
+  const float bottom = rect.y + rect.h;
+  // The four straight edges, each stopping where its corners begin.
+  SDL_RenderLine(renderer, rect.x + r, rect.y, right - r - 1.0f, rect.y);
+  SDL_RenderLine(renderer, rect.x + r, bottom - 1.0f, right - r - 1.0f, bottom - 1.0f);
+  SDL_RenderLine(renderer, rect.x, rect.y + r, rect.x, bottom - r - 1.0f);
+  SDL_RenderLine(renderer, right - 1.0f, rect.y + r, right - 1.0f, bottom - r - 1.0f);
+  // The corners, one point per scanline. Four points share each scanline, which
+  // is why they are gathered rather than drawn one call at a time.
+  SDL_FPoint points[kMaxCornerRadius * 4];
+  int count = 0;
+  const int band = static_cast<int>(r);
+  for(int i = 0; i < band; ++i) {
+    const float inset = cornerInset(r, i);
+    const float y = rect.y + static_cast<float>(i);
+    const float flipped = bottom - static_cast<float>(i) - 1.0f;
+    points[count++] = SDL_FPoint {rect.x + inset, y};
+    points[count++] = SDL_FPoint {right - inset - 1.0f, y};
+    points[count++] = SDL_FPoint {rect.x + inset, flipped};
+    points[count++] = SDL_FPoint {right - inset - 1.0f, flipped};
+  }
+  SDL_RenderPoints(renderer, points, count);
+}
+
 void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme().surface, SDL_Color borderColor = theme().hairline) {
   fill(renderer, rect, fillColor);
   stroke(renderer, rect, borderColor);
@@ -31,12 +109,15 @@ void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme(
 }
 
 void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot) {
-  if(selected) {
-    fill(renderer, row, theme().selectedBg);
-    fill(renderer, {row.x, row.y, kSelectionStripWidth, row.h}, theme().accent);
-  } else if(hot) {
-    fill(renderer, row, theme().hoverBg);
-  }
+  // A rounded fill and nothing else.
+  //
+  // It used to be a fill plus a strip of accent down the left edge, and before
+  // that an outline as well. The strip was there to say "this one" louder than
+  // the fill could, on a palette where the selected fill was two shades off the
+  // panel behind it. On this one it is not: the fill carries the whole message,
+  // and a column of accent bars down a tree reads as a series of tabs.
+  if(selected) fillRounded(renderer, row, theme().selectedBg, kRadiusSmall);
+  else if(hot) fillRounded(renderer, row, theme().hoverBg, kRadiusSmall);
 }
 
 void drawFocusEdge(SDL_Renderer* renderer, Rect pane, bool focused) {
@@ -57,6 +138,18 @@ void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color
 
 void drawSurface(SDL_Renderer* renderer, Rect rect) {
   drawSurface(renderer, rect, theme().surface, theme().hairline);
+}
+
+void drawRoundedSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor,
+                        float radius) {
+  fillRounded(renderer, rect, fillColor, radius);
+  // A border the same colour as the fill is how a caller asks for a surface
+  // with no edge at all; stroking it anyway would only cost a draw call.
+  if(borderColor.r == fillColor.r && borderColor.g == fillColor.g && borderColor.b == fillColor.b &&
+     borderColor.a == fillColor.a) {
+    return;
+  }
+  strokeRounded(renderer, rect, borderColor, radius);
 }
 
 void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
@@ -103,8 +196,7 @@ void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip&
   const float width = static_cast<float>(text.width(tooltip.text, style)) + kTooltipPadX * 2.0f;
   const float height = static_cast<float>(text.lineHeight(style)) + kTooltipPadY * 2.0f;
   const Rect card = placeTooltip(tooltip.anchor, width, height, bounds);
-  fill(renderer, card, theme().surfaceElevated);
-  stroke(renderer, card, theme().hairline);
+  drawRoundedSurface(renderer, card, theme().surfaceElevated, theme().hairline, kRadiusSmall);
   text.draw(tooltip.text, card.x + kTooltipPadX, card.y + kTooltipPadY, theme().text, style);
 }
 

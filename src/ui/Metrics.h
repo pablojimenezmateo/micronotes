@@ -33,6 +33,26 @@ inline constexpr float kWindowButtonWidth = 40.0f;
 // size like the rest.
 inline constexpr float kWindowFrameThickness = 6.0f;
 
+// Corner radii. Three steps, because a shell with a radius per control is a
+// shell where nothing lines up: `small` is for controls the size of a row --
+// chips, checkboxes, the search field; `medium` is for blocks inside the page
+// -- callouts, code, properties; `large` is for things that float over it.
+inline constexpr float kRadiusSmall = 4.0f;
+inline constexpr float kRadiusMedium = 8.0f;
+inline constexpr float kRadiusLarge = 12.0f;
+
+// The icon rail down the leading edge of the window. Fixed: it holds icons of
+// one size and nothing that could want more room, so it is not resizable and
+// has no persisted width.
+inline constexpr float kRibbonWidth = 44.0f;
+inline constexpr float kRibbonButtonSize = 32.0f;
+inline constexpr float kRibbonIconSize = 16.0f;
+
+// The band a callout reserves above its first line for the kind's icon and
+// name. Layout reserves it and the draw fills it, so the number is here rather
+// than in either of them.
+inline constexpr float kCalloutTitleHeight = 24.0f;
+
 // Panel widths a fresh library starts with. The sidebar is wider than a plain
 // tree needs because it also holds the search field and its results.
 inline constexpr float kDefaultSidebarWidth = 280.0f;
@@ -69,11 +89,15 @@ inline constexpr float kCompactBreakpoint = 1000.0f;
 inline constexpr float kCompactHysteresis = 12.0f;
 inline constexpr float kCompactSidebarWidth = 220.0f;
 
-// The accent strip down the left of a selected row, and down the edge of the
-// pane that has the keyboard. Two different widths so the two never read as the
-// same thing.
-inline constexpr float kSelectionStripWidth = 3.0f;
+// The accent strip down the edge of the pane that has the keyboard. A selected
+// row used to have one too, at a different width so the two could not be
+// confused; it is a rounded fill now, and the pane edge is the only strip left.
 inline constexpr float kFocusEdgeWidth = 2.0f;
+
+// The nesting guides down the sidebar's tree: one hairline per level of depth,
+// so a note six folders down is visibly under the folder it belongs to rather
+// than merely further right than its neighbours.
+inline constexpr float kTreeGuideWidth = 1.0f;
 
 // The spacing scale. Every gap and inset in the shell is one of these, so a
 // row in the sidebar and a row in a panel are inset by the same amount rather

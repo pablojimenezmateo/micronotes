@@ -441,8 +441,14 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       break;
     case BlockKind::Bullet:
     case BlockKind::Ordered:
+      out.textLeft = out.indent + options_.listGutter;
+      break;
     case BlockKind::Todo:
       out.textLeft = out.indent + options_.listGutter;
+      // A ticked task is struck through. Only while its marker is hidden: with
+      // the caret in the block the `- [x] ` is text the user is editing, and a
+      // line through what you are typing is a line through your own cursor.
+      if(block.checked && !revealed && !raw) base.strike = true;
       break;
     case BlockKind::Quote:
     case BlockKind::Callout:
@@ -451,6 +457,13 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       // callout would be drawn with three lots of air inside its own box.
       padTop = flags.groupFirst ? 8.0f : 0.0f;
       padBottom = flags.groupLast ? 8.0f : 0.0f;
+      // The head of a callout run is its title. It gets no extra height: the
+      // `> [!KIND]` line already occupies one, and reserving a band above it
+      // as well would leave the box with a blank row over its own name.
+      if(block.kind == BlockKind::Callout && flags.groupFirst && !block.info.empty() && !revealed && !raw) {
+        out.calloutTitle = true;
+        base.strong = true;
+      }
       break;
     case BlockKind::Code:
       base.mono = true;

@@ -258,3 +258,53 @@ MICRONOTES_TEST(layout_finds_the_block_under_a_point) {
   MICRONOTES_REQUIRE(!layout.blockAt(-4.0f));
   MICRONOTES_REQUIRE(!layout.blockAt(layout.totalHeight() + 4.0f));
 }
+
+// A callout's head line is its title. The layout says so, and says it only for
+// the line that actually opens the run, so a three-line callout does not get
+// three titles and a plain `>` quote does not get one at all.
+MICRONOTES_TEST(layout_marks_only_the_head_of_a_callout_as_its_title) {
+  const std::string source = "> [!NOTE] Read this\n> and then this\n\n> a plain quote\n";
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  layout.update(source, options);
+
+  std::size_t titles = 0;
+  for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+    if(layout.layout(i).calloutTitle) ++titles;
+  }
+  MICRONOTES_REQUIRE(titles == 1);
+  MICRONOTES_REQUIRE(layout.layout(0).calloutTitle);
+  MICRONOTES_REQUIRE(layout.blocks()[0].kind == BlockKind::Callout);
+  MICRONOTES_REQUIRE(!layout.layout(1).calloutTitle);
+}
+
+// The title is drawn strong and in the callout's own colour, so while the caret
+// is inside the block -- where the `> [!NOTE]` is shown as the text it really
+// is -- it must stop being a title and go back to being source.
+MICRONOTES_TEST(layout_stops_titling_a_callout_whose_markers_are_revealed) {
+  const std::string source = "> [!TIP] Try this\n";
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.layout(0).calloutTitle);
+
+  options.caretOffset = 4;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.layout(0).revealed);
+  MICRONOTES_REQUIRE(!layout.layout(0).calloutTitle);
+}
+
+// A quote with no `[!KIND]` is a quote. Titling it would put a bold coloured
+// first line on every block quote in the library.
+MICRONOTES_TEST(layout_never_titles_a_quote_that_names_no_kind) {
+  const std::string source = "> just a quotation\n> over two lines\n";
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  layout.update(source, options);
+  for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+    MICRONOTES_REQUIRE(!layout.layout(i).calloutTitle);
+  }
+}

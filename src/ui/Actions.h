@@ -122,6 +122,16 @@ struct ActionSpec {
   // A few actions are pure editing verbs with no useful palette row -- they act
   // on a selection the palette has just taken the focus away from.
   bool inPalette = true;
+  // A second chord that runs the same action, for the keys people arrive
+  // already knowing. `Ctrl+O` opens the note switcher because that is what it
+  // does in Obsidian, and taking `Ctrl+P` away to make room would trade one set
+  // of habits for another. Aliases are additive: nothing that answered to a key
+  // before this field existed stops answering to it.
+  //
+  // Every row in the registry spells it, even the empty ones. Leaving it to the
+  // default reads better and does not build: the warnings-as-errors lane treats
+  // a partly-initialized aggregate as the mistake it usually is.
+  std::string_view altChord;
 };
 
 // Not everything with a key is a command. Walking the sidebar, continuing a
