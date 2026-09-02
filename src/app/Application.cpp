@@ -885,16 +885,42 @@ static bool spawnDetached(const std::vector<std::string>& command) {
 
 
 
-static Rect searchBoxRect(Rect notes) {
-  return {notes.x + 14.0f, notes.y + 12.0f, notes.w - 28.0f, 34.0f};
+// The search field sits on top of the navigation it filters, inside the
+// sidebar, because filtering and browsing are the same question asked two ways
+// and they used to be in two panels either side of a divider.
+static Rect searchBoxRect(Rect sidebar) {
+  return {sidebar.x + 12.0f, sidebar.y + 12.0f, sidebar.w - 24.0f, ui::kSidebarSearchHeight};
 }
 
 // The strip inside the search box that holds the text: after the "Find" label
 // and before the scope toggle. Layout and hit testing both derive from this, so
 // a click lands where the glyph it pointed at is actually drawn.
-static Rect searchTextRect(Rect notes, const TextRenderer& text) {
-  const Rect box = searchBoxRect(notes);
-  return {box.x + 52.0f, box.y + 7.0f, box.w - 92.0f, static_cast<float>(text.lineHeight())};
+static Rect searchTextRect(Rect sidebar, const TextRenderer& text) {
+  const Rect box = searchBoxRect(sidebar);
+  return {box.x + 46.0f, box.y + 7.0f, box.w - 86.0f, static_cast<float>(text.lineHeight())};
+}
+
+// Everything below the search field: the scrolling row list, which is the only
+// thing buildSidebarRows() and sidebarRowAt() ever measure against.
+static Rect sidebarListRect(Rect sidebar) {
+  const float top = sidebar.y + ui::kSidebarSearchBand;
+  return {sidebar.x, top, sidebar.w, std::max(0.0f, sidebar.y + sidebar.h - top)};
+}
+
+// The results the sidebar is listing, recomputed only when the question or the
+// library has changed. buildSidebarRows() runs on every frame, and each query
+// is a hit on SQLite.
+static const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
+  const auto& selection = ui.state.selection();
+  if(!ui.searchCacheValid || ui.searchCacheQuery != selection.search ||
+     ui.searchCacheScope != selection.searchScope || ui.searchCacheRevision != ui.state.revision()) {
+    ui.searchCacheQuery = selection.search;
+    ui.searchCacheScope = selection.searchScope;
+    ui.searchCacheRevision = ui.state.revision();
+    ui.searchCache = ui.state.currentSearchResults();
+    ui.searchCacheValid = true;
+  }
+  return ui.searchCache;
 }
 
 // Core measures text through a callback so it stays free of any font
@@ -955,34 +981,9 @@ static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
   const auto nearEdge = [&](const Rect& panel) {
     return !ui::empty(panel) && std::abs(x - (panel.x + panel.w)) <= ui::kResizeGutterInflate + 1.0f;
   };
-  return nearEdge(layout.sidebar) || nearEdge(layout.notes) ||
+  return nearEdge(layout.sidebar) ||
          (!ui::empty(layout.rightPanel) &&
           std::abs(x - layout.rightPanel.x) <= ui::kResizeGutterInflate + 1.0f);
-}
-
-static bool noteRowAt(const UiRuntime& ui, Rect notesRect, float x, float y) {
-  if(!contains(notesRect, x, y)) return false;
-  float rowY = notesRect.y + 62.0f;
-  if(!ui.search.empty()) {
-    for(const auto& result : ui.state.currentSearchResults()) {
-      const std::size_t snippetCount = std::max<std::size_t>(result.snippets.size(), result.matchLine.empty() ? 0 : 1);
-      const float availableH = notesRect.y + notesRect.h - 24.0f - (rowY - 8.0f);
-      const std::size_t maxVisibleSnippets = availableH <= 90.0f ? 0 : static_cast<std::size_t>((availableH - 30.0f) / 60.0f);
-      const std::size_t visibleSnippets = std::min<std::size_t>(snippetCount, std::min<std::size_t>(4, maxVisibleSnippets));
-      const float rowH = visibleSnippets > 0 ? 30.0f + static_cast<float>(visibleSnippets * 60) : 50.0f;
-      Rect row {notesRect.x + 10.0f, rowY - 8.0f, notesRect.w - 20.0f, rowH};
-      if(contains(row, x, y)) return true;
-      rowY += rowH;
-    }
-    return false;
-  }
-  const auto notes = ui.state.currentNotes();
-  for(std::size_t i = 0; i < notes.size() && rowY < notesRect.y + notesRect.h - 24.0f; ++i) {
-    Rect row {notesRect.x + 10.0f, rowY - 8.0f, notesRect.w - 20.0f, 50.0f};
-    if(contains(row, x, y)) return true;
-    rowY += 50.0f;
-  }
-  return false;
 }
 
 static std::string blockText(const markdown::Block& block) {
@@ -1439,6 +1440,12 @@ constexpr float kSidebarRowHeight = 26.0f;
 constexpr float kSidebarTagHeight = 24.0f;
 constexpr float kSidebarLabelHeight = 34.0f;
 constexpr float kSidebarIndent = 13.0f;
+constexpr float kSidebarResultTitleHeight = 24.0f;
+constexpr float kSidebarSnippetHeight = 16.0f;
+
+static float searchResultRowHeight(std::size_t matchLines) {
+  return kSidebarResultTitleHeight + static_cast<float>(matchLines) * kSidebarSnippetHeight + 4.0f;
+}
 
 // Rebuilt every frame from the library rather than cached: it is a few hundred
 // rows, and a tree that disagrees with the files is a worse problem than one
@@ -1469,7 +1476,7 @@ static void buildSidebarRows(UiRuntime& ui, Rect rect) {
     y += kSidebarRowHeight;
   };
 
-  const auto notes = ui.state.allNotes();
+  const auto& notes = ui.state.allNotes();
   const auto root = ui.state.libraryRoot();
   // A shortcut list is a flat list of notes, drawn with the same row the tree
   // uses so a note looks and behaves the same wherever it is listed.
@@ -1491,6 +1498,61 @@ static void buildSidebarRows(UiRuntime& ui, Rect rect) {
     }
     return drawn;
   };
+
+  const auto pushFlatNote = [&](const library::NoteListItem& note) {
+    ui::TreeRow tree;
+    tree.kind = ui::TreeRowKind::Note;
+    tree.depth = 0;
+    tree.folder = note.path.lexically_relative(root).parent_path();
+    tree.noteId = note.id;
+    tree.label = note.title;
+    tree.icon = note.icon;
+    pushTreeRow(std::move(tree));
+  };
+  // Whatever the list ended up holding, it scrolls the same way.
+  const auto finish = [&]() {
+    const float contentHeight = y + static_cast<float>(ui.sidebarScroll) - top;
+    ui.sidebarMaxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight - (rect.h - 24.0f))));
+    ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
+  };
+
+  // A running query replaces the tree rather than appearing beside it. The
+  // sidebar answers one question at a time, and Esc puts the tree back.
+  if(!ui.search.empty()) {
+    const auto& results = searchResults(ui);
+    pushLabel(std::to_string(results.size()) + (results.size() == 1 ? " RESULT" : " RESULTS"));
+    for(const auto& result : results) {
+      SidebarRow row;
+      row.kind = SidebarRow::Kind::SearchResult;
+      row.noteId = result.id;
+      row.title = result.title;
+      if(result.snippets.empty()) {
+        if(!result.matchLine.empty()) row.matchLines.push_back(result.matchLine);
+      } else {
+        for(const auto& snippet : result.snippets) {
+          if(row.matchLines.size() >= 3) break;
+          if(!snippet.matchLine.empty()) row.matchLines.push_back(snippet.matchLine);
+        }
+      }
+      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, searchResultRowHeight(row.matchLines.size())};
+      y += row.rect.h;
+      ui.sidebarRows.push_back(std::move(row));
+    }
+    finish();
+    return;
+  }
+
+  // A tag is a filter over the library, so choosing one lists what carries it
+  // instead of the tree it cuts across.
+  if(!ui.state.selection().tag.empty()) {
+    pushLabel("#" + ui.state.selection().tag);
+    for(const auto& note : notes) {
+      if(std::find(note.tags.begin(), note.tags.end(), ui.state.selection().tag) == note.tags.end()) continue;
+      pushFlatNote(note);
+    }
+    finish();
+    return;
+  }
 
   if(!ui.state.workspace().favorites.empty()) {
     const std::size_t before = ui.sidebarRows.size();
@@ -1528,9 +1590,7 @@ static void buildSidebarRows(UiRuntime& ui, Rect rect) {
     }
   }
 
-  const float contentHeight = y + static_cast<float>(ui.sidebarScroll) - top;
-  ui.sidebarMaxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight - (rect.h - 24.0f))));
-  ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
+  finish();
 }
 
 // The row under the pointer, or nothing when the pointer is off the list.
@@ -1546,6 +1606,10 @@ static std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, Rect sidebar
 // One place where a sidebar row turns into a selection, so a click, an arrow
 // key and a drop can never disagree about what selecting a row means.
 static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expandFolder) {
+  if(row.kind == SidebarRow::Kind::SearchResult) {
+    selectNoteById(ui, row.noteId);
+    return;
+  }
   if(row.kind == SidebarRow::Kind::Tag) {
     if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
     ui.state.selectTag(row.tag);
@@ -1556,8 +1620,8 @@ static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expand
   if(row.tree.kind == ui::TreeRowKind::Note) {
     selectNoteById(ui, row.tree.noteId);
     // Opening a note from the tree moves the context to its folder too, so the
-    // note list and the breadcrumb agree with what is on screen. A search owns
-    // the note list while it is running, so it is left alone.
+    // breadcrumb agrees with what is on screen. A search owns the row list
+    // while it is running, so it is left alone.
     if(ui.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
       ui.state.selectFolder(row.tree.folder);
     }
@@ -1617,34 +1681,91 @@ static void expandTreeCursor(UiRuntime& ui, bool open) {
 // A note with no icon still needs something in the icon column, or its title
 // would sit where a folder's does and the two would read as one kind of thing.
 
+// The search field on top of the navigation it filters.
+static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
+  const Rect search = searchBoxRect(rect);
+  const bool focused = ui.focus == FocusArea::Search;
+  drawSurface(renderer, search, theme().inputBg, focused ? theme().accentDim : theme().hairline);
+  ui.searchScopeToggle = {search.x + search.w - 30.0f, search.y + 5.0f, 24.0f, 24.0f};
+  ui.offerTooltip(ui.searchScopeToggle, "Searching " + searchScopeName(ui.searchScope) + " - click to change");
+  text.draw("Find", search.x + 10.0f, search.y + 8.0f, focused ? theme().accent : theme().dim);
+  drawTextField(renderer, text, ui, ui.search, searchTextRect(rect, text), focused, "Search all notes");
+  fill(renderer, ui.searchScopeToggle, focused ? theme().accentSoft : theme().surface);
+  stroke(renderer, ui.searchScopeToggle, focused ? theme().accentDim : theme().hairline);
+  text.draw(searchScopeLabel(ui.searchScope), ui.searchScopeToggle.x + 8.0f, ui.searchScopeToggle.y + 4.0f,
+            focused ? theme().accent : theme().muted);
+}
+
+// The one place with nothing to list says which nothing it is, because the way
+// out of each is different.
+static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
+  const Rect where {list.x + 8.0f, list.y + 8.0f, list.w - 16.0f, 120.0f};
+  if(!ui.state.hasLibrary()) {
+    drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
+                     where, ui::keysFor(ui::ActionId::Settings) + "  Settings");
+  } else if(!ui.search.empty()) {
+    drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.search.text() + "\".",
+                     where, "Esc  clear the search");
+  } else if(!ui.state.selection().tag.empty()) {
+    drawEmptyMessage(text, "No notes with this tag", "Nothing carries #" + ui.state.selection().tag + " any more.",
+                     where, "click the tag again to clear the filter");
+  } else {
+    drawEmptyMessage(text, "No notes yet", "Notes here are plain .md files.",
+                     where, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
+  }
+}
+
 static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   fill(renderer, rect, theme().sidebarBg);
   ClipGuard clip(renderer, rect);
-  ui.sidebarRect = rect;
-  buildSidebarRows(ui, rect);
-  if(ui.sidebarRows.empty()) {
-    drawEmptyMessage(text, "No library", "No folder of notes is open.",
-                     {rect.x + 8, rect.y + 20, rect.w - 16, 110}, ui::keysFor(ui::ActionId::Settings) + "  Settings");
+  drawSidebarSearch(renderer, text, ui, rect);
+
+  const Rect list = sidebarListRect(rect);
+  ui.sidebarRect = list;
+  buildSidebarRows(ui, list);
+  // A section label with nothing under it is a heading over a hole; the empty
+  // message says what happened instead.
+  const bool onlyLabels = std::none_of(ui.sidebarRows.begin(), ui.sidebarRows.end(),
+                                       [](const auto& row) { return row.kind != SidebarRow::Kind::SectionLabel; });
+  if(onlyLabels) {
+    ui.sidebarRows.clear();
+    drawSidebarEmpty(text, ui, list);
     return;
   }
 
+  ClipGuard listClip(renderer, list);
   const auto& selection = ui.state.selection();
   const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
+  const ui::TextStyle snippetStyle {ui::FontFamily::Sans, false, false, ui::type().tiny};
   for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
     const auto& row = ui.sidebarRows[i];
-    if(row.rect.y + row.rect.h < rect.y || row.rect.y > rect.y + rect.h) continue;
+    if(row.rect.y + row.rect.h < list.y || row.rect.y > list.y + list.h) continue;
     const bool hot = ui.hovered(row.rect);
-    const float indent = rect.x + 10.0f + static_cast<float>(row.tree.depth) * kSidebarIndent;
+    const float indent = list.x + 10.0f + static_cast<float>(row.tree.depth) * kSidebarIndent;
 
     if(row.kind == SidebarRow::Kind::SectionLabel) {
-      drawSectionLabel(text, row.label, rect.x + 18, row.rect.y + 12);
+      drawSectionLabel(text, row.label, list.x + 18, row.rect.y + 12);
+      continue;
+    }
+    if(row.kind == SidebarRow::Kind::SearchResult) {
+      const bool selected = row.noteId == selection.noteId;
+      drawSelection(renderer, row.rect, selected, hot);
+      if(!selected && !hot) hLine(renderer, row.rect.x + 8, row.rect.x + row.rect.w - 8, row.rect.y + row.rect.h, theme().hairline);
+      text.draw(ellipsizeToWidth(text, row.title, static_cast<int>(row.rect.w - 24), rowStyle),
+                row.rect.x + 12, row.rect.y + 3, selected ? theme().text : theme().muted, rowStyle);
+      float snippetY = row.rect.y + kSidebarResultTitleHeight;
+      for(const auto& line : row.matchLines) {
+        text.draw(ellipsizeToWidth(text, line, static_cast<int>(row.rect.w - 28), snippetStyle),
+                  row.rect.x + 16, snippetY, selected ? theme().accent : theme().dim, snippetStyle);
+        snippetY += kSidebarSnippetHeight;
+      }
       continue;
     }
     if(row.kind == SidebarRow::Kind::Tag) {
       const bool selected = selection.tag == row.tag;
       drawSelection(renderer, row.rect, selected, hot);
       text.draw("#" + ellipsizeToWidth(text, row.tag, static_cast<int>(row.rect.w - 40), rowStyle),
-                rect.x + 20, row.rect.y + 4, selected ? theme().accent : theme().dim, rowStyle);
+                list.x + 20, row.rect.y + 4, selected ? theme().accent : theme().dim, rowStyle);
       continue;
     }
 
@@ -1677,105 +1798,8 @@ static void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& u
                 row.rect.y + 5.0f, current ? theme().accent : theme().dim, rowStyle);
     }
   }
-  drawVerticalScrollbar(renderer, rect, ui.sidebarScroll, ui.sidebarMaxScroll);
+  drawVerticalScrollbar(renderer, list, ui.sidebarScroll, ui.sidebarMaxScroll);
 }
-
-static void drawNotes(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  fill(renderer, rect, theme().notesBg);
-  ClipGuard clip(renderer, rect);
-  Rect search {rect.x + 14, rect.y + 12, rect.w - 28, 34};
-  drawSurface(renderer, search, theme().inputBg, ui.focus == FocusArea::Search ? theme().accentDim : theme().hairline);
-  ui.searchScopeToggle = {search.x + search.w - 34, search.y + 5, 24, 24};
-  ui.offerTooltip(ui.searchScopeToggle, "Searching " + searchScopeName(ui.searchScope) + " - click to change");
-  text.draw("Find", search.x + 12, search.y + 8, ui.focus == FocusArea::Search ? theme().accent : theme().dim);
-  drawTextField(renderer, text, ui, ui.search, {search.x + 52, search.y + 8, search.w - 94, 22},
-                ui.focus == FocusArea::Search, "Search all notes");
-  fill(renderer, ui.searchScopeToggle, ui.focus == FocusArea::Search ? theme().accentSoft : theme().surface);
-  stroke(renderer, ui.searchScopeToggle, ui.focus == FocusArea::Search ? theme().accentDim : theme().hairline);
-  text.draw(searchScopeLabel(ui.searchScope), ui.searchScopeToggle.x + 8, ui.searchScopeToggle.y + 4, ui.focus == FocusArea::Search ? theme().accent : theme().muted);
-
-  float y = rect.y + 62;
-  if(!ui.search.empty()) {
-    const auto results = ui.state.currentSearchResults();
-    if(results.empty()) {
-      drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.search.text() + "\".",
-                       {rect.x + 8, y - 8, rect.w - 16, 110}, "Esc  clear the search");
-      return;
-    }
-    for(const auto& result : results) {
-      if(y >= rect.y + rect.h - 24) break;
-      const bool selected = result.id == ui.state.selection().noteId;
-      const std::size_t snippetCount = std::max<std::size_t>(result.snippets.size(), result.matchLine.empty() ? 0 : 1);
-      const float availableH = rect.y + rect.h - 24.0f - (y - 8.0f);
-      const std::size_t maxVisibleSnippets = availableH <= 90.0f ? 0 : static_cast<std::size_t>((availableH - 30.0f) / 60.0f);
-      const std::size_t visibleSnippets = std::min<std::size_t>(snippetCount, std::min<std::size_t>(4, maxVisibleSnippets));
-      const float rowH = visibleSnippets > 0 ? 30.0f + static_cast<float>(visibleSnippets * 60) : 50.0f;
-      Rect row {rect.x + 10, y - 8, rect.w - 20, rowH};
-      drawSelection(renderer, row, selected, ui.hovered(row));
-      if(!selected && !ui.hovered(row)) hLine(renderer, row.x + 8, row.x + row.w - 8, row.y + row.h, theme().hairline);
-      text.draw(ellipsizeToWidth(text, result.title, static_cast<int>(row.w - 28)), rect.x + 20, y, selected ? theme().text : theme().muted);
-      if(visibleSnippets > 0) {
-        float snippetY = y + 22;
-        for(std::size_t i = 0; i < visibleSnippets; ++i) {
-          const auto snippet = result.snippets.empty()
-            ? library::SearchResult::Snippet {result.beforeLine, result.matchLine, result.afterLine}
-            : result.snippets[i];
-          text.draw(ellipsizeToWidth(text, snippet.beforeLine, static_cast<int>(row.w - 28)), rect.x + 20, snippetY, theme().dim, false, true);
-          text.draw(ellipsizeToWidth(text, snippet.matchLine, static_cast<int>(row.w - 28)), rect.x + 20, snippetY + 20, selected ? theme().accent : theme().text, false, true);
-          text.draw(ellipsizeToWidth(text, snippet.afterLine, static_cast<int>(row.w - 28)), rect.x + 20, snippetY + 40, theme().dim, false, true);
-          snippetY += 60.0f;
-        }
-      }
-      y += rowH;
-    }
-    return;
-  }
-
-  const auto notes = ui.state.currentNotes();
-  if(notes.empty()) {
-    // Three different nothings, and the way out of each is different: no
-    // library at all, a library with no notes in it, and a notebook or tag
-    // that happens to be empty.
-    const Rect where {rect.x + 8, y - 8, rect.w - 16, 110};
-    if(!ui.state.hasLibrary()) {
-      drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
-                       where, ui::keysFor(ui::ActionId::Settings) + "  Settings");
-    } else if(ui.state.allNotes().empty()) {
-      drawEmptyMessage(text, "No notes yet", "Notes here are plain .md files.",
-                       where, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
-    } else if(!ui.state.selection().tag.empty()) {
-      drawEmptyMessage(text, "No notes with this tag", "Nothing carries #" + ui.state.selection().tag + " any more.",
-                       where, "click the tag again to clear the filter");
-    } else {
-      drawEmptyMessage(text, "This notebook is empty", "A note made here lands in this folder.",
-                       where, ui::keysFor(ui::ActionId::NewNote) + "  new note");
-    }
-    return;
-  }
-  for(std::size_t i = 0; i < notes.size() && y < rect.y + rect.h - 24; ++i) {
-    const auto& note = notes[i];
-    const bool selected = note.id == ui.state.selection().noteId;
-    Rect row {rect.x + 10, y - 8, rect.w - 20, 50};
-    drawSelection(renderer, row, selected, ui.hovered(row));
-    if(!selected && !ui.hovered(row)) hLine(renderer, row.x + 8, row.x + row.w - 8, row.y + row.h, theme().hairline);
-    // The same icon column as the tree, so a note looks like itself wherever it
-    // is listed.
-    drawNoteIcon(renderer, text, note.icon, {rect.x + 18, y, 18, 18}, selected ? theme().accent : theme().dim);
-    text.draw(ellipsizeToWidth(text, note.title, static_cast<int>(row.w - 52)), rect.x + 42, y, selected ? theme().text : theme().muted);
-    if(!note.tags.empty()) {
-      const auto tagLabel = "#" + ellipsize(note.tags.front(), 18);
-      const float chipW = std::min(static_cast<float>(text.width(tagLabel) + 22), row.w - 58);
-      Rect chip {rect.x + 42, y + 22, chipW, 22};
-      fill(renderer, chip, selected ? theme().accentSoft : theme().chipBg);
-      stroke(renderer, chip, selected ? theme().accentDim : theme().hairline);
-      text.draw(tagLabel, chip.x + 10, chip.y + std::max(2.0f, (chip.h - static_cast<float>(text.lineHeight())) / 2.0f), selected ? theme().accent : theme().dim);
-    }
-    y += 50;
-  }
-}
-
-
-
 
 static bool scrollbarHit(Rect viewport, int scroll, int maxScroll, float x, float y) {
   if(maxScroll <= 0) return false;
@@ -1783,7 +1807,7 @@ static bool scrollbarHit(Rect viewport, int scroll, int maxScroll, float x, floa
 }
 
 static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int height) {
-  if(ui.resizingSidebar || ui.resizingNotes) return CursorKind::ResizeHorizontal;
+  if(ui.resizingSidebar) return CursorKind::ResizeHorizontal;
   if(ui.scrollDragTarget != ScrollDragTarget::None) return CursorKind::ResizeVertical;
 
   const float x = ui.mouseX;
@@ -1804,17 +1828,12 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   if(ui.overlays.active()) return CursorKind::Pointer;
 
   if(contains(layout.sidebar, x, y)) {
-    if(sidebarRowAt(ui, layout.sidebar, x, y)) return CursorKind::Pointer;
-    return CursorKind::Default;
-  }
-
-  if(contains(layout.notes, x, y)) {
-    const Rect search = searchBoxRect(layout.notes);
+    const Rect search = searchBoxRect(layout.sidebar);
     if(contains(search, x, y)) {
-      const Rect scopeToggle {search.x + search.w - 34.0f, search.y + 5.0f, 24.0f, 24.0f};
-      return contains(scopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
+      return contains(ui.searchScopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
     }
-    return noteRowAt(ui, layout.notes, x, y) ? CursorKind::Pointer : CursorKind::Default;
+    if(sidebarRowAt(ui, sidebarListRect(layout.sidebar), x, y)) return CursorKind::Pointer;
+    return CursorKind::Default;
   }
 
   if(!contains(layout.content, x, y)) return CursorKind::Default;
@@ -2252,13 +2271,11 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   // First, whatever is or is not open behind it: it carries the window controls.
   drawTitleBar(renderer, text, ui, layout.titleBar);
 
-  if(!ui::empty(layout.sidebar)) drawSidebar(renderer, text, ui, layout.sidebar);
-  if(!ui::empty(layout.notes)) drawNotes(renderer, text, ui, layout.notes);
-  // One rule per panel that is actually there. A hidden panel is zero wide, and
-  // its rule would land on the edge of whatever took its place.
-  for(const Rect& panel : {layout.sidebar, layout.notes}) {
-    if(ui::empty(panel)) continue;
-    fill(renderer, {panel.x + panel.w, panel.y, 1, panel.h}, theme().hairline);
+  // A hidden panel is zero wide, and its rule would land on the edge of
+  // whatever took its place.
+  if(!ui::empty(layout.sidebar)) {
+    drawSidebar(renderer, text, ui, layout.sidebar);
+    fill(renderer, {layout.sidebar.x + layout.sidebar.w, layout.sidebar.y, 1, layout.sidebar.h}, theme().hairline);
   }
   if(!ui::empty(layout.rightPanel)) drawRightPanel(renderer, text, ui, layout.rightPanel);
   if(!ui::empty(layout.tabs)) drawTabStrip(renderer, text, ui, layout.tabs);
@@ -2726,7 +2743,6 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "find") focusFindInNote(ui);
   else if(id == "search") focusSearchAllNotes(ui);
   else if(id == "toggle-sidebar") togglePanel(ui, &ui::WorkspaceModel::sidebarVisible, "Sidebar");
-  else if(id == "toggle-notes") togglePanel(ui, &ui::WorkspaceModel::noteListVisible, "Note list");
   else if(id == "toggle-right") togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");
   else if(id == "cycle-right") cycleRightPanel(ui);
   else if(id == "next-tab") stepTab(ui, 1);
@@ -2993,7 +3009,6 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     ui::ActionId::CloseTab,
     ui::ActionId::OpenInNewTab,
     ui::ActionId::ToggleSidebar,
-    ui::ActionId::ToggleNoteList,
     ui::ActionId::ToggleRightPanel,
     ui::ActionId::CycleRightPanel,
   };
@@ -3157,6 +3172,11 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       else selectBlockAtCursor(ui);
     }
     ui.focus = FocusArea::Editor;
+  } else if(ui.focus == FocusArea::Search && (key == SDLK_DOWN || key == SDLK_UP)) {
+    // The results are sidebar rows now, so walking them is the tree cursor: the
+    // field keeps the typing and the list keeps the selection. A single-line
+    // field has nothing else to do with Up and Down.
+    moveTreeCursor(ui, key == SDLK_DOWN ? 1 : -1);
   } else if(auto* field = focusedField(ui)) {
     // Enter is the only key whose meaning depends on which field this is;
     // everything else -- arrows, word motion, Home/End, Backspace, Delete,
@@ -3278,10 +3298,6 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       publishEditorPrimarySelection(ui);
       ui.revealEditorCursor = true;
     }
-  } else if(ui.focus == FocusArea::Notes) {
-    if(key == SDLK_DOWN) selectNoteAt(ui, ui.noteCursor + 1);
-    else if(key == SDLK_UP) selectNoteAt(ui, ui.noteCursor - 1);
-    else if(key == SDLK_RETURN) ui.focus = FocusArea::Editor;
   } else if(ui.focus == FocusArea::Folders) {
     if(key == SDLK_DOWN || key == SDLK_UP) moveTreeCursor(ui, key == SDLK_DOWN ? 1 : -1);
     else if(key == SDLK_RIGHT || key == SDLK_LEFT) expandTreeCursor(ui, key == SDLK_RIGHT);
@@ -3312,11 +3328,11 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
 
   if(button == SDL_BUTTON_MIDDLE) {
-    if(contains(layout.notes, x, y) && y >= layout.notes.y + 12 && y <= layout.notes.y + 46) {
+    if(contains(searchBoxRect(layout.sidebar), x, y)) {
       ui.focus = FocusArea::Search;
       // Middle-click pastes at the point pressed, like every other X11 text
       // field, rather than always at the end of the string.
-      ui.search.editor.moveCursor(fieldOffsetAtX(text, ui.search, searchTextRect(layout.notes, text), x));
+      ui.search.editor.moveCursor(fieldOffsetAtX(text, ui.search, searchTextRect(layout.sidebar, text), x));
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
       return;
     }
@@ -3346,7 +3362,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       // The search box is the one field drawn in a pane, so a middle click
       // inside it drops the caret where it landed before pasting.
       if(ui.focus == FocusArea::Search) {
-        const Rect fieldRect = searchTextRect(layout.notes, text);
+        const Rect fieldRect = searchTextRect(layout.sidebar, text);
         if(contains(fieldRect, x, y)) {
           field->editor.moveCursor(fieldOffsetAtX(text, *field, fieldRect, x));
         }
@@ -3412,10 +3428,6 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       ui.resizingSidebar = true;
       return;
     }
-    if(std::abs(x - (layout.notes.x + layout.notes.w)) <= 4.0f) {
-      ui.resizingNotes = true;
-      return;
-    }
   }
 
   if(button == SDL_BUTTON_LEFT) {
@@ -3428,8 +3440,28 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
 
   if(contains(layout.sidebar, x, y)) {
+    // The search field is part of the sidebar but not part of its row list, so
+    // it takes the click before any row arithmetic happens.
+    if(contains(searchBoxRect(layout.sidebar), x, y)) {
+      if(contains(ui.searchScopeToggle, x, y)) {
+        ui.searchScope = nextSearchScope(ui.searchScope);
+        ui.state.setSearch(ui.search.text(), ui.searchScope);
+        ui.status = "Search scope " + searchScopeLabel(ui.searchScope);
+        return;
+      }
+      // Clicking a text field puts the caret where you clicked. Before, it only
+      // moved focus, and the insertion point stayed pinned to the end.
+      const Rect fieldRect = searchTextRect(layout.sidebar, text);
+      ui.focus = FocusArea::Search;
+      const auto offset = fieldOffsetAtX(text, ui.search, fieldRect, x);
+      ui.search.editor.moveCursor(offset);
+      ui.selectingFieldText = true;
+      ui.fieldSelectionAnchor = offset;
+      return;
+    }
+
     ui.focus = FocusArea::Folders;
-    const auto index = sidebarRowAt(ui, layout.sidebar, x, y);
+    const auto index = sidebarRowAt(ui, sidebarListRect(layout.sidebar), x, y);
     if(!index) {
       if(button == SDL_BUTTON_RIGHT) openFolderMenu(ui, x, y);
       return;
@@ -3445,7 +3477,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     activateSidebarRow(ui, row, true);
     if(button == SDL_BUTTON_RIGHT) {
-      if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::Note) openNoteMenu(ui, x, y);
+      if(row.kind == SidebarRow::Kind::SearchResult) openNoteMenu(ui, x, y);
+      else if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::Note) openNoteMenu(ui, x, y);
       else if(row.kind == SidebarRow::Kind::Tree) openFolderMenu(ui, x, y);
       return;
     }
@@ -3457,53 +3490,6 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         ui.draggingFolder = true;
         ui.draggingFolderPath = row.tree.folder;
       }
-    }
-    return;
-  }
-  if(contains(layout.notes, x, y)) {
-    if(y >= layout.notes.y + 12 && y <= layout.notes.y + 46) {
-      if(contains(ui.searchScopeToggle, x, y)) {
-        ui.searchScope = nextSearchScope(ui.searchScope);
-        ui.state.setSearch(ui.search.text(), ui.searchScope);
-        ui.status = "Search scope " + searchScopeLabel(ui.searchScope);
-        return;
-      }
-      // Clicking a text field puts the caret where you clicked. Before, it only
-      // moved focus, and the insertion point stayed pinned to the end.
-      const Rect fieldRect = searchTextRect(layout.notes, text);
-      ui.focus = FocusArea::Search;
-      const auto offset = fieldOffsetAtX(text, ui.search, fieldRect, x);
-      ui.search.editor.moveCursor(offset);
-      ui.selectingFieldText = true;
-      ui.fieldSelectionAnchor = offset;
-      return;
-    }
-    ui.focus = FocusArea::Notes;
-    if(!ui.search.empty()) {
-      float rowY = layout.notes.y + 62.0f;
-      for(const auto& result : ui.state.currentSearchResults()) {
-        const std::size_t snippetCount = std::max<std::size_t>(result.snippets.size(), result.matchLine.empty() ? 0 : 1);
-        const float availableH = layout.notes.y + layout.notes.h - 24.0f - (rowY - 8.0f);
-        const std::size_t maxVisibleSnippets = availableH <= 90.0f ? 0 : static_cast<std::size_t>((availableH - 30.0f) / 60.0f);
-        const std::size_t visibleSnippets = std::min<std::size_t>(snippetCount, std::min<std::size_t>(4, maxVisibleSnippets));
-        const float rowH = visibleSnippets > 0 ? 30.0f + static_cast<float>(visibleSnippets * 60) : 50.0f;
-        Rect row {layout.notes.x + 10, rowY - 8, layout.notes.w - 20, rowH};
-        if(contains(row, x, y)) {
-          selectNoteById(ui, result.id);
-          break;
-        }
-        rowY += rowH;
-      }
-    } else {
-      int index = static_cast<int>((y - (layout.notes.y + 54.0f)) / 50.0f);
-      selectNoteAt(ui, index);
-      if(button == SDL_BUTTON_LEFT && !ui.state.selection().noteId.empty()) {
-        ui.draggingNote = true;
-        ui.draggingNoteId = ui.state.selection().noteId;
-      }
-    }
-    if(button == SDL_BUTTON_RIGHT) {
-      openNoteMenu(ui, x, y);
     }
     return;
   }
@@ -3753,7 +3739,6 @@ static void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int wid
       }
     }
     ui.resizingSidebar = false;
-    ui.resizingNotes = false;
     ui.selectingEditorText = false;
     ui.selectingFieldText = false;
     ui.scrollDragTarget = ScrollDragTarget::None;
@@ -3833,7 +3818,6 @@ int run(ApplicationOptions options) {
       : ui::PaneMode::Live);
   }
   if(options.showSidebar) ui.state.workspace().sidebarVisible = *options.showSidebar;
-  if(options.showNoteList) ui.state.workspace().noteListVisible = *options.showNoteList;
   if(options.showRightPanel) ui.state.workspace().rightPanelVisible = *options.showRightPanel;
   if(!options.rightPanelView.empty()) {
     ui.state.workspace().rightPanelView = ui::rightPanelViewFromName(options.rightPanelView);
@@ -3937,6 +3921,14 @@ int run(ApplicationOptions options) {
     return out;
   };
 
+  if(!options.searchQuery.empty()) {
+    // Not selectAll: a capture wants the caret after the query, the way it sits
+    // once the query has been typed.
+    ui.search.beginWith(options.searchQuery, false);
+    ui.state.setSearch(options.searchQuery, ui.searchScope);
+    ui.focus = FocusArea::Search;
+  }
+
   if(!options.openOverlay.empty()) {
     const auto& which = options.openOverlay;
     if(which == "rename") beginRename(ui);
@@ -4039,15 +4031,13 @@ int run(ApplicationOptions options) {
           }
         } else if(ui.draggingNote || ui.draggingFolder) {
           const ShellLayout layout = shellLayout(ui, width, height);
-          const auto row = sidebarRowAt(ui, layout.sidebar, event.motion.x, event.motion.y);
+          const auto row = sidebarRowAt(ui, sidebarListRect(layout.sidebar), event.motion.x, event.motion.y);
           ui.sidebarDropRow = row && ui.sidebarRows[*row].kind == SidebarRow::Kind::Tree
                                 ? row
                                 : std::optional<std::size_t> {};
         } else if(ui.resizingSidebar) {
-          ui.state.workspace().sidebarWidth = std::clamp(static_cast<int>(event.motion.x), 150, std::max(150, width - 520));
-        } else if(ui.resizingNotes) {
-          const ShellLayout layout = shellLayout(ui, width, height);
-          ui.state.workspace().noteListWidth = std::clamp(static_cast<int>(event.motion.x - layout.sidebar.w), 190, std::max(190, width - static_cast<int>(layout.sidebar.w) - 320));
+          ui.state.workspace().sidebarWidth = std::clamp(static_cast<float>(event.motion.x), ui::kMinSidebarWidth,
+                                                         std::max(ui::kMinSidebarWidth, static_cast<float>(width) - 520.0f));
         }
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.overlays.active()) {

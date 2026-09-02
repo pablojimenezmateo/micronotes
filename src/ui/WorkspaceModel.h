@@ -48,12 +48,10 @@ struct WorkspaceModel {
   // A hidden panel keeps its width, so showing it again restores the size it
   // had rather than snapping to the default.
   bool sidebarVisible = true;
-  bool noteListVisible = true;
   bool rightPanelVisible = false;
   RightPanelView rightPanelView = RightPanelView::Outline;
 
   float sidebarWidth = kDefaultSidebarWidth;
-  float noteListWidth = kDefaultNoteListWidth;
   float rightPanelWidth = kDefaultRightPanelWidth;
 
   // Notes pinned to the top of the sidebar, and the ones opened most recently,

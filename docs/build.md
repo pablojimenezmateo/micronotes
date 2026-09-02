@@ -304,7 +304,7 @@ Useful runtime controls:
   view alike; the slash menu and the turn-into menu offer all five.
 - A fenced code block shows its language and a `Copy` button in its top right.
 - A note can carry an `icon:` emoji in its front matter, shown beside it in the
-  tree, the note list and the breadcrumb. Set it from the command palette; an
+  tree and the breadcrumb. Set it from the command palette; an
   empty value removes the key. Front matter keys micronotes does not model are
   preserved exactly as they were written, so a note written by another tool
   survives being saved here.
@@ -322,7 +322,15 @@ Useful runtime controls:
   in the library's `.micronotes/ui.state`.
 - `/`: focus search when the editor is not focused.
 - Click in the editor to place the cursor.
-- Right-click a note in the note list for Rename and Delete actions.
+- Right-click a note anywhere in the sidebar - in the tree or in a list of
+  search results - for Rename, Set icon, Edit tags, Move and Delete.
+- The search field sits at the top of the sidebar, above the navigation it
+  filters. `Ctrl+Shift+F` focuses it, and the `A`/`T`/`C` button at its right
+  cycles the scope between all, title only and content only. While a query is
+  running the sidebar lists the matching notes and up to three matching lines
+  each instead of the tree; `Up`/`Down` walk the results while the field keeps
+  the typing, and `Esc` clears the query and brings the tree back. Selecting a
+  tag does the same thing with that tag's notes.
 - The sidebar is a tree: notes nest under their notebook, a disclosure triangle
   opens a notebook without selecting it, and clicking a row selects it. `Up` and
   `Down` walk the rows, `Right` opens a notebook or steps into it, and `Left`
@@ -335,8 +343,12 @@ Useful runtime controls:
 - Favorites sit above the tree and the notes you opened most recently below it;
   tags are a filter at the bottom rather than a second way to organise notes.
   Both lists are stored in `.micronotes/ui.state` and name notes by id.
-- Above the page, a breadcrumb names the notebooks down to the open note; click
-  one to go there. The star at the right pins the note to Favorites.
+- The window draws its own title bar rather than wearing the compositor's: a
+  breadcrumb naming the notebooks down to the open note (click one to go there),
+  the star that pins the note to Favorites, and minimize / maximize / close at
+  the right. Dragging the empty part of the strip moves the window, and the
+  window's edges resize it. On a platform that refuses a hit test the ordinary
+  decorations come back and the drawn buttons stand down.
 - Deleting a note or a notebook moves it to the library's own
   `.micronotes/trash/`, not the desktop trash, so "Restore from trash..." in the
   command palette can put it back - with its attachments, and under a new name
@@ -388,6 +400,9 @@ These exist to make UI work reproducible and are not part of normal use:
 --scale 2              # override the display scale
 --pane live|editor|viewer|split
 --select <title>       # open the first note whose title contains this
+--search <query>       # seed the sidebar's search field, to capture it searching
+--panels sidebar,right # which side panels to show, rather than whatever was stored
+--right-panel outline|backlinks
 --open rename|tags|new-folder|note-menu|folder-menu|delete-note|settings|shortcuts|command-palette
 ```
 

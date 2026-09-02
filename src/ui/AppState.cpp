@@ -49,6 +49,7 @@ bool AppState::openOrCreateLibrary(const std::filesystem::path& root) {
   perf::ScopeTimer timer("app_state.open_or_create_library");
   library_.emplace(root);
   library_->ensureLayout();
+  ++revision_;
   organization_.emplace(*library_);
   return index_.open(root) && index_.refreshChangedFiles();
 }
@@ -367,8 +368,13 @@ bool AppState::restoreFromTrash(const std::string& name) {
 
 bool AppState::refreshLibrary() {
   if(!library_) return false;
+  ++revision_;
   organization_.emplace(*library_);
   return index_.refreshChangedFiles();
+}
+
+std::uint64_t AppState::revision() const {
+  return revision_;
 }
 
 bool AppState::saveUiState(const std::filesystem::path& path) const {
@@ -384,10 +390,8 @@ bool AppState::saveUiState(const std::filesystem::path& path) const {
   // Rounded on the way out: an older binary parses these with from_chars into
   // an int, and "240.5" would make it fall back to its default instead.
   out << "sidebar=" << static_cast<int>(std::lround(workspace_.sidebarWidth)) << "\n";
-  out << "notelist=" << static_cast<int>(std::lround(workspace_.noteListWidth)) << "\n";
   out << "rightpanel=" << static_cast<int>(std::lround(workspace_.rightPanelWidth)) << "\n";
   out << "panel_sidebar=" << (workspace_.sidebarVisible ? 1 : 0) << "\n";
-  out << "panel_notelist=" << (workspace_.noteListVisible ? 1 : 0) << "\n";
   out << "panel_right=" << (workspace_.rightPanelVisible ? 1 : 0) << "\n";
   out << "right_view=" << rightPanelViewName(workspace_.rightPanelView) << "\n";
   out << "folder=" << selection_.folder.generic_string() << "\n";
@@ -413,7 +417,6 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
   // A file written before panels could be hidden says nothing about them, and
   // the arrangement it was written under is the one the defaults describe.
   workspace_.sidebarVisible = true;
-  workspace_.noteListVisible = true;
   workspace_.rightPanelVisible = false;
   workspace_.tabs.clear();
   workspace_.activeTab = 0;
@@ -461,10 +464,8 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
     }
     else if(key == "active_tab") activeTab = parseInt(value, 0);
     else if(key == "sidebar") workspace_.sidebarWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.sidebarWidth)));
-    else if(key == "notelist") workspace_.noteListWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.noteListWidth)));
     else if(key == "rightpanel") workspace_.rightPanelWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.rightPanelWidth)));
     else if(key == "panel_sidebar") workspace_.sidebarVisible = parseInt(value, 1) != 0;
-    else if(key == "panel_notelist") workspace_.noteListVisible = parseInt(value, 1) != 0;
     else if(key == "panel_right") workspace_.rightPanelVisible = parseInt(value, 0) != 0;
     else if(key == "right_view") workspace_.rightPanelView = rightPanelViewFromName(value);
     else if(key == "folder") selection_.folder = value;

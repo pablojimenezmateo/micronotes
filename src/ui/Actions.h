@@ -60,7 +60,6 @@ enum class ActionId {
   CyclePane,
   ToggleTheme,
   ToggleSidebar,
-  ToggleNoteList,
   ToggleRightPanel,
   CycleRightPanel,
   NextTab,

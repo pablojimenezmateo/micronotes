@@ -27,12 +27,10 @@ struct ShellLayoutInputs {
   // A hidden panel keeps its width so that showing it again restores the size
   // it had, rather than snapping back to the default.
   bool sidebarVisible = true;
-  bool noteListVisible = true;
   bool rightPanelVisible = false;
   bool tabStripVisible = false;
 
   float sidebarWidth = 0.0f;
-  float noteListWidth = 0.0f;
   float rightPanelWidth = 0.0f;
 
   // The mode the previous frame settled on. Feeding it back in is what gives
@@ -52,8 +50,7 @@ struct ShellLayout {
   // the window controls. Reserved whether or not a note is open, so a hit test
   // against the rest of the window agrees with what was drawn.
   Rect titleBar;
-  Rect sidebar;      // notebooks, favorites, tags
-  Rect notes;        // search box and the note list
+  Rect sidebar;      // search field, notebooks, favorites, tags
   Rect tabs;         // the tab strip above the page
   Rect content;      // the page itself
   Rect rightPanel;   // outline, backlinks

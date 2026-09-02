@@ -33,28 +33,29 @@ inline constexpr float kWindowButtonWidth = 40.0f;
 // size like the rest.
 inline constexpr float kWindowFrameThickness = 6.0f;
 
-// Panel widths a fresh library starts with.
-inline constexpr float kDefaultSidebarWidth = 240.0f;
-inline constexpr float kDefaultNoteListWidth = 300.0f;
+// Panel widths a fresh library starts with. The sidebar is wider than a plain
+// tree needs because it also holds the search field and its results.
+inline constexpr float kDefaultSidebarWidth = 280.0f;
 inline constexpr float kDefaultRightPanelWidth = 280.0f;
+
+// The search field at the top of the sidebar, and the strip it sits in.
+inline constexpr float kSidebarSearchHeight = 34.0f;
+inline constexpr float kSidebarSearchBand = 58.0f;
 
 // The narrowest each panel may be dragged to, and the narrowest the page may be
 // squeezed to before the panels start giving room back instead.
-inline constexpr float kMinSidebarWidth = 170.0f;
-inline constexpr float kMinNoteListWidth = 220.0f;
+inline constexpr float kMinSidebarWidth = 200.0f;
 inline constexpr float kMinRightPanelWidth = 200.0f;
 inline constexpr float kMinContentWidth = 320.0f;
 
 // Squeeze floors. A window too narrow to honour the minimums above has to put
 // the difference somewhere, and a panel thinner than this is not worth drawing.
-inline constexpr float kSidebarSqueezeFloor = 150.0f;
-inline constexpr float kNoteListSqueezeFloor = 190.0f;
+inline constexpr float kSidebarSqueezeFloor = 180.0f;
 inline constexpr float kRightPanelSqueezeFloor = 170.0f;
 
 // No panel may take more than its share of the window, however wide it was
 // dragged on a larger screen and then persisted.
-inline constexpr float kMaxSidebarFraction = 0.28f;
-inline constexpr float kMaxNoteListFraction = 0.34f;
+inline constexpr float kMaxSidebarFraction = 0.34f;
 inline constexpr float kMaxRightPanelFraction = 0.30f;
 
 // Layout treats a window narrower than this as if it were this wide, so the
@@ -66,8 +67,7 @@ inline constexpr float kMinUsableWidth = 760.0f;
 // flipping back and forth on every motion event.
 inline constexpr float kCompactBreakpoint = 1000.0f;
 inline constexpr float kCompactHysteresis = 12.0f;
-inline constexpr float kCompactSidebarWidth = 190.0f;
-inline constexpr float kCompactNoteListWidth = 240.0f;
+inline constexpr float kCompactSidebarWidth = 220.0f;
 
 // The accent strip down the left of a selected row, and down the edge of the
 // pane that has the keyboard. Two different widths so the two never read as the

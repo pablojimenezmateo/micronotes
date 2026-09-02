@@ -93,24 +93,21 @@ ShellLayoutInputs WorkspaceModel::layoutInputs(float windowWidth, float windowHe
   inputs.windowWidth = windowWidth;
   inputs.windowHeight = windowHeight;
   inputs.sidebarVisible = sidebarVisible;
-  inputs.noteListVisible = noteListVisible;
   inputs.rightPanelVisible = rightPanelVisible;
   inputs.sidebarWidth = sidebarWidth;
-  inputs.noteListWidth = noteListWidth;
   inputs.rightPanelWidth = rightPanelWidth;
   inputs.previousMode = previousMode;
   return inputs;
 }
 
 bool WorkspaceModel::togglePanel(bool WorkspaceModel::*panel) {
-  // Hiding the last panel that can reach another note would leave the palette
-  // as the only way out, so the last one standing refuses. The right panel is
-  // not counted: it shows the open note, it does not navigate to one.
-  const bool hiding = this->*panel;
-  if(hiding && panel != &WorkspaceModel::rightPanelVisible) {
-    const bool otherShowing = panel == &WorkspaceModel::sidebarVisible ? noteListVisible : sidebarVisible;
-    if(!otherShowing) return false;
-  }
+  // This used to refuse to hide the last of the two panels that could reach
+  // another note, because hiding both was an accident waiting to happen: they
+  // overlapped, so closing one felt harmless. There is one navigator now --
+  // search, tree and shortcut lists are all in the sidebar -- and hiding it is
+  // a deliberate act with the same key to undo it, the palette, and the tab
+  // strip still standing. So nothing refuses, and the return stays for callers
+  // that already branch on it.
   this->*panel = !(this->*panel);
   return true;
 }

@@ -10,10 +10,9 @@ using micronotes::ui::rightPanelViewName;
 using micronotes::ui::WorkspaceModel;
 using micronotes::ui::computeShellLayout;
 
-MICRONOTES_TEST(workspace_starts_with_the_two_navigating_panels_open) {
+MICRONOTES_TEST(workspace_starts_with_the_navigating_panel_open) {
   const WorkspaceModel workspace;
   MICRONOTES_REQUIRE(workspace.sidebarVisible);
-  MICRONOTES_REQUIRE(workspace.noteListVisible);
   // The right panel describes the open note, so it is not there until asked for.
   MICRONOTES_REQUIRE(!workspace.rightPanelVisible);
 }
@@ -26,25 +25,24 @@ MICRONOTES_TEST(workspace_toggles_a_panel_both_ways) {
   MICRONOTES_REQUIRE(!workspace.rightPanelVisible);
 }
 
-// Hiding both navigating panels would leave the palette as the only way to
-// reach another note, so the last one standing refuses to go.
-MICRONOTES_TEST(workspace_keeps_one_way_to_reach_another_note) {
+// The sidebar is the only navigator, and hiding it is allowed: it is one key,
+// the same key brings it back, and the palette and the tab strip are still
+// there meanwhile. What must not happen is a toggle that only goes one way.
+MICRONOTES_TEST(workspace_sidebar_hides_and_comes_back) {
   WorkspaceModel workspace;
   MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::sidebarVisible));
   MICRONOTES_REQUIRE(!workspace.sidebarVisible);
-  MICRONOTES_REQUIRE(!workspace.togglePanel(&WorkspaceModel::noteListVisible));
-  MICRONOTES_REQUIRE(workspace.noteListVisible);
-
-  // The right panel is not one of the two, so it may still be hidden with only
-  // one navigating panel open.
-  workspace.rightPanelVisible = true;
-  MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::rightPanelVisible));
-  MICRONOTES_REQUIRE(!workspace.rightPanelVisible);
-
-  // Bringing the sidebar back frees the note list to go.
   MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::sidebarVisible));
-  MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::noteListVisible));
-  MICRONOTES_REQUIRE(!workspace.noteListVisible);
+  MICRONOTES_REQUIRE(workspace.sidebarVisible);
+
+  // Both panels away at once is a reachable state, and still reversible.
+  workspace.rightPanelVisible = true;
+  MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::sidebarVisible));
+  MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::rightPanelVisible));
+  MICRONOTES_REQUIRE(!workspace.sidebarVisible);
+  MICRONOTES_REQUIRE(!workspace.rightPanelVisible);
+  MICRONOTES_REQUIRE(workspace.togglePanel(&WorkspaceModel::sidebarVisible));
+  MICRONOTES_REQUIRE(workspace.sidebarVisible);
 }
 
 // A hidden panel keeps its width, so showing it again restores the size it had.

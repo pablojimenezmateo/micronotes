@@ -26,11 +26,13 @@ struct ApplicationOptions {
   // Debug aids for reproducible captures.
   std::optional<int> paneMode;
   std::string selectTitle;
+  // Seeds the sidebar's search field, so a capture can pin the searching state
+  // the same way --select pins an open note.
+  std::string searchQuery;
   std::string openOverlay;
   // Which panels a captured frame should show, so a screenshot can pin an
   // arrangement the persisted state does not happen to be in.
   std::optional<bool> showSidebar;
-  std::optional<bool> showNoteList;
   std::optional<bool> showRightPanel;
   // Which of the right panel's views a captured frame should be showing.
   std::string rightPanelView;

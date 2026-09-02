@@ -44,7 +44,6 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       // arrangement rather than inheriting whatever the library was left in.
       const std::string value = argv[++i];
       options.showSidebar = value.find("sidebar") != std::string::npos;
-      options.showNoteList = value.find("notes") != std::string::npos;
       options.showRightPanel = value.find("right") != std::string::npos;
     } else if(arg == "--right-panel" && i + 1 < argc) {
       options.rightPanelView = argv[++i];
@@ -57,6 +56,8 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       else if(value == "live") options.paneMode = 3;
     } else if(arg == "--select" && i + 1 < argc) {
       options.selectTitle = argv[++i];
+    } else if(arg == "--search" && i + 1 < argc) {
+      options.searchQuery = argv[++i];
     } else if(arg == "--open" && i + 1 < argc) {
       options.openOverlay = argv[++i];
     }

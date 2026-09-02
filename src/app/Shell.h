@@ -23,6 +23,7 @@
 
 #include <cstdlib>
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -57,7 +58,6 @@ enum class UiAction {
 
 enum class FocusArea {
   Folders,
-  Notes,
   Editor,
   Search,
   Find,
@@ -85,7 +85,6 @@ enum class CursorKind {
 inline const char* focusName(FocusArea focus) {
   switch(focus) {
     case FocusArea::Folders: return "Folders";
-    case FocusArea::Notes: return "Notes";
     case FocusArea::Editor: return "Editor";
     case FocusArea::Search: return "Search";
     case FocusArea::Find: return "Find";
@@ -131,7 +130,11 @@ struct SidebarRow {
   enum class Kind {
     Tree,
     SectionLabel,
-    Tag
+    Tag,
+    // A note that matched the query, with the lines that matched under it.
+    // While a search is running these replace the tree rather than appearing
+    // beside them: the sidebar answers one question at a time.
+    SearchResult
   };
 
   Kind kind = Kind::Tree;
@@ -142,6 +145,13 @@ struct SidebarRow {
   Rect disclosure;
   ui::TreeRow tree;
   std::string tag;
+  // Search results only.
+  std::string noteId;
+  std::string title;
+  // The matching lines alone, without the context either side. A sidebar-width
+  // column has no room for three lines per hit, and showing them would triple
+  // every row's height for text nobody can read at that width.
+  std::vector<std::string> matchLines;
 };
 
 struct SystemCursors {
@@ -289,6 +299,16 @@ struct UiRuntime {
   // of the library: a disclosure triangle must not touch a file.
   ui::TreeModel tree;
   std::vector<SidebarRow> sidebarRows;
+  // The results the sidebar is currently listing. Held rather than re-queried
+  // because the row list is rebuilt on every frame -- including the ones a
+  // hover causes -- and each query is a hit on SQLite. Keyed on the library
+  // revision as well as the query, so an edit that changes what matches is not
+  // served a stale answer.
+  std::string searchCacheQuery;
+  library::SearchScope searchCacheScope = library::SearchScope::All;
+  std::uint64_t searchCacheRevision = 0;
+  bool searchCacheValid = false;
+  std::vector<library::SearchResult> searchCache;
   // Last frame's sidebar rect, so keyboard navigation can scroll a row into
   // view without recomputing the whole window layout.
   Rect sidebarRect;
@@ -325,7 +345,6 @@ struct UiRuntime {
   // which would ask the display server a question every frame.
   bool windowMaximized = false;
   bool resizingSidebar = false;
-  bool resizingNotes = false;
   // Set while a drag inside a single-line field is extending its selection.
   bool selectingFieldText = false;
   std::size_t fieldSelectionAnchor = 0;

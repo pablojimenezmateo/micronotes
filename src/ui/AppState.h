@@ -7,6 +7,7 @@
 #include "library/Organization.h"
 #include "ui/WorkspaceModel.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -76,6 +77,10 @@ public:
   bool deleteSelectedFolder();
   bool updateSelectedTags(const std::vector<std::string>& tags);
   bool refreshLibrary();
+  // Bumped every time the library is re-read. A view that caches an answer
+  // derived from the library keys its cache on this rather than trying to name
+  // every mutation that could have invalidated it.
+  std::uint64_t revision() const;
 
   bool favorite(std::string_view noteId) const;
   bool toggleFavorite(const std::string& noteId);
@@ -95,6 +100,7 @@ private:
   std::optional<library::Library> library_;
   mutable std::optional<library::OrganizationService> organization_;
   library::LibraryIndex index_;
+  std::uint64_t revision_ = 0;
 };
 
 }

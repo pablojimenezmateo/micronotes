@@ -18,7 +18,6 @@ ShellLayoutInputs wideShell() {
   inputs.windowWidth = 1600.0f;
   inputs.windowHeight = 900.0f;
   inputs.sidebarWidth = micronotes::ui::kDefaultSidebarWidth;
-  inputs.noteListWidth = micronotes::ui::kDefaultNoteListWidth;
   inputs.rightPanelWidth = micronotes::ui::kDefaultRightPanelWidth;
   return inputs;
 }
@@ -32,8 +31,7 @@ bool nearlyEqual(float a, float b) {
 MICRONOTES_TEST(shell_layout_panes_tile_the_window_without_a_gap) {
   const ShellLayout layout = computeShellLayout(wideShell());
   MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.x, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.notes.x, layout.sidebar.x + layout.sidebar.w));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.content.x, layout.notes.x + layout.notes.w));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.content.x, layout.sidebar.x + layout.sidebar.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x, layout.content.x + layout.content.w));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x + layout.rightPanel.w, 1600.0f));
   // The panes hang between the title bar and the status bar, meeting both.
@@ -52,7 +50,7 @@ MICRONOTES_TEST(shell_layout_title_bar_spans_the_window_above_every_panel) {
   MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.w, 1600.0f));
   MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.h, micronotes::ui::kTitleBarHeight));
   // Nothing starts above the bottom of it.
-  for(const auto& region : {layout.sidebar, layout.notes, layout.tabs, layout.content, layout.rightPanel}) {
+  for(const auto& region : {layout.sidebar, layout.tabs, layout.content, layout.rightPanel}) {
     MICRONOTES_REQUIRE(region.y >= layout.titleBar.y + layout.titleBar.h - 0.001f);
   }
 }
@@ -66,14 +64,9 @@ MICRONOTES_TEST(shell_layout_hidden_panels_give_their_room_to_the_page) {
   inputs.sidebarVisible = false;
   const ShellLayout hidden = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(hidden.sidebar.w, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(hidden.notes.x, 0.0f));
   MICRONOTES_REQUIRE(hidden.content.w > withPanels);
+  MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x, 0.0f));
   MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x + hidden.content.w, 1600.0f));
-
-  inputs.noteListVisible = false;
-  const ShellLayout bare = computeShellLayout(inputs);
-  MICRONOTES_REQUIRE(nearlyEqual(bare.content.x, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(bare.content.w, 1600.0f));
 }
 
 MICRONOTES_TEST(shell_layout_right_panel_takes_room_only_when_shown) {
@@ -85,9 +78,8 @@ MICRONOTES_TEST(shell_layout_right_panel_takes_room_only_when_shown) {
   const ShellLayout with = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(with.rightPanel.w, micronotes::ui::kDefaultRightPanelWidth));
   MICRONOTES_REQUIRE(nearlyEqual(with.content.w, without.content.w - micronotes::ui::kDefaultRightPanelWidth));
-  // The panels either side of the page are unmoved by it.
+  // The panel the other side of the page is unmoved by it.
   MICRONOTES_REQUIRE(with.sidebar == without.sidebar);
-  MICRONOTES_REQUIRE(with.notes == without.notes);
 }
 
 MICRONOTES_TEST(shell_layout_tab_strip_pushes_the_page_down) {
@@ -114,7 +106,6 @@ MICRONOTES_TEST(shell_layout_narrow_window_keeps_the_page_usable) {
   inputs.windowWidth = 700.0f;
   const ShellLayout layout = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(layout.sidebar.w > 0.0f);
-  MICRONOTES_REQUIRE(layout.notes.w > 0.0f);
   MICRONOTES_REQUIRE(layout.rightPanel.w > 0.0f);
   MICRONOTES_REQUIRE(layout.content.w > 0.0f);
   MICRONOTES_REQUIRE(layout.mode == LayoutMode::Compact);
