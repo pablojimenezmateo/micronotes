@@ -7,6 +7,7 @@
 #include "core/ui/ShellModel.h"
 #include "core/viewer/MarkdownViewer.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -538,4 +539,40 @@ MICRONOTES_TEST(editor_redo_returns_the_undone_edit) {
   MICRONOTES_REQUIRE(editor.text() == "a");
   MICRONOTES_REQUIRE(editor.redo());
   MICRONOTES_REQUIRE(editor.text() == "ab");
+}
+
+// Consumers derive per-frame work from the buffer, and a frame happens for
+// reasons that have nothing to do with the text. Without this they either
+// recompute every frame or compare the whole string; the status bar was doing
+// the first, walking a 235 KB note byte by byte on every scroll frame.
+MICRONOTES_TEST(editor_revision_moves_only_when_the_text_does) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("hello");
+  const std::uint64_t opened = editor.revision();
+
+  // Moving around is not a change.
+  editor.moveCursor(0);
+  editor.selectAll();
+  editor.clearSelection();
+  MICRONOTES_REQUIRE(editor.revision() == opened);
+
+  editor.moveCursor(editor.text().size());
+  editor.insert(" there");
+  const std::uint64_t typed = editor.revision();
+  MICRONOTES_REQUIRE(typed != opened);
+
+  editor.erasePrevious();
+  MICRONOTES_REQUIRE(editor.revision() != typed);
+
+  // Undo restores earlier bytes but issues a new revision. That direction is
+  // the safe one: a consumer recomputes something it need not have, rather than
+  // showing an answer for a buffer that is no longer on screen.
+  const std::uint64_t erased = editor.revision();
+  editor.undo();
+  MICRONOTES_REQUIRE(editor.revision() != erased);
+
+  // Loading another note is a change even though nothing was edited.
+  const std::uint64_t before = editor.revision();
+  editor.setText("a different note");
+  MICRONOTES_REQUIRE(editor.revision() != before);
 }

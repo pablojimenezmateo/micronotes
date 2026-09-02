@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace micronotes::doc {
 namespace {
@@ -278,6 +279,11 @@ std::vector<std::pair<std::size_t, std::size_t>> sourceLines(std::string_view so
 void DocumentLayout::setMetrics(Metrics metrics) {
   metrics_ = std::move(metrics);
   cache_.clear();
+  // Every cached block layout was measured with the old faces, so the standing
+  // layout no longer describes anything. Without this the reuse check below
+  // would happily keep it: the source and the geometry are unchanged, and the
+  // one thing that did change is not visible in either.
+  built_ = false;
 }
 
 const std::vector<SourceBlock>& DocumentLayout::blocks() const {
@@ -323,18 +329,66 @@ std::size_t DocumentLayout::lastRelaidBlocks() const {
   return lastRelaid_;
 }
 
+std::vector<bool> DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
+                                              const LayoutOptions& options) const {
+  // Fold ranges come from the block structure, so they can only be resolved
+  // once the scan is in: the caller names the heads, the layout names the
+  // blocks each head swallows.
+  std::vector<bool> hidden(blocks.size(), false);
+  for(std::size_t i = 0; options.folded && i < blocks.size(); ++i) {
+    // A fold nested inside a collapsed one is already hidden, and costs
+    // nothing to resolve again.
+    if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
+    perf::addCounter(perf::CounterId::LayoutFoldQueries);
+    if(!options.folded(blocks[i])) continue;
+    const std::size_t end = foldEnd(blocks, i);
+    for(std::size_t j = i + 1; j < end; ++j) hidden[j] = true;
+  }
+  return hidden;
+}
+
+std::size_t DocumentLayout::blockIndexFor(std::size_t offset) const {
+  if(offset == kNone) return kNone;
+  return blockIndexAt(blocks_, std::min(offset, source_.size()));
+}
+
+// A memcmp of the whole note, which is O(document) -- but it is one linear pass
+// over bytes already in cache, and what it decides is whether to skip the copy,
+// the rescan, the per-block key hash and the flat-line rebuild. On a 235 KB note
+// that trade is about 12 microseconds against 1.9 milliseconds.
+bool DocumentLayout::sourceMatches(std::string_view source) const {
+  if(!built_) return false;
+  if(source.size() != source_.size()) return false;
+  return source.empty() || std::memcmp(source.data(), source_.data(), source.size()) == 0;
+}
+
+// Whether the layout already standing is the exact answer to this call.
+//
+// "Exact" has to cover every input the block cache keys on, because the whole
+// point is to skip building those keys: the geometry hash, which block holds the
+// caret (markers are revealed per block, not per offset), which block is shown
+// raw, revealAll, and the resolved fold state. The source bytes are the caller's
+// precondition -- this is asked only once `sourceMatches` has said yes.
+//
+// Two things are deliberately NOT covered, both because the block cache does not
+// cover them either, so nothing regresses by skipping them here:
+//   - `wikiLinkResolves`. Its answer decides a run's role but is not part of a
+//     block's cache key, so a link that starts or stops resolving does not
+//     invalidate the cached block today either. It shows up on the next edit.
+//   - `metrics_`. Installing new metrics drops the cache and clears `built_`,
+//     which is the invalidation.
+bool DocumentLayout::canReuse(const LayoutOptions& options, std::uint64_t geometry,
+                              const std::vector<bool>& folds) const {
+  if(geometry != geometryHash_) return false;
+  if(options.revealAll != options_.revealAll) return false;
+  if(blockIndexFor(options.caretOffset) != caretBlock_) return false;
+  if(blockIndexFor(options.rawOffset) != rawBlock_) return false;
+  return folds == hidden_;
+}
+
 void DocumentLayout::update(std::string_view source, const LayoutOptions& options) {
   const perf::ScopeTimer timer("layout.update");
   perf::addCounter(perf::CounterId::LayoutUpdateCalls);
-  perf::addCounter(perf::CounterId::LayoutSourceBytesCopied, source.size());
-  source_.assign(source);
-  options_ = options;
-  {
-    const perf::ScopeTimer scanTimer("layout.update.scan_blocks");
-    blocks_ = scanBlocks(source_);
-  }
-  perf::addCounter(perf::CounterId::LayoutBlocksScanned, blocks_.size());
-  const std::string_view text = source_;
 
   std::uint64_t geometry = kFnvOffset;
   geometry = hashValue(geometry, options.width);
@@ -346,34 +400,52 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   geometry = hashValue(geometry, options.headingSpaceAbove);
   geometry = hashBytes(geometry, &options.type, sizeof(options.type));
 
-  // Fold ranges come from the block structure, so they can only be resolved
-  // once the scan is in: the caller names the heads, the layout names the
-  // blocks each head swallows.
-  hidden_.assign(blocks_.size(), false);
-  for(std::size_t i = 0; options.folded && i < blocks_.size(); ++i) {
-    // A fold nested inside a collapsed one is already hidden, and costs
-    // nothing to resolve again.
-    if(hidden_[i] || !foldableKind(blocks_[i].kind)) continue;
-    perf::addCounter(perf::CounterId::LayoutFoldQueries);
-    if(!options.folded(blocks_[i])) continue;
-    const std::size_t end = foldEnd(blocks_, i);
-    for(std::size_t j = i + 1; j < end; ++j) hidden_[j] = true;
+  // Identical bytes mean an identical partition, so `blocks_` still describes
+  // this source and the fold state can be resolved against it directly. That is
+  // the common case by a wide margin: the live surface re-lays the note out once
+  // per frame whether or not anything happened, and a scroll is every frame with
+  // nothing happening.
+  if(sourceMatches(source)) {
+    std::vector<bool> folds = resolveFolds(blocks_, options);
+    if(canReuse(options, geometry, folds)) {
+      // Nothing the layout depends on moved, so every byte this call would have
+      // copied, scanned, hashed and walked would have reproduced the answer
+      // already sitting in `placed_`. Before this returned early it was the
+      // single largest cost in a frame, and on a scroll -- where by definition
+      // only the viewport moved -- it was the whole frame's work.
+      perf::addCounter(perf::CounterId::LayoutUnchangedUpdates);
+      // The predicates are fresh closures every frame even when their answers
+      // are not, so the stored options have to take them, or a later query would
+      // call through a capture that has gone.
+      options_ = options;
+      lastRelaid_ = 0;
+      return;
+    }
+    // Something else moved -- the caret, the width, a fold -- so the blocks have
+    // to be placed again. The scan and the copy do not: those are the document,
+    // and the document is what did not change.
+    hidden_ = std::move(folds);
+  } else {
+    perf::addCounter(perf::CounterId::LayoutSourceBytesCopied, source.size());
+    source_.assign(source);
+    {
+      const perf::ScopeTimer scanTimer("layout.update.scan_blocks");
+      blocks_ = scanBlocks(source_);
+    }
+    perf::addCounter(perf::CounterId::LayoutBlocksScanned, blocks_.size());
+    hidden_ = resolveFolds(blocks_, options);
   }
+  options_ = options;
+  const std::string_view text = source_;
 
-  const std::size_t caretBlock = options.caretOffset == kNone ? kNone : blockIndexAt(blocks_, std::min(options.caretOffset, source_.size()));
-  const std::size_t rawBlock = options.rawOffset == kNone ? kNone : blockIndexAt(blocks_, std::min(options.rawOffset, source_.size()));
+  const std::size_t caretBlock = blockIndexFor(options.caretOffset);
+  const std::size_t rawBlock = blockIndexFor(options.rawOffset);
 
   placed_.assign(blocks_.size(), Placed {});
   liveKeys_.clear();
   liveKeys_.reserve(blocks_.size());
   lastRelaid_ = 0;
   float top = 0.0f;
-  // Folded over every block key, so it summarises the whole document, its
-  // geometry and its reveal state in one word. Comparing it against the previous
-  // update's is what lets an update that will produce a byte-identical layout
-  // say so -- which is every frame of a scroll.
-  std::uint64_t signature = hashValue(geometry, caretBlock);
-  signature = hashValue(signature, rawBlock);
   perf::addCounter(perf::CounterId::LayoutBlocksWalked, blocks_.size());
   for(std::size_t i = 0; i < blocks_.size(); ++i) {
     const SourceBlock& block = blocks_[i];
@@ -397,8 +469,6 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
     key = hashBytes(key, &flags, sizeof(flags));
     key = hashValue(key, first);
 
-    signature = hashValue(signature, key);
-
     auto found = cache_.find(key);
     if(found == cache_.end()) {
       ++lastRelaid_;
@@ -415,15 +485,10 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   }
   totalHeight_ = top;
 
-  // Nothing about this update differed from the last one, so every byte scanned,
-  // hashed and walked above reproduced an answer that was already in hand. On a
-  // scroll -- where the source, the width and the caret are all unchanged and
-  // only the viewport moved -- this is every single frame.
-  if(hadSignature_ && signature == lastSignature_) {
-    perf::addCounter(perf::CounterId::LayoutUnchangedUpdates);
-  }
-  lastSignature_ = signature;
-  hadSignature_ = true;
+  geometryHash_ = geometry;
+  caretBlock_ = caretBlock;
+  rawBlock_ = rawBlock;
+  built_ = true;
 
   flatLines_.clear();
   flatLines_.reserve(blocks_.size() + blocks_.size() / 2);
@@ -838,6 +903,23 @@ std::optional<std::size_t> DocumentLayout::blockAt(float y) const {
     if(y >= top && y < top + placed_[i].layout->height) return i;
   }
   return placed_.size() - 1;
+}
+
+std::pair<std::size_t, std::size_t> DocumentLayout::blockRange(float top, float bottom) const {
+  if(placed_.empty() || bottom < top) return {0, 0};
+  // Blocks tile the document: block i covers [top_i, top_{i+1}), and a block
+  // hidden inside a collapsed fold has zero height and shares its neighbour's
+  // top. So the first block on screen is the last one starting at or before
+  // `top`, and the range ends at the first one starting after `bottom`.
+  const auto byTop = [](const Placed& placed, float value) { return placed.top < value; };
+  auto first = std::lower_bound(placed_.begin(), placed_.end(), top, byTop);
+  if(first != placed_.begin()) --first;
+  const auto last = std::upper_bound(placed_.begin(), placed_.end(), bottom,
+                                     [](float value, const Placed& placed) {
+                                       return value < placed.top;
+                                     });
+  return {static_cast<std::size_t>(first - placed_.begin()),
+          static_cast<std::size_t>(last - placed_.begin())};
 }
 
 std::size_t DocumentLayout::flatLineForOffset(std::size_t offset, float* caretX) const {

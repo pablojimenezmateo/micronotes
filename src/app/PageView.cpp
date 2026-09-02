@@ -329,6 +329,26 @@ void PageView::setSelecting(bool selecting) {
   selecting_ = selecting;
 }
 
+// The blocks whose boxes reach the viewport, widened backwards to the head of a
+// quote or callout run the first visible block sits inside.
+//
+// The run matters because its container -- the tinted box, the bar down the left
+// -- is drawn once, by the block that starts it. A run that begins above the
+// viewport and continues into it would otherwise lose its box the moment its
+// first line scrolled off, which is a visible bug and not a subtle one.
+std::pair<std::size_t, std::size_t> PageView::visibleBlocks() const {
+  const float oy = originY();
+  auto range = document_.blockRange(page_.y - oy, page_.y + page_.h - oy);
+  const auto& blocks = document_.blocks();
+  while(range.first > 0 && range.first < blocks.size() &&
+        !doc::startsQuoteRun(blocks, range.first)) {
+    const doc::BlockKind kind = blocks[range.first].kind;
+    if(kind != doc::BlockKind::Quote && kind != doc::BlockKind::Callout) break;
+    --range.first;
+  }
+  return range;
+}
+
 ui::Rect PageView::blockRect(std::size_t index) const {
   const float top = originY() + document_.blockTop(index);
   return {columnLeft_, top, columnWidth_, document_.layout(index).height};
@@ -401,15 +421,16 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   drawBlockDecorations(renderer, text);
 
   const auto& blocks = document_.blocks();
-  // Every block in the note is visited to decide whether it is on screen, so
-  // this loop is O(document) per frame while what it draws is O(viewport).
-  // Counted rather than assumed: the gap between the two is the whole cost of
-  // scrolling a long note, and it is invisible in a profile that only reports a
-  // hot loop.
-  perf::addCounter(perf::CounterId::PageBlocksVisited, blocks.size());
+  // Only the blocks that reach the viewport. This used to walk the whole note
+  // and test each block against the page, which made a draw cost the document
+  // rather than the window: 10,801 blocks visited to draw 18 of them, every
+  // frame, on a 235 KB note. The counters below are what said so, and they stay
+  // to keep saying so.
+  const auto [firstBlock, lastBlock] = visibleBlocks();
+  perf::addCounter(perf::CounterId::PageBlocksVisited, lastBlock - firstBlock);
   std::size_t blocksDrawn = 0;
   std::size_t runsDrawn = 0;
-  for(std::size_t i = 0; i < blocks.size(); ++i) {
+  for(std::size_t i = firstBlock; i < lastBlock; ++i) {
     const doc::SourceBlock& block = blocks[i];
     const doc::BlockLayout& layout = document_.layout(i);
     const float top = oy + document_.blockTop(i);
@@ -502,7 +523,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   perf::addCounter(perf::CounterId::PageBlocksDrawn, blocksDrawn);
   perf::addCounter(perf::CounterId::PageRunsDrawn, runsDrawn);
   if(ScopedFrame* frame = ScopedFrame::current()) {
-    frame->addBlocks(blocks.size(), blocksDrawn, document_.lastRelaidBlocks());
+    frame->addBlocks(lastBlock - firstBlock, blocksDrawn, document_.lastRelaidBlocks());
     frame->addRuns(runsDrawn);
   }
 
@@ -528,9 +549,10 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
   const float viewTop = page_.y;
   const float viewBottom = page_.y + page_.h;
   const auto& blocks = document_.blocks();
-  perf::addCounter(perf::CounterId::PageDecorationBlocksVisited, blocks.size());
+  const auto [firstBlock, lastBlock] = visibleBlocks();
+  perf::addCounter(perf::CounterId::PageDecorationBlocksVisited, lastBlock - firstBlock);
 
-  for(std::size_t i = 0; i < blocks.size(); ++i) {
+  for(std::size_t i = firstBlock; i < lastBlock; ++i) {
     const doc::SourceBlock& block = blocks[i];
     const doc::BlockLayout& layout = document_.layout(i);
     if(layout.hidden) continue;
@@ -605,11 +627,12 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
   const float ox = originX();
   const float oy = originY();
   const auto& blocks = document_.blocks();
-  perf::addCounter(perf::CounterId::PageCodeChromeBlocksVisited, blocks.size());
+  const auto [firstBlock, lastBlock] = visibleBlocks();
+  perf::addCounter(perf::CounterId::PageCodeChromeBlocksVisited, lastBlock - firstBlock);
   ui::TextStyle label;
   label.size = ui::type().tiny;
 
-  for(std::size_t i = 0; i < blocks.size(); ++i) {
+  for(std::size_t i = firstBlock; i < lastBlock; ++i) {
     const doc::SourceBlock& block = blocks[i];
     if(block.kind != doc::BlockKind::Code) continue;
     const doc::BlockLayout& layout = document_.layout(i);
@@ -644,12 +667,13 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
 void PageView::drawFoldControls(SDL_Renderer* renderer) {
   const float oy = originY();
   const auto& blocks = document_.blocks();
-  perf::addCounter(perf::CounterId::PageFoldControlBlocksVisited, blocks.size());
+  const auto [firstBlock, lastBlock] = visibleBlocks();
+  perf::addCounter(perf::CounterId::PageFoldControlBlocksVisited, lastBlock - firstBlock);
   const auto hovered = document_.blockAt(pointerY_ - oy);
   const bool onPage = pointerX_ >= page_.x && pointerX_ <= page_.x + page_.w &&
                       pointerY_ >= page_.y && pointerY_ <= page_.y + page_.h;
 
-  for(std::size_t i = 0; i < blocks.size(); ++i) {
+  for(std::size_t i = firstBlock; i < lastBlock; ++i) {
     const doc::BlockLayout& layout = document_.layout(i);
     if(layout.hidden) continue;
     const float top = oy + document_.blockTop(i);

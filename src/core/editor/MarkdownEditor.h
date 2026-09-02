@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -69,6 +70,18 @@ public:
   const std::string& text() const;
   std::size_t cursor() const;
   bool dirty() const;
+  // Bumped by every call that changes the text, and by nothing else.
+  //
+  // Consumers derive things from the buffer per frame -- a word count, a block
+  // scan -- and a frame happens for reasons that have nothing to do with the
+  // text: a scroll, a hover, a window focus. Without a cheap "is this still the
+  // same buffer" answer they either recompute every frame or compare the whole
+  // string, and the first is what the status bar was doing.
+  //
+  // It is a revision, not a hash: undo to an identical earlier state is a new
+  // revision. That direction is the safe one -- a consumer recomputes something
+  // it did not have to, rather than showing a stale answer.
+  std::uint64_t revision() const;
   void markDirty();
   void markSaved();
 
@@ -90,6 +103,11 @@ private:
     bool selecting = false;
   };
 
+  // Every text mutation goes through here, so `dirty_` and `revision_` cannot
+  // drift apart: a site that forgets to mark the buffer changed also fails to
+  // save it, which is a bug nobody ships.
+  void markChanged();
+
   void snapshot(EditKind kind);
   void closeEdit();
 
@@ -98,6 +116,7 @@ private:
   std::size_t selectionAnchor_ = 0;
   bool selecting_ = false;
   bool dirty_ = false;
+  std::uint64_t revision_ = 0;
   std::vector<Snapshot> undo_;
   std::vector<Snapshot> redo_;
   EditKind groupKind_ = EditKind::Structural;

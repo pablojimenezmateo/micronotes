@@ -1,8 +1,10 @@
 #include "TestSupport.h"
 
+#include "core/perf/PerformanceCounters.h"
 #include "doc/Layout.h"
 
 #include <cmath>
+#include <cstdint>
 #include <string>
 
 using micronotes::doc::BlockKind;
@@ -307,4 +309,157 @@ MICRONOTES_TEST(layout_never_titles_a_quote_that_names_no_kind) {
   for(std::size_t i = 0; i < layout.blockCount(); ++i) {
     MICRONOTES_REQUIRE(!layout.layout(i).calloutTitle);
   }
+}
+
+namespace {
+
+// A document long enough that walking it and walking the viewport are visibly
+// different numbers.
+std::string manyBlocks(int sections) {
+  std::string out;
+  for(int i = 0; i < sections; ++i) {
+    out += "## Section " + std::to_string(i) + "\n\n";
+    out += "A paragraph with enough words in it to occupy a line of its own.\n\n";
+    out += "- bullet " + std::to_string(i) + "\n\n";
+  }
+  return out;
+}
+
+std::uint64_t counter(microcore::perf::CounterId id) {
+  return microcore::perf::readCounter(id);
+}
+
+}
+
+// The live surface re-lays the note out once per frame whether or not anything
+// happened, so a scroll is a frame with nothing to do. It used to copy, rescan,
+// re-hash and re-flatten the whole note anyway -- about 70% of the frame on a
+// 235 KB one, and every bit of it reproducing the layout already in hand.
+MICRONOTES_TEST(layout_update_does_nothing_when_nothing_changed) {
+  const std::string source = manyBlocks(200);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  layout.update(source, options);
+
+  const auto before = microcore::perf::captureCounters();
+  for(int frame = 0; frame < 10; ++frame) layout.update(source, options);
+  const auto after = microcore::perf::captureCounters();
+
+  using microcore::perf::CounterId;
+  const auto delta = [&](CounterId id) {
+    return after[static_cast<std::size_t>(id)] - before[static_cast<std::size_t>(id)];
+  };
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutUpdateCalls) == 10);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutUnchangedUpdates) == 10);
+  // Not one byte copied, not one block rescanned or rehashed, not one line
+  // reflattened. These are the four O(document) passes the fast path exists to
+  // skip, and each of them reading zero is the whole claim.
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutSourceBytesCopied) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutKeyBytesHashed) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutBlocksScanned) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutFlatLinesBuilt) == 0);
+}
+
+// Every input the reuse check covers has to actually invalidate, or the fast
+// path is a correctness bug that only shows up as a stale screen.
+MICRONOTES_TEST(layout_update_rebuilds_when_an_input_moves) {
+  const std::string source = manyBlocks(20);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+
+  const auto rebuilds = [&](const LayoutOptions& next, std::string_view text) {
+    const auto before = counter(microcore::perf::CounterId::LayoutUnchangedUpdates);
+    layout.update(text, next);
+    return counter(microcore::perf::CounterId::LayoutUnchangedUpdates) == before;
+  };
+
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(!rebuilds(options, source));  // unchanged: reused
+
+  LayoutOptions narrower = options;
+  narrower.width = 500.0f;
+  MICRONOTES_REQUIRE(rebuilds(narrower, source));
+
+  LayoutOptions caret = narrower;
+  caret.caretOffset = source.size() / 2;
+  MICRONOTES_REQUIRE(rebuilds(caret, source));
+
+  LayoutOptions revealed = caret;
+  revealed.revealAll = true;
+  MICRONOTES_REQUIRE(rebuilds(revealed, source));
+
+  const std::string edited = source + "\nA new paragraph.\n";
+  MICRONOTES_REQUIRE(rebuilds(revealed, edited));
+
+  // Same length, different bytes: a length check alone would miss this, and the
+  // screen would keep the old text.
+  std::string swapped = edited;
+  swapped[swapped.size() / 2] = swapped[swapped.size() / 2] == 'x' ? 'y' : 'x';
+  MICRONOTES_REQUIRE(rebuilds(revealed, swapped));
+
+  // New faces mean every cached block was measured with the wrong ones, and
+  // neither the source nor the geometry says so.
+  layout.update(swapped, revealed);
+  layout.setMetrics(stubMetrics());
+  MICRONOTES_REQUIRE(rebuilds(revealed, swapped));
+}
+
+// A fold collapses without the source, the geometry or the caret moving, so it
+// is the one input the reuse check has to resolve rather than compare.
+MICRONOTES_TEST(layout_update_rebuilds_when_a_fold_closes) {
+  const std::string source = manyBlocks(8);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  bool collapsed = false;
+  options.folded = [&collapsed](const micronotes::doc::SourceBlock& block) {
+    return collapsed && block.kind == BlockKind::Heading;
+  };
+  layout.update(source, options);
+  const float open = layout.totalHeight();
+
+  collapsed = true;
+  const auto before = counter(microcore::perf::CounterId::LayoutUnchangedUpdates);
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(counter(microcore::perf::CounterId::LayoutUnchangedUpdates) == before);
+  MICRONOTES_REQUIRE(layout.totalHeight() < open);
+}
+
+// What lets a draw pass cost the viewport instead of the document.
+MICRONOTES_TEST(layout_block_range_covers_the_band_and_nothing_else) {
+  const std::string source = manyBlocks(100);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.blockCount() > 200);
+
+  const auto range = layout.blockRange(0.0f, 200.0f);
+  MICRONOTES_REQUIRE(range.first == 0);
+  MICRONOTES_REQUIRE(range.second < layout.blockCount());
+
+  // Every block the band touches is inside the range...
+  for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+    const float top = layout.blockTop(i);
+    const float bottom = top + layout.layout(i).height;
+    if(bottom <= 0.0f || top >= 200.0f) continue;
+    MICRONOTES_REQUIRE(i >= range.first && i < range.second);
+  }
+  // ...and a band in the middle starts somewhere in the middle.
+  const float half = layout.totalHeight() / 2.0f;
+  const auto middle = layout.blockRange(half, half + 100.0f);
+  MICRONOTES_REQUIRE(middle.first > 0);
+  MICRONOTES_REQUIRE(middle.second > middle.first);
+  MICRONOTES_REQUIRE(layout.blockTop(middle.first) <= half);
+
+  // A band past the end is empty rather than out of bounds.
+  const auto past = layout.blockRange(layout.totalHeight() + 1000.0f,
+                                      layout.totalHeight() + 2000.0f);
+  MICRONOTES_REQUIRE(past.second <= layout.blockCount());
 }

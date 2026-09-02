@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -143,7 +144,8 @@ public:
   static constexpr std::size_t kNone = static_cast<std::size_t>(-1);
 
   void setMetrics(Metrics metrics);
-  // Re-lays out only the blocks whose content or geometry actually changed.
+  // Re-lays out only the blocks whose content or geometry actually changed, and
+  // returns immediately when nothing did.
   void update(std::string_view source, const LayoutOptions& options);
 
   const std::vector<SourceBlock>& blocks() const;
@@ -160,6 +162,13 @@ public:
   std::size_t offsetAt(float x, float y) const;
   std::vector<Rect> selectionRects(std::size_t from, std::size_t to) const;
   std::optional<std::size_t> blockAt(float y) const;
+  // Half-open range of block indices whose boxes intersect the document-space
+  // band [top, bottom). Blocks are laid out contiguously and in order, so this
+  // is two binary searches -- which is what lets a draw pass cost the viewport
+  // rather than the document. A caller that walks every block and tests each
+  // one against the viewport is O(document) per frame no matter how little it
+  // ends up drawing.
+  std::pair<std::size_t, std::size_t> blockRange(float top, float bottom) const;
   // Moves `offset` by whole visual rows, keeping the horizontal position.
   std::size_t rowRelative(std::size_t offset, int deltaRows) const;
   std::size_t rowsPerHeight(float height) const;
@@ -191,6 +200,19 @@ private:
     bool groupLast = true;      // last line of one
   };
 
+  // Whether `source` is byte-for-byte what the standing layout was built from,
+  // which is also what makes `blocks_` still describe it.
+  bool sourceMatches(std::string_view source) const;
+  // Whether the standing layout already answers this call exactly. Asked only
+  // once the source is known to match; see the definition for the rest.
+  bool canReuse(const LayoutOptions& options, std::uint64_t geometry,
+                const std::vector<bool>& folds) const;
+  // The fold predicate resolved over the current `blocks_`, as a per-block
+  // "is hidden" vector.
+  std::vector<bool> resolveFolds(const std::vector<SourceBlock>& blocks,
+                                 const LayoutOptions& options) const;
+  std::size_t blockIndexFor(std::size_t offset) const;
+
   BlockLayout layoutBlock(std::size_t index, const Flags& flags) const;
   const BlockLayout* layoutForOffset(std::size_t offset, std::size_t* blockIndex) const;
   std::size_t flatLineForOffset(std::size_t offset, float* caretX) const;
@@ -206,10 +228,12 @@ private:
   std::vector<std::uint64_t> liveKeys_;
   float totalHeight_ = 0.0f;
   std::size_t lastRelaid_ = 0;
-  // Fingerprint of the last update's inputs and outputs, so an update that will
-  // reproduce the previous layout exactly can be counted as such.
-  std::uint64_t lastSignature_ = 0;
-  bool hadSignature_ = false;
+  // What the standing layout was built from, so the next call can ask whether
+  // it would produce the same thing again.
+  std::uint64_t geometryHash_ = 0;
+  std::size_t caretBlock_ = kNone;
+  std::size_t rawBlock_ = kNone;
+  bool built_ = false;
 };
 
 }

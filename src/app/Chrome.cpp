@@ -1,5 +1,7 @@
 #include "app/Chrome.h"
 
+#include <cstdint>
+
 #include "app/Shell.h"
 
 #include "core/perf/Perf.h"
@@ -57,12 +59,6 @@ void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool m
 
 // Words and characters in the buffer, in one pass.
 //
-// Counted on the frame that draws them rather than cached. Frames here are
-// event-driven, so this runs about once per keystroke -- the same keystroke
-// that already re-scanned the blocks and re-laid out the page, work this is
-// small beside. It is counted rather than assumed to be small: the counter
-// below is what a later reading of the harness will judge it on.
-//
 // A word is a run of non-space bytes, which is what every editor's status bar
 // means by the word and what a reader checking a word budget expects.
 // Characters are bytes of the note as stored, not codepoints; saying so here
@@ -72,7 +68,21 @@ struct BufferCounts {
   std::size_t characters = 0;
 };
 
-BufferCounts countBuffer(std::string_view text) {
+// Memoised on the buffer's revision, because this used to run on every frame.
+//
+// The comment that stood here said it ran "about once per keystroke", on the
+// reasoning that frames are event driven. That was wrong, and the counters said
+// so the moment they existed: status.word_counts tracked frame.presents exactly,
+// because a scroll, a hover and a window focus all draw a frame and none of them
+// touches the text. It was a byte-at-a-time walk of the whole note, 0.1 ms a
+// frame on a 235 KB one, to render a number that had not changed.
+//
+// The revision is the editor's, so a buffer that has not been edited cannot be
+// recounted no matter what else happened. `kNoRevision` is a value the editor
+// never issues, so the first call always counts.
+constexpr std::uint64_t kNoRevision = static_cast<std::uint64_t>(-1);
+
+BufferCounts countBufferUncached(std::string_view text) {
   perf::ScopeTimer timer("status.count_buffer");
   perf::addCounter(perf::CounterId::StatusWordCounts);
   BufferCounts counts;
@@ -88,6 +98,18 @@ BufferCounts countBuffer(std::string_view text) {
     inWord = true;
   }
   return counts;
+}
+
+BufferCounts countBuffer(std::string_view text, std::uint64_t revision) {
+  static std::uint64_t cachedRevision = kNoRevision;
+  static BufferCounts cached;
+  if(revision == cachedRevision) {
+    perf::addCounter(perf::CounterId::StatusWordCountsReused);
+    return cached;
+  }
+  cached = countBufferUncached(text);
+  cachedRevision = revision;
+  return cached;
 }
 
 std::string plural(std::size_t count, std::string_view noun) {
@@ -114,7 +136,7 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   // The right first, so the left knows how much room it was left with.
   float right = rect.x + rect.w - 14.0f;
   if(!ui.state.selection().noteId.empty()) {
-    const BufferCounts counts = countBuffer(ui.editor.text());
+    const BufferCounts counts = countBuffer(ui.editor.text(), ui.editor.revision());
     const std::string tally = plural(counts.words, "word") + "    " + plural(counts.characters, "character");
     const float width = static_cast<float>(text.width(tally));
     text.draw(tally, right - width, rect.y + 6, theme().dim);

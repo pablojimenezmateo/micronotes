@@ -75,6 +75,7 @@ void MarkdownEditor::setText(std::string text) {
   selectionAnchor_ = cursor_;
   selecting_ = false;
   dirty_ = false;
+  ++revision_;
   undo_.clear();
   redo_.clear();
   breakUndoGroup();
@@ -95,7 +96,7 @@ void MarkdownEditor::insert(std::string_view text) {
   text_.insert(cursor_, text);
   cursor_ += text.size();
   clearSelection();
-  dirty_ = true;
+  markChanged();
   closeEdit();
 }
 
@@ -109,7 +110,7 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
   text_.insert(start, text);
   cursor_ = start + text.size();
   clearSelection();
-  dirty_ = true;
+  markChanged();
   closeEdit();
 }
 
@@ -124,7 +125,7 @@ void MarkdownEditor::erasePrevious() {
   text_.erase(previous, cursor_ - previous);
   cursor_ = previous;
   clearSelection();
-  dirty_ = true;
+  markChanged();
   closeEdit();
 }
 
@@ -137,7 +138,7 @@ void MarkdownEditor::eraseNext() {
   snapshot(EditKind::Erase);
   text_.erase(cursor_, nextCodepoint(text_, cursor_) - cursor_);
   clearSelection();
-  dirty_ = true;
+  markChanged();
   closeEdit();
 }
 
@@ -224,7 +225,7 @@ void MarkdownEditor::eraseSelection() {
   text_.erase(start, selectionEnd() - start);
   cursor_ = start;
   clearSelection();
-  dirty_ = true;
+  markChanged();
   closeEdit();
 }
 
@@ -347,7 +348,7 @@ bool MarkdownEditor::undo() {
     clearSelection();
   }
   undo_.pop_back();
-  dirty_ = true;
+  markChanged();
   breakUndoGroup();
   return true;
 }
@@ -364,7 +365,7 @@ bool MarkdownEditor::redo() {
     clearSelection();
   }
   redo_.pop_back();
-  dirty_ = true;
+  markChanged();
   breakUndoGroup();
   return true;
 }
@@ -387,7 +388,16 @@ bool MarkdownEditor::dirty() const {
 }
 
 void MarkdownEditor::markDirty() {
+  markChanged();
+}
+
+void MarkdownEditor::markChanged() {
   dirty_ = true;
+  ++revision_;
+}
+
+std::uint64_t MarkdownEditor::revision() const {
+  return revision_;
 }
 
 void MarkdownEditor::markSaved() {

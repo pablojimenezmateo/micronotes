@@ -112,9 +112,10 @@ row is read as "this code path did not run" rather than "nobody wired this up".
 When you add code on a hot path, add instrumentation with it, and add the
 *counter* as well as the timer. A timing says how long the work took; only a
 counter says whether it should have happened at all. A blind spot found later
-costs far more than a counter added up front -- the scroll relayout in
+costs far more than a counter added up front. The scroll relayout in
 `docs/performance.md` sat in the hottest path in the app, fully cached, passing
-every budget, because nothing counted the work the cache did not cover.
+every budget, because nothing counted the work the cache did not cover -- and
+when the counters went in it turned out to be 70% of every frame.
 
 ## Agent Best Practices
 

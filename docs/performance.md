@@ -238,59 +238,89 @@ the only reason that work did not get done.
 `library_index_refresh_writes_nothing_when_nothing_changed`, and
 `library_index_scan_does_not_descend_into_the_state_directory` guard all of it.
 
-### Open: a scroll re-lays out the whole note, every frame
+### Resolved: a scroll re-laid out the whole note, every frame
 
 Found the day the frame trace and the layout counters were added, which is the
-point of the section above: this was the slowest thing the app does and it was
-invisible to every instrument the repo had. Every existing budget measured an
-*edit*, so the harness could be green while the most common interaction --
-moving the viewport over a note nobody is typing into -- cost more than typing.
+point of the section above: this was the slowest thing the app did and it was
+invisible to every instrument the repo had before. Every existing budget
+measured an *edit*, so the harness was green while the most common interaction
+-- moving the viewport over a note nobody is typing into -- cost more than
+typing did.
 
 Measured on a 235 KB note (10,801 blocks), Release, 60 frames:
 
-```
-[frame] 60 frames | avg 2.78 ms | p50 1.89 | p95 2.30 | max 58.14 | 1 over 16.7 ms
-        | blocks 18/10801 per frame | relaid 100.0 | runs 110
+| | before | after |
+|---|---:|---:|
+| frame p50 | 1.89 ms | **0.59 ms** |
+| frame p95 | 2.30 ms | **0.74 ms** |
+| `layout.update` self, steady frame | 1.86 ms | **0.17 ms** |
+| `page.draw` self, per frame | 0.24 ms | **0.09 ms** |
+| `page.blocks_visited` per frame | 10,801 | **18** |
+| `layout.source_bytes_copied` per frame | 235,661 | **0** |
+| `layout.key_bytes_hashed` per frame | 235,661 | **0** |
+| `layout.blocks_scanned` per frame | 10,801 | **0** |
+| `layout.flat_lines_built` per frame | 12,002 | **0** |
+| `status.count_buffer` per frame | 0.10 ms | **0** |
 
-[perf]      self ms      main ms     total ms       max ms       avg ms   calls  label
-[perf]     111.526      111.526      129.309       52.078       2.1551      60  layout.update
-[perf]      17.783       17.783       17.783        0.815       0.2964      60  layout.update.scan_blocks
-[perf]      14.490       14.490       14.490        2.002       0.2415      60  page.draw
-```
+And in the harness, `scroll.frame_relayout_median` went 0.566 ms -> **0.011 ms**.
 
-`layout.update` is **1.86 ms of self time in every frame** -- about 70% of the
-frame -- and the counters say what it bought:
+Three separate causes, all with the same shape.
 
-| counter | per frame | what it means |
-|---|---:|---|
-| `layout.unchanged_updates` | 59 of 60 | the update reproduced the previous layout exactly |
-| `layout.source_bytes_copied` | 235,661 | the whole note copied into the layout's buffer |
-| `layout.key_bytes_hashed` | 235,661 | the whole note hashed again for cache keys |
-| `layout.blocks_scanned` | 10,801 | the block scanner re-partitioned the note |
-| `layout.blocks_relaid` | 100 | ...and this is all that was actually rebuilt |
-| `layout.flat_lines_built` | 12,002 | the caret/hit-test line table rebuilt from scratch |
-| `layout.fold_queries` | 3,601 | the fold predicate asked about every foldable block |
+**The layout rebuilt an answer it already had.** `layout.unchanged_updates` read
+59 of 60: the live surface re-lays the note out once per frame whether or not
+anything happened, and a scroll is by definition a frame where nothing did. The
+per-block layout cache was working -- 99% hits -- so a profile of the relayout
+looked healthy; the cost was the whole-document copy, rescan, per-block key hash
+and flat-line rebuild *around* the cache, none of which depends on the scroll
+offset. `DocumentLayout::update` now compares its inputs against what the
+standing layout was built from and returns immediately when they match. The
+comparison includes a `memcmp` of the whole note, which is still O(document) --
+but it is one linear pass over bytes already in cache, about 12 µs against the
+1.9 ms it replaces.
 
-Note the shape of it. The per-block layout cache is *working* -- 99% hit rate --
-so a profile of the relayout itself looks fine. The cost is everything the
-update does **before and around** the cache: the copy, the rescan, the hash of
-every block's bytes to derive a key, and the flat-line rebuild. All four are
-O(document) and none of them depends on the scroll offset, which is not an input
-to the layout at all.
+**The draw walked the document to paint the window.** Four separate full passes
+over the block list -- text, decorations, code chrome, fold controls -- each
+testing every block against the viewport, about 43,000 block visits per frame to
+draw 18 of them. `DocumentLayout::blockRange` answers the same question with two
+binary searches, since blocks tile the document in order. The range is widened
+backwards to the head of a quote or callout run so a container that starts above
+the viewport keeps its box.
 
-The draw has the same shape one layer up. `page.blocks_visited` is 10,801 per
-frame against `page.blocks_drawn` of 18 -- 0.17% of the walk produces output --
-and three further passes (`page.decoration_blocks_visited`,
-`page.code_chrome_blocks_visited`, `page.fold_control_blocks_visited`) each walk
-the whole block list again, for about 43,000 block visits a frame to draw 18 of
-them.
+**The status bar recounted the buffer.** `status.word_counts` tracked
+`frame.presents` exactly. The comment above it claimed it ran "about once per
+keystroke, because frames are event driven" -- a scroll, a hover and a window
+focus each draw a frame and none touches the text. It is now memoised on
+`MarkdownEditor::revision()`, a counter bumped by every mutation and nothing
+else.
 
-None of this is fixed yet. What is fixed is that it is now *visible*, and that
-`scroll.frame_relayout_median` in the harness fails a budget when a frame that
-changed nothing costs more than 2 ms.
+The pattern in all three is worth naming, because it is the one the counters are
+good at and a profiler is not: **the cache was fine and the work around the
+cache was the cost**. Nothing was slow per call. Everything ran more often than
+it needed to, and only a count says so.
 
-### Open: the status bar counts words every frame
+`layout_update_does_nothing_when_nothing_changed`,
+`layout_update_rebuilds_when_an_input_moves`,
+`layout_update_rebuilds_when_a_fold_closes`,
+`layout_block_range_covers_the_band_and_nothing_else` and
+`editor_revision_moves_only_when_the_text_does` guard all of it, and the
+`scroll` scenario fails its budget if a frame that changed nothing costs more
+than 2 ms again.
 
-`status.count_buffer` is 0.1 ms of every frame on the same note, and
-`status.word_counts` tracks the frame count exactly. It recounts a 235 KB buffer
-to render a number that changes only when the buffer does.
+### Open: the fold predicate is still asked per block per frame
+
+`layout.fold_queries` is 3,601 per frame on the same note -- the reuse check has
+to resolve the folds to know they have not moved, and the app's predicate hashes
+the note id on every call to answer "nothing is folded". About 0.05 ms a frame,
+roughly a third of what a steady frame's layout now costs. The fix is to hoist
+that lookup out of the per-block lambda in `drawLive`, which is one line in
+`src/app/Application.cpp` -- a file under a shrinking line budget, so it wants to
+happen alongside the decomposition that file is already queued for rather than
+by raising the ratchet for 0.05 ms.
+
+### Open: wikilink resolution does not invalidate a block
+
+Whether a `[[target]]` resolves decides a run's colour, but it is not part of a
+block's cache key -- so a link that starts or stops resolving keeps its old
+colour until the next real edit to that block. This predates the reuse check
+above and is not made worse by it; noted here because looking for it is what
+found it.

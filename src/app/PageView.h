@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace micronotes::app {
@@ -165,6 +166,9 @@ private:
   float originY() const;
   // Rect of the whole block in window coordinates.
   ui::Rect blockRect(std::size_t index) const;
+  // Half-open range of block indices this frame has to consider, which is the
+  // viewport's worth rather than the document's.
+  std::pair<std::size_t, std::size_t> visibleBlocks() const;
   // Backgrounds and rules, drawn under the text of every visible block.
   void drawBlockDecorations(SDL_Renderer* renderer, ui::TextRenderer& text);
   // The language label and copy button, drawn over a code block's first line.
