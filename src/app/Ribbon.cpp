@@ -3,9 +3,9 @@
 #include "app/Shell.h"
 
 #include "ui/Metrics.h"
+#include "ui/RibbonLayout.h"
 #include "ui/Theme.h"
 
-#include <array>
 #include <cmath>
 #include <string>
 
@@ -13,50 +13,12 @@ namespace micronotes::app {
 namespace {
 
 using ui::Rect;
+using ui::RibbonMark;
 using ui::fill;
 using ui::fillRounded;
+using ui::ribbonLayout;
 using ui::stroke;
 using ui::theme;
-
-// What each control does, and which way up the rail it sits.
-//
-// Drawn rather than typeset, every one of them: the vendored UI face has no
-// glyph for a page, a magnifier or a pane, and the emoji face is not installed
-// everywhere. A mark assembled from lines and rects is the only one that is
-// certain to be there and certain to stay crisp at any display scale.
-enum class Mark {
-  NewNote,
-  GoToNote,
-  Search,
-  Commands,
-  LeftPanel,
-  RightPanel,
-  Settings
-};
-
-struct Control {
-  ui::ActionId action = ui::ActionId::Count;
-  Mark mark = Mark::NewNote;
-};
-
-// Top group: the four ways to start doing something.
-constexpr std::array<Control, 4> kLeading {{
-  {ui::ActionId::NewNote, Mark::NewNote},
-  {ui::ActionId::GoToNote, Mark::GoToNote},
-  {ui::ActionId::SearchAllNotes, Mark::Search},
-  {ui::ActionId::CommandPalette, Mark::Commands},
-}};
-
-// Foot: the arrangement of the window, and the way into its settings. At the
-// foot because they are what you reach for having finished, not started.
-constexpr std::array<Control, 3> kTrailing {{
-  {ui::ActionId::ToggleSidebar, Mark::LeftPanel},
-  {ui::ActionId::ToggleRightPanel, Mark::RightPanel},
-  {ui::ActionId::Settings, Mark::Settings},
-}};
-
-constexpr float kGap = 4.0f;
-constexpr float kEdgePad = 6.0f;
 
 void line(SDL_Renderer* renderer, float x1, float y1, float x2, float y2, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
@@ -76,10 +38,10 @@ void drawPanelMark(SDL_Renderer* renderer, Rect box, bool leading, bool on, SDL_
   fill(renderer, filled, color);
 }
 
-void drawMark(SDL_Renderer* renderer, Mark mark, Rect box, bool on, SDL_Color color) {
+void drawMark(SDL_Renderer* renderer, RibbonMark mark, Rect box, bool on, SDL_Color color) {
   const float cy = std::round(box.y + box.h / 2.0f);
   switch(mark) {
-    case Mark::NewNote: {
+    case RibbonMark::NewNote: {
       // A page, with a plus where the corner fold would be.
       const Rect page {box.x + 1.0f, box.y, box.w - 5.0f, box.h};
       stroke(renderer, page, color);
@@ -91,7 +53,7 @@ void drawMark(SDL_Renderer* renderer, Mark mark, Rect box, bool on, SDL_Color co
       line(renderer, px, py - 3.0f, px, py + 3.0f, color);
       return;
     }
-    case Mark::GoToNote: {
+    case RibbonMark::GoToNote: {
       // A page with an arrow into it: going to a note, rather than looking for
       // one, which is what the magnifier beneath it means.
       // The arrow sits clear of the page rather than crossing its border: two
@@ -103,27 +65,27 @@ void drawMark(SDL_Renderer* renderer, Mark mark, Rect box, bool on, SDL_Color co
       line(renderer, ax - 3.0f, cy + 3.0f, ax, cy, color);
       return;
     }
-    case Mark::Search: {
+    case RibbonMark::Search: {
       // A ring and a handle. Drawn as a rounded outline rather than a circle:
       // at sixteen pixels the difference is invisible and the outline is exact.
       ui::strokeRounded(renderer, {box.x, box.y, box.w - 5.0f, box.h - 5.0f}, color, (box.w - 5.0f) / 2.0f);
       line(renderer, box.x + box.w - 6.0f, box.y + box.h - 6.0f, box.x + box.w - 1.0f, box.y + box.h - 1.0f, color);
       return;
     }
-    case Mark::Commands: {
+    case RibbonMark::Commands: {
       // A prompt: a chevron and the line it types on.
       line(renderer, box.x + 2.0f, cy - 4.0f, box.x + 6.0f, cy, color);
       line(renderer, box.x + 6.0f, cy, box.x + 2.0f, cy + 4.0f, color);
       ui::hLine(renderer, box.x + 8.0f, box.x + box.w - 1.0f, cy + 4.0f, color);
       return;
     }
-    case Mark::LeftPanel:
+    case RibbonMark::LeftPanel:
       drawPanelMark(renderer, {box.x, box.y + 1.0f, box.w, box.h - 2.0f}, true, on, color);
       return;
-    case Mark::RightPanel:
+    case RibbonMark::RightPanel:
       drawPanelMark(renderer, {box.x, box.y + 1.0f, box.w, box.h - 2.0f}, false, on, color);
       return;
-    case Mark::Settings: {
+    case RibbonMark::Settings: {
       // Three sliders. A cogwheel is the usual mark and the wrong one to draw
       // from line segments: the teeth alias into a smudge at this size.
       const float rows[] = {cy - 5.0f, cy, cy + 5.0f};
@@ -146,36 +108,6 @@ bool controlIsOn(const UiRuntime& ui, ui::ActionId action) {
   return false;
 }
 
-// Where every control is drawn, top group down from the top and foot group up
-// from the bottom. One function, called by the draw and by both hit tests, so
-// what was painted and what a click lands on cannot disagree.
-//
-// A window too short to hold all seven drops controls from the foot group
-// upward -- Settings first. Overlapping two marks would leave a smear that
-// answers to whichever hit test ran last, and a control that is not there is at
-// least honest about it.
-template <typename Visit>
-void eachControl(Rect rect, const Visit& visit) {
-  const float step = ui::kRibbonButtonSize + kGap;
-  const float x = std::round(rect.x + (rect.w - ui::kRibbonButtonSize) / 2.0f);
-
-  float y = rect.y + kEdgePad;
-  float leadingBottom = y;
-  for(const auto& control : kLeading) {
-    if(y + ui::kRibbonButtonSize > rect.y + rect.h) break;
-    visit(control, Rect {x, std::round(y), ui::kRibbonButtonSize, ui::kRibbonButtonSize});
-    y += step;
-    leadingBottom = y;
-  }
-
-  float bottom = rect.y + rect.h - kEdgePad - ui::kRibbonButtonSize;
-  for(auto it = kTrailing.rbegin(); it != kTrailing.rend(); ++it) {
-    if(bottom < leadingBottom) break;
-    visit(*it, Rect {x, std::round(bottom), ui::kRibbonButtonSize, ui::kRibbonButtonSize});
-    bottom -= step;
-  }
-}
-
 // The tooltip names the action and the keys that also run it, so the rail
 // teaches the shortcut rather than replacing it.
 std::string controlTooltip(const ui::ActionSpec& spec) {
@@ -195,10 +127,11 @@ void drawRibbon(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, R
   fill(renderer, rect, theme().sidebarBg);
   ui::ClipGuard clip(renderer, rect);
 
-  eachControl(rect, [&](const Control& control, Rect box) {
-    const ui::ActionSpec* spec = ui::findAction(control.action);
-    if(!spec) return;
-    const bool on = controlIsOn(ui, control.action);
+  for(const auto& placed : ribbonLayout(rect)) {
+    const ui::ActionSpec* spec = ui::findAction(placed.control.action);
+    if(!spec) continue;
+    const Rect box = placed.rect;
+    const bool on = controlIsOn(ui, placed.control.action);
     const bool hot = ui.hovered(box);
     if(hot) fillRounded(renderer, box, theme().hoverBg, ui::kRadiusSmall);
     // A toggle that is on stays lit with the pointer away from it; everything
@@ -207,29 +140,27 @@ void drawRibbon(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, R
     const Rect mark {std::round(box.x + (box.w - ui::kRibbonIconSize) / 2.0f),
                      std::round(box.y + (box.h - ui::kRibbonIconSize) / 2.0f),
                      ui::kRibbonIconSize, ui::kRibbonIconSize};
-    drawMark(renderer, control.mark, mark, on, ink);
+    drawMark(renderer, placed.control.mark, mark, on, ink);
     ui.offerTooltip(box, controlTooltip(*spec));
-  });
+  }
 }
 
 std::optional<ui::ActionId> handleRibbonClick(UiRuntime& ui, Rect rect, float x, float y) {
   (void)ui;
   if(!ui::contains(rect, x, y)) return std::nullopt;
-  std::optional<ui::ActionId> hit;
-  eachControl(rect, [&](const Control& control, Rect box) {
-    if(ui::contains(box, x, y)) hit = control.action;
-  });
-  return hit;
+  for(const auto& placed : ribbonLayout(rect)) {
+    if(ui::contains(placed.rect, x, y)) return placed.control.action;
+  }
+  return std::nullopt;
 }
 
 bool ribbonHasControlAt(UiRuntime& ui, Rect rect, float x, float y) {
   (void)ui;
   if(!ui::contains(rect, x, y)) return false;
-  bool over = false;
-  eachControl(rect, [&](const Control&, Rect box) {
-    if(ui::contains(box, x, y)) over = true;
-  });
-  return over;
+  for(const auto& placed : ribbonLayout(rect)) {
+    if(ui::contains(placed.rect, x, y)) return true;
+  }
+  return false;
 }
 
 }

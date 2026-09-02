@@ -174,6 +174,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/Fuzzy.cpp
   src/ui/ColorMath.cpp
   src/ui/NoteProperties.cpp
+  src/ui/RibbonLayout.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
@@ -263,6 +264,7 @@ add_executable(micronotes_tests
   tests/OutlineTests.cpp
   tests/PathUtilsTests.cpp
   tests/PerfTraceTests.cpp
+  tests/RibbonLayoutTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/ShellLayoutTests.cpp

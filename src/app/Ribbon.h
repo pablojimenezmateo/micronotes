@@ -23,6 +23,10 @@ struct UiRuntime;
 // behaviour of its own, so a button cannot drift from the palette row and the
 // keyboard binding that claim to do the same thing -- they are one entry in
 // `ui::Actions`, drawn three ways.
+//
+// Which controls it shows and where they sit is `ui::ribbonLayout`, so the
+// draw and the two hit tests below cannot disagree about it, and the rule for
+// a window too short to hold them all can be tested without a renderer.
 void drawRibbon(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
 // The action a click on the rail asked for, or nothing when it missed. Returned

@@ -3,6 +3,8 @@
 #include "core/perf/PerformanceCounters.h"
 #include "core/render/FontResolver.h"
 #include "core/render/TextTextureCache.h"
+#include "ui/Actions.h"
+#include "ui/RibbonLayout.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -281,4 +283,52 @@ MICRONOTES_TEST(architecture_key_names_are_formatted_not_typed) {
                         "ui::acceleratorText(), so rebinding the key would leave it stale:\n";
   for(const auto& hit : offenders) message += "  " + hit + "\n";
   micronotes::tests::require(offenders.empty(), message);
+}
+
+// Every action a surface can offer has to be dispatched by something.
+//
+// The palette, the icon rail and the keyboard all funnel into
+// performCommand(), which is a chain of `id == "name"` branches, and a name
+// with no branch is a control that does nothing at all when clicked -- silently,
+// because the chain simply falls off the end. That is how the rail's Commands
+// button spent its life inert: `command-palette` is the one action deliberately
+// kept out of the palette, so the rail was the only surface offering it and
+// nothing else exercised the missing branch.
+//
+// A source scan rather than a call, because the dispatch needs a whole running
+// shell to call. It is enough: what is being checked is that a branch for the
+// name exists, and the branch is spelt one way.
+MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
+  const std::string dispatch = readText(repoRoot() / "src" / "app" / "Application.cpp");
+  // Anchor on the chain itself. Were performCommand rewritten into a table,
+  // this test would otherwise scan for a spelling nothing uses any more and
+  // pass forever.
+  MICRONOTES_REQUIRE(dispatch.find("static void performCommand(UiRuntime& ui, const std::string& id) {") !=
+                     std::string::npos);
+
+  std::set<std::string> offered;
+  // Everything the command palette lists.
+  for(const auto& spec : micronotes::ui::actionSpecs()) {
+    if(spec.inPalette) offered.insert(std::string(spec.name));
+  }
+  // Everything the icon rail can be clicked on. Read from the rail's own table
+  // rather than a copy of it, so a control added there is covered by this test
+  // the moment it is added.
+  for(const auto& control : micronotes::ui::ribbonControls()) {
+    const auto* spec = micronotes::ui::findAction(control.action);
+    MICRONOTES_REQUIRE(spec != nullptr);
+    offered.insert(std::string(spec->name));
+  }
+  MICRONOTES_REQUIRE(!offered.empty());
+
+  std::string missing;
+  for(const auto& name : offered) {
+    if(dispatch.find("id == \"" + name + "\"") != std::string::npos) continue;
+    if(!missing.empty()) missing += ", ";
+    missing += name;
+  }
+  micronotes::tests::require(
+    missing.empty(),
+    "actions the palette or the icon rail offer but performCommand does not handle: " + missing +
+    " -- clicking one of these does nothing at all, and nothing else notices");
 }

@@ -47,6 +47,11 @@ inline constexpr float kRadiusLarge = 12.0f;
 inline constexpr float kRibbonWidth = 44.0f;
 inline constexpr float kRibbonButtonSize = 32.0f;
 inline constexpr float kRibbonIconSize = 16.0f;
+// Between two buttons, and above the first and below the last. Read by the
+// placement and by nothing else, but they belong beside the button size: how
+// many controls a short column can hold is arithmetic over all three.
+inline constexpr float kRibbonGap = 4.0f;
+inline constexpr float kRibbonEdgePad = 6.0f;
 
 // The band a callout reserves above its first line for the kind's icon and
 // name. Layout reserves it and the draw fills it, so the number is here rather

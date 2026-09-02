@@ -364,6 +364,10 @@ Useful runtime controls:
 - Every empty place - no library, a library with no notes, an empty notebook, a
   tag nothing carries any more, a search that matched nothing, a note with no
   text in it - says which of those it is and which key does something about it.
+- The icon rail does not hide, and a window too short to hold all seven of its
+  controls drops them in a stated order - Settings first, the sidebar toggle
+  last - so a shell with every panel put away always keeps the button that
+  brings them back.
 
 ## Appearance
 
