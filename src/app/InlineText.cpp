@@ -1,5 +1,7 @@
 #include "app/InlineText.h"
 
+#include "ui/TextUtil.h"
+
 #include <cctype>
 #include <cmath>
 #include <sstream>
@@ -206,11 +208,18 @@ std::vector<std::string> wrapText(TextRenderer& text, std::string_view value, in
       if(!line.empty() && text.width(candidate, heading, mono) > maxWidth) {
         out.push_back(line);
         line = word;
-        while(text.width(line, heading, mono) > maxWidth && line.size() > 1) {
-          std::string chunk = line;
-          while(chunk.size() > 1 && text.width(chunk, heading, mono) > maxWidth) chunk.pop_back();
-          out.push_back(chunk);
-          line.erase(0, chunk.size());
+        // A word too long for the measure is broken across lines. By bisection
+        // over code point boundaries, because the two obvious ways to write this
+        // are both wrong: shortening a byte at a time costs a shaping pass per
+        // byte, and a byte is not a character, so a cut can land inside a UTF-8
+        // sequence and hand the renderer something that is not text.
+        while(text.width(line, heading, mono) > maxWidth) {
+          const std::size_t cut = ui::breakToFit(
+            line, maxWidth,
+            [&](std::string_view part) { return text.width(part, heading, mono); });
+          if(cut == 0 || cut >= line.size()) break;
+          out.push_back(line.substr(0, cut));
+          line.erase(0, cut);
         }
       } else {
         line = candidate;

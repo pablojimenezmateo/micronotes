@@ -37,6 +37,19 @@ std::string ellipsize(std::string text, std::size_t limit);
 std::string ellipsizeToFit(std::string value, int maxWidth,
                            const std::function<int(std::string_view)>& measure);
 
+// The length in bytes of the longest prefix of `value` that measures within
+// `maxWidth`, cut at a code point boundary. The other half of
+// `ellipsizeToFit`: same bisection, for the case where the rest of the text
+// goes on the next line instead of being replaced by an ellipsis.
+//
+// Never returns zero for a non-empty input -- one code point that does not fit
+// still has to be put somewhere -- and never returns a length that lands inside
+// a UTF-8 sequence, which is the bug this exists to make unwriteable.
+//
+// Like `ellipsizeToFit` it assumes measurement grows with the prefix, which is
+// true of every font here and is what licenses the bisection.
+std::size_t breakToFit(std::string_view value, int maxWidth,
+                       const std::function<int(std::string_view)>& measure);
 
 // A link target that leaves the machine, as opposed to one inside the library.
 bool isRemoteTarget(std::string_view target);

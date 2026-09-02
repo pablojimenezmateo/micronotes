@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+using micronotes::ui::breakToFit;
 using micronotes::ui::ellipsizeToFit;
 
 namespace {
@@ -77,6 +78,52 @@ MICRONOTES_TEST(ellipsize_to_fit_measures_a_handful_of_times_not_once_per_charac
   };
   const std::string out = ellipsizeToFit(value, 80, counted);
   MICRONOTES_REQUIRE(out == std::string(7, 'x') + "...");
+  // log2(4001) is under 12, plus the initial "does the whole thing fit" pass.
+  MICRONOTES_REQUIRE(measures <= 16);
+}
+
+MICRONOTES_TEST(break_to_fit_returns_the_whole_string_when_it_fits) {
+  MICRONOTES_REQUIRE(breakToFit("abcd", 100, measureEight) == 4);
+  MICRONOTES_REQUIRE(breakToFit("abcd", 32, measureEight) == 4);
+  MICRONOTES_REQUIRE(breakToFit("", 32, measureEight) == 0);
+}
+
+MICRONOTES_TEST(break_to_fit_keeps_the_longest_prefix_that_fits) {
+  // Eight pixels a code point, so ten of them fit in eighty.
+  MICRONOTES_REQUIRE(breakToFit("abcdefghijklmno", 80, measureEight) == 10);
+  MICRONOTES_REQUIRE(breakToFit("abcdefghijklmno", 81, measureEight) == 10);
+  MICRONOTES_REQUIRE(breakToFit("abcdefghijklmno", 88, measureEight) == 11);
+}
+
+// The bug this replaced popped one *byte* at a time, so a cut could land inside
+// a multi-byte sequence and hand the renderer bytes that are not text. Every
+// answer here has to be a code point boundary, including when only part of a
+// character's worth of room is left.
+MICRONOTES_TEST(break_to_fit_never_cuts_inside_a_code_point) {
+  const std::string value = "\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9";  // five e-acutes
+  MICRONOTES_REQUIRE(value.size() == 10);
+  for(int width = -4; width <= 60; ++width) {
+    const std::size_t cut = breakToFit(value, width, measureEight);
+    micronotes::tests::require(cut % 2 == 0, "cut " + std::to_string(cut) + " at width " +
+                                               std::to_string(width) + " split a code point");
+    micronotes::tests::require(cut > 0, "cut nothing at width " + std::to_string(width));
+    micronotes::tests::require(cut <= value.size(), "cut past the end");
+  }
+  // Two code points fit in 16 pixels and a third does not.
+  MICRONOTES_REQUIRE(breakToFit(value, 16, measureEight) == 4);
+  // Not even one fits in four, and one is still what comes back: it has to go
+  // somewhere, and the caller's alternative is an empty line forever.
+  MICRONOTES_REQUIRE(breakToFit(value, 4, measureEight) == 2);
+}
+
+MICRONOTES_TEST(break_to_fit_bisects_rather_than_walking) {
+  const std::string value(4000, 'x');
+  int measures = 0;
+  const auto counted = [&](std::string_view part) {
+    ++measures;
+    return measureEight(part);
+  };
+  MICRONOTES_REQUIRE(breakToFit(value, 80, counted) == 10);
   // log2(4001) is under 12, plus the initial "does the whole thing fit" pass.
   MICRONOTES_REQUIRE(measures <= 16);
 }
