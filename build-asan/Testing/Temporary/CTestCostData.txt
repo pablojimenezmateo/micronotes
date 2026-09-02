@@ -1,3 +1,0 @@
-micronotes_tests 3 0.0797067
-micronotes_core_manifest 3 0.00351354
----

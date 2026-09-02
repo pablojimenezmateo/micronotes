@@ -1,5 +1,9 @@
-# CMake build output
+# CMake build output. `build-*` as well as `build/`: run-checks.sh puts each
+# sanitizer and the clang lane in its own tree beside it, and without the glob
+# they were committed -- 534 object files carrying one machine's absolute paths,
+# which then made every sanitizer lane fail to configure anywhere else.
 build/
+build-*/
 _CPack_Packages/
 
 # Packaged artifacts
