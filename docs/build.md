@@ -139,6 +139,44 @@ Run the performance harness:
 ./build/bin/micronotes_perf
 ```
 
+### Checked builds
+
+`CMakePresets.json` carries the sanitizer configurations and the
+warnings-as-errors debug build the tree is expected to compile clean under:
+
+```bash
+cmake --preset micronotes-debug && cmake --build build/micronotes-debug
+ctest --preset micronotes-debug
+
+cmake --preset micronotes-asan  && cmake --build build/micronotes-asan  && ctest --preset micronotes-asan
+cmake --preset micronotes-ubsan && cmake --build build/micronotes-ubsan && ctest --preset micronotes-ubsan
+cmake --preset micronotes-tsan  && cmake --build build/micronotes-tsan  && ctest --preset micronotes-tsan
+```
+
+`tools/run-checks.sh` drives the same ground and keeps the full output of each
+lane in `${LOG_DIR:-/tmp}/micronotes-<lane>.log`, so a result can be read back
+without rerunning it:
+
+```bash
+tools/run-checks.sh tests        # build + ctest
+tools/run-checks.sh clang-build  # whole tree under clang, warnings as errors
+tools/run-checks.sh all          # every lane in sequence
+```
+
+The `clang-build` lane is the second-compiler gate: every other lane uses the
+default compiler, so without it a clang-only compile break reaches `main`
+unseen. It compiles and links the default target and does not rerun the tests.
+
+ThreadSanitizer dies at startup with `unexpected memory mapping` on kernels that
+hand out more address-space randomness than it can model - check with
+`cat /proc/sys/vm/mmap_rnd_bits`, which has to be 28 or lower. That is the
+sanitizer's own limitation, not a finding. `run-checks.sh` works around it per
+process with `setarch -R`; by hand, run the binary the same way:
+
+```bash
+setarch -R ./build/micronotes-tsan/bin/micronotes_tests
+```
+
 Run the app with an explicit local library:
 
 ```bash

@@ -1,0 +1,78 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "micronotes-debug",
+      "displayName": "micronotes debug",
+      "description": "Debug build with warnings as errors, which is what `cmake --build build` should agree with.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/micronotes-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MICRONOTES_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "micronotes-asan",
+      "displayName": "micronotes address sanitizer",
+      "description": "Debug build with AddressSanitizer enabled.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/micronotes-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MICRONOTES_WARNINGS_AS_ERRORS": "OFF",
+        "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address"
+      }
+    },
+    {
+      "name": "micronotes-ubsan",
+      "displayName": "micronotes undefined behavior sanitizer",
+      "description": "Debug build with UndefinedBehaviorSanitizer enabled.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/micronotes-ubsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MICRONOTES_WARNINGS_AS_ERRORS": "OFF",
+        "CMAKE_C_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=undefined"
+      }
+    },
+    {
+      "name": "micronotes-tsan",
+      "displayName": "micronotes thread sanitizer",
+      "description": "Debug build with ThreadSanitizer enabled.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/micronotes-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MICRONOTES_WARNINGS_AS_ERRORS": "OFF",
+        "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "micronotes-debug", "configurePreset": "micronotes-debug"},
+    {"name": "micronotes-asan", "configurePreset": "micronotes-asan"},
+    {"name": "micronotes-ubsan", "configurePreset": "micronotes-ubsan"},
+    {"name": "micronotes-tsan", "configurePreset": "micronotes-tsan"}
+  ],
+  "testPresets": [
+    {"name": "micronotes-debug", "configurePreset": "micronotes-debug", "output": {"outputOnFailure": true}},
+    {"name": "micronotes-asan", "configurePreset": "micronotes-asan", "output": {"outputOnFailure": true}},
+    {"name": "micronotes-ubsan", "configurePreset": "micronotes-ubsan", "output": {"outputOnFailure": true}},
+    {"name": "micronotes-tsan", "configurePreset": "micronotes-tsan", "output": {"outputOnFailure": true}}
+  ]
+}

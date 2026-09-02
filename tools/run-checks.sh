@@ -5,11 +5,12 @@
 # can be read back later WITHOUT rebuilding and rerunning everything.
 #
 # Usage:
-#   tools/run-checks.sh tests   # plain build + ctest        -> /tmp/<app>-tests.log
-#   tools/run-checks.sh asan    # AddressSanitizer + ctest   -> /tmp/<app>-asan.log
-#   tools/run-checks.sh ubsan   # UndefinedBehavior + ctest  -> /tmp/<app>-ubsan.log
-#   tools/run-checks.sh tsan    # ThreadSanitizer + ctest    -> /tmp/<app>-tsan.log
-#   tools/run-checks.sh all     # tests, asan, ubsan, tsan in sequence
+#   tools/run-checks.sh tests        # plain build + ctest       -> /tmp/<app>-tests.log
+#   tools/run-checks.sh clang-build  # whole tree, clang, -Werror -> /tmp/<app>-clang-build.log
+#   tools/run-checks.sh asan         # AddressSanitizer + ctest   -> /tmp/<app>-asan.log
+#   tools/run-checks.sh ubsan        # UndefinedBehavior + ctest  -> /tmp/<app>-ubsan.log
+#   tools/run-checks.sh tsan         # ThreadSanitizer + ctest    -> /tmp/<app>-tsan.log
+#   tools/run-checks.sh all          # every lane above, in sequence
 #
 # The full console output (build + test) is tee'd to the log; the exit status is
 # the real status of the underlying command (via PIPESTATUS), so callers still
@@ -30,6 +31,11 @@ cd "$REPO_ROOT"
 # Derive the app name from CMakeLists so this script is identical in both repos.
 APP="$(sed -n 's/^project(\([A-Za-z0-9_-]*\).*/\1/p' CMakeLists.txt | head -1)"
 APP="${APP:-app}"
+
+# The project's CMake options are named after the project in upper case
+# (MICRONOTES_WARNINGS_AS_ERRORS, MICROAGENDA_WARNINGS_AS_ERRORS). Deriving the
+# prefix rather than writing it out keeps this script identical in both repos.
+OPT="$(printf '%s' "$APP" | tr '[:lower:]-' '[:upper:]_')"
 
 JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || echo 8)}"
 LOG_DIR="${LOG_DIR:-/tmp}"
@@ -133,13 +139,54 @@ check_sanitizer() {
   return $rc
 }
 
+# Second-compiler build gate.
+#
+# Two blind spots meet here. Every other lane uses the default compiler, so a
+# clang-only compile break reaches main unseen; and the sanitizer lanes above
+# do not turn the warning set on, so only this lane and a warnings-as-errors
+# `tests` configure enforce it at all -- and only this one under clang.
+#
+# Compile and link only: GCC already runs the tests, and running them a second
+# time buys nothing this lane is for. It builds the DEFAULT target rather than
+# the test binary alone, so the application and the perf harness are covered
+# too rather than being allowed to stop compiling while every check stays green.
+check_clang_build() {
+  local build_dir="build-clang"
+  local log="${LOG_DIR}/${APP}-clang-build.log"
+
+  if ! command -v clang++ >/dev/null 2>&1; then
+    echo "run-checks: clang++ not found; install it (apt install clang) to run this lane" >&2
+    return 1
+  fi
+
+  # CMAKE_CXX_SCAN_FOR_MODULES=OFF because Ninja otherwise wants
+  # clang-scan-deps, which is not in the base clang package everywhere.
+  run_logged "$log" bash -c '
+    set -e
+    cmake -S . -B '"$build_dir"' -G Ninja \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_C_COMPILER=clang \
+      -DCMAKE_CXX_COMPILER=clang++ \
+      -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
+      -D'"$OPT"'_PERF_HARNESS_BUILD=ON \
+      -D'"$OPT"'_WARNINGS_AS_ERRORS=ON "$@"
+    cmake --build '"$build_dir"' -j'"$JOBS"'
+  ' _ "${EXTRA_CMAKE_ARGS[@]}"
+  local rc=$?
+  echo "run-checks: clang-build finished (exit $rc); log at $log"
+  return $rc
+}
+
 TARGET="${1:-tests}"
 case "$TARGET" in
   tests) check_tests ;;
+  clang-build) check_clang_build ;;
   asan|ubsan|tsan) check_sanitizer "$TARGET" ;;
   all)
     rc=0
     check_tests || rc=1
+    # Before the sanitizers, which are the expensive part.
+    check_clang_build || rc=1
     for san in asan ubsan tsan; do
       check_sanitizer "$san" || rc=1
     done
@@ -147,7 +194,7 @@ case "$TARGET" in
     exit $rc
     ;;
   *)
-    echo "usage: run-checks.sh [tests|asan|ubsan|tsan|all]" >&2
+    echo "usage: run-checks.sh [tests|clang-build|asan|ubsan|tsan|all]" >&2
     exit 2
     ;;
 esac
