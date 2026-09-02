@@ -180,11 +180,24 @@ bool isListKind(BlockKind kind) {
 
 std::vector<SourceBlock> scanBlocks(std::string_view source) {
   std::vector<SourceBlock> blocks;
-  // Roughly one block per two lines of typical prose; a good enough guess to
-  // keep a full rescan from reallocating on every keystroke.
-  blocks.reserve(source.size() / 48 + 8);
-  std::size_t pos = 0;
-  while(pos < source.size()) {
+  scanBlocksInto(source, &blocks);
+  return blocks;
+}
+
+namespace {
+
+// The one block starting at `pos`, which must be the start of a line.
+//
+// The scanner carries no state whatsoever between blocks: every field of the
+// block returned here is decided from `pos` and the bytes after it, and no
+// branch ever looks at a byte before `pos`. That is not an accident of the
+// current constructs -- it is the property `scanBlocksFrom` below is built on,
+// because it makes a scan resumed at any block boundary produce exactly the
+// blocks a scan from the top of the buffer would have produced there.
+// `blockscan_resuming_at_every_boundary_matches_a_full_scan` is the test that
+// holds a future construct to it.
+SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
+  {
     const Line line = lineAt(source, pos);
     const std::string_view text = textOf(source, line);
     std::size_t indentBytes = 0;
@@ -203,9 +216,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
       block.kind = BlockKind::Blank;
       block.contentStart = line.start;
       block.contentEnd = line.start;
-      blocks.push_back(std::move(block));
-      pos = line.next;
-      continue;
+      return block;
     }
 
     // Four columns of indentation open a Markdown code block. A list marker at
@@ -225,9 +236,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
       block.end = lastContentEnd;
       block.contentStart = line.start;
       block.contentEnd = lastContentEnd > line.start && source[lastContentEnd - 1] == '\n' ? lastContentEnd - 1 : lastContentEnd;
-      blocks.push_back(std::move(block));
-      pos = lastContentEnd;
-      continue;
+      return block;
     }
 
     // Fenced code owns everything up to its closing fence, so a `#` inside a
@@ -261,9 +270,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
       }
       block.contentEnd = std::max(block.contentStart, contentEnd);
       block.end = blockEnd;
-      blocks.push_back(std::move(block));
-      pos = blockEnd;
-      continue;
+      return block;
     }
 
     // Tables, raw HTML and footnote definitions are handed to md4c whole.
@@ -290,9 +297,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
       block.end = scan;
       block.contentStart = line.start;
       block.contentEnd = scan > line.start && source[scan - 1] == '\n' ? scan - 1 : scan;
-      blocks.push_back(std::move(block));
-      pos = scan;
-      continue;
+      return block;
     }
 
     if(columns < 4 && isDivider(body)) {
@@ -300,9 +305,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
       // The whole line is marker; there is nothing to type into.
       block.contentStart = line.end;
       block.contentEnd = line.end;
-      blocks.push_back(std::move(block));
-      pos = line.next;
-      continue;
+      return block;
     }
 
     if(columns < 4 && !body.empty() && body[0] == '#') {
@@ -314,9 +317,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
         std::size_t after = hashes;
         while(after < body.size() && body[after] == ' ') ++after;
         block.contentStart = bodyStart + after;
-        blocks.push_back(std::move(block));
-        pos = line.next;
-        continue;
+        return block;
       }
     }
 
@@ -336,9 +337,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
           block.contentStart = bodyStart + contentAfter;
         }
       }
-      blocks.push_back(std::move(block));
-      pos = line.next;
-      continue;
+      return block;
     }
 
     if(const Marker& marker = leadingMarker; marker.matched) {
@@ -362,9 +361,7 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
       }
       block.contentEnd = contentEnd;
       block.end = scan;
-      blocks.push_back(std::move(block));
-      pos = scan;
-      continue;
+      return block;
     }
 
     // A paragraph absorbs following lines until something else starts.
@@ -380,16 +377,41 @@ std::vector<SourceBlock> scanBlocks(std::string_view source) {
     }
     block.contentEnd = contentEnd;
     block.end = scan;
-    blocks.push_back(std::move(block));
-    pos = scan;
+    return block;
   }
+}
+
+}
+
+std::size_t scanBlocksFrom(std::string_view source, std::size_t from, std::size_t tailBytes,
+                           const ResumeAt& resume, std::vector<SourceBlock>* out) {
+  std::size_t pos = from;
+  while(pos < source.size()) {
+    out->push_back(scanOneBlock(source, pos));
+    // Every branch of the scan sets `end` to where it consumed up to, so the
+    // block itself says where the next one starts.
+    pos = out->back().end;
+    if(pos < source.size() && source.size() - pos <= tailBytes && resume && resume(pos)) break;
+  }
+  return pos;
+}
+
+void scanBlocksInto(std::string_view source, std::vector<SourceBlock>* out) {
+  std::vector<SourceBlock>& blocks = *out;
+  blocks.clear();
+  // Roughly one block per two lines of typical prose; a good enough guess to
+  // keep a full rescan from reallocating on every keystroke. `reserve` is a
+  // no-op once the vector has been round-tripped through a previous scan, which
+  // is the case that matters: prose runs nearer one block per 20 bytes than one
+  // per 48, so a cold vector still grows a couple of times.
+  blocks.reserve(source.size() / 48 + 8);
+  scanBlocksFrom(source, 0, 0, {}, &blocks);
 
   if(blocks.empty()) {
     SourceBlock block;
     block.kind = BlockKind::Paragraph;
     blocks.push_back(block);
   }
-  return blocks;
 }
 
 bool startsQuoteRun(const std::vector<SourceBlock>& blocks, std::size_t index) {

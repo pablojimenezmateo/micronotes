@@ -53,6 +53,43 @@ enum class TextRole {
   Muted
 };
 
+// One run of source that shares a style: a word, a run of spaces, or a marker.
+// The staging form of a `TextRun`, before the flow has decided which line it
+// lands on or where along it. Declared here only so the layout can own the
+// buffer these are staged into; the tokenizer that fills them is in Layout.cpp.
+struct Token {
+  std::size_t start = 0;
+  std::size_t end = 0;
+  std::string text;
+  RunStyle style;
+  TextRole role = TextRole::Body;
+  bool isMarker = false;
+  bool hidden = false;
+  bool space = false;
+  int link = -1;
+};
+
+// What one byte of a block's content is: which inline spans cover it, and what
+// they make it look like. The layout builds one of these per byte of a
+// marked-up block and then walks the table to cut runs where it changes.
+// Declared here, like `Token`, only so the layout can own the buffer it is
+// staged into -- the code that fills it is in Layout.cpp.
+struct Attr {
+  bool strong = false;
+  bool italic = false;
+  bool mono = false;
+  bool strike = false;
+  bool marker = false;
+  int link = -1;
+  TextRole role = TextRole::Body;
+
+  bool operator==(const Attr& other) const {
+    return strong == other.strong && italic == other.italic && mono == other.mono &&
+           strike == other.strike && marker == other.marker && link == other.link &&
+           role == other.role;
+  }
+};
+
 struct TextRun {
   // Relative to the owning block's `start`, so one cached layout can serve
   // every position an identical block appears at. Add `blocks()[i].start`.
@@ -137,6 +174,24 @@ struct LayoutOptions {
   // folds. Unset means "assume it does", which is what a layout with no library
   // behind it should draw.
   std::function<bool(std::string_view)> wikiLinkResolves;
+
+  // Identity stamps. Both are optional, and both exist because the reuse check
+  // otherwise has to *prove* that nothing moved -- which costs a pass over the
+  // document to establish that a pass over the document is unnecessary.
+  //
+  // `sourceRevision` saves a memcmp of the whole note; `foldRevision` saves
+  // asking `folded` once per block, and each of those asks builds a fold key.
+  // On a 466 KB note that was 0.13 ms of every idle frame, all of it spent
+  // re-deriving last frame's answer.
+  //
+  // Zero means "cannot say", and the layout falls back to comparing bytes and
+  // to re-resolving the folds -- which is what a caller with no revision to
+  // offer, a test for instance, should get. A caller that does supply one is
+  // promising that it moves whenever the answer would: the source stamp must
+  // change on every mutation of the buffer, and the fold stamp on every change
+  // to what is collapsed *and* on a change of which note is being folded.
+  std::uint64_t sourceRevision = 0;
+  std::uint64_t foldRevision = 0;
 };
 
 class DocumentLayout {
@@ -146,6 +201,9 @@ public:
   void setMetrics(Metrics metrics);
   // Re-lays out only the blocks whose content or geometry actually changed, and
   // returns immediately when nothing did.
+  // `source` must not be a view into this layout's own buffer: the source is
+  // patched in place from it, so the two cannot be the same bytes. Callers hand
+  // in the editor's text, which never is.
   void update(std::string_view source, const LayoutOptions& options);
 
   const std::vector<SourceBlock>& blocks() const;
@@ -178,59 +236,182 @@ public:
   std::size_t lastRelaidBlocks() const;
 
 private:
+  // Where a block sits, and the layout it resolved to. There was a
+  // `blockIndex` field here as well; nothing ever read it, because it was
+  // always the array index. Caching the layout's height and row count here too
+  // was tried -- on the theory that reading them through the pointer is a
+  // random access into an unordered_map node -- and measured no difference, so
+  // the duplicated state is not worth carrying: the nodes for consecutive
+  // blocks are allocated in order and the prefetcher covers them.
   struct Placed {
-    std::size_t blockIndex = 0;
     float top = 0.0f;
     const BlockLayout* layout = nullptr;
-  };
-
-  struct FlatLine {
-    std::size_t block = 0;
-    std::size_t line = 0;
-    float top = 0.0f;
   };
 
   // What a block's layout depends on beyond its own bytes and the geometry.
   struct Flags {
     bool revealed = false;      // markers shown as text
     bool raw = false;           // laid out as plain source lines
-    bool trailingLine = false;  // owns the empty last line of the buffer
+    // The two ends of the buffer. `first` gets no space above it however much
+    // its kind would otherwise ask for, and `trailingLine` owns the empty last
+    // line a buffer ending in a newline has to put a caret on. Both are here
+    // rather than derived from the index at the point of use because the flags
+    // are what a block's cached layout is keyed under: a block that keeps its
+    // bytes but stops being the first one in the document has to stop sharing
+    // the first one's layout, and this is the record that says so.
+    bool first = false;
+    bool trailingLine = false;
     bool hidden = false;        // inside a collapsed toggle
     bool groupFirst = true;     // first line of a quote or callout run
     bool groupLast = true;      // last line of one
+
+    bool operator==(const Flags& other) const {
+      return revealed == other.revealed && raw == other.raw && first == other.first &&
+             trailingLine == other.trailingLine && hidden == other.hidden &&
+             groupFirst == other.groupFirst && groupLast == other.groupLast;
+    }
   };
+
+  // How much of the buffer an edit left alone: `prefix` bytes match from the
+  // start and `suffix` from the end, so everything the edit could have touched
+  // lies inside [prefix, size - suffix) of both buffers. Two memcmp-speed
+  // passes, and between them they bound the edit.
+  struct EditWindow {
+    std::size_t prefix = 0;
+    std::size_t suffix = 0;
+  };
+  static EditWindow matchEdges(std::string_view oldSource, std::string_view newSource);
+
+  // `blocks_` brought up to date with `source_`, given the window the edit fell
+  // inside and how many bytes the buffer held before it.
+  //
+  // The scan is spliced rather than redone: it resumes at a block boundary the
+  // edit provably cannot have moved, stops at the first boundary the previous
+  // scan also had inside the bytes the edit left alone, and takes the rest of
+  // the list from where it already was -- so an edit costs a scan of the edit
+  // plus an offset shift, instead of re-deriving all ten thousand blocks of a
+  // 200 KB note to find the one that changed.
+  //
+  // `head` and `tail` come back as the number of blocks that came through
+  // unchanged at each end. Those two numbers are also what the placement patch
+  // is built on: the blocks between them are the entire extent of the edit, and
+  // the ones after them moved by the change in block count and by nothing else.
+  // A cache key is a pure function of a block's bytes and its scan fields --
+  // never of where in the buffer it sits -- so a carried-over block keeps its
+  // key, its map entry and the layout behind it however far the edit pushed it
+  // down the page.
+  void rescan(const EditWindow& window, std::size_t previousBytes, std::size_t* head,
+              std::size_t* tail);
 
   // Whether `source` is byte-for-byte what the standing layout was built from,
   // which is also what makes `blocks_` still describe it.
   bool sourceMatches(std::string_view source) const;
   // Whether the standing layout already answers this call exactly. Asked only
   // once the source is known to match; see the definition for the rest.
-  bool canReuse(const LayoutOptions& options, std::uint64_t geometry,
-                const std::vector<bool>& folds) const;
-  // The fold predicate resolved over the current `blocks_`, as a per-block
-  // "is hidden" vector.
-  std::vector<bool> resolveFolds(const std::vector<SourceBlock>& blocks,
-                                 const LayoutOptions& options) const;
+  // `foldsMatch` is the caller's answer to the one input this cannot check for
+  // itself, since establishing it is the expensive part.
+  bool canReuse(const LayoutOptions& options, std::uint64_t geometry, bool foldsMatch) const;
+  // The fold predicate resolved over `blocks`, as a per-block "is hidden" byte,
+  // into a vector the caller owns -- so the buffer is reused between updates
+  // instead of allocated per keystroke. A byte rather than a `vector<bool>` bit
+  // because the placement patch has to *diff* two generations of this to learn
+  // which blocks a fold change moved, and a byte-wise diff is a `memcmp`.
+  void resolveFolds(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
+                    std::vector<std::uint8_t>* out) const;
   std::size_t blockIndexFor(std::size_t offset) const;
+
+  // The flags block `index` is keyed and laid out under. They depend on the
+  // block, on its neighbours' kinds, on the fold state and on where the caret
+  // and the raw block are -- and on nothing else, which is precisely what lets
+  // the placement patch bound the set of blocks a given change can have moved.
+  Flags flagsFor(std::size_t index, std::size_t caretBlock, std::size_t rawBlock) const;
+  // Counted into a local and posted once per update. A counter add is a relaxed
+  // atomic read-modify-write on a process-wide cacheline: nothing on a call per
+  // frame, and about 25 cycles per block when a cold open resolves ten thousand
+  // of them.
+  struct Tally {
+    std::uint64_t keyBytes = 0;
+    std::uint64_t cacheHits = 0;
+  };
+  // Block `index` under `flags`, taken from the cache or laid out into it, with
+  // the key it lives under written back through `key`.
+  const BlockLayout* resolveEntry(std::size_t index, const Flags& flags, std::uint64_t geometry,
+                                  std::uint64_t* key, Tally* tally);
 
   BlockLayout layoutBlock(std::size_t index, const Flags& flags) const;
   const BlockLayout* layoutForOffset(std::size_t offset, std::size_t* blockIndex) const;
   std::size_t flatLineForOffset(std::size_t offset, float* caretX) const;
+  // The visual-row index space that row-relative motion moves in, addressed
+  // through `lineStart_` rather than through a materialised table of rows.
+  std::size_t flatLineCount() const;
+  // The block owning row `flat`, and the row's index inside that block.
+  std::pair<std::size_t, std::size_t> flatLineAt(std::size_t flat) const;
+  float flatLineTop(std::size_t flat) const;
+  // The last row starting at or above `y` -- the row `y` falls in, or the last
+  // one above it when `y` lands in a block's padding.
+  std::size_t flatLineAtY(float y) const;
 
   Metrics metrics_;
   LayoutOptions options_;
   std::string source_;
   std::vector<SourceBlock> blocks_;
   std::vector<Placed> placed_;
-  std::vector<bool> hidden_;
-  std::vector<FlatLine> flatLines_;
+  std::vector<std::uint8_t> hidden_;
+  // Prefix sum of visual lines: `lineStart_[i]` is how many rows the blocks
+  // before `i` contribute, so `lineStart_.back()` is the document's row count
+  // and a row maps back to its block by binary search. This was a materialised
+  // (block, line, top) record per visual row -- 13.5k of them on a 460 KB note,
+  // rebuilt from scratch on every update and then scanned *linearly* by both of
+  // its readers. The prefix sum is one integer per block, filled by the
+  // placement walk that was happening anyway, and every query is a binary
+  // search over it.
+  std::vector<std::uint32_t> lineStart_;
   std::unordered_map<std::uint64_t, BlockLayout> cache_;
   std::vector<std::uint64_t> liveKeys_;
+  // `liveKeys_` sorted, for the cache sweep. A member so the sweep does not
+  // allocate a copy of it on the one frame it is already the slowest thing in.
+  std::vector<std::uint64_t> liveSorted_;
+  // The flags each standing block was keyed under. Half of the identity a
+  // carried-over key needs: identical bytes are not enough when the caret moved
+  // into the block and revealed its markers.
+  std::vector<Flags> flags_;
+  // The blocks the partial rescan produced, before they are spliced into
+  // `blocks_`. A member so a keystroke's rescan allocates nothing.
+  std::vector<SourceBlock> scanned_;
+  // The fold resolution of the update being built, before it is swapped in. Its
+  // predecessor is what says which blocks a fold change moved.
+  std::vector<std::uint8_t> spareHidden_;
+  // The blocks whose entry this update can have moved, as a few inclusive
+  // ranges rather than one span: a caret at the top of a note and an edit at
+  // the bottom are two blocks of work, and a single interval covering both
+  // would be the whole document. Sorted and merged before the walk reads it.
+  std::vector<std::pair<std::size_t, std::size_t>> dirty_;
+  // Scratch for the per-block flow. `Flow` is constructed once per block, so a
+  // buffer it owns is grown from empty ten thousand times over a document --
+  // which is most of what laying one out allocates. Held here instead, the run
+  // and whitespace buffers are grown once and reused by every block after the
+  // first. `mutable` because laying a block out is logically a const query.
+  mutable std::vector<TextRun> flowRuns_;
+  mutable std::vector<std::pair<std::size_t, float>> flowPending_;
+  // The token groups a block is staged into before it is flowed. Same reason:
+  // one per block, and the inner vectors keep their capacity between blocks, so
+  // a document's worth of tokenizing grows its buffers once.
+  mutable std::vector<std::vector<Token>> flowGroups_;
+  // The inline scan's buffers and the per-byte attribute table it fills, held
+  // for the same reason: both were an allocation per block on a path that runs
+  // once per block, and the mask inside the scan was paid even by the four
+  // blocks in five with no markup in them.
+  mutable InlineScratch inlineScratch_;
+  mutable std::vector<Attr> attrs_;
   float totalHeight_ = 0.0f;
   std::size_t lastRelaid_ = 0;
   // What the standing layout was built from, so the next call can ask whether
   // it would produce the same thing again.
   std::uint64_t geometryHash_ = 0;
+  // The stamps the standing layout was built under, or zero when it was built
+  // by a caller that did not offer them.
+  std::uint64_t sourceRevision_ = 0;
+  std::uint64_t foldRevision_ = 0;
   std::size_t caretBlock_ = kNone;
   std::size_t rawBlock_ = kNone;
   bool built_ = false;

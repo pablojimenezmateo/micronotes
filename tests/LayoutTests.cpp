@@ -5,12 +5,14 @@
 
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 using micronotes::doc::BlockKind;
 using micronotes::doc::DocumentLayout;
 using micronotes::doc::LayoutOptions;
 using micronotes::doc::Metrics;
+using micronotes::doc::Rect;
 using micronotes::doc::RunStyle;
 
 namespace {
@@ -353,13 +355,17 @@ MICRONOTES_TEST(layout_update_does_nothing_when_nothing_changed) {
   };
   MICRONOTES_REQUIRE(delta(CounterId::LayoutUpdateCalls) == 10);
   MICRONOTES_REQUIRE(delta(CounterId::LayoutUnchangedUpdates) == 10);
-  // Not one byte copied, not one block rescanned or rehashed, not one line
-  // reflattened. These are the four O(document) passes the fast path exists to
-  // skip, and each of them reading zero is the whole claim.
+  // Not one byte copied, not one block rescanned or rehashed, not one block
+  // walked. These are the four O(document) passes the fast path exists to skip,
+  // and each of them reading zero is the whole claim.
   MICRONOTES_REQUIRE(delta(CounterId::LayoutSourceBytesCopied) == 0);
   MICRONOTES_REQUIRE(delta(CounterId::LayoutKeyBytesHashed) == 0);
   MICRONOTES_REQUIRE(delta(CounterId::LayoutBlocksScanned) == 0);
-  MICRONOTES_REQUIRE(delta(CounterId::LayoutFlatLinesBuilt) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutBlocksWalked) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutBlocksRescanned) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutBlocksShifted) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutSourceBytesMoved) == 0);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutVisualRows) == 0);
 }
 
 // Every input the reuse check covers has to actually invalidate, or the fast
@@ -406,6 +412,84 @@ MICRONOTES_TEST(layout_update_rebuilds_when_an_input_moves) {
   layout.update(swapped, revealed);
   layout.setMetrics(stubMetrics());
   MICRONOTES_REQUIRE(rebuilds(revealed, swapped));
+}
+
+// The stamps are the caller saying "nothing moved" so the layout does not have
+// to prove it. Proving it costs a memcmp of the whole note and a fold query per
+// block, which on a 466 KB note was the entire cost of an idle frame.
+MICRONOTES_TEST(layout_stamped_reuse_asks_the_fold_predicate_nothing) {
+  const std::string source = manyBlocks(200);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  options.sourceRevision = 7;
+  options.foldRevision = 3;
+  int asked = 0;
+  options.folded = [&asked](const micronotes::doc::SourceBlock&) {
+    ++asked;
+    return false;
+  };
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(asked > 0);  // the first pass has to resolve them
+
+  asked = 0;
+  const auto before = microcore::perf::captureCounters();
+  for(int frame = 0; frame < 10; ++frame) layout.update(source, options);
+  const auto after = microcore::perf::captureCounters();
+  using microcore::perf::CounterId;
+  const auto delta = [&](CounterId id) {
+    return after[static_cast<std::size_t>(id)] - before[static_cast<std::size_t>(id)];
+  };
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutUnchangedUpdates) == 10);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutFoldQueries) == 0);
+  MICRONOTES_REQUIRE(asked == 0);
+}
+
+// A stamp that moves has to invalidate, or a collapsed heading stays open and
+// the screen is simply wrong.
+MICRONOTES_TEST(layout_a_moved_fold_stamp_re_resolves_the_folds) {
+  const std::string source = manyBlocks(8);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  options.sourceRevision = 1;
+  options.foldRevision = 1;
+  bool collapsed = false;
+  options.folded = [&collapsed](const micronotes::doc::SourceBlock& block) {
+    return collapsed && block.kind == BlockKind::Heading;
+  };
+  layout.update(source, options);
+  const float open = layout.totalHeight();
+
+  collapsed = true;
+  options.foldRevision = 2;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.totalHeight() < open);
+
+  collapsed = false;
+  options.foldRevision = 3;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.totalHeight() == open);
+}
+
+// A caller with no stamp to offer must get exactly the behaviour it had before
+// the stamps existed: zero means "cannot say", not "nothing changed".
+MICRONOTES_TEST(layout_an_unstamped_caller_still_compares_bytes) {
+  const std::string source = manyBlocks(8);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  layout.update(source, options);
+  const auto before = counter(microcore::perf::CounterId::LayoutUnchangedUpdates);
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(counter(microcore::perf::CounterId::LayoutUnchangedUpdates) == before + 1);
+
+  const std::string edited = source + "\nAnother paragraph.\n";
+  layout.update(edited, options);
+  MICRONOTES_REQUIRE(counter(microcore::perf::CounterId::LayoutUnchangedUpdates) == before + 1);
 }
 
 // A fold collapses without the source, the geometry or the caret moving, so it
@@ -462,4 +546,653 @@ MICRONOTES_TEST(layout_block_range_covers_the_band_and_nothing_else) {
   const auto past = layout.blockRange(layout.totalHeight() + 1000.0f,
                                       layout.totalHeight() + 2000.0f);
   MICRONOTES_REQUIRE(past.second <= layout.blockCount());
+}
+
+namespace {
+
+// Everything about a laid-out document that anything downstream can observe:
+// where each block sits, how tall it is, and every run on every line of it.
+// Two layouts that agree here are interchangeable to the view, the caret and
+// the hit tester.
+bool layoutsAgree(const DocumentLayout& a, const DocumentLayout& b, std::string* why) {
+  const auto fail = [&](const std::string& message) {
+    if(why) *why = message;
+    return false;
+  };
+  if(a.blockCount() != b.blockCount()) return fail("block count");
+  for(std::size_t i = 0; i < a.blockCount(); ++i) {
+    const auto& left = a.layout(i);
+    const auto& right = b.layout(i);
+    const std::string at = " at block " + std::to_string(i);
+    if(std::abs(a.blockTop(i) - b.blockTop(i)) > 0.001f) return fail("block top" + at);
+    if(a.blockHidden(i) != b.blockHidden(i)) return fail("hidden" + at);
+    if(left.kind != right.kind) return fail("kind" + at);
+    if(std::abs(left.height - right.height) > 0.001f) return fail("height" + at);
+    if(std::abs(left.indent - right.indent) > 0.001f) return fail("indent" + at);
+    if(std::abs(left.textLeft - right.textLeft) > 0.001f) return fail("text left" + at);
+    if(left.revealed != right.revealed) return fail("revealed" + at);
+    if(left.raw != right.raw) return fail("raw" + at);
+    if(left.complex != right.complex) return fail("complex" + at);
+    if(left.calloutTitle != right.calloutTitle) return fail("callout title" + at);
+    if(left.links != right.links) return fail("links" + at);
+    if(left.lines.size() != right.lines.size()) return fail("line count" + at);
+    for(std::size_t l = 0; l < left.lines.size(); ++l) {
+      const auto& leftLine = left.lines[l];
+      const auto& rightLine = right.lines[l];
+      const std::string on = at + " line " + std::to_string(l);
+      if(std::abs(leftLine.y - rightLine.y) > 0.001f) return fail("line y" + on);
+      if(std::abs(leftLine.height - rightLine.height) > 0.001f) return fail("line height" + on);
+      if(leftLine.runs.size() != rightLine.runs.size()) return fail("run count" + on);
+      for(std::size_t r = 0; r < leftLine.runs.size(); ++r) {
+        const auto& leftRun = leftLine.runs[r];
+        const auto& rightRun = rightLine.runs[r];
+        const std::string in = on + " run " + std::to_string(r);
+        if(leftRun.srcStart != rightRun.srcStart) return fail("run start" + in);
+        if(leftRun.srcEnd != rightRun.srcEnd) return fail("run end" + in);
+        if(leftRun.text != rightRun.text) return fail("run text" + in);
+        if(leftRun.role != rightRun.role) return fail("run role" + in);
+        if(leftRun.isMarker != rightRun.isMarker) return fail("run marker" + in);
+        if(leftRun.linkIndex != rightRun.linkIndex) return fail("run link" + in);
+        if(!(leftRun.style == rightRun.style)) return fail("run style" + in);
+        if(std::abs(leftRun.rect.x - rightRun.rect.x) > 0.001f) return fail("run x" + in);
+        if(std::abs(leftRun.rect.w - rightRun.rect.w) > 0.001f) return fail("run w" + in);
+      }
+    }
+  }
+
+  // ...and every query the surface actually asks, because the placement is
+  // patched in place now rather than rebuilt, and a patch can leave a *correct*
+  // block sitting at a stale row. The per-block loop above cannot see that: the
+  // row index is a separate array, and nothing in `layout(i)` reads it. These
+  // are the readers of it.
+  const std::string_view text = a.source();
+  const float height = a.totalHeight();
+  const std::size_t rowStep = text.size() / 64 + 1;
+  for(std::size_t offset = 0; offset <= text.size(); offset += rowStep) {
+    const std::string at = " at offset " + std::to_string(offset);
+    if(a.rowRelative(offset, 1) != b.rowRelative(offset, 1)) return fail("row down" + at);
+    if(a.rowRelative(offset, -1) != b.rowRelative(offset, -1)) return fail("row up" + at);
+    if(a.rowRelative(offset, 9) != b.rowRelative(offset, 9)) return fail("row down nine" + at);
+    const Rect left = a.caretRect(offset);
+    const Rect right = b.caretRect(offset);
+    if(std::abs(left.x - right.x) > 0.001f || std::abs(left.y - right.y) > 0.001f ||
+       std::abs(left.h - right.h) > 0.001f) {
+      return fail("caret rect" + at);
+    }
+    const auto leftRects = a.selectionRects(offset, offset + rowStep);
+    const auto rightRects = b.selectionRects(offset, offset + rowStep);
+    if(leftRects.size() != rightRects.size()) return fail("selection rect count" + at);
+    for(std::size_t r = 0; r < leftRects.size(); ++r) {
+      if(std::abs(leftRects[r].x - rightRects[r].x) > 0.001f ||
+         std::abs(leftRects[r].y - rightRects[r].y) > 0.001f ||
+         std::abs(leftRects[r].w - rightRects[r].w) > 0.001f ||
+         std::abs(leftRects[r].h - rightRects[r].h) > 0.001f) {
+        return fail("selection rect" + at);
+      }
+    }
+  }
+  const float yStep = height / 48.0f + 1.0f;
+  for(float y = -20.0f; y < height + 40.0f; y += yStep) {
+    const std::string at = " at y " + std::to_string(y);
+    if(a.blockAt(y) != b.blockAt(y)) return fail("block at" + at);
+    if(a.blockRange(y, y + 120.0f) != b.blockRange(y, y + 120.0f)) return fail("block range" + at);
+    for(const float x : {-10.0f, 0.0f, 37.0f, 240.0f, 4000.0f}) {
+      if(a.offsetAt(x, y) != b.offsetAt(x, y)) {
+        return fail("offset at x " + std::to_string(x) + at);
+      }
+    }
+  }
+  if(a.rowsPerHeight(400.0f) != b.rowsPerHeight(400.0f)) return fail("rows per height");
+  if(std::abs(a.totalHeight() - b.totalHeight()) > 0.001f) return fail("total height");
+  return true;
+}
+
+// A document long enough that the incremental path has a prefix and a suffix to
+// carry over, and varied enough that the blocks it carries are not all alike.
+std::string sectionedFixture(int sections) {
+  std::string source;
+  for(int section = 0; section < sections; ++section) {
+    const std::string n = std::to_string(section);
+    source += "## Section " + n + "\n\n";
+    source += "A paragraph with **strong text**, `code`, a [link](note-" + n +
+              ".md) and enough words in it to wrap more than once on screen.\n\n";
+    source += "- bullet " + n + "\n- [ ] task " + n + "\n\n";
+    source += "> quoted line " + n + "\n\n";
+    source += "```cpp\nint value_" + n + " = " + n + ";\n```\n\n";
+    // A table, because whether its first row is a table at all is decided by
+    // the line under it. That makes it the one construct here whose kind can
+    // change while its own bytes do not, which is what the block-shape check in
+    // the reuse map is for.
+    source += "| left " + n + " | right |\n|:------|------:|\n| a | b |\n\n";
+  }
+  return source;
+}
+
+std::string longFixture() {
+  return sectionedFixture(40);
+}
+
+}
+
+// The reuse machinery is an optimisation, and the only thing that makes an
+// optimisation safe is that it cannot be observed. This walks a document
+// through the edits a person makes -- typing at each end and in the middle,
+// deleting, splitting a block, moving the caret, folding, resizing -- and after
+// every one of them asserts that the incrementally updated layout is
+// indistinguishable from one built from scratch for the same inputs.
+//
+// It is written as one long sequence rather than a test per edit on purpose:
+// the incremental path carries state from the previous update, so the bugs it
+// can have are the ones that need two edits in a row to show up.
+MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
+  std::string source = longFixture();
+  DocumentLayout incremental;
+  incremental.setMetrics(stubMetrics());
+
+  std::uint64_t revision = 1;
+  LayoutOptions options;
+  options.width = 620.0f;
+
+  int checked = 0;
+  const auto settle = [&](const char* what) {
+    options.sourceRevision = revision;
+    incremental.update(source, options);
+
+    DocumentLayout fresh;
+    fresh.setMetrics(stubMetrics());
+    LayoutOptions freshOptions = options;
+    freshOptions.sourceRevision = 0;
+    freshOptions.foldRevision = 0;
+    fresh.update(source, freshOptions);
+
+    std::string why;
+    // Compared before the message is built: the order the arguments of a call
+    // are evaluated in is unspecified, so a message that reads `why` in the same
+    // expression that fills it reads it empty about half the time.
+    const bool agree = layoutsAgree(incremental, fresh, &why);
+    micronotes::tests::require(agree,
+                               std::string("incremental layout diverged -- ") + what + ": " + why);
+    ++checked;
+  };
+
+  settle("first build");
+
+  // Typing at the top, in the middle and at the end. Each leaves a different
+  // amount of the document either side of the edit for the map to carry over.
+  const std::size_t top = source.find("A paragraph") + 2;
+  for(int i = 0; i < 4; ++i) {
+    source.insert(top, 1, 'x');
+    ++revision;
+    options.caretOffset = top + 1;
+    settle("typing near the top");
+  }
+  std::size_t middle = source.find("A paragraph", source.size() / 2) + 2;
+  for(int i = 0; i < 4; ++i) {
+    source.insert(middle, 1, 'y');
+    ++revision;
+    options.caretOffset = middle + 1;
+    settle("typing in the middle");
+  }
+  for(int i = 0; i < 4; ++i) {
+    source.push_back('z');
+    ++revision;
+    options.caretOffset = source.size();
+    settle("typing at the end");
+  }
+
+  // Deleting, which takes the other branch of every prefix/suffix comparison.
+  for(int i = 0; i < 4; ++i) {
+    source.erase(middle, 1);
+    ++revision;
+    options.caretOffset = middle;
+    settle("backspace in the middle");
+  }
+
+  // Splitting a block and joining it again: the block count changes, so every
+  // block below shifts by an index as well as by an offset.
+  source.insert(middle, "\n\n");
+  ++revision;
+  options.caretOffset = middle + 2;
+  settle("splitting a paragraph");
+  source.erase(middle, 2);
+  ++revision;
+  options.caretOffset = middle;
+  settle("joining it again");
+
+  // Moving the caret with no edit at all: the source stands still and two
+  // blocks change which of their markers are shown.
+  for(std::size_t i = 0; i < incremental.blockCount(); i += 7) {
+    options.caretOffset = incremental.blocks()[i].start;
+    settle("moving the caret");
+  }
+
+  // Into and out of a fenced block, whose opening marker moves between being a
+  // line of its own and riding in front of the first line of code.
+  const std::size_t fence = source.find("```cpp");
+  MICRONOTES_REQUIRE(fence != std::string::npos);
+  options.caretOffset = fence + 2;
+  settle("caret inside a fence");
+  options.rawOffset = fence + 2;
+  settle("fence dropped to raw");
+  options.rawOffset = DocumentLayout::kNone;
+  options.caretOffset = 0;
+  settle("back out of the fence");
+
+  // Folding a heading, which hides everything under it and moves every top
+  // below, then unfolding it.
+  std::uint64_t foldRevision = 1;
+  bool folded = false;
+  const std::size_t foldedHeading = source.find("## Section 12");
+  MICRONOTES_REQUIRE(foldedHeading != std::string::npos);
+  options.folded = [&](const micronotes::doc::SourceBlock& block) {
+    return folded && block.start == foldedHeading;
+  };
+  options.foldRevision = foldRevision;
+  settle("fold predicate installed");
+  folded = true;
+  options.foldRevision = ++foldRevision;
+  settle("heading folded");
+  settle("idle frame while folded");
+  folded = false;
+  options.foldRevision = ++foldRevision;
+  settle("heading unfolded");
+  options.folded = nullptr;
+  options.foldRevision = 0;
+
+  // Breaking a table's delimiter row and putting it back. A table is the one
+  // construct here whose kind is decided by a line other than its first, and it
+  // swings a whole block between `Complex` and `Paragraph` without changing its
+  // extent -- the shape of edit most likely to catch a reuse map out.
+  const std::size_t delimiter = source.find("|:------|------:|");
+  MICRONOTES_REQUIRE(delimiter != std::string::npos);
+  source.replace(delimiter, 1, "x");
+  ++revision;
+  options.caretOffset = delimiter + 1;
+  settle("table delimiter broken");
+  source.replace(delimiter, 1, "|");
+  ++revision;
+  options.caretOffset = delimiter + 1;
+  settle("table delimiter restored");
+
+  // Resizing, which invalidates every cached block at once, and then typing
+  // again at the new width so the next edit reuses keys built under it.
+  for(const float width : {480.0f, 900.0f, 620.0f}) {
+    options.width = width;
+    settle("resized");
+    source.insert(middle, 1, 'w');
+    ++revision;
+    options.caretOffset = middle + 1;
+    settle("typing after a resize");
+  }
+
+  MICRONOTES_REQUIRE(checked > 30);
+}
+
+// The same claim as above, made by a machine instead of by hand.
+//
+// The scripted sequence covers the edits somebody thought of; the placement is
+// patched in place now, so the interesting bugs are the ones that need a
+// particular *pair* of consecutive updates -- an edit that shifts the block
+// count, then a caret move above the shift, then a fold whose head is inside
+// the block that moved. There are more such pairs than anyone will write out,
+// so this walks a seeded random sequence through them and holds the same
+// invariant after every single step: indistinguishable from a layout built from
+// scratch under the same inputs.
+//
+// Seeded, so a failure is reproducible from the name of the test alone. The
+// step number in the message is the index into that fixed sequence.
+namespace {
+
+// One seeded random walk of edits, asserted against a from-scratch layout after
+// every step. Factored out so the test can run a few independent sequences: a
+// single seed explores one path through the state machine, and the bugs this is
+// built to catch are in the transitions, not in any one state.
+void walkRandomEdits(std::uint64_t seed, int steps) {
+  // xorshift64*, so the sequence is fixed by the seed and does not depend on
+  // the standard library's distribution implementations.
+  std::uint64_t state = seed;
+  const auto next = [&state]() {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    return state * 0x2545F4914F6CDD1Dull;
+  };
+  const auto pick = [&next](std::size_t bound) {
+    return bound == 0 ? std::size_t {0} : static_cast<std::size_t>(next() >> 11) % bound;
+  };
+
+  std::string source = sectionedFixture(6);
+  DocumentLayout incremental;
+  incremental.setMetrics(stubMetrics());
+
+  std::uint64_t revision = 1;
+  std::uint64_t foldRevision = 1;
+  int foldMode = 0;
+  LayoutOptions options;
+  options.width = 620.0f;
+  options.foldRevision = foldRevision;
+  options.folded = [&foldMode](const micronotes::doc::SourceBlock& block) {
+    if(foldMode == 0) return false;
+    if(block.kind != BlockKind::Heading) return false;
+    return foldMode == 1 || block.level == 2;
+  };
+
+  int step = 0;
+  const auto settle = [&](bool stamped) {
+    options.sourceRevision = stamped ? revision : 0;
+    incremental.update(source, options);
+
+    DocumentLayout fresh;
+    fresh.setMetrics(stubMetrics());
+    LayoutOptions freshOptions = options;
+    freshOptions.sourceRevision = 0;
+    freshOptions.foldRevision = 0;
+    fresh.update(source, freshOptions);
+
+    std::string why;
+    const bool agree = layoutsAgree(incremental, fresh, &why);
+    micronotes::tests::require(agree, "random edit sequence " + std::to_string(seed) +
+                                        " diverged at step " + std::to_string(step) + ": " + why);
+  };
+
+  settle(true);
+
+  // Snippets rather than random bytes: what stresses the incremental path is an
+  // edit that changes a block's *kind* or its extent, and those are markers. A
+  // bare "```" is in the list deliberately -- an unclosed fence swallows the
+  // rest of the document into one block, which is the largest structural change
+  // a three-byte edit can make.
+  static const char* kSnippets[] = {"x",  "hello ",   "**bold** ", "# ",     "- ",
+                                    "> ", "`code` ",  "[[wiki]] ", "1. ",    "- [ ] ",
+                                    "\n", "\n\n",     "```\n",     "|a|b|\n", "    "};
+  constexpr std::size_t kSnippetCount = sizeof(kSnippets) / sizeof(kSnippets[0]);
+
+  for(step = 1; step <= steps; ++step) {
+    const std::size_t what = pick(20);
+    if(what < 7) {
+      const std::size_t at = pick(source.size() + 1);
+      const std::string_view snippet = kSnippets[pick(kSnippetCount)];
+      source.insert(at, snippet);
+      ++revision;
+      options.caretOffset = at + snippet.size();
+    } else if(what < 11) {
+      if(source.empty()) continue;
+      const std::size_t at = pick(source.size());
+      const std::size_t count = std::min<std::size_t>(pick(12) + 1, source.size() - at);
+      source.erase(at, count);
+      ++revision;
+      options.caretOffset = at;
+    } else if(what < 15) {
+      options.caretOffset = pick(source.size() + 1);
+    } else if(what < 16) {
+      options.rawOffset = options.rawOffset == DocumentLayout::kNone
+                            ? pick(source.size() + 1)
+                            : DocumentLayout::kNone;
+    } else if(what < 17) {
+      foldMode = static_cast<int>(pick(3));
+      options.foldRevision = ++foldRevision;
+    } else if(what < 18) {
+      options.width = 320.0f + static_cast<float>(pick(9)) * 90.0f;
+    } else if(what < 19) {
+      options.revealAll = !options.revealAll;
+    }
+    // The remaining draw changes nothing at all, which is the path that has to
+    // answer "already correct" without touching the document.
+
+    // Every fourth step drops the stamp, so the byte comparison that stands in
+    // for it is exercised against a source the caller says nothing about.
+    settle(step % 4 != 0);
+  }
+}
+
+}
+
+MICRONOTES_TEST(layout_incremental_updates_match_under_a_random_edit_sequence) {
+  for(const std::uint64_t seed : {0x9E3779B97F4A7C15ull, 0x1234567891234567ull,
+                                  0xDEADBEEFCAFEF00Dull}) {
+    walkRandomEdits(seed, 250);
+  }
+}
+
+// A line ending inside a paragraph is one space on screen, however many bytes
+// of newline and indentation the file spent on it. Asserted for a paragraph
+// with no inline markup and for one with some, because those take two different
+// tokenizers: a block the inline scanner finds nothing in skips the per-byte
+// attribute table entirely, and the two paths have to agree about this or a
+// hand-wrapped sentence gains its indentation back as visible spaces.
+MICRONOTES_TEST(layout_folds_a_hand_wrapped_line_ending_into_one_space) {
+  const auto drawnText = [](const std::string& source) {
+    DocumentLayout layout;
+    layout.setMetrics(stubMetrics());
+    LayoutOptions options;
+    options.width = 4000.0f;  // wide enough that nothing wraps on screen
+    layout.update(source, options);
+    std::string drawn;
+    for(const auto& line : layout.layout(0).lines) {
+      for(const auto& run : line.runs) drawn += run.text;
+    }
+    return drawn;
+  };
+
+  MICRONOTES_REQUIRE(drawnText("A plain paragraph hand wrapped\n   across two source lines.\n") ==
+                     "A plain paragraph hand wrapped across two source lines.");
+  MICRONOTES_REQUIRE(drawnText("A **marked up** paragraph wrapped\n   across two source lines.\n") ==
+                     "A marked up paragraph wrapped across two source lines.");
+}
+
+// The visual-row index used to be a record per row, and both of its readers --
+// "which row did this click land on" and "which row is the caret on" -- walked
+// it from the front. So every click and every up-arrow in a long note cost a
+// pass over every row in it. Nothing about the answers changed when that became
+// a binary search over a per-block prefix sum, which is exactly why the probe
+// counter exists: a linear scan and a binary search agree on every result, and
+// on a fixture small enough to assert by hand they also agree on the time.
+// The two claims of the incremental path, as counters rather than as timings:
+// an edit rescans the *edit*, and it places the blocks the edit moved. Both are
+// the difference between O(edit) and O(document), and both are invisible to a
+// correctness test, because a full rescan and a full replacement produce exactly
+// the right answer -- just slowly. So they are asserted here, on a document big
+// enough that the two numbers cannot be confused.
+MICRONOTES_TEST(layout_an_edit_rescans_and_replaces_only_what_it_touched) {
+  std::string source = manyBlocks(400);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  options.sourceRevision = 1;
+  layout.update(source, options);
+  const std::size_t blocks = layout.blockCount();
+  MICRONOTES_REQUIRE(blocks > 300);
+
+  using microcore::perf::CounterId;
+  // A character typed into a block in the middle of the document.
+  const std::size_t at = source.find("Paragraph", source.size() / 2) + 3;
+  MICRONOTES_REQUIRE(at != std::string::npos);
+  source.insert(at, 1, 'x');
+  options.sourceRevision = 2;
+  options.caretOffset = at + 1;
+
+  const auto before = microcore::perf::captureCounters();
+  layout.update(source, options);
+  const auto after = microcore::perf::captureCounters();
+  const auto delta = [&](CounterId id) {
+    return after[static_cast<std::size_t>(id)] - before[static_cast<std::size_t>(id)];
+  };
+
+  // The scan resumes two blocks above the edit and stops at the first boundary
+  // the old scan shared inside the untouched tail, so a handful either way --
+  // but nowhere near the document.
+  micronotes::tests::require(delta(CounterId::LayoutBlocksRescanned) > 0,
+                             "the edit rescanned nothing at all");
+  micronotes::tests::require(delta(CounterId::LayoutBlocksRescanned) < 12,
+                             "rescanned " + std::to_string(delta(CounterId::LayoutBlocksRescanned)) +
+                               " blocks of " + std::to_string(blocks));
+  micronotes::tests::require(delta(CounterId::LayoutBlocksWalked) < 12,
+                             "placed " + std::to_string(delta(CounterId::LayoutBlocksWalked)) +
+                               " blocks of " + std::to_string(blocks));
+  // And the source is patched over the edit rather than re-copied.
+  micronotes::tests::require(delta(CounterId::LayoutSourceBytesCopied) < 64,
+                             "copied " + std::to_string(delta(CounterId::LayoutSourceBytesCopied)) +
+                               " bytes of " + std::to_string(source.size()));
+  // The placement was patched, not rebuilt.
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutPlacementPatches) == 1);
+  MICRONOTES_REQUIRE(delta(CounterId::LayoutPlacementRebuilds) == 0);
+
+  // Moving the caret between two blocks touches those two and nothing else --
+  // the source does not move at all, so nothing is rescanned or copied.
+  options.caretOffset = layout.blocks()[blocks / 4].start;
+  const auto beforeCaret = microcore::perf::captureCounters();
+  layout.update(source, options);
+  const auto afterCaret = microcore::perf::captureCounters();
+  const auto caretDelta = [&](CounterId id) {
+    return afterCaret[static_cast<std::size_t>(id)] - beforeCaret[static_cast<std::size_t>(id)];
+  };
+  MICRONOTES_REQUIRE(caretDelta(CounterId::LayoutBlocksScanned) == 0);
+  MICRONOTES_REQUIRE(caretDelta(CounterId::LayoutSourceBytesCopied) == 0);
+  micronotes::tests::require(caretDelta(CounterId::LayoutBlocksWalked) <= 4,
+                             "a caret move placed " +
+                               std::to_string(caretDelta(CounterId::LayoutBlocksWalked)) +
+                               " blocks of " + std::to_string(blocks));
+}
+
+MICRONOTES_TEST(layout_row_lookups_binary_search_the_index) {
+  const std::string source = manyBlocks(400);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+
+  using microcore::perf::CounterId;
+  const auto rowsBefore = counter(CounterId::LayoutVisualRows);
+  layout.update(source, options);
+  const std::uint64_t rows = counter(CounterId::LayoutVisualRows) - rowsBefore;
+  MICRONOTES_REQUIRE(rows > 1000);
+
+  const auto queriesBefore = counter(CounterId::LayoutRowIndexQueries);
+  const auto probesBefore = counter(CounterId::LayoutRowIndexProbes);
+  const std::size_t hit = layout.offsetAt(80.0f, layout.totalHeight() * 0.75f);
+  const std::uint64_t queries = counter(CounterId::LayoutRowIndexQueries) - queriesBefore;
+  const std::uint64_t probes = counter(CounterId::LayoutRowIndexProbes) - probesBefore;
+
+  // The answer still has to be right: three quarters of the way down a uniform
+  // document is three quarters of the way through its bytes.
+  MICRONOTES_REQUIRE(hit > source.size() / 2);
+  MICRONOTES_REQUIRE(hit < source.size());
+  MICRONOTES_REQUIRE(queries == 1);
+  // One query is ceil(log2(rows)) + 1 steps at most. The second bound is the
+  // one that matters: a walk would take `rows` of them.
+  MICRONOTES_REQUIRE(probes < 24);
+  MICRONOTES_REQUIRE(probes * 40 < rows);
+}
+
+// A collapsed block gives up every one of its visual rows, so the prefix sum
+// behind the row index is full of runs of repeated values. Stepping the caret
+// down by one row has to cross a whole run of them in a single move -- which is
+// the case a "find the block at this row" written as a scan gets right by
+// accident and one written as a search only gets right deliberately.
+MICRONOTES_TEST(layout_row_motion_steps_over_collapsed_blocks) {
+  const std::string source = manyBlocks(6);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  options.folded = [](const micronotes::doc::SourceBlock& block) {
+    return block.kind == BlockKind::Heading;
+  };
+  layout.update(source, options);
+
+  std::size_t rows = 0;
+  for(std::size_t i = 0; i < layout.blockCount(); ++i) rows += layout.layout(i).lines.size();
+  // Most blocks are inside a collapsed heading and contribute nothing.
+  MICRONOTES_REQUIRE(rows > 1);
+  MICRONOTES_REQUIRE(rows < layout.blockCount());
+
+  std::size_t offset = 0;
+  float y = layout.caretRect(0).y;
+  for(std::size_t step = 0; step + 1 < rows; ++step) {
+    const std::size_t next = layout.rowRelative(offset, 1);
+    MICRONOTES_REQUIRE(next > offset);
+    const auto rect = layout.caretRect(next);
+    MICRONOTES_REQUIRE(rect.y > y);
+    offset = next;
+    y = rect.y;
+  }
+  // And a row past the last one saturates at the end of the buffer rather than
+  // running off the index.
+  MICRONOTES_REQUIRE(layout.rowRelative(offset, 1) == source.size());
+  MICRONOTES_REQUIRE(layout.rowRelative(0, -1) == 0);
+}
+
+// The cache sweep erases most of the map while `placed_` still holds pointers
+// into it. That is sound only because `unordered_map` is node-based -- erasing
+// one element leaves pointers to every other element valid -- and the sweep
+// leans on it hard enough to be worth a test: if it were ever wrong the symptom
+// would be a use-after-free on the next frame rather than a failed assertion,
+// which is why this reads the entire layout back afterwards and why it belongs
+// in the sanitizer lanes.
+MICRONOTES_TEST(layout_survives_a_cache_sweep_that_erases_most_of_the_map) {
+  const std::string source = manyBlocks(120);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+
+  using microcore::perf::CounterId;
+  const auto before = counter(CounterId::LayoutCacheEvictions);
+  // Every width is a new geometry, so every block gets a new key. A generation
+  // is smaller than the block count here because identical blocks share a key,
+  // which is the point of keying on content -- so it takes a dozen passes to
+  // overflow a cache sized at three generations of *blocks*.
+  for(int step = 0; step < 14; ++step) {
+    options.width = 500.0f + static_cast<float>(step) * 37.0f;
+    layout.update(source, options);
+  }
+  MICRONOTES_REQUIRE(counter(CounterId::LayoutCacheEvictions) > before);
+
+  // Every block's layout has to still be readable and still agree with the
+  // placement. This is the read that would fault on a freed node.
+  float top = 0.0f;
+  std::size_t rows = 0;
+  for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+    const auto& block = layout.layout(i);
+    MICRONOTES_REQUIRE(std::abs(layout.blockTop(i) - top) < 0.01f);
+    top += block.height;
+    rows += block.lines.size();
+    for(const auto& line : block.lines) {
+      for(const auto& run : line.runs) MICRONOTES_REQUIRE(run.srcEnd >= run.srcStart);
+    }
+  }
+  MICRONOTES_REQUIRE(rows > 0);
+  MICRONOTES_REQUIRE(std::abs(top - layout.totalHeight()) < 0.01f);
+  MICRONOTES_REQUIRE(layout.offsetAt(80.0f, top * 0.5f) < source.size());
+}
+
+// Installing metrics throws the block cache away, and every entry in the
+// standing placement is a pointer into that cache. Its one caller re-lays out
+// immediately, so nothing reads the placement in between -- which is exactly
+// the sort of invariant that holds until someone adds a second caller. This
+// pins the safe behaviour: after new metrics and before the next update, the
+// layout answers as an empty document instead of reading freed nodes.
+MICRONOTES_TEST(layout_answers_as_empty_between_new_metrics_and_the_next_update) {
+  const std::string source = manyBlocks(40);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.totalHeight() > 0.0f);
+
+  layout.setMetrics(stubMetrics());
+  MICRONOTES_REQUIRE(layout.totalHeight() == 0.0f);
+  MICRONOTES_REQUIRE(layout.layout(0).lines.empty());
+  MICRONOTES_REQUIRE(layout.offsetAt(100.0f, 400.0f) == 0);
+  MICRONOTES_REQUIRE(layout.blockAt(400.0f) == std::nullopt);
+  const auto range = layout.blockRange(0.0f, 1000.0f);
+  MICRONOTES_REQUIRE(range.first == 0 && range.second == 0);
+  MICRONOTES_REQUIRE(layout.caretRect(20).h > 0.0f);
+  MICRONOTES_REQUIRE(layout.selectionRects(0, 40).empty());
+  MICRONOTES_REQUIRE(layout.rowRelative(20, 1) == 20);
+
+  // And it comes back whole on the next update.
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.totalHeight() > 0.0f);
 }

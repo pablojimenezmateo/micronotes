@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <utility>
 
@@ -60,34 +61,6 @@ std::string displayText(std::string_view source) {
   return out;
 }
 
-struct Attr {
-  bool strong = false;
-  bool italic = false;
-  bool mono = false;
-  bool strike = false;
-  bool marker = false;
-  int link = -1;
-  TextRole role = TextRole::Body;
-
-  bool operator==(const Attr& other) const {
-    return strong == other.strong && italic == other.italic && mono == other.mono &&
-           strike == other.strike && marker == other.marker && link == other.link &&
-           role == other.role;
-  }
-};
-
-struct Token {
-  std::size_t start = 0;
-  std::size_t end = 0;
-  std::string text;
-  RunStyle style;
-  TextRole role = TextRole::Body;
-  bool isMarker = false;
-  bool hidden = false;
-  bool space = false;
-  int link = -1;
-};
-
 using LineGroup = std::vector<Token>;
 
 Token makeToken(std::string_view source, std::size_t start, std::size_t end, const RunStyle& style, TextRole role, bool marker, bool hidden, int link) {
@@ -106,14 +79,28 @@ Token makeToken(std::string_view source, std::size_t start, std::size_t end, con
 
 class Flow {
 public:
-  Flow(const Metrics& metrics, std::size_t base, float textLeft, float width, float lineHeight, bool wrap, float top, BlockLayout& out)
-      : metrics_(metrics), base_(base), textLeft_(textLeft), right_(textLeft + width), lineHeight_(lineHeight), wrap_(wrap), y_(top), out_(out) {
+  Flow(const Metrics& metrics, std::size_t base, float textLeft, float width, float lineHeight,
+       bool wrap, float top, BlockLayout& out, std::vector<TextRun>& runs,
+       std::vector<std::pair<std::size_t, float>>& pending)
+      : metrics_(metrics), base_(base), textLeft_(textLeft), right_(textLeft + width), lineHeight_(lineHeight), wrap_(wrap), y_(top), runs_(runs), pending_(pending), out_(out) {
     penX_ = textLeft_;
+    runs_.clear();
+    pending_.clear();
   }
 
-  void run(const std::vector<LineGroup>& groups) {
-    for(const auto& group : groups) {
-      for(const auto& token : group) {
+  // Non-const: a token's text is moved into the run it becomes, rather than
+  // copied. Every word in the document was being materialised three times --
+  // once out of the source, once into the token, once into the run -- and the
+  // third of those is pure waste, because a token is emitted exactly once and
+  // read never again.
+  // `count` rather than `groups.size()`: the buffer belongs to the layout and
+  // keeps last block's groups past the live prefix, so that their token storage
+  // can be reused rather than freed.
+  void run(std::vector<LineGroup>& groups, std::size_t count) {
+    for(std::size_t g = 0; g < count; ++g) {
+      LineGroup& group = groups[g];
+      group_ = &group;
+      for(auto& token : group) {
         if(token.hidden || token.text.empty()) {
           // Flush first: a zero-width run must sit after the spaces that
           // precede it, or the offset it anchors lands inside them.
@@ -122,13 +109,20 @@ public:
           continue;
         }
         if(token.space) {
-          pending_.push_back(token);
+          // Measured once, here. It used to be measured twice for every word
+          // that followed it -- once to decide whether the line fits and once
+          // again inside the flush that emits it -- and roughly half a
+          // document's tokens are runs of spaces.
+          // By index into the group being walked, which is also where it will be
+          // emitted from: a held-back space used to be deep-copied -- string and
+          // all -- into this queue, for roughly half the tokens in a document.
+          pending_.push_back({static_cast<std::size_t>(&token - group.data()),
+                              metrics_.measure(token.text, token.style)});
+          pendingWidth_ += pending_.back().second;
           continue;
         }
         const float width = metrics_.measure(token.text, token.style);
-        float pendingWidth = 0.0f;
-        for(const auto& space : pending_) pendingWidth += metrics_.measure(space.text, space.style);
-        if(wrap_ && penX_ > textLeft_ && penX_ + pendingWidth + width > right_) {
+        if(wrap_ && penX_ > textLeft_ && penX_ + pendingWidth_ + width > right_) {
           flushPending();
           pushLine();
         } else {
@@ -150,7 +144,7 @@ public:
   }
 
 private:
-  void emit(const Token& token, float width) {
+  void emit(Token& token, float width) {
     TextRun run;
     run.srcStart = token.start - base_;
     run.srcEnd = token.end - base_;
@@ -159,21 +153,27 @@ private:
     run.role = token.role;
     run.isMarker = token.isMarker;
     run.linkIndex = token.link;
-    run.text = token.hidden ? std::string() : token.text;
+    run.text = token.hidden ? std::string() : std::move(token.text);
     runs_.push_back(std::move(run));
     penX_ += width;
   }
 
   void flushPending() {
-    for(const auto& space : pending_) emit(space, metrics_.measure(space.text, space.style));
+    for(const auto& [index, width] : pending_) emit((*group_)[index], width);
     pending_.clear();
+    pendingWidth_ = 0.0f;
   }
 
   void pushLine() {
     VisualLine line;
     line.y = y_;
     line.height = lineHeight_;
-    line.runs = std::move(runs_);
+    // Move the runs across rather than the vector: handing `runs_`'s buffer to
+    // the line leaves `runs_` with no capacity, so the next line grew from zero
+    // again -- five reallocations per line, on every line of the document.
+    // This way the line gets a right-sized buffer and `runs_` keeps its own.
+    line.runs.reserve(runs_.size());
+    for(auto& run : runs_) line.runs.push_back(std::move(run));
     runs_.clear();
     out_.lines.push_back(std::move(line));
     y_ += lineHeight_;
@@ -182,14 +182,15 @@ private:
 
   // A word wider than the whole column is broken at codepoint boundaries so it
   // never disappears past the right edge.
-  void splitWord(const Token& token) {
+  void splitWord(Token& token) {
     std::size_t i = 0;
     while(i < token.text.size()) {
       std::size_t j = i;
       float accumulated = 0.0f;
       while(j < token.text.size()) {
         const std::size_t next = utf8Next(token.text, j);
-        const float width = metrics_.measure(token.text.substr(j, next - j), token.style);
+        const float width =
+          metrics_.measure(std::string_view(token.text).substr(j, next - j), token.style);
         if(j > i && penX_ + accumulated + width > right_) break;
         accumulated += width;
         j = next;
@@ -212,8 +213,15 @@ private:
   bool wrap_ = true;
   float y_ = 0.0f;
   float penX_ = 0.0f;
-  std::vector<TextRun> runs_;
-  std::vector<Token> pending_;
+  // Both borrowed from the layout, so that they are allocated once for a
+  // document rather than once for each of its blocks.
+  std::vector<TextRun>& runs_;
+  // Whitespace held back until the next word decides whether the line breaks
+  // before or after it, as an index into the group being walked plus the width
+  // it was measured at.
+  std::vector<std::pair<std::size_t, float>>& pending_;
+  LineGroup* group_ = nullptr;
+  float pendingWidth_ = 0.0f;
   BlockLayout& out_;
 };
 
@@ -229,10 +237,47 @@ RunStyle styleFrom(const RunStyle& base, const Attr& attr, float monoSize) {
   return style;
 }
 
+// Tokens a span of content is about to produce, near enough. Words and the
+// spaces between them alternate, and English prose runs about five bytes to the
+// word, so a span yields roughly one token per three bytes. It only has to be
+// close: the point is that the token vector grows once instead of the five or
+// six doublings it took to reach a paragraph's worth from empty, which across a
+// document was the single largest source of allocation in laying one out.
+std::size_t tokenEstimate(std::size_t bytes) {
+  return bytes / 3 + 4;
+}
+
+// The same split for a block the inline scanner found nothing in, which in
+// ordinary prose is most of them. Worth its own loop because the general one
+// pays for markup this block does not have: a heap-allocated attribute slot per
+// content byte, zero-filled and then read back, to conclude that every byte is
+// plain. Kept directly below its general form so the two stay in step.
+void appendPlainTokens(std::string_view source, std::size_t from, std::size_t to,
+                       const RunStyle& base, LineGroup& out) {
+  out.reserve(out.size() + tokenEstimate(to - from));
+  std::size_t i = from;
+  while(i < to) {
+    const bool space = isSpaceByte(source[i]);
+    std::size_t j = i + 1;
+    while(j < to && isSpaceByte(source[j]) == space) ++j;
+    const bool foldsLineEnding = space && j - i > 1 &&
+                                 source.substr(i, j - i).find('\n') != std::string_view::npos;
+    if(foldsLineEnding) {
+      out.push_back(makeToken(source, i, j - 1, base, TextRole::Body, false, true, -1));
+      out.push_back(makeToken(source, j - 1, j, base, TextRole::Body, false, false, -1));
+      i = j;
+      continue;
+    }
+    out.push_back(makeToken(source, i, j, base, TextRole::Body, false, false, -1));
+    i = j;
+  }
+}
+
 // Splits `[from, to)` into tokens that share one set of inline attributes, with
 // whitespace kept as its own token so wrapping has break opportunities.
 void appendContentTokens(std::string_view source, std::size_t from, std::size_t to, const std::vector<Attr>& attrs,
                          const RunStyle& base, float monoSize, bool revealed, LineGroup& out) {
+  out.reserve(out.size() + tokenEstimate(to - from));
   std::size_t i = from;
   while(i < to) {
     const Attr& attr = attrs[i - from];
@@ -284,6 +329,18 @@ void DocumentLayout::setMetrics(Metrics metrics) {
   // would happily keep it: the source and the geometry are unchanged, and the
   // one thing that did change is not visible in either.
   built_ = false;
+  // And the placement has to go with the cache, because every entry in it is a
+  // pointer *into* the cache that was just emptied. The only caller happens to
+  // call update() on the next line, so nothing reads the placement in between
+  // -- but "safe as long as nobody asks" is a use-after-free waiting for a
+  // second caller, and dropping it costs nothing on a path that has already
+  // thrown the whole document's layout away. Queries then answer from an empty
+  // document, which they are all written to do.
+  placed_.clear();
+  lineStart_.clear();
+  liveKeys_.clear();
+  flags_.clear();
+  totalHeight_ = 0.0f;
 }
 
 const std::vector<SourceBlock>& DocumentLayout::blocks() const {
@@ -329,12 +386,14 @@ std::size_t DocumentLayout::lastRelaidBlocks() const {
   return lastRelaid_;
 }
 
-std::vector<bool> DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
-                                              const LayoutOptions& options) const {
+void DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
+                                  const LayoutOptions& options,
+                                  std::vector<std::uint8_t>* out) const {
   // Fold ranges come from the block structure, so they can only be resolved
   // once the scan is in: the caller names the heads, the layout names the
   // blocks each head swallows.
-  std::vector<bool> hidden(blocks.size(), false);
+  std::vector<std::uint8_t>& hidden = *out;
+  hidden.assign(blocks.size(), 0);
   for(std::size_t i = 0; options.folded && i < blocks.size(); ++i) {
     // A fold nested inside a collapsed one is already hidden, and costs
     // nothing to resolve again.
@@ -342,9 +401,153 @@ std::vector<bool> DocumentLayout::resolveFolds(const std::vector<SourceBlock>& b
     perf::addCounter(perf::CounterId::LayoutFoldQueries);
     if(!options.folded(blocks[i])) continue;
     const std::size_t end = foldEnd(blocks, i);
-    for(std::size_t j = i + 1; j < end; ++j) hidden[j] = true;
+    for(std::size_t j = i + 1; j < end; ++j) hidden[j] = 1;
   }
-  return hidden;
+}
+
+// The first and last index at which two byte spans differ, or `{kNone, kNone}`
+// when they are equal. The equality case is what happens on every keystroke, so
+// it is one `memcmp` rather than a loop; the scan runs only when a fold really
+// did move.
+static std::pair<std::size_t, std::size_t> diffSpan(const std::uint8_t* a, const std::uint8_t* b,
+                                                    std::size_t count) {
+  constexpr std::size_t kNone = DocumentLayout::kNone;
+  if(count == 0 || std::memcmp(a, b, count) == 0) return {kNone, kNone};
+  std::size_t low = 0;
+  while(a[low] == b[low]) ++low;
+  std::size_t high = count - 1;
+  while(a[high] == b[high]) --high;
+  return {low, high};
+}
+
+DocumentLayout::EditWindow DocumentLayout::matchEdges(std::string_view oldSource,
+                                                     std::string_view newSource) {
+  // A block at a time through `memcmp`, which is vectorised, then a byte at a
+  // time to land exactly. Byte-at-a-time throughout was 70 microseconds over a
+  // 200 KB note -- as much as the walk this whole comparison exists to shorten.
+  constexpr std::size_t kChunk = 64;
+  const std::size_t limit = std::min(oldSource.size(), newSource.size());
+  EditWindow window;
+  while(window.prefix + kChunk <= limit &&
+        std::memcmp(oldSource.data() + window.prefix, newSource.data() + window.prefix, kChunk) == 0) {
+    window.prefix += kChunk;
+  }
+  while(window.prefix < limit && oldSource[window.prefix] == newSource[window.prefix]) {
+    ++window.prefix;
+  }
+
+  const std::size_t tailLimit = limit - window.prefix;
+  while(window.suffix + kChunk <= tailLimit &&
+        std::memcmp(oldSource.data() + oldSource.size() - window.suffix - kChunk,
+                    newSource.data() + newSource.size() - window.suffix - kChunk, kChunk) == 0) {
+    window.suffix += kChunk;
+  }
+  while(window.suffix < tailLimit &&
+        oldSource[oldSource.size() - 1 - window.suffix] ==
+          newSource[newSource.size() - 1 - window.suffix]) {
+    ++window.suffix;
+  }
+  return window;
+}
+
+void DocumentLayout::rescan(const EditWindow& window, std::size_t previousBytes,
+                            std::size_t* headOut, std::size_t* tailOut) {
+  *headOut = 0;
+  *tailOut = 0;
+  // A list to splice into has to exist, and has to have described the buffer the
+  // window was measured against. `blocks_` always partitions the source it was
+  // scanned from, so where the last block ends is the whole test.
+  if(blocks_.empty() || blocks_.back().end != previousBytes) {
+    scanBlocksInto(source_, &blocks_);
+    return;
+  }
+
+  const std::ptrdiff_t byteShift =
+    static_cast<std::ptrdiff_t>(source_.size()) - static_cast<std::ptrdiff_t>(previousBytes);
+
+  // Where the scan resumes. A block's classification can depend on the line
+  // that follows it -- a paragraph ends because the next line starts something,
+  // a table is a table because of the row under it -- so the finest thing the
+  // edit can be said to have touched is the line holding its first changed
+  // byte, not the byte. Resuming two blocks above that line is one block of
+  // margin over what the argument needs, and costs two cache probes.
+  //
+  // The line is found in the already-patched buffer, which is allowed because
+  // `prefix` is by definition the first byte that differs: everything before it
+  // reads the same in either generation.
+  const std::size_t changed = std::min(window.prefix, previousBytes);
+  std::size_t lineAt = 0;
+  if(changed > 0) {
+    const std::size_t newline = source_.rfind('\n', changed - 1);
+    lineAt = newline == std::string::npos ? 0 : newline + 1;
+  }
+  const std::size_t holder = blockIndexAt(blocks_, lineAt);
+  const std::size_t carried = holder >= 2 ? holder - 2 : 0;
+  const std::size_t restart = blocks_[carried].start;
+
+  // Where it may stop. Both halves of this matter: `scanBlocksFrom` asks only
+  // once the rest of the buffer is bytes the edit left alone, and this says the
+  // previous scan was between blocks at the same place. A scan that carries no
+  // state, resumed from a shared boundary over identical bytes, produces
+  // identical blocks -- so from there on the answer is the list already in hand.
+  //
+  // The `> restart` is not decoration. A large insertion can reach the
+  // untouched tail after scanning fewer bytes than it added, and the matching
+  // old offset would then land *above* where the scan resumed -- which would
+  // splice the same blocks in twice.
+  const auto resumeAt = [&](std::size_t offset) {
+    const std::ptrdiff_t was = static_cast<std::ptrdiff_t>(offset) - byteShift;
+    if(was <= static_cast<std::ptrdiff_t>(restart)) return false;
+    const std::size_t index = blockIndexAt(blocks_, static_cast<std::size_t>(was));
+    return blocks_[index].start == static_cast<std::size_t>(was);
+  };
+
+  scanned_.clear();
+  const std::size_t stopped =
+    scanBlocksFrom(source_, restart, window.suffix, resumeAt, &scanned_);
+  const std::size_t oldCount = blocks_.size();
+  const std::size_t resume =
+    stopped < source_.size()
+      ? blockIndexAt(blocks_, static_cast<std::size_t>(static_cast<std::ptrdiff_t>(stopped) -
+                                                       byteShift))
+      : oldCount;
+
+  // Splice: the head stays where it is, the scanned middle replaces the blocks
+  // it re-derived, and the tail slides to meet it.
+  const std::size_t middle = scanned_.size();
+  const std::size_t count = carried + middle + (oldCount - resume);
+  if(count > oldCount) {
+    blocks_.resize(count);
+    std::move_backward(blocks_.begin() + resume, blocks_.begin() + oldCount, blocks_.end());
+  } else if(count < oldCount) {
+    std::move(blocks_.begin() + resume, blocks_.begin() + oldCount,
+              blocks_.begin() + carried + middle);
+    blocks_.resize(count);
+  }
+  std::move(scanned_.begin(), scanned_.end(), blocks_.begin() + carried);
+  // The tail's blocks keep everything except where in the buffer they sit, and
+  // that moved by exactly the number of bytes the edit added or removed. Four
+  // integer adds per block, against a hash of every byte and a map probe each if
+  // they were re-derived instead.
+  for(std::size_t i = carried + middle; i < count; ++i) {
+    SourceBlock& block = blocks_[i];
+    block.start = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.start) + byteShift);
+    block.end = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.end) + byteShift);
+    block.contentStart =
+      static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.contentStart) + byteShift);
+    block.contentEnd =
+      static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.contentEnd) + byteShift);
+  }
+
+  perf::addCounter(perf::CounterId::LayoutBlocksRescanned, middle);
+  if(blocks_.empty()) {
+    // An emptied buffer is still one block, so there is somewhere to put a
+    // caret. Same rule the full scan ends on, and nothing carried over.
+    blocks_.emplace_back();
+    return;
+  }
+  *headOut = carried;
+  *tailOut = oldCount - resume;
 }
 
 std::size_t DocumentLayout::blockIndexFor(std::size_t offset) const {
@@ -378,12 +581,53 @@ bool DocumentLayout::sourceMatches(std::string_view source) const {
 //   - `metrics_`. Installing new metrics drops the cache and clears `built_`,
 //     which is the invalidation.
 bool DocumentLayout::canReuse(const LayoutOptions& options, std::uint64_t geometry,
-                              const std::vector<bool>& folds) const {
+                              bool foldsMatch) const {
+  if(!foldsMatch) return false;
   if(geometry != geometryHash_) return false;
   if(options.revealAll != options_.revealAll) return false;
   if(blockIndexFor(options.caretOffset) != caretBlock_) return false;
-  if(blockIndexFor(options.rawOffset) != rawBlock_) return false;
-  return folds == hidden_;
+  return blockIndexFor(options.rawOffset) == rawBlock_;
+}
+
+DocumentLayout::Flags DocumentLayout::flagsFor(std::size_t index, std::size_t caretBlock,
+                                               std::size_t rawBlock) const {
+  const SourceBlock& block = blocks_[index];
+  Flags flags;
+  flags.revealed = options_.revealAll || index == caretBlock;
+  flags.raw = index == rawBlock;
+  flags.first = index == 0;
+  // A buffer ending in a newline has one more (empty) line to put a caret on.
+  flags.trailingLine = index + 1 == blocks_.size() && block.end == source_.size() &&
+                       !source_.empty() && source_.back() == '\n';
+  flags.hidden = hidden_[index] != 0;
+  flags.groupFirst = startsQuoteRun(blocks_, index);
+  flags.groupLast = endsQuoteRun(blocks_, index);
+  return flags;
+}
+
+const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& flags,
+                                                std::uint64_t geometry, std::uint64_t* key,
+                                                Tally* tally) {
+  const SourceBlock& block = blocks_[index];
+  tally->keyBytes += block.end - block.start;
+  std::uint64_t hash =
+    hashBytes(geometry, source_.data() + block.start, block.end - block.start);
+  hash = hashValue(hash, block.kind);
+  hash = hashValue(hash, block.level);
+  hash = hashValue(hash, block.listDepth);
+  hash = hashValue(hash, block.ordinal);
+  hash = hashValue(hash, block.checked);
+  hash = hashBytes(hash, &flags, sizeof(flags));
+  *key = hash;
+
+  auto found = cache_.find(hash);
+  if(found == cache_.end()) {
+    ++lastRelaid_;
+    found = cache_.emplace(hash, layoutBlock(index, flags)).first;
+  } else {
+    ++tally->cacheHits;
+  }
+  return &found->second;
 }
 
 void DocumentLayout::update(std::string_view source, const LayoutOptions& options) {
@@ -405,9 +649,53 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   // the common case by a wide margin: the live surface re-lays the note out once
   // per frame whether or not anything happened, and a scroll is every frame with
   // nothing happening.
-  if(sourceMatches(source)) {
-    std::vector<bool> folds = resolveFolds(blocks_, options);
-    if(canReuse(options, geometry, folds)) {
+  // A caller that stamps its buffer is believed; one that does not gets the
+  // memcmp. The stamp is checked first so the common case -- an idle frame over
+  // an unedited note -- does not touch the document at all.
+  const bool sourceStamped = options.sourceRevision != 0 && built_ &&
+                             options.sourceRevision == sourceRevision_;
+  const std::size_t previousCount = blocks_.size();
+  // Whether the standing placement can be *patched* rather than rebuilt. The
+  // geometry seeds every cache key, so a layout built under a different one
+  // shares nothing with this call; and the four parallel arrays have to describe
+  // the blocks standing now, or there is nothing to patch.
+  const bool patchable = built_ && geometry == geometryHash_ &&
+                         flags_.size() == previousCount && liveKeys_.size() == previousCount &&
+                         placed_.size() == previousCount && hidden_.size() == previousCount &&
+                         lineStart_.size() == previousCount + 1;
+  // Read before `options_` is overwritten below: a `revealAll` flip changes
+  // every block's flags at once, which is the one change with no local extent.
+  const bool revealAllChanged = built_ && options.revealAll != options_.revealAll;
+
+  // The blocks whose entry this call can have moved. Collected as ranges,
+  // sorted and merged below; everything outside them is provably identical to
+  // what is already standing, which is the whole basis of the patch.
+  dirty_.clear();
+  const auto markDirty = [this](std::size_t low, std::size_t high) {
+    if(low == kNone) return;
+    dirty_.emplace_back(low, high == kNone ? low : high);
+  };
+
+  // How many blocks came through this call unchanged at each end of the
+  // document. Everything between them is the extent of what moved, and the two
+  // numbers together are what used to be a `size_t` per block.
+  std::size_t head = 0;
+  std::size_t tail = 0;
+
+  if(sourceStamped || sourceMatches(source)) {
+    // Same bytes means the same partition, so the standing fold resolution
+    // describes this call too -- if nothing about the folds has moved. A stamped
+    // caller says so directly; an unstamped one has to be asked block by block.
+    const bool foldsStamped = options.foldRevision != 0 && options.foldRevision == foldRevision_;
+    std::pair<std::size_t, std::size_t> foldDiff {kNone, kNone};
+    if(!foldsStamped) {
+      const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
+      resolveFolds(blocks_, options, &spareHidden_);
+      foldDiff = diffSpan(spareHidden_.data(), hidden_.data(),
+                          std::min(spareHidden_.size(), hidden_.size()));
+      if(spareHidden_.size() != hidden_.size()) foldDiff = {0, spareHidden_.size()};
+    }
+    if(canReuse(options, geometry, foldDiff.first == kNone)) {
       // Nothing the layout depends on moved, so every byte this call would have
       // copied, scanned, hashed and walked would have reproduced the answer
       // already sitting in `placed_`. Before this returned early it was the
@@ -423,102 +711,327 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
     }
     // Something else moved -- the caret, the width, a fold -- so the blocks have
     // to be placed again. The scan and the copy do not: those are the document,
-    // and the document is what did not change.
-    hidden_ = std::move(folds);
+    // and the document is what did not change. Every block maps to itself.
+    // When the folds are stamped unchanged, `hidden_` already describes them.
+    if(foldDiff.first != kNone) {
+      // Which blocks a fold change moved, rather than all of them: a fold hides
+      // a run, and the run is exactly where the flags differ.
+      markDirty(foldDiff.first, foldDiff.second);
+      hidden_.swap(spareHidden_);
+    }
+    head = blocks_.size();
   } else {
-    perf::addCounter(perf::CounterId::LayoutSourceBytesCopied, source.size());
-    source_.assign(source);
+    // What the edit did, measured against the buffer the layout is standing on
+    // rather than against a copy of it. Taking this window first is what lets
+    // everything below be a patch: the source, the block list and the placement
+    // are all carried forward through it instead of rebuilt.
+    const EditWindow window = matchEdges(source_, source);
+    const std::size_t previousBytes = source_.size();
+    // The layout keeps its own copy of the buffer because every run of every
+    // cached block points into it, and the caller's buffer is not the layout's
+    // to hold. Keeping that copy current used to `assign` the whole note on
+    // every keystroke -- 200 KB per typed character. The window says which bytes
+    // actually moved, so this writes those and memmoves what follows them.
+    {
+      const std::size_t from = window.prefix;
+      const std::size_t removed = previousBytes - window.suffix - from;
+      const std::size_t added = source.size() - window.suffix - from;
+      perf::addCounter(perf::CounterId::LayoutSourceBytesCopied, added);
+      if(added != removed) {
+        perf::addCounter(perf::CounterId::LayoutSourceBytesMoved, window.suffix);
+      }
+      // `replace` has undefined behaviour if `source` views our own buffer. No
+      // caller does that -- and one that handed us back exactly our own bytes
+      // would have been answered by `sourceMatches` above -- but a view *into*
+      // it would corrupt the copy silently, so it costs two comparisons to say
+      // so instead.
+      const auto address = [](const char* pointer) {
+        return reinterpret_cast<std::uintptr_t>(pointer);
+      };
+      if(address(source.data()) >= address(source_.data()) &&
+         address(source.data()) <= address(source_.data()) + source_.size()) {
+        source_ = std::string(source);
+      } else {
+        source_.replace(from, removed, source.data() + from, added);
+      }
+    }
     {
       const perf::ScopeTimer scanTimer("layout.update.scan_blocks");
-      blocks_ = scanBlocks(source_);
+      rescan(window, previousBytes, &head, &tail);
     }
     perf::addCounter(perf::CounterId::LayoutBlocksScanned, blocks_.size());
-    hidden_ = resolveFolds(blocks_, options);
+    {
+      const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
+      resolveFolds(blocks_, options, &spareHidden_);
+    }
+    const std::size_t count = blocks_.size();
+    // The blocks between the two carried-over ends are the edit itself, and the
+    // block either side of them can have changed which quote run it belongs to
+    // -- that is the one flag decided by a neighbour rather than by the block.
+    markDirty(head > 0 ? head - 1 : 0, std::min(count - tail, count - 1));
+    if(patchable) {
+      // The fold state has to be diffed across the edit's index shift: the
+      // blocks before it kept their index, the ones after it moved by the change
+      // in block count, and the ones between are being rebuilt anyway.
+      const auto headDiff = diffSpan(spareHidden_.data(), hidden_.data(), head);
+      markDirty(headDiff.first, headDiff.second);
+      const auto tailDiff = diffSpan(spareHidden_.data() + count - tail,
+                                     hidden_.data() + previousCount - tail, tail);
+      if(tailDiff.first != kNone) {
+        markDirty(count - tail + tailDiff.first, count - tail + tailDiff.second);
+      }
+    }
+    hidden_.swap(spareHidden_);
   }
+
   options_ = options;
-  const std::string_view text = source_;
+  const std::size_t count = blocks_.size();
+  // The carried-over ends say which blocks kept their entry, and that is only a
+  // claim about a placement there is one of. Without one, nothing carries.
+  if(!patchable) {
+    head = 0;
+    tail = 0;
+  }
+  const std::ptrdiff_t shift =
+    static_cast<std::ptrdiff_t>(count) - static_cast<std::ptrdiff_t>(previousCount);
+  // Where a block that stood at old index `index` sits now, or `kNone` when the
+  // edit rebuilt it -- in which case it is inside the dirty middle already.
+  const auto nowAt = [&](std::size_t index) -> std::size_t {
+    if(index == kNone || index >= previousCount) return kNone;
+    if(index < head) return index;
+    if(index + tail >= previousCount) {
+      return static_cast<std::size_t>(static_cast<std::ptrdiff_t>(index) + shift);
+    }
+    return kNone;
+  };
 
   const std::size_t caretBlock = blockIndexFor(options.caretOffset);
   const std::size_t rawBlock = blockIndexFor(options.rawOffset);
-
-  placed_.assign(blocks_.size(), Placed {});
-  liveKeys_.clear();
-  liveKeys_.reserve(blocks_.size());
-  lastRelaid_ = 0;
-  float top = 0.0f;
-  perf::addCounter(perf::CounterId::LayoutBlocksWalked, blocks_.size());
-  for(std::size_t i = 0; i < blocks_.size(); ++i) {
-    const SourceBlock& block = blocks_[i];
-    Flags flags;
-    flags.revealed = options.revealAll || i == caretBlock;
-    flags.raw = i == rawBlock;
-    // A buffer ending in a newline has one more (empty) line to put a caret on.
-    flags.trailingLine = i + 1 == blocks_.size() && block.end == source_.size() &&
-                         !source_.empty() && source_.back() == '\n';
-    flags.hidden = hidden_[i];
-    flags.groupFirst = startsQuoteRun(blocks_, i);
-    flags.groupLast = endsQuoteRun(blocks_, i);
-    const bool first = i == 0;
-    perf::addCounter(perf::CounterId::LayoutKeyBytesHashed, block.end - block.start);
-    std::uint64_t key = hashBytes(geometry, text.data() + block.start, block.end - block.start);
-    key = hashValue(key, block.kind);
-    key = hashValue(key, block.level);
-    key = hashValue(key, block.listDepth);
-    key = hashValue(key, block.ordinal);
-    key = hashValue(key, block.checked);
-    key = hashBytes(key, &flags, sizeof(flags));
-    key = hashValue(key, first);
-
-    auto found = cache_.find(key);
-    if(found == cache_.end()) {
-      ++lastRelaid_;
-      perf::addCounter(perf::CounterId::LayoutBlocksRelaid);
-      found = cache_.emplace(key, layoutBlock(i, flags)).first;
-    } else {
-      perf::addCounter(perf::CounterId::LayoutCacheHits);
-    }
-    placed_[i].blockIndex = i;
-    placed_[i].top = top;
-    placed_[i].layout = &found->second;
-    liveKeys_.push_back(key);
-    top += found->second.height;
+  if(revealAllChanged) {
+    // Every block reveals or hides its markers at once. Nothing local about it.
+    markDirty(0, count - 1);
+  } else if(nowAt(caretBlock_) != caretBlock) {
+    // Two blocks: the one the caret left stops showing its markers, and the one
+    // it arrived at starts.
+    markDirty(caretBlock == kNone ? kNone : caretBlock, kNone);
+    markDirty(nowAt(caretBlock_), kNone);
   }
-  totalHeight_ = top;
+  if(nowAt(rawBlock_) != rawBlock) {
+    markDirty(rawBlock == kNone ? kNone : rawBlock, kNone);
+    markDirty(nowAt(rawBlock_), kNone);
+  }
+
+  const perf::ScopeTimer placeTimer("layout.update.place_blocks");
+  if(patchable) {
+    if(shift != 0) {
+      // Align the standing arrays to the new indexing before patching them. The
+      // blocks after the edit kept their content, their flags, their key and the
+      // layout behind it, and moved by the change in block count -- so moving
+      // them is a memmove of four parallel arrays, where rebuilding them is a
+      // hash of every byte and a map probe per block.
+      const std::size_t oldTail = previousCount - tail;
+      if(shift > 0) {
+        placed_.resize(count);
+        flags_.resize(count);
+        liveKeys_.resize(count);
+        lineStart_.resize(count + 1);
+        std::move_backward(placed_.begin() + oldTail, placed_.begin() + previousCount,
+                           placed_.end());
+        std::move_backward(flags_.begin() + oldTail, flags_.begin() + previousCount, flags_.end());
+        std::move_backward(liveKeys_.begin() + oldTail, liveKeys_.begin() + previousCount,
+                           liveKeys_.end());
+        std::move_backward(lineStart_.begin() + oldTail, lineStart_.begin() + previousCount + 1,
+                           lineStart_.end());
+      } else {
+        const std::size_t newTail = count - tail;
+        std::move(placed_.begin() + oldTail, placed_.begin() + previousCount,
+                  placed_.begin() + newTail);
+        std::move(flags_.begin() + oldTail, flags_.begin() + previousCount,
+                  flags_.begin() + newTail);
+        std::move(liveKeys_.begin() + oldTail, liveKeys_.begin() + previousCount,
+                  liveKeys_.begin() + newTail);
+        std::move(lineStart_.begin() + oldTail, lineStart_.begin() + previousCount + 1,
+                  lineStart_.begin() + newTail);
+        placed_.resize(count);
+        flags_.resize(count);
+        liveKeys_.resize(count);
+        lineStart_.resize(count + 1);
+      }
+    }
+  } else {
+    // Nothing to patch: no standing layout, or one built under another geometry.
+    // The walk below rebuilds every entry, which is what no carried-over ends
+    // and a dirty range covering the document ask it to do.
+    placed_.resize(count);
+    flags_.resize(count);
+    liveKeys_.resize(count);
+    lineStart_.resize(count + 1);
+    dirty_.clear();
+    dirty_.emplace_back(0, count - 1);
+  }
+
+  // Sorted and merged, so the walk sees each block at most once and the gaps
+  // between ranges are real gaps. Adjacent ranges merge as well as overlapping
+  // ones: a gap of nothing is not a gap worth reconverging across.
+  std::sort(dirty_.begin(), dirty_.end());
+  std::size_t ranges = 0;
+  for(std::size_t i = 0; i < dirty_.size(); ++i) {
+    if(ranges > 0 && dirty_[i].first <= dirty_[ranges - 1].second + 1) {
+      dirty_[ranges - 1].second = std::max(dirty_[ranges - 1].second, dirty_[i].second);
+    } else {
+      dirty_[ranges++] = dirty_[i];
+    }
+  }
+  dirty_.resize(ranges);
+
+  lastRelaid_ = 0;
+  Tally tally;
+  std::uint64_t keyReused = 0;
+  std::uint64_t walked = 0;
+  std::uint64_t shifted = 0;
+  // What the blocks recomputed so far have added to every position below them,
+  // held back rather than applied: a keystroke that does not change its block's
+  // height or line count leaves both zero, and then there is nothing below the
+  // edit to touch at all.
+  float pendingTop = 0.0f;
+  std::int64_t pendingRows = 0;
+  std::size_t settled = 0;  // every entry below this index is correct
+  for(const auto& range : dirty_) {
+    const std::size_t low = range.first;
+    const std::size_t high = std::min(range.second, count - 1);
+    if(low > high) continue;
+    if(pendingTop != 0.0f || pendingRows != 0) {
+      // Carry the outstanding shift down to the start of this range. Positions
+      // only; these blocks' entries are untouched.
+      for(std::size_t i = settled; i < low; ++i) {
+        placed_[i].top += pendingTop;
+        lineStart_[i] = static_cast<std::uint32_t>(
+          static_cast<std::int64_t>(lineStart_[i]) + pendingRows);
+      }
+      shifted += low - settled;
+    }
+    // The first block of the document starts at zero by definition; any other
+    // takes its position from the block above, which is settled by now.
+    float top = low == 0 ? 0.0f : placed_[low].top + pendingTop;
+    std::int64_t rows =
+      low == 0 ? 0 : static_cast<std::int64_t>(lineStart_[low]) + pendingRows;
+    for(std::size_t i = low; i <= high; ++i) {
+      const Flags flags = flagsFor(i, caretBlock, rawBlock);
+      const BlockLayout* layout = nullptr;
+      // A block from one of the carried-over ends is at the index its entry is
+      // already filed under -- the alignment above moved the tail's entries to
+      // meet it -- so its standing key and layout describe it still.
+      const bool carriedOver = i < head || i >= count - tail;
+      if(carriedOver && flags_[i] == flags) {
+        // An identical block under identical flags has an identical key, and the
+        // layout it resolved to last time is still in the cache under it. This
+        // is what makes a conservative dirty range cheap: no bytes hashed, and
+        // -- the part that actually costs -- no random probe into a map with one
+        // entry per block in the note.
+        ++keyReused;
+        layout = placed_[i].layout;
+      } else {
+        std::uint64_t key = 0;
+        layout = resolveEntry(i, flags, geometry, &key, &tally);
+        liveKeys_[i] = key;
+        flags_[i] = flags;
+      }
+      placed_[i].top = top;
+      placed_[i].layout = layout;
+      lineStart_[i] = static_cast<std::uint32_t>(rows);
+      top += layout->height;
+      rows += static_cast<std::int64_t>(layout->lines.size());
+    }
+    walked += high - low + 1;
+    if(high + 1 < count) {
+      // What this range moved everything below it by. Zero is the common case
+      // and the whole point: typing a character inside a paragraph that does not
+      // rewrap leaves the rest of the document already correct.
+      pendingTop = top - placed_[high + 1].top;
+      pendingRows = rows - static_cast<std::int64_t>(lineStart_[high + 1]);
+    } else {
+      totalHeight_ = top;
+      lineStart_[count] = static_cast<std::uint32_t>(rows);
+      pendingTop = 0.0f;
+      pendingRows = 0;
+    }
+    settled = high + 1;
+  }
+  if(pendingTop != 0.0f || pendingRows != 0) {
+    for(std::size_t i = settled; i < count; ++i) {
+      placed_[i].top += pendingTop;
+      lineStart_[i] = static_cast<std::uint32_t>(
+        static_cast<std::int64_t>(lineStart_[i]) + pendingRows);
+    }
+    shifted += count - settled;
+    lineStart_[count] = static_cast<std::uint32_t>(
+      static_cast<std::int64_t>(lineStart_[count]) + pendingRows);
+    totalHeight_ += pendingTop;
+  }
+
+  perf::addCounter(perf::CounterId::LayoutBlocksWalked, walked);
+  perf::addCounter(perf::CounterId::LayoutBlocksShifted, shifted);
+  perf::addCounter(perf::CounterId::LayoutBlocksKeyReused, keyReused);
+  perf::addCounter(perf::CounterId::LayoutKeyBytesHashed, tally.keyBytes);
+  perf::addCounter(perf::CounterId::LayoutBlocksRelaid, lastRelaid_);
+  perf::addCounter(perf::CounterId::LayoutCacheHits, tally.cacheHits);
+  perf::addCounter(perf::CounterId::LayoutVisualRows, lineStart_[count]);
+  perf::addCounter(patchable ? perf::CounterId::LayoutPlacementPatches
+                             : perf::CounterId::LayoutPlacementRebuilds);
 
   geometryHash_ = geometry;
+  sourceRevision_ = options.sourceRevision;
+  foldRevision_ = options.foldRevision;
   caretBlock_ = caretBlock;
   rawBlock_ = rawBlock;
   built_ = true;
 
-  flatLines_.clear();
-  flatLines_.reserve(blocks_.size() + blocks_.size() / 2);
-  for(std::size_t i = 0; i < placed_.size(); ++i) {
-    const BlockLayout& layout = *placed_[i].layout;
-    for(std::size_t line = 0; line < layout.lines.size(); ++line) {
-      flatLines_.push_back({i, line, placed_[i].top + layout.lines[line].y});
-    }
-  }
-  perf::addCounter(perf::CounterId::LayoutFlatLinesBuilt, flatLines_.size());
-
-  // Bounded memory: keep roughly one spare generation of block layouts.
-  if(cache_.size() > blocks_.size() * 3 + 256) {
-    std::vector<std::uint64_t> live = liveKeys_;
-    std::sort(live.begin(), live.end());
+  // Bounded memory: keep the live generation of block layouts and a small spare.
+  // The sweep is where a resize spends its worst frame, because it frees layouts
+  // in bulk -- every line, run and run string of the ones it drops -- so it gets
+  // its own timer rather than hiding inside the update's.
+  //
+  // The ceiling was `blocks * 3 + 256` on the theory that three generations buy
+  // back the case where a key returns: an undo, a retype, a window dragged back
+  // to a width it just left. Measured on the 200 KB fixture, interleaved, it
+  // buys nothing and costs a lot. At one generation `layout.blocks_relaid` is
+  // *identical* -- not one extra block was laid out, because on that workload no
+  // key ever came back -- while peak RSS goes from 55.1 MB to 28.7 MB.
+  //
+  // The other half is the shape of the work rather than the amount. Fourteen
+  // width steps at three generations are one sweep freeing 26,864 layouts, which
+  // is a single 24 ms frame and is the whole of the worst frame of a window drag.
+  // At one generation they are nine sweeps of about 5,400 each: 24 ms of `free`
+  // in total instead of 11, and no frame over 11 ms. Total work up, spike down,
+  // and the spike is the part anyone sees.
+  //
+  // The spare 256 is what keeps an undo of a keystroke hitting: an edit adds
+  // about one key, so a sweep runs at most every 257 of them.
+  if(cache_.size() > blocks_.size() + 256) {
+    const perf::ScopeTimer evictTimer("layout.update.evict_cache");
+    perf::addCounter(perf::CounterId::LayoutCacheSweeps);
+    liveSorted_ = liveKeys_;
+    std::sort(liveSorted_.begin(), liveSorted_.end());
+    std::uint64_t evicted = 0;
     for(auto it = cache_.begin(); it != cache_.end();) {
-      if(std::binary_search(live.begin(), live.end(), it->first)) {
+      if(std::binary_search(liveSorted_.begin(), liveSorted_.end(), it->first)) {
         ++it;
       } else {
-        perf::addCounter(perf::CounterId::LayoutCacheEvictions);
+        ++evicted;
         it = cache_.erase(it);
       }
     }
-    for(std::size_t i = 0; i < placed_.size(); ++i) {
-      placed_[i].layout = &cache_.find(liveKeys_[i])->second;
-    }
+    perf::addCounter(perf::CounterId::LayoutCacheEvictions, evicted);
+    // No re-pointing of `placed_` afterwards. `unordered_map` is node-based:
+    // erasing an element invalidates pointers into that element only, and every
+    // key in `liveKeys_` survived the sweep by construction. The loop that used
+    // to sit here re-found all ten thousand of them -- one hash probe per block,
+    // which is the cost the whole key-reuse path exists to avoid.
   }
 }
 
 BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) const {
+  const perf::ScopeTimer blockTimer("layout.block");
   const bool revealed = flags.revealed;
   const bool raw = flags.raw;
   const bool trailingLine = flags.trailingLine;
@@ -542,7 +1055,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     case BlockKind::Heading:
       base.size = type.heading[std::clamp(block.level, 1, 6) - 1];
       base.strong = true;
-      if(index > 0) padTop = options_.headingSpaceAbove;
+      if(!flags.first) padTop = options_.headingSpaceAbove;
       break;
     case BlockKind::Bullet:
     case BlockKind::Ordered:
@@ -641,114 +1154,155 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     return out;
   }
 
-  std::vector<LineGroup> groups;
+  // Staged into the layout's own buffer, and the groups within it keep the token
+  // storage they had last block. `groupCount` is the live prefix -- the vector
+  // itself is never shrunk, so its tail is last block's tokens, which is exactly
+  // the capacity this one wants to reuse.
+  std::vector<LineGroup>& groups = flowGroups_;
+  std::size_t groupCount = 0;
+  const auto addGroup = [&]() -> LineGroup& {
+    if(groupCount == groups.size()) groups.emplace_back();
+    LineGroup& group = groups[groupCount++];
+    group.clear();
+    return group;
+  };
   const RunStyle markerStyle = base;
 
   if(raw || block.kind == BlockKind::Code) {
     const bool fenced = block.kind == BlockKind::Code && !raw;
     const std::size_t from = fenced ? block.contentStart : block.start;
     const std::size_t to = fenced ? block.contentEnd : block.end;
+    // Revealed, the opening fence is a line of its own; hidden, it rides in
+    // front of the first line of code. Deciding that before the loop rather than
+    // splicing it in afterwards is what lets the groups be filled in order.
+    if(fenced && revealed) {
+      addGroup().push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, false, -1));
+    }
+    bool firstLine = true;
     for(const auto& [lineStart, lineEnd] : sourceLines(source, from, to)) {
-      LineGroup group;
+      LineGroup& group = addGroup();
+      if(fenced && !revealed && firstLine) {
+        group.push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, true, -1));
+      }
+      firstLine = false;
       if(lineEnd > lineStart) {
         group.push_back(makeToken(source, lineStart, lineEnd, base, TextRole::Code, false, false, -1));
       }
       // The newline itself takes no space but must stay addressable.
       const std::size_t tail = std::min(lineEnd + 1, to);
       if(tail > lineEnd) group.push_back(makeToken(source, lineEnd, tail, base, TextRole::Code, false, true, -1));
-      groups.push_back(std::move(group));
     }
-    if(fenced) {
-      LineGroup opening;
-      opening.push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, !revealed, -1));
-      if(revealed) {
-        groups.insert(groups.begin(), std::move(opening));
-      } else if(!groups.empty()) {
-        groups.front().insert(groups.front().begin(), std::move(opening.front()));
-      } else {
-        groups.push_back(std::move(opening));
-      }
-      if(block.end > block.contentEnd) {
-        Token closing = makeToken(source, block.contentEnd, block.end, markerStyle, TextRole::Marker, true, !revealed, -1);
-        if(revealed) {
-          LineGroup group;
-          group.push_back(std::move(closing));
-          groups.push_back(std::move(group));
-        } else {
-          groups.back().push_back(std::move(closing));
-        }
-      }
+    if(fenced && !revealed && firstLine) {
+      // `sourceLines` always yields at least one line, so this is unreachable
+      // today; it is here so that the opening fence cannot be dropped if it ever
+      // yields none.
+      addGroup().push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, true, -1));
+    }
+    if(fenced && block.end > block.contentEnd) {
+      Token closing = makeToken(source, block.contentEnd, block.end, markerStyle, TextRole::Marker, true, !revealed, -1);
+      if(revealed) addGroup().push_back(std::move(closing));
+      else groups[groupCount - 1].push_back(std::move(closing));
     }
   } else {
-    LineGroup group;
+    LineGroup& group = addGroup();
     if(block.contentStart > block.start) {
       group.push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, !revealed, -1));
     }
     if(block.contentEnd > block.contentStart) {
+      const perf::ScopeTimer inlineTimer("layout.block.inline_attrs");
       const std::size_t span = block.contentEnd - block.contentStart;
-      std::vector<Attr> attrs(span);
-      const auto inlines = scanInlines(source.substr(block.contentStart, span), block.contentStart);
-      for(const auto& inlineSpan : inlines) {
-        const auto apply = [&](std::size_t from, std::size_t to, const std::function<void(Attr&)>& fn) {
-          for(std::size_t i = std::max(from, block.contentStart); i < std::min(to, block.contentEnd); ++i) {
-            fn(attrs[i - block.contentStart]);
+      const auto& inlines =
+        scanInlinesInto(source.substr(block.contentStart, span), block.contentStart,
+                        &inlineScratch_);
+      perf::addCounter(perf::CounterId::LayoutInlineSpans, inlines.size());
+      if(inlines.empty()) {
+        // Nothing marked up, so there is nothing an attribute table could say.
+        perf::addCounter(perf::CounterId::LayoutPlainBlocks);
+        appendPlainTokens(source, block.contentStart, block.contentEnd, base, group);
+      } else {
+        perf::addCounter(perf::CounterId::LayoutAttrBytes, span);
+        // Reassigned rather than reallocated, same as the scan's own buffers:
+        // one allocation for a document instead of one per marked-up block.
+        std::vector<Attr>& attrs = attrs_;
+        attrs.assign(span, Attr {});
+        for(const auto& inlineSpan : inlines) {
+          // A template rather than a `std::function`: this is called per byte of
+          // the span, and through a type-erased call it could not be inlined.
+          const auto apply = [&](std::size_t from, std::size_t to, auto&& fn) {
+            for(std::size_t i = std::max(from, block.contentStart); i < std::min(to, block.contentEnd); ++i) {
+              fn(attrs[i - block.contentStart]);
+            }
+          };
+          apply(inlineSpan.openStart, inlineSpan.openEnd, [](Attr& a) { a.marker = true; });
+          apply(inlineSpan.closeStart, inlineSpan.closeEnd, [](Attr& a) { a.marker = true; });
+          switch(inlineSpan.kind) {
+            case SpanKind::Strong:
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strong = true; });
+              break;
+            case SpanKind::Emphasis:
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.italic = true; });
+              break;
+            case SpanKind::Strike:
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strike = true; });
+              break;
+            case SpanKind::Code:
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) {
+                a.mono = true;
+                a.role = TextRole::Code;
+              });
+              break;
+            case SpanKind::Link:
+            case SpanKind::Image:
+            case SpanKind::Autolink: {
+              out.links.push_back(inlineSpan.target);
+              const int link = static_cast<int>(out.links.size()) - 1;
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
+                a.link = link;
+                a.role = TextRole::Link;
+              });
+              break;
+            }
+            case SpanKind::WikiLink: {
+              out.links.push_back(inlineSpan.target);
+              const int link = static_cast<int>(out.links.size()) - 1;
+              const bool resolves = !options_.wikiLinkResolves || options_.wikiLinkResolves(inlineSpan.target);
+              const auto role = resolves ? TextRole::WikiLink : TextRole::WikiLinkUnresolved;
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link, role](Attr& a) {
+                a.link = link;
+                a.role = role;
+              });
+              break;
+            }
+            case SpanKind::Escape:
+              break;
           }
-        };
-        apply(inlineSpan.openStart, inlineSpan.openEnd, [](Attr& a) { a.marker = true; });
-        apply(inlineSpan.closeStart, inlineSpan.closeEnd, [](Attr& a) { a.marker = true; });
-        switch(inlineSpan.kind) {
-          case SpanKind::Strong:
-            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strong = true; });
-            break;
-          case SpanKind::Emphasis:
-            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.italic = true; });
-            break;
-          case SpanKind::Strike:
-            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strike = true; });
-            break;
-          case SpanKind::Code:
-            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) {
-              a.mono = true;
-              a.role = TextRole::Code;
-            });
-            break;
-          case SpanKind::Link:
-          case SpanKind::Image:
-          case SpanKind::Autolink: {
-            out.links.push_back(inlineSpan.target);
-            const int link = static_cast<int>(out.links.size()) - 1;
-            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
-              a.link = link;
-              a.role = TextRole::Link;
-            });
-            break;
-          }
-          case SpanKind::WikiLink: {
-            out.links.push_back(inlineSpan.target);
-            const int link = static_cast<int>(out.links.size()) - 1;
-            const bool resolves = !options_.wikiLinkResolves || options_.wikiLinkResolves(inlineSpan.target);
-            const auto role = resolves ? TextRole::WikiLink : TextRole::WikiLinkUnresolved;
-            apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link, role](Attr& a) {
-              a.link = link;
-              a.role = role;
-            });
-            break;
-          }
-          case SpanKind::Escape:
-            break;
+        }
+        {
+          const perf::ScopeTimer tokenTimer("layout.block.content_tokens");
+          appendContentTokens(source, block.contentStart, block.contentEnd, attrs, base, type.mono, revealed, group);
         }
       }
-      appendContentTokens(source, block.contentStart, block.contentEnd, attrs, base, type.mono, revealed, group);
     }
     if(block.end > block.contentEnd) {
       // The trailing newline is always zero width: it must never push the line.
       group.push_back(makeToken(source, block.contentEnd, block.end, markerStyle, TextRole::Marker, true, true, -1));
     }
-    groups.push_back(std::move(group));
   }
 
-  Flow flow(metrics_, block.start, out.textLeft, available, lineHeight, !raw && block.kind != BlockKind::Code, padTop, out);
-  flow.run(groups);
+  // Roughly how many lines this is about to wrap into, so the line vector grows
+  // once rather than doubling its way there. Half the type size is a crude mean
+  // glyph advance, and being wrong only costs the doubling this avoids.
+  {
+    const std::size_t contentBytes =
+      block.contentEnd > block.contentStart ? block.contentEnd - block.contentStart : 0;
+    const float inkWidth = static_cast<float>(contentBytes) * base.size * 0.5f;
+    out.lines.reserve(static_cast<std::size_t>(inkWidth / std::max(1.0f, available)) + 1);
+  }
+
+  const perf::ScopeTimer flowTimer("layout.block.flow");
+  Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
+            !raw && block.kind != BlockKind::Code, padTop, out, flowRuns_, flowPending_);
+  flow.run(groups, groupCount);
   float bottom = flow.bottom();
   if(trailingLine) bottom = appendTrailingLine(bottom);
   out.height = bottom + padBottom;
@@ -815,19 +1369,11 @@ Rect DocumentLayout::caretRect(std::size_t offset) const {
 }
 
 std::size_t DocumentLayout::offsetAt(float x, float y) const {
-  if(flatLines_.empty()) return 0;
-  std::size_t flat = 0;
-  for(std::size_t i = 0; i < flatLines_.size(); ++i) {
-    const auto& entry = flatLines_[i];
-    const auto& line = placed_[entry.block].layout->lines[entry.line];
-    if(y < entry.top) break;
-    flat = i;
-    if(y < entry.top + line.height) break;
-  }
-  const auto& entry = flatLines_[flat];
-  const BlockLayout& layout = *placed_[entry.block].layout;
-  const VisualLine& line = layout.lines[entry.line];
-  const SourceBlock& block = blocks_[entry.block];
+  if(flatLineCount() == 0) return 0;
+  const auto [blockIndex, lineIndex] = flatLineAt(flatLineAtY(y));
+  const BlockLayout& layout = *placed_[blockIndex].layout;
+  const VisualLine& line = layout.lines[lineIndex];
+  const SourceBlock& block = blocks_[blockIndex];
 
   const TextRun* chosen = nullptr;
   for(const auto& run : line.runs) {
@@ -858,39 +1404,44 @@ std::size_t DocumentLayout::offsetAt(float x, float y) const {
 std::vector<Rect> DocumentLayout::selectionRects(std::size_t from, std::size_t to) const {
   std::vector<Rect> rects;
   if(from > to) std::swap(from, to);
-  if(from == to) return rects;
-  for(const auto& entry : flatLines_) {
-    const BlockLayout& layout = *placed_[entry.block].layout;
-    const VisualLine& line = layout.lines[entry.line];
-    const std::size_t base = blocks_[entry.block].start;
-    float left = 0.0f;
-    float right = 0.0f;
-    bool any = false;
-    for(const auto& run : line.runs) {
-      if(run.text.empty()) continue;
-      const std::size_t runStart = base + run.srcStart;
-      const std::size_t runEnd = base + run.srcEnd;
-      if(runEnd <= from || runStart >= to) continue;
-      const std::size_t a = std::max(from, runStart);
-      const std::size_t b = std::min(to, runEnd);
-      float x0 = run.rect.x;
-      float x1 = run.rect.x + run.rect.w;
-      if(a > runStart) {
-        x0 += metrics_.measure(std::string_view(run.text).substr(0, std::min(a - runStart, run.text.size())), run.style);
+  if(from == to || placed_.empty()) return rects;
+  // Only a block the range overlaps can contribute a rect, and blocks are
+  // ordered by source offset -- so the walk is the selection's size, not the
+  // document's. It used to visit every visual line in the note on every frame a
+  // selection was up, and discard all but a handful.
+  for(std::size_t i = blockIndexFor(from); i < blocks_.size() && blocks_[i].start < to; ++i) {
+    const BlockLayout& layout = *placed_[i].layout;
+    const std::size_t base = blocks_[i].start;
+    for(const VisualLine& line : layout.lines) {
+      float left = 0.0f;
+      float right = 0.0f;
+      bool any = false;
+      for(const auto& run : line.runs) {
+        if(run.text.empty()) continue;
+        const std::size_t runStart = base + run.srcStart;
+        const std::size_t runEnd = base + run.srcEnd;
+        if(runEnd <= from || runStart >= to) continue;
+        const std::size_t a = std::max(from, runStart);
+        const std::size_t b = std::min(to, runEnd);
+        float x0 = run.rect.x;
+        float x1 = run.rect.x + run.rect.w;
+        if(a > runStart) {
+          x0 += metrics_.measure(std::string_view(run.text).substr(0, std::min(a - runStart, run.text.size())), run.style);
+        }
+        if(b < runEnd) {
+          x1 = run.rect.x + metrics_.measure(std::string_view(run.text).substr(0, std::min(b - runStart, run.text.size())), run.style);
+        }
+        if(!any) {
+          left = x0;
+          right = x1;
+          any = true;
+        } else {
+          left = std::min(left, x0);
+          right = std::max(right, x1);
+        }
       }
-      if(b < runEnd) {
-        x1 = run.rect.x + metrics_.measure(std::string_view(run.text).substr(0, std::min(b - runStart, run.text.size())), run.style);
-      }
-      if(!any) {
-        left = x0;
-        right = x1;
-        any = true;
-      } else {
-        left = std::min(left, x0);
-        right = std::max(right, x1);
-      }
+      if(any) rects.push_back({left, placed_[i].top + line.y, std::max(2.0f, right - left), line.height});
     }
-    if(any) rects.push_back({left, placed_[entry.block].top + line.y, std::max(2.0f, right - left), line.height});
   }
   return rects;
 }
@@ -898,11 +1449,17 @@ std::vector<Rect> DocumentLayout::selectionRects(std::size_t from, std::size_t t
 std::optional<std::size_t> DocumentLayout::blockAt(float y) const {
   if(placed_.empty()) return std::nullopt;
   if(y < 0.0f || y > totalHeight_) return std::nullopt;
-  for(std::size_t i = 0; i < placed_.size(); ++i) {
-    const float top = placed_[i].top;
-    if(y >= top && y < top + placed_[i].layout->height) return i;
-  }
-  return placed_.size() - 1;
+  // Same tiling argument as `blockRange` below, which was already binary
+  // searching while this walked: blocks cover [top_i, top_{i+1}) in order, so
+  // the block at `y` is the last one starting at or before it. Blocks folded to
+  // zero height share their successor's top and lose the tie, which is what the
+  // linear scan's "skip anything y does not fit inside" achieved.
+  const auto after = std::upper_bound(placed_.begin(), placed_.end(), y,
+                                      [](float value, const Placed& placed) {
+                                        return value < placed.top;
+                                      });
+  if(after == placed_.begin()) return 0;
+  return static_cast<std::size_t>(after - placed_.begin()) - 1;
 }
 
 std::pair<std::size_t, std::size_t> DocumentLayout::blockRange(float top, float bottom) const {
@@ -922,27 +1479,63 @@ std::pair<std::size_t, std::size_t> DocumentLayout::blockRange(float top, float 
           static_cast<std::size_t>(last - placed_.begin())};
 }
 
+std::size_t DocumentLayout::flatLineCount() const {
+  return lineStart_.empty() ? 0 : lineStart_.back();
+}
+
+std::pair<std::size_t, std::size_t> DocumentLayout::flatLineAt(std::size_t flat) const {
+  // `lineStart_` is non-decreasing and starts at zero, so the owning block is
+  // the last one whose start is at or below `flat`. A block with no rows -- one
+  // folded away -- repeats its predecessor's value, and upper_bound steps over
+  // the whole run of them in one go.
+  const auto after = std::upper_bound(lineStart_.begin(), lineStart_.end(),
+                                      static_cast<std::uint32_t>(flat));
+  const auto block = static_cast<std::size_t>(after - lineStart_.begin()) - 1;
+  return {block, flat - lineStart_[block]};
+}
+
+float DocumentLayout::flatLineTop(std::size_t flat) const {
+  const auto [block, line] = flatLineAt(flat);
+  return placed_[block].top + placed_[block].layout->lines[line].y;
+}
+
+std::size_t DocumentLayout::flatLineAtY(float y) const {
+  // Row tops are non-decreasing across the index -- blocks tile the document in
+  // order and rows tile their block -- so the linear "keep the last row at or
+  // above y" scan this replaces was a hand-rolled binary search over a sorted
+  // array, run over every row in the note.
+  std::size_t lo = 0;
+  std::size_t hi = flatLineCount();
+  std::uint64_t probes = 0;
+  while(lo < hi) {
+    ++probes;
+    const std::size_t mid = lo + (hi - lo) / 2;
+    if(flatLineTop(mid) <= y) lo = mid + 1;
+    else hi = mid;
+  }
+  perf::addCounter(perf::CounterId::LayoutRowIndexQueries);
+  perf::addCounter(perf::CounterId::LayoutRowIndexProbes, probes);
+  return lo == 0 ? 0 : lo - 1;
+}
+
 std::size_t DocumentLayout::flatLineForOffset(std::size_t offset, float* caretX) const {
   const Rect caret = caretRect(offset);
   if(caretX) *caretX = caret.x;
-  std::size_t best = 0;
-  for(std::size_t i = 0; i < flatLines_.size(); ++i) {
-    if(flatLines_[i].top <= caret.y + 0.5f) best = i;
-    else break;
-  }
-  return best;
+  if(flatLineCount() == 0) return 0;
+  return flatLineAtY(caret.y + 0.5f);
 }
 
 std::size_t DocumentLayout::rowRelative(std::size_t offset, int deltaRows) const {
-  if(flatLines_.empty()) return offset;
+  const std::size_t rows = flatLineCount();
+  if(rows == 0) return offset;
   float caretX = 0.0f;
   const std::size_t current = flatLineForOffset(offset, &caretX);
   const long long target = static_cast<long long>(current) + deltaRows;
   if(target < 0) return 0;
-  if(target >= static_cast<long long>(flatLines_.size())) return source_.size();
-  const auto& entry = flatLines_[static_cast<std::size_t>(target)];
-  const auto& line = placed_[entry.block].layout->lines[entry.line];
-  return offsetAt(caretX, entry.top + line.height / 2.0f);
+  if(target >= static_cast<long long>(rows)) return source_.size();
+  const auto [block, line] = flatLineAt(static_cast<std::size_t>(target));
+  const VisualLine& visual = placed_[block].layout->lines[line];
+  return offsetAt(caretX, placed_[block].top + visual.y + visual.height / 2.0f);
 }
 
 std::size_t DocumentLayout::rowsPerHeight(float height) const {

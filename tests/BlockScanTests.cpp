@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using micronotes::doc::BlockKind;
 using micronotes::doc::SourceBlock;
@@ -157,4 +158,74 @@ MICRONOTES_TEST(block_scan_maps_offsets_back_to_blocks) {
     MICRONOTES_REQUIRE(blocks[index].start <= offset);
     MICRONOTES_REQUIRE(offset < blocks[index].end || index + 1 == blocks.size());
   }
+}
+
+// The property the incremental rescan rests on: the scanner carries nothing
+// between blocks, so a scan resumed at any block boundary produces exactly the
+// blocks a scan from the top produces from there on.
+//
+// It holds today because no branch of `scanOneBlock` reads a byte before its own
+// `pos` -- a paragraph absorbs the lines *after* it, a fence closes on a later
+// line, a table is decided by the row under it. Nothing looks up. This asserts
+// it at every boundary of a document with one of everything in it, so a
+// construct added later that does look back fails here rather than by leaving a
+// stale block on screen after an edit three paragraphs above it.
+MICRONOTES_TEST(blockscan_resuming_at_every_boundary_matches_a_full_scan) {
+  const auto sameBlock = [](const SourceBlock& a, const SourceBlock& b) {
+    return a.kind == b.kind && a.start == b.start && a.end == b.end &&
+           a.contentStart == b.contentStart && a.contentEnd == b.contentEnd &&
+           a.level == b.level && a.listDepth == b.listDepth && a.ordinal == b.ordinal &&
+           a.ordered == b.ordered && a.checked == b.checked && a.info == b.info;
+  };
+
+  for(const std::string& source :
+      {readFixture("docs/markdown-elements.md"),
+       std::string("# h\n\nprose over\ntwo lines\n\n- item\n  more\n\n```cpp\nint x;\n```\n\n"
+                   "| a | b |\n|:--|--:|\n| 1 | 2 |\n\n> [!NOTE] title\n> body\n\n---\n\n"
+                   "    indented code\n    second line\n\n1. one\n2. two\n"),
+       std::string("```unclosed\nstill inside\n"), std::string("no trailing newline"),
+       std::string("\n\n\n")}) {
+    const auto full = scanBlocks(source);
+    MICRONOTES_REQUIRE(!full.empty());
+    for(std::size_t at = 0; at < full.size(); ++at) {
+      std::vector<SourceBlock> resumed;
+      const std::size_t stopped =
+        micronotes::doc::scanBlocksFrom(source, full[at].start, 0, {}, &resumed);
+      micronotes::tests::require(stopped == source.size(),
+                                 "resumed scan stopped early at block " + std::to_string(at));
+      micronotes::tests::require(resumed.size() == full.size() - at,
+                                 "resumed scan produced " + std::to_string(resumed.size()) +
+                                   " blocks from block " + std::to_string(at) + " of " +
+                                   std::to_string(full.size()));
+      for(std::size_t i = 0; i < resumed.size(); ++i) {
+        micronotes::tests::require(sameBlock(resumed[i], full[at + i]),
+                                   "resumed block " + std::to_string(i) + " differs from full scan "
+                                   "block " + std::to_string(at + i));
+      }
+    }
+  }
+}
+
+// The stop condition, on its own terms: given a tail of bytes the caller knows
+// is unchanged and a predicate that recognises the previous scan's boundaries,
+// the scan stops at the first one and leaves the rest to the caller.
+MICRONOTES_TEST(blockscan_stops_at_the_first_boundary_inside_the_untouched_tail) {
+  const std::string source = "# one\n\npara two\n\n- three\n\npara four\n";
+  const auto full = scanBlocks(source);
+  MICRONOTES_REQUIRE(full.size() >= 5);
+  const std::size_t third = full[2].start;
+
+  std::vector<SourceBlock> resumed;
+  const std::size_t stopped = micronotes::doc::scanBlocksFrom(
+    source, 0, source.size() - third,
+    [&](std::size_t offset) {
+      return micronotes::doc::blockIndexAt(full, offset) < full.size() &&
+             full[micronotes::doc::blockIndexAt(full, offset)].start == offset;
+    },
+    &resumed);
+  // The tail begins at the third block, so the first boundary inside it is the
+  // third block's start -- and the scan hands back the two blocks above it.
+  MICRONOTES_REQUIRE(stopped == third);
+  MICRONOTES_REQUIRE(resumed.size() == 2);
+  MICRONOTES_REQUIRE(resumed.back().end == third);
 }

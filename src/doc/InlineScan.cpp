@@ -63,13 +63,18 @@ struct Delimiter {
 
 }
 
-std::vector<SourceSpan> scanInlines(std::string_view text, std::size_t base) {
-  std::vector<SourceSpan> spans;
+const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_t base,
+                                               InlineScratch* scratch) {
+  std::vector<SourceSpan>& spans = scratch->spans;
+  spans.clear();
   if(text.empty()) return spans;
 
   // Bytes that structural scanning has claimed. Emphasis delimiters are only
-  // recognised outside them.
-  std::vector<char> masked(text.size(), 0);
+  // recognised outside them. Reassigned rather than reallocated: `assign` keeps
+  // the capacity a previous block grew, so a document's worth of scanning takes
+  // one allocation instead of one per block.
+  std::vector<char>& masked = scratch->masked;
+  masked.assign(text.size(), 0);
   const auto mask = [&](std::size_t from, std::size_t to) {
     for(std::size_t i = from; i < to && i < masked.size(); ++i) masked[i] = 1;
   };
@@ -332,6 +337,12 @@ std::vector<SourceSpan> scanInlines(std::string_view text, std::size_t base) {
     ends.push_back(span.end);
   }
   return spans;
+}
+
+std::vector<SourceSpan> scanInlines(std::string_view text, std::size_t base) {
+  InlineScratch scratch;
+  scanInlinesInto(text, base, &scratch);
+  return std::move(scratch.spans);
 }
 
 }

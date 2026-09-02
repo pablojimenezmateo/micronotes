@@ -50,29 +50,99 @@
   /* visible in any timing: they are the reason a scroll of a 200 KB note costs  */    \
   /* the same as an edit to it. A frame that changed nothing should add zero to  */    \
   /* both, and today adds the whole note to each.                                */    \
+  /*                                                                             */    \
+  /* source_bytes_copied is the bytes of the edit, not of the note: the layout    */    \
+  /* keeps its own copy of the buffer, and it is patched over the span the        */    \
+  /* prefix/suffix comparison says moved. It used to be the whole note per        */    \
+  /* keystroke. bytes_moved is the memmove that an insertion or a deletion drags  */    \
+  /* the rest of the buffer through, which is the part that is still O(document)  */    \
+  /* -- and is zero for an edit that replaces as many bytes as it removes.        */    \
   X(LayoutSourceBytesCopied, "layout.source_bytes_copied")                             \
+  X(LayoutSourceBytesMoved, "layout.source_bytes_moved")                               \
   X(LayoutKeyBytesHashed, "layout.key_bytes_hashed")                                   \
-  /* Blocks the update walked, and the subset it had to build because no cached  */    \
-  /* layout matched. relaid/update is the number the incremental design exists   */    \
-  /* to keep near zero; blocks_walked is what it still costs when it succeeds.   */    \
+  /* Blocks the update looked at the *entry* of -- flags, key, cached layout --   */    \
+  /* and the subset it had to build because no cached layout matched. relaid per  */    \
+  /* update is the number the incremental design exists to keep near zero.        */    \
+  /*                                                                             */    \
+  /* blocks_walked used to be the block count on every update, because the        */    \
+  /* placement was rebuilt from the front each time. It is now the size of the    */    \
+  /* edit: a keystroke walks a handful of blocks whatever the note's length, and  */    \
+  /* a walked count that tracks layout.blocks again means the patch stopped       */    \
+  /* applying and every update is rebuilding the document.                        */    \
   X(LayoutBlocksWalked, "layout.blocks_walked")                                        \
   X(LayoutBlocksRelaid, "layout.blocks_relaid")                                        \
+  /* Blocks whose entry was already right and only had to be moved down the page. */    \
+  /* A block below an edit that changed a line count is one of these: no flags, no */   \
+  /* key, no probe, just a float and an integer added to its position. Zero when   */   \
+  /* the edit left its own block the same height, which is most keystrokes.        */   \
+  X(LayoutBlocksShifted, "layout.blocks_shifted")                                      \
+  /* Which of the two placement paths ran. A patch keeps the standing arrays and   */   \
+  /* rewrites the ranges the call can have moved; a rebuild starts from an empty    */  \
+  /* page. Rebuilds are the first update, a resize, and new metrics -- so more than */  \
+  /* a handful of them outside those means a precondition of the patch is failing.  */  \
+  X(LayoutPlacementPatches, "layout.placement_patches")                                \
+  X(LayoutPlacementRebuilds, "layout.placement_rebuilds")                              \
+  /* Blocks the placement examined and found already correct: the block carried  */    \
+  /* over from the standing layout and its flags came out the same, so its key,   */    \
+  /* its map entry and the layout behind it all stood. A key is a pure function   */    \
+  /* of a block's bytes and fields, never of its offsets, so an edit invalidates  */    \
+  /* only the blocks it overlaps -- however far it shifted everything below.      */    \
+  /*                                                                             */    \
+  /* This used to be most of the document on every update, because the placement  */    \
+  /* walked all of it and this was the count that said the walk was cheap. It is  */    \
+  /* small now for the better reason: the walk does not reach those blocks at     */    \
+  /* all, so what is left here is the margin the dirty ranges are padded with.    */    \
+  X(LayoutBlocksKeyReused, "layout.blocks_key_reused")                                 \
   X(LayoutCacheHits, "layout.cache_hits")                                              \
   X(LayoutCacheEvictions, "layout.cache_evictions")                                    \
+  /* Times the cache was swept, so evictions/sweeps says how much one sweep     */    \
+  /* frees -- which is the frame a window drag stutters on. The ceiling trades   */   \
+  /* the two against each other: a lower one sweeps more often and frees less     */  \
+  /* each time, for the same total and a smaller spike.                           */  \
+  X(LayoutCacheSweeps, "layout.cache_sweeps")                                        \
   /* Updates whose source, geometry and reveal state were byte-for-byte what the */    \
   /* previous update already laid out -- i.e. work that produced the exact same  */    \
   /* answer as last frame. This is the counter that names the scroll problem: on */    \
   /* a pure scroll it should equal the frame count, and every one of those calls */    \
   /* is a whole-document rescan whose result was already in hand.                */    \
   X(LayoutUnchangedUpdates, "layout.unchanged_updates")                                \
-  /* Blocks the scanner produced, and visual lines flattened for caret and hit    */   \
-  /* testing. flat_lines is rebuilt from scratch per update, so it scales with    */   \
-  /* the document rather than with the viewport.                                  */   \
+  /* Blocks the scanner produced, and visual rows the document wraps into. The  */    \
+  /* rows used to be materialised as one record each and scanned linearly; now    */   \
+  /* only their per-block prefix sum exists, so this is the size of the index     */   \
+  /* rather than the work of building it -- and a row count that starts tracking  */   \
+  /* the probe count below is the sign it went back to being a list.              */   \
   X(LayoutBlocksScanned, "layout.blocks_scanned")                                      \
-  X(LayoutFlatLinesBuilt, "layout.flat_lines_built")                                   \
+  /* Blocks the partial rescan actually re-derived. The scan resumes just above  */    \
+  /* the edit and stops as soon as it agrees with the previous scan again, so     */   \
+  /* this is the size of the edit: a couple of blocks per keystroke against the    */  \
+  /* ten thousand in a 200 KB note. It reads zero on the paths that scan the whole */  \
+  /* buffer -- the first open of a note, and a note replaced wholesale.            */  \
+  X(LayoutBlocksRescanned, "layout.blocks_rescanned")                                  \
+  X(LayoutVisualRows, "layout.visual_rows")                                            \
+  /* Row-index lookups -- where a click landed, which row the caret is on -- and  */   \
+  /* the binary-search steps they took. probes/queries should sit near log2 of    */   \
+  /* visual_rows (about 14 on a 460 KB note). It was 13,536: both readers of the  */   \
+  /* flat line table walked it from the front, so every click and every up-arrow  */   \
+  /* paid a pass over every row in the document.                                  */   \
+  X(LayoutRowIndexQueries, "layout.row_index_queries")                                 \
+  X(LayoutRowIndexProbes, "layout.row_index_probes")                                   \
   /* Fold predicate calls. Answered per block per update, and each answer that is */   \
   /* not the cheap early-out builds a fold key string.                            */   \
   X(LayoutFoldQueries, "layout.fold_queries")                                          \
+  /* Inline markup work inside a relaid block: spans the inline scanner found,  */     \
+  /* and content bytes given a per-byte attribute slot to hold their formatting. */    \
+  /* attr_bytes is the one to watch -- it is a heap allocation and a zero fill    */   \
+  /* per block, sized to the block, so a full layout allocates and clears the     */   \
+  /* whole document however little of it is marked up.                            */   \
+  X(LayoutInlineSpans, "layout.inline_spans")                                          \
+  X(LayoutAttrBytes, "layout.attr_bytes")                                              \
+  /* Relaid blocks the inline scanner found no markup in, which take the tokenizer */  \
+  /* path that skips the attribute table entirely. plain_blocks against            */  \
+  /* blocks_relaid says how much of a document is ordinary prose -- and it is four */  \
+  /* blocks in five, which is why the scan's own buffers are held by the caller:    */  \
+  /* the byte mask was allocated and zero-filled by every one of these for a scan   */  \
+  /* that then found nothing to write in it.                                        */  \
+  X(LayoutPlainBlocks, "layout.plain_blocks")                                          \
   /* --- live page surface --------------------------------------------------- */     \
   /* The draw walks every block in the document and tests each against the        */   \
   /* viewport, so blocks_visited scales with the note and blocks_drawn with the   */   \
