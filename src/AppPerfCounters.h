@@ -85,6 +85,13 @@
   /* keystroke. bytes_moved is the memmove that an insertion or a deletion drags  */    \
   /* the rest of the buffer through, which is the part that is still O(document)  */    \
   /* -- and is zero for an edit that replaces as many bytes as it removes.        */    \
+  /* Bytes `matchEdges` proved unchanged to locate an edit: the prefix that     */    \
+  /* matched from the start plus the suffix that matched from the end. On a      */    \
+  /* one-character edit in the middle of a note those two sum to about the whole */    \
+  /* buffer, which is the price of a caller that hands over a buffer and no      */    \
+  /* account of what it did to it. Read against source_bytes_copied: the ratio   */    \
+  /* is how much of the note was read to find how little of it moved.            */    \
+  X(LayoutEditBytesMatched, "layout.edit_bytes_matched")                                \
   X(LayoutSourceBytesCopied, "layout.source_bytes_copied")                             \
   X(LayoutSourceBytesMoved, "layout.source_bytes_moved")                               \
   X(LayoutKeyBytesHashed, "layout.key_bytes_hashed")                                   \

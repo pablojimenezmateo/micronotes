@@ -453,6 +453,7 @@ DocumentLayout::EditWindow DocumentLayout::matchEdges(std::string_view oldSource
           newSource[newSource.size() - 1 - window.suffix]) {
     ++window.suffix;
   }
+  perf::addCounter(perf::CounterId::LayoutEditBytesMatched, window.prefix + window.suffix);
   return window;
 }
 
