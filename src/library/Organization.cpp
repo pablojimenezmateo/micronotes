@@ -11,7 +11,15 @@ OrganizationService::OrganizationService(const Library& library) : library_(libr
 const std::vector<NoteListItem>& OrganizationService::notes() const {
   if(notes_) return *notes_;
   std::vector<NoteListItem> notes;
-  for(const auto& path : library_.noteFiles()) {
+  // One walk of the tree, not two. `folders()` used to run a second
+  // `recursive_directory_iterator` over the same directories a few
+  // microseconds after this one, because the only thing it needed that a list
+  // of notes cannot give it is the folders with no notes in them.
+  std::vector<std::filesystem::directory_entry> files;
+  library_.walk(&files, &directories_);
+  notes.reserve(files.size());
+  for(const auto& entry : files) {
+    const auto& path = entry.path();
     auto metadata = library_.loadNoteMetadata(path);
     // One `lexically_relative` per note, here, rather than one per note per
     // caller. Its `generic_string` form is also what the fallback id is made
@@ -42,16 +50,13 @@ const std::vector<NoteListItem>& OrganizationService::notes() const {
 
 const std::vector<FolderNode>& OrganizationService::folders() const {
   if(folders_) return *folders_;
+  // Establishes `directories_` if the note list has not been built yet. Both
+  // are memoised off the one scan, which is what makes reading the list below
+  // safe rather than a second walk waiting to happen.
+  notes();
   std::vector<FolderNode> folders;
-  if(std::filesystem::exists(library_.root())) {
-    for(const auto& entry : std::filesystem::recursive_directory_iterator(library_.root())) {
-      if(!entry.is_directory()) continue;
-      const auto path = entry.path();
-      if(path == library_.root()) continue;
-      if(path.string().find((library_.root() / ".micronotes").string()) == 0) continue;
-      folders.push_back({path.lexically_relative(library_.root()), 0});
-    }
-  }
+  folders.reserve(directories_.size() + 1);
+  for(const auto& relative : directories_) folders.push_back({relative, 0});
   // By folder rather than by scan. This was a `find_if` over every folder for
   // every note, which on a library filed into as many folders as it has notes
   // is quadratic in the library.

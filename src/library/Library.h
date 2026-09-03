@@ -63,6 +63,17 @@ public:
   // is the whole cost of a refresh that finds nothing changed.
   std::vector<std::filesystem::directory_entry> noteFileEntries() const;
 
+  // The one walk both of the above are made of, with the directories it passed
+  // through reported alongside the notes. Either output may be null.
+  //
+  // The directories are here because the sidebar tree needs them -- including
+  // the empty ones, which no list of notes can name -- and the alternative was
+  // a second `recursive_directory_iterator` over the same tree a few
+  // microseconds later. Paths are library-relative, and the state directory is
+  // pruned rather than filtered, so neither list can mention it.
+  void walk(std::vector<std::filesystem::directory_entry>* files,
+            std::vector<std::filesystem::path>* directories) const;
+
 private:
   std::filesystem::path root_;
 };

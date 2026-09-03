@@ -388,9 +388,19 @@ bool Library::restoreFromTrash(const std::string& name) const {
 }
 
 std::vector<std::filesystem::directory_entry> Library::noteFileEntries() const {
-  perf::addCounter(perf::CounterId::LibraryNoteFilesCalls);
   std::vector<std::filesystem::directory_entry> files;
-  if(!std::filesystem::exists(root_)) return files;
+  walk(&files, nullptr);
+  return files;
+}
+
+void Library::walk(std::vector<std::filesystem::directory_entry>* filesOut,
+                   std::vector<std::filesystem::path>* directoriesOut) const {
+  perf::addCounter(perf::CounterId::LibraryNoteFilesCalls);
+  std::vector<std::filesystem::directory_entry> discard;
+  std::vector<std::filesystem::directory_entry>& files = filesOut ? *filesOut : discard;
+  files.clear();
+  if(directoriesOut) directoriesOut->clear();
+  if(!std::filesystem::exists(root_)) return;
 
   // The state directory holds the sqlite index, its WAL, and every attachment.
   // The walk used to descend into all of it and then discard the results by
@@ -402,20 +412,23 @@ std::vector<std::filesystem::directory_entry> Library::noteFileEntries() const {
   std::error_code error;
   std::filesystem::recursive_directory_iterator it(
     root_, std::filesystem::directory_options::skip_permission_denied, error);
-  if(error) return files;
+  if(error) return;
   const std::filesystem::recursive_directory_iterator end;
   for(; it != end; it.increment(error)) {
     if(error) break;
     perf::addCounter(perf::CounterId::LibraryDirectoryEntriesVisited);
     if(it->is_directory(error)) {
-      if(it->path() == stateDir) it.disable_recursion_pending();
+      if(it->path() == stateDir) {
+        it.disable_recursion_pending();
+        continue;
+      }
+      if(directoriesOut) directoriesOut->push_back(it->path().lexically_relative(root_));
       continue;
     }
     if(!it->is_regular_file(error)) continue;
     if(it->path().extension() != ".md") continue;
     files.push_back(*it);
   }
-  return files;
 }
 
 std::vector<std::filesystem::path> Library::noteFiles() const {

@@ -61,6 +61,10 @@ private:
   // Keys are views into the ids in `notes_`, so this is filled by the same call
   // that finalises that vector and never outlives it.
   mutable std::unordered_map<std::string_view, std::size_t> index_;
+  // Every directory under the root, library-relative, from the same walk that
+  // built `notes_`. The tree needs the empty ones, which the note list cannot
+  // name; before this they cost a second walk of the whole library.
+  mutable std::vector<std::filesystem::path> directories_;
   mutable std::optional<std::vector<FolderNode>> folders_;
   mutable std::optional<std::vector<std::string>> tags_;
 };
