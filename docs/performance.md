@@ -1948,3 +1948,73 @@ carry a `static_assert` saying so.
 
 **The general rule:** never hash a struct by its bytes. Hash the fields, or pack
 them somewhere with no padding to reason about.
+
+## The sixth pass: a UI review, and the second renderer's frame
+
+This pass started as a UI/UX consistency review rather than a performance one:
+put the same note on screen in the live pane and the reading pane, take a
+screenshot of each, and look at what differs. It found six drawing divergences
+(`docs/tech-debt.md`, TD-9) and one number that made no sense.
+
+### Resolved: the reading pane re-wrapped every visible block, every frame
+
+The instrument here was a counter, not a timer.
+
+One 675-byte note, 1600x1000, both panels, 60 frames, the same note in the same
+window in each pane:
+
+| | `render.text_measure_calls` | `shell.content` self |
+|---|---:|---:|
+| live pane | 3,266 | 0.053 ms/frame |
+| reading pane | 21,339 | 0.265 ms/frame |
+| split pane | 20,732 | 0.531 ms/frame |
+
+Six and a half times the measurements for the same note. Twenty blocks, sixty
+frames: 17 measurements per block per frame, on a note where the longest
+paragraph is two lines.
+
+Two things were doing it, both in `drawReadingPane`'s per-block loop:
+
+* `blockTextHeight` re-ran `measureInlineLines`, which walks every word of the
+  block and measures each one, to recover the height the block occupies. The
+  layout memo had already computed that height in `buildViewerLayout` -- that
+  is what the memo is for -- and thrown it away, keeping only the running `top`
+  of each block.
+* the same helper called `inlineRuns` to get the runs it was measuring, while
+  the draw had already built them for itself. So the runs -- a vector, and two
+  `std::string`s per inline -- were built twice per visible block per frame.
+
+The memo records `bodyHeight` per block now: the height of the block's own body,
+which is the one number both passes need and the one the draw was recomputing.
+Tables are in it too, because measuring a table measures every cell in it. And
+`blockTextHeight` takes the runs it is measuring instead of rebuilding them.
+
+| | before | after |
+|---|---:|---:|
+| reading pane `text_measure_calls` | 21,339 | 11,674 |
+| split pane `text_measure_calls` | 20,732 | 11,367 |
+
+45% fewer, with all eight session screenshots byte-identical and every other
+deterministic counter unchanged -- which is the proof that what came out was
+duplicate work rather than work.
+
+**What is left is the draw itself,** and it is filed as TD-12: `drawInlineRuns`
+measures each word as it places it, because the reading pane has no equivalent
+of `doc::Layout`'s per-block run cache. The remaining 11,674 are 99.1% cache
+hits, so they are hash-and-probe rather than shaping, and the pane makes its
+budget comfortably. The fix is TD-9, not a second cache.
+
+### Why the harness could not have found this
+
+Every number above came from a real headless session and a counter. The perf
+harness never touches `ReadingPane.cpp` -- it stops at `doc::` and `library::`,
+as this file says of the fifth pass -- and no *timer* would have made the case
+either: 0.265 ms a frame is inside every budget in the file. What said "this is
+wrong" was two counters that should have been the same order of magnitude and
+were not.
+
+The rule from the third pass stands unchanged, and this is another instance of
+it: when you add code to a hot path, add the counter as well as the timer,
+because a timing says how long the work took and only a counter says whether it
+should have happened at all. The same rule caught the scroll relayout that was
+70% of every frame while passing every budget.
