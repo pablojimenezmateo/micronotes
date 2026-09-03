@@ -803,9 +803,7 @@ static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expand
     return;
   }
   if(row.kind == SidebarRow::Kind::Tag) {
-    if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-    ui.state.selectTag(row.tag);
-    selectNoteAt(ui, 0);
+    selectTag(ui, row.tag);
     return;
   }
   if(row.kind != SidebarRow::Kind::Tree) return;

@@ -8,6 +8,7 @@
 #include "ui/Metrics.h"
 #include "ui/Outline.h"
 #include "ui/Theme.h"
+#include "ui/WikiLink.h"
 
 #include <algorithm>
 #include <string>
@@ -30,6 +31,16 @@ constexpr float kBacklinkMinHeight = 44.0f;
 // insets the sidebar beside it uses.
 constexpr float kPadX = ui::kSpace3;
 constexpr float kIndentStep = ui::kSpace3;
+
+// A row's own rect inside the list, inset the way the sidebar insets its rows.
+// It was the full width of the panel here, so a selected heading in the outline
+// was a square band running from the panel's left hairline to under the
+// scrollbar, while a selected note in the sidebar beside it was an inset
+// rounded fill -- two lists of rows, two shapes of selection, for the same
+// "this one".
+Rect rowRect(Rect list, float y, float height) {
+  return {list.x + ui::kSpace2, y, std::max(0.0f, list.w - ui::kSpace2 * 2.0f), height};
+}
 
 // The tab a click lands on, and where each one is drawn. One geometry, read by
 // both the paint and the hit test, so a tab cannot be painted off its own
@@ -68,8 +79,8 @@ constexpr ui::RightPanelView kViews[] = {ui::RightPanelView::Outline, ui::RightP
 // allocation per frame to address the twenty rows a panel can show.
 Rect outlineRowRect(Rect rect, std::size_t index, float pitch, int scroll) {
   const Rect list = listRect(rect);
-  return {list.x, list.y + ui::kSpace1 + static_cast<float>(index) * pitch - static_cast<float>(scroll),
-          list.w, pitch};
+  return rowRect(list, list.y + ui::kSpace1 + static_cast<float>(index) * pitch - static_cast<float>(scroll),
+                 pitch);
 }
 
 // How far the panel can be scrolled, given everything the current view would
@@ -213,11 +224,11 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       const bool here = i == current;
       const bool hot = ui::contains(row, ui.mouseX, ui.mouseY);
       ui::drawSelection(renderer, row, here, hot);
-      const float x = list.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
+      const float x = row.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
       // A top-level heading carries the note's structure and reads as the
       // strong row; anything nested under it is support.
       const auto colour = here ? theme().text : (entry.depth == 0 ? theme().muted : theme().dim);
-      text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(list.x + list.w - x - kPadX), rowStyle),
+      text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(row.x + row.w - x - ui::kSpace2), rowStyle),
                 x, ui::textTop(row, text, rowStyle), colour, rowStyle);
     }
     ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
@@ -242,15 +253,23 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     ui.backlinkRows.clear();
     for(const auto& link : backlinks) {
       if(y + pitch >= list.y && y <= list.y + list.h) {
-        const Rect row {list.x, y, list.w, pitch};
+        const Rect row = rowRect(list, y, pitch);
         ui::drawSelection(renderer, row, false, ui::contains(row, ui.mouseX, ui.mouseY));
-        const int room = static_cast<int>(list.w - kPadX * 2.0f);
+        const int room = static_cast<int>(row.w - kPadX * 2.0f);
+        // Two lines centred in the row together, rather than dropped a fixed
+        // two pixels into it: the pair grows with the reader's text size and
+        // the row's floor does not.
+        const float pairHeight = static_cast<float>(text.lineHeight(rowStyle) + text.lineHeight(lineStyle));
+        const float titleY = std::round(y + std::max(0.0f, (pitch - pairHeight) / 2.0f));
         text.draw(ui::ellipsizeToWidth(text, link.title, room, rowStyle),
-                  list.x + kPadX, y + ui::kSpace1 / 2.0f, theme().text, rowStyle);
+                  row.x + kPadX, titleY, theme().text, rowStyle);
         // The line the link was written on, which is the whole difference
         // between a list of titles and a reason to click one.
-        text.draw(ui::ellipsizeToWidth(text, link.line, room, lineStyle),
-                  list.x + kPadX, y + ui::kSpace1 / 2.0f + static_cast<float>(text.lineHeight(rowStyle)),
+        // The line as it reads, not as it is written: the source line is what
+        // the index stores, and it carries the `[[brackets]]` of the very link
+        // that put this row here.
+        text.draw(ui::ellipsizeToWidth(text, ui::plainWikiText(link.line), room, lineStyle),
+                  row.x + kPadX, titleY + static_cast<float>(text.lineHeight(rowStyle)),
                   theme().dim, lineStyle);
         ui.backlinkRows.push_back({row, link.id});
       }
@@ -265,18 +284,31 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     empty("No tags", "This note carries none yet.", ui::keysFor(ui::ActionId::EditTags) + "  edit tags");
     return;
   }
-  const float chipHeight = std::max(22.0f, static_cast<float>(text.lineHeight(rowStyle)) + ui::kSpace1);
-  const float chipPitch = chipHeight + ui::kSpace2 - 2.0f;
-  setMaxScroll(ui, rect, static_cast<float>(tags.size()) * chipPitch);
-  float y = list.y + ui::kSpace2 - static_cast<float>(scroll);
+  // Rows, not chips.
+  //
+  // These were bordered chips with no hover and no click handler -- they looked
+  // exactly like the tag chips in the page header, which *are* a read-only
+  // property display, while sitting in a panel list where every other row is
+  // something you click. The sidebar's TAGS section is the same object with the
+  // same affordance, so this is the same row: `#tag`, dim until it is the
+  // filter in force, and a click sets that filter.
+  const float pitch = rowPitch(text, rowStyle);
+  setMaxScroll(ui, rect, static_cast<float>(tags.size()) * pitch);
+  const std::string& activeTag = ui.state.selection().tag;
+  float y = list.y + ui::kSpace1 - static_cast<float>(scroll);
+  ui.tagRows.clear();
   for(const auto& tag : tags) {
-    if(y + chipHeight >= list.y && y <= list.y + list.h) {
+    if(y + pitch >= list.y && y <= list.y + list.h) {
+      const Rect row = rowRect(list, y, pitch);
+      const bool selected = activeTag == tag;
+      ui::drawSelection(renderer, row, selected, ui::contains(row, ui.mouseX, ui.mouseY));
       const std::string label = "#" + tag;
-      const Rect chip {list.x + kPadX, y, static_cast<float>(text.width(label, rowStyle)) + ui::kSpace4, chipHeight};
-      ui::drawSurface(renderer, chip, theme().chipBg, theme().accentDim);
-      text.draw(label, chip.x + ui::kSpace2, ui::textTop(chip, text, rowStyle), theme().accent, rowStyle);
+      text.draw(ui::ellipsizeToWidth(text, label, static_cast<int>(row.w - kPadX * 2.0f), rowStyle),
+                row.x + kPadX, ui::textTop(row, text, rowStyle),
+                selected ? theme().accent : theme().dim, rowStyle);
+      ui.tagRows.push_back({row, tag});
     }
-    y += chipPitch;
+    y += pitch;
   }
   ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
 }
@@ -301,6 +333,14 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
     for(const auto& row : ui.backlinkRows) {
       if(!ui::contains(row.rect, x, y)) continue;
       selectNoteById(ui, row.noteId);
+      return true;
+    }
+    return true;
+  }
+  if(workspace.rightPanelView == ui::RightPanelView::Tags) {
+    for(const auto& row : ui.tagRows) {
+      if(!ui::contains(row.rect, x, y)) continue;
+      selectTag(ui, row.tag);
       return true;
     }
     return true;

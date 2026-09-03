@@ -28,6 +28,12 @@ void selectNoteAt(UiRuntime& ui, int index) {
   }
 }
 
+void selectTag(UiRuntime& ui, const std::string& tag) {
+  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  ui.state.selectTag(tag);
+  selectNoteAt(ui, 0);
+}
+
 void selectNoteById(UiRuntime& ui, const std::string& noteId) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectNote(noteId);

@@ -31,6 +31,12 @@ struct WikiSpan {
 // literal text they are.
 std::optional<WikiSpan> findWikiLink(std::string_view text, std::size_t from = 0);
 
+// `text` with every `[[target]]` and `[[target|alias]]` replaced by the words
+// it would be drawn as. For anywhere a line of a note is shown as a preview
+// rather than rendered: the backlinks panel drew the raw source line, so a list
+// of reasons to click a note was a list of `[[double brackets]]`.
+std::string plainWikiText(std::string_view text);
+
 // A `[[target]]` split into the parts that mean different things.
 struct WikiTarget {
   std::string note;     // what to look for in the library

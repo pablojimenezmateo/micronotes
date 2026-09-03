@@ -11,6 +11,7 @@
 #include "ui/TextUtil.h"
 #include "ui/Theme.h"
 
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -24,6 +25,12 @@ using ui::fill;
 using ui::hLine;
 using ui::stroke;
 using ui::theme;
+
+// The favourite star's target, and the icon in front of the note's own crumb.
+// Both were written out inline, and the star's was written out twice -- once
+// as its own left edge and once as the reserve the breadcrumb stops at.
+constexpr float kFavoriteWidth = 26.0f;
+constexpr float kCrumbIconSize = 16.0f;
 
 // A window button's mark, drawn from lines rather than typeset: the UI face has
 // no glyph for a close cross, and a missing one would leave tofu where the
@@ -63,11 +70,6 @@ void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool m
 // means by the word and what a reader checking a word budget expects.
 // Characters are bytes of the note as stored, not codepoints; saying so here
 // is cheaper than a UTF-8 walk nobody asked for.
-struct BufferCounts {
-  std::size_t words = 0;
-  std::size_t characters = 0;
-};
-
 // Memoised on the buffer's revision, because this used to run on every frame.
 //
 // The comment that stood here said it ran "about once per keystroke", on the
@@ -78,15 +80,23 @@ struct BufferCounts {
 // frame on a 235 KB one, to render a number that had not changed.
 //
 // The revision is the editor's, so a buffer that has not been edited cannot be
-// recounted no matter what else happened. `kNoRevision` is a value the editor
-// never issues, so the first call always counts.
-constexpr std::uint64_t kNoRevision = static_cast<std::uint64_t>(-1);
-
-BufferCounts countBufferUncached(std::string_view text) {
+// recounted no matter what else happened. The memo lives on the runtime beside
+// the note it counts -- see `UiRuntime::BufferCountsMemo` for why it is not a
+// `static` in here.
+const UiRuntime::BufferCountsMemo& countBuffer(UiRuntime& ui) {
+  auto& memo = ui.bufferCounts;
+  const std::uint64_t revision = ui.editor.revision();
+  if(memo.valid && memo.revision == revision) {
+    perf::addCounter(perf::CounterId::StatusWordCountsReused);
+    return memo;
+  }
   perf::ScopeTimer timer("status.count_buffer");
   perf::addCounter(perf::CounterId::StatusWordCounts);
-  BufferCounts counts;
-  counts.characters = text.size();
+  memo.valid = true;
+  memo.revision = revision;
+  memo.words = 0;
+  const std::string_view text = ui.editor.text();
+  memo.characters = text.size();
   bool inWord = false;
   for(const unsigned char c : text) {
     const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r';
@@ -94,22 +104,10 @@ BufferCounts countBufferUncached(std::string_view text) {
       inWord = false;
       continue;
     }
-    if(!inWord) ++counts.words;
+    if(!inWord) ++memo.words;
     inWord = true;
   }
-  return counts;
-}
-
-BufferCounts countBuffer(std::string_view text, std::uint64_t revision) {
-  static std::uint64_t cachedRevision = kNoRevision;
-  static BufferCounts cached;
-  if(revision == cachedRevision) {
-    perf::addCounter(perf::CounterId::StatusWordCountsReused);
-    return cached;
-  }
-  cached = countBufferUncached(text);
-  cachedRevision = revision;
-  return cached;
+  return memo;
 }
 
 std::string plural(std::size_t count, std::string_view noun) {
@@ -145,7 +143,7 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   // The right first, so the left knows how much room it was left with.
   float right = rect.x + rect.w - ui::kSpace3;
   if(!ui.state.selection().noteId.empty()) {
-    const BufferCounts counts = countBuffer(ui.editor.text(), ui.editor.revision());
+    const auto& counts = countBuffer(ui);
     const std::string tally = plural(counts.words, "word") + "    " + plural(counts.characters, "character");
     const float width = static_cast<float>(text.width(tally));
     text.draw(tally, right - width, baseline, theme().dim);
@@ -197,7 +195,12 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().small};
   const auto note = ui.state.hasLibrary() ? ui.state.findNote(ui.state.selection().noteId) : std::nullopt;
 
-  const float baseline = rect.y + std::max(4.0f, (rect.h - static_cast<float>(text.lineHeight(style))) / 2.0f);
+  // The same rule the status bar and every row in the shell uses. This was
+  // `rect.y + max(4, (rect.h - line) / 2)`, unrounded and with a floor of its
+  // own, so the one strip of chrome at the top of the window centred its text
+  // by a slightly different arithmetic from the one at the bottom -- which is
+  // exactly what `ui::textTop` exists to stop.
+  const float baseline = ui::textTop(rect, text, style);
 
   // The window controls first, right to left so close sits in the actual
   // corner, where the pointer lands when it is thrown at it. Everything else
@@ -220,8 +223,11 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
     right = ui.windowButtons.front().x;
   }
 
-  float x = rect.x + 20.0f;
-  const float limit = right - 44.0f;
+  float x = rect.x + ui::kSpace4 + ui::kSpace1;
+  // Whatever the star needs, so the trail cannot run under it. It was a bare
+  // 44 against a star placed at `right - 34` with a width of 26, which is two
+  // numbers that have to be kept in step by hand.
+  const float limit = right - kFavoriteWidth - ui::kSpace2;
 
   // Every crumb down to the note's own folder, root first.
   std::vector<std::filesystem::path> trail {{}};
@@ -237,29 +243,35 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
     const auto label = trail[i].empty() ? ui.state.libraryRoot().filename().generic_string()
                                         : trail[i].filename().generic_string();
     const float w = static_cast<float>(text.width(label, style));
-    const Rect hit {x - 4.0f, rect.y + 4.0f, w + 8.0f, rect.h - 8.0f};
+    const Rect hit {x - ui::kSpace1, rect.y + ui::kSpace1, w + ui::kSpace2, rect.h - ui::kSpace2};
     const bool hot = ui.hovered(hit);
     if(hot) fill(renderer, hit, theme().hoverBg);
     text.draw(label, x, baseline, hot ? theme().text : theme().muted, style);
     ui.crumbs.emplace_back(hit, trail[i]);
-    x += w + 8.0f;
+    x += w + ui::kSpace2;
     text.draw("/", x, baseline, theme().dim, style);
-    x += static_cast<float>(text.width("/", style)) + 8.0f;
+    x += static_cast<float>(text.width("/", style)) + ui::kSpace2;
   }
   if(note && x < limit) {
-    drawNoteIcon(renderer, text, note->icon, {x, rect.y + 6.0f, 16.0f, 16.0f}, theme().dim);
-    x += 20.0f;
+    drawNoteIcon(renderer, text, note->icon,
+                 {x, std::round(rect.y + (rect.h - kCrumbIconSize) / 2.0f), kCrumbIconSize, kCrumbIconSize},
+                 theme().dim);
+    x += kCrumbIconSize + ui::kSpace1;
     text.draw(ellipsizeToWidth(text, note->title, static_cast<int>(limit - x), style), x, baseline, theme().text, style);
   }
 
   if(note) {
     // A filled star reads as "kept"; the outline is an offer.
-    ui.favoriteButton = {right - 34.0f, rect.y + 4.0f, 26.0f, rect.h - 8.0f};
+    ui.favoriteButton = {right - kFavoriteWidth - ui::kSpace2, rect.y + ui::kSpace1, kFavoriteWidth,
+                         rect.h - ui::kSpace2};
     const bool pinned = ui.state.favorite(note->id);
     ui.offerTooltip(ui.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
     if(ui.hovered(ui.favoriteButton)) fill(renderer, ui.favoriteButton, theme().hoverBg);
-    text.draw(pinned ? "\xe2\x98\x85" : "\xe2\x98\x86", ui.favoriteButton.x + 6.0f, baseline,
-              pinned ? theme().accent : theme().dim, style);
+    const auto star = pinned ? "\xe2\x98\x85" : "\xe2\x98\x86";
+    text.draw(star,
+              std::round(ui.favoriteButton.x +
+                         (ui.favoriteButton.w - static_cast<float>(text.width(star, style))) / 2.0f),
+              baseline, pinned ? theme().accent : theme().dim, style);
   }
 }
 

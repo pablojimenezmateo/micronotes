@@ -28,7 +28,11 @@ std::vector<std::string> tabTitles(const UiRuntime& ui) {
   return titles;
 }
 
-std::vector<ui::TabSlot> slotsFor(const UiRuntime& ui, ui::TextRenderer* text, Rect rect) {
+// Takes the titles rather than fetching them: `drawTabStrip` needs them for the
+// draw as well, and building them twice a frame is a vector of strings and a
+// `findNote` per tab, twice, to lay out the handful of tabs a strip can show.
+std::vector<ui::TabSlot> slotsFor(const std::vector<std::string>& titles, ui::TextRenderer* text,
+                                  Rect rect) {
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().ui};
   std::function<int(std::string_view)> measure;
   if(text) {
@@ -36,7 +40,7 @@ std::vector<ui::TabSlot> slotsFor(const UiRuntime& ui, ui::TextRenderer* text, R
       return text->width(value, style);
     };
   }
-  return ui::layoutTabs(tabTitles(ui), rect, measure);
+  return ui::layoutTabs(titles, rect, measure);
 }
 
 // Drawn rather than typeset: the UI face has no glyph for a close cross that
@@ -63,7 +67,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   ui::ClipGuard clip(renderer, rect);
   const auto& workspace = ui.state.workspace();
   const auto titles = tabTitles(ui);
-  const auto slots = slotsFor(ui, &text, rect);
+  const auto slots = slotsFor(titles, &text, rect);
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().ui};
 
   for(const auto& slot : slots) {
@@ -105,7 +109,7 @@ bool handleTabStripClick(UiRuntime& ui, Rect rect, float x, float y, Uint8 butto
   if(!ui::contains(rect, x, y)) return false;
   // Laid out with no measurer: the geometry is a pure function of the titles
   // and the strip, and the close targets do not depend on the font.
-  const auto slots = slotsFor(ui, nullptr, rect);
+  const auto slots = slotsFor(tabTitles(ui), nullptr, rect);
   for(const auto& slot : slots) {
     if(!slot.visible || !ui::contains(slot.rect, x, y)) continue;
     // Middle click closes, as it does in every tab strip; so does the cross.

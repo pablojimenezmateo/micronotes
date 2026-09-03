@@ -77,6 +77,20 @@ std::optional<WikiSpan> findWikiLink(std::string_view text, std::size_t from) {
   return std::nullopt;
 }
 
+std::string plainWikiText(std::string_view text) {
+  if(text.find("[[") == std::string_view::npos) return std::string(text);
+  std::string out;
+  out.reserve(text.size());
+  std::size_t copied = 0;
+  while(const auto span = findWikiLink(text, copied)) {
+    out.append(text, copied, span->start - copied);
+    out.append(span->label);
+    copied = span->end;
+  }
+  out.append(text, copied, std::string_view::npos);
+  return out;
+}
+
 WikiTarget splitWikiTarget(std::string_view target) {
   const auto hash = target.find('#');
   if(hash == std::string_view::npos) return {trimmed(target), {}};
