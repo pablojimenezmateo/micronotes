@@ -53,7 +53,7 @@ void openWikiLink(UiRuntime& ui, std::string_view target) {
   // a link would have filed it by hand.
   std::filesystem::path folder = ui.state.selection().folder;
   if(const auto current = ui.state.findNote(ui.state.selection().noteId)) {
-    folder = current->path.lexically_relative(ui.state.libraryRoot()).parent_path();
+    folder = current->folder;
   }
   if(!saveCurrent(ui, true)) return;
   const auto created = ui.state.createNote(split.note, folder);
@@ -88,7 +88,7 @@ void openWikiMenu(UiRuntime& ui, std::size_t wikiStart) {
   overlay.hint = "Enter links, Esc keeps typing";
   const auto root = ui.state.libraryRoot();
   for(const auto& note : ui.state.allNotes()) {
-    const auto folder = note.path.lexically_relative(root).parent_path().generic_string();
+    const auto folder = note.folder.generic_string();
     overlay.items.push_back({note.title, note.title, folder.empty() ? "" : folder, "", true, false});
   }
   ui.overlays.open(std::move(overlay));

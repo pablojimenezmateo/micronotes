@@ -2078,7 +2078,7 @@ static void openNotePalette(UiRuntime& ui, std::string overlayId, std::string ti
   overlay.width = 460.0f;
   const auto root = ui.state.libraryRoot();
   for(const auto& note : ui.state.allNotes()) {
-    const auto folder = note.path.lexically_relative(root).parent_path().generic_string();
+    const auto folder = note.folder.generic_string();
     overlay.items.push_back({note.id,
                              note.icon.empty() ? note.title : note.icon + " " + note.title,
                              folder.empty() ? root.filename().generic_string() : folder,
@@ -2423,7 +2423,7 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
   } else if(result.overlayId == "jump-note") {
     selectNoteById(ui, result.itemId);
     if(const auto note = ui.state.findNote(result.itemId)) {
-      const auto folder = note->path.lexically_relative(ui.state.libraryRoot()).parent_path();
+      const auto folder = note->folder;
       ui.search.reset();
       ui.state.selectFolder(folder);
       ui.state.selectNote(result.itemId);

@@ -61,6 +61,10 @@ public:
   std::vector<library::Backlink> backlinksToSelected() const;
   std::optional<LoadedNote> selectedNote() const;
   std::optional<library::NoteListItem> findNote(std::string_view noteId) const;
+  // The same lookup as a borrow. A caller that only reads what it found should
+  // take this: `findNote` copies a path and three strings out of a list the
+  // caller already holds a reference to.
+  const library::NoteListItem* noteById(std::string_view noteId) const;
   std::optional<library::NoteListItem> createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body = "");
   bool saveSelectedNote(std::string_view body);
   bool saveSelectedNoteRecovery(std::string_view body) const;

@@ -132,9 +132,12 @@ std::vector<library::NoteListItem> AppState::currentNotes() const {
   if(!selection_.search.empty()) {
     std::vector<library::NoteListItem> out;
     for(const auto& result : index_.search(selection_.search, selection_.searchScope)) {
-      auto item = organization_->findNote(result.id);
-      if(item) out.push_back(std::move(*item));
-      else out.push_back({result.id, result.path, result.title, {}, {}});
+      const auto* item = organization_->noteById(result.id);
+      if(item) out.push_back(*item);
+      else {
+        out.push_back({result.id, result.path, result.title, {}, {},
+                       result.path.lexically_relative(libraryRoot()).parent_path()});
+      }
     }
     return out;
   }
@@ -172,6 +175,10 @@ std::optional<library::NoteListItem> AppState::findNote(std::string_view noteId)
   return organization_->findNote(noteId);
 }
 
+const library::NoteListItem* AppState::noteById(std::string_view noteId) const {
+  return organization_ ? organization_->noteById(noteId) : nullptr;
+}
+
 std::optional<library::NoteListItem> AppState::createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body) {
   if(!library_) return std::nullopt;
   library::NoteMetadata metadata;
@@ -185,7 +192,9 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
   selection_.search.clear();
   selection_.noteId = metadata.id;
   workspace_.openNote(metadata.id, false);
-  return library::NoteListItem {metadata.id, path, metadata.title, metadata.tags, metadata.icon};
+  return library::NoteListItem {metadata.id,   path,          metadata.title,
+                                metadata.tags, metadata.icon,
+                                path.lexically_relative(library_->root()).parent_path()};
 }
 
 bool AppState::saveSelectedNote(std::string_view body) {
@@ -225,7 +234,7 @@ bool AppState::renameSelectedNote(const std::string& title) {
   auto note = selectedNote();
   if(!note) return false;
   auto metadata = note->metadata;
-  metadata.title = uniqueTitle(*library_, title, note->item.path.parent_path().lexically_relative(library_->root()), note->item.path);
+  metadata.title = uniqueTitle(*library_, title, note->item.folder, note->item.path);
   const auto target = library_->renameNote(note->item.path, metadata.title);
   if(!library_->saveNote(target, metadata, note->body)) return false;
   selection_.noteId = metadata.id;

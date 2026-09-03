@@ -216,7 +216,7 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
   std::vector<std::filesystem::path> trail {{}};
   if(note) {
     std::filesystem::path walk;
-    for(const auto& part : note->path.lexically_relative(ui.state.libraryRoot()).parent_path()) {
+    for(const auto& part : note->folder) {
       walk /= part;
       trail.push_back(walk);
     }

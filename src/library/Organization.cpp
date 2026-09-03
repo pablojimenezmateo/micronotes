@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <set>
+#include <unordered_map>
 
 namespace micronotes::library {
 
@@ -12,18 +13,30 @@ const std::vector<NoteListItem>& OrganizationService::notes() const {
   std::vector<NoteListItem> notes;
   for(const auto& path : library_.noteFiles()) {
     auto metadata = library_.loadNoteMetadata(path);
+    // One `lexically_relative` per note, here, rather than one per note per
+    // caller. Its `generic_string` form is also what the fallback id is made
+    // from, so the two share the single call.
+    auto relative = path.lexically_relative(library_.root());
     notes.push_back({
-      metadata.id.empty() ? fallbackNoteId(path.lexically_relative(library_.root()).generic_string()) : metadata.id,
+      metadata.id.empty() ? fallbackNoteId(relative.generic_string()) : metadata.id,
       path,
       metadata.title.empty() ? path.stem().string() : metadata.title,
       std::move(metadata.tags),
       std::move(metadata.icon),
+      relative.parent_path(),
     });
   }
   std::sort(notes.begin(), notes.end(), [](const auto& lhs, const auto& rhs) {
     return lhs.title < rhs.title;
   });
   notes_ = std::move(notes);
+  // Built here rather than on first use, so its keys -- views into the ids in
+  // `notes_` -- cannot outlive or predate the vector they point into. Two notes
+  // carrying the same front-matter id resolve to the last of them, which is
+  // what the linear scan this replaces did as well.
+  index_.clear();
+  index_.reserve(notes_->size());
+  for(std::size_t i = 0; i < notes_->size(); ++i) index_[(*notes_)[i].id] = i;
   return *notes_;
 }
 
@@ -39,11 +52,21 @@ const std::vector<FolderNode>& OrganizationService::folders() const {
       folders.push_back({path.lexically_relative(library_.root()), 0});
     }
   }
+  // By folder rather than by scan. This was a `find_if` over every folder for
+  // every note, which on a library filed into as many folders as it has notes
+  // is quadratic in the library.
+  std::unordered_map<std::string, std::size_t> at;
+  at.reserve(folders.size() * 2);
+  for(std::size_t i = 0; i < folders.size(); ++i) at.emplace(folders[i].path.generic_string(), i);
   for(const auto& note : notes()) {
-    const auto parent = note.path.lexically_relative(library_.root()).parent_path();
-    auto found = std::find_if(folders.begin(), folders.end(), [&](const auto& folder) { return folder.path == parent; });
-    if(found == folders.end()) folders.push_back({parent, 1});
-    else ++found->noteCount;
+    const auto key = note.folder.generic_string();
+    const auto found = at.find(key);
+    if(found == at.end()) {
+      at.emplace(key, folders.size());
+      folders.push_back({note.folder, 1});
+    } else {
+      ++folders[found->second].noteCount;
+    }
   }
   std::sort(folders.begin(), folders.end(), [](const auto& lhs, const auto& rhs) { return lhs.path < rhs.path; });
   folders_ = std::move(folders);
@@ -66,7 +89,7 @@ const std::vector<std::string>& OrganizationService::tags() const {
 std::vector<NoteListItem> OrganizationService::notesInFolder(const std::filesystem::path& relativeFolder) const {
   std::vector<NoteListItem> out;
   for(const auto& note : notes()) {
-    if(note.path.lexically_relative(library_.root()).parent_path() == relativeFolder) out.push_back(note);
+    if(note.folder == relativeFolder) out.push_back(note);
   }
   return out;
 }
@@ -79,11 +102,16 @@ std::vector<NoteListItem> OrganizationService::notesWithTag(const std::string& t
   return out;
 }
 
+const NoteListItem* OrganizationService::noteById(std::string_view noteId) const {
+  const auto& list = notes();
+  const auto found = index_.find(noteId);
+  return found == index_.end() ? nullptr : &list[found->second];
+}
+
 std::optional<NoteListItem> OrganizationService::findNote(std::string_view noteId) const {
-  for(const auto& note : notes()) {
-    if(note.id == noteId) return note;
-  }
-  return std::nullopt;
+  const NoteListItem* note = noteById(noteId);
+  if(!note) return std::nullopt;
+  return *note;
 }
 
 }

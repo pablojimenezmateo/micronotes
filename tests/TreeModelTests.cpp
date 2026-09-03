@@ -19,12 +19,15 @@ std::vector<FolderNode> fixtureFolders() {
   return {{"", 1}, {"work", 2}, {"work/2026", 1}, {"ideas", 0}};
 }
 
+// `folder` is the library-relative directory the note is filed in, and the tree
+// reads it rather than re-deriving it from the path, so a fixture that leaves it
+// empty is a fixture where every note is at the root.
 std::vector<NoteListItem> fixtureNotes() {
   return {
-    {"n-root", kRoot / "Inbox.md", "Inbox", {}, ""},
-    {"n-a", kRoot / "work" / "Alpha.md", "Alpha", {}, "\xF0\x9F\x93\x93"},
-    {"n-b", kRoot / "work" / "Beta.md", "Beta", {}, ""},
-    {"n-c", kRoot / "work" / "2026" / "Plan.md", "Plan", {}, ""},
+    {"n-root", kRoot / "Inbox.md", "Inbox", {}, "", ""},
+    {"n-a", kRoot / "work" / "Alpha.md", "Alpha", {}, "\xF0\x9F\x93\x93", "work"},
+    {"n-b", kRoot / "work" / "Beta.md", "Beta", {}, "", "work"},
+    {"n-c", kRoot / "work" / "2026" / "Plan.md", "Plan", {}, "", "work/2026"},
   };
 }
 

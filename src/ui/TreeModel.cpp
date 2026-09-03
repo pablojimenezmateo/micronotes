@@ -71,7 +71,7 @@ std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& fol
     children[key(folder.path.parent_path())].push_back(&folder);
   }
   for(const auto& note : notes) {
-    owned[key(note.path.lexically_relative(root).parent_path())].push_back(&note);
+    owned[key(note.folder)].push_back(&note);
   }
 
   std::vector<TreeRow> rows;

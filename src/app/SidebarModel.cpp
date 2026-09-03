@@ -74,12 +74,14 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure)
     std::size_t drawn = 0;
     for(const auto& id : ids) {
       if(drawn >= limit) break;
-      const auto found = std::find_if(notes.begin(), notes.end(), [&](const auto& note) { return note.id == id; });
-      if(found == notes.end()) continue;
+      // By id index rather than by scan. Thirteen shortcuts against a thousand
+      // notes was thirteen thousand string compares to draw thirteen rows.
+      const auto* found = ui.state.noteById(id);
+      if(!found) continue;
       ui::TreeRow tree;
       tree.kind = ui::TreeRowKind::Note;
       tree.depth = 0;
-      tree.folder = found->path.lexically_relative(root).parent_path();
+      tree.folder = found->folder;
       tree.noteId = found->id;
       tree.label = found->title;
       tree.icon = found->icon;
@@ -93,7 +95,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure)
     ui::TreeRow tree;
     tree.kind = ui::TreeRowKind::Note;
     tree.depth = 0;
-    tree.folder = note.path.lexically_relative(root).parent_path();
+    tree.folder = note.folder;
     tree.noteId = note.id;
     tree.label = note.title;
     tree.icon = note.icon;
