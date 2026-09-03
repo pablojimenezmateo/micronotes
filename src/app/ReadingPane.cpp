@@ -37,7 +37,6 @@ using ui::splitLines;
 using ui::TextRenderer;
 using ui::theme;
 
-
 std::string anchorFor(std::string value) {
   std::string out;
   bool pendingDash = false;

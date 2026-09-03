@@ -227,7 +227,6 @@ std::vector<InlineRun> inlineRuns(const markdown::Block& block, SDL_Color baseCo
   return inlineRuns(block.inlines, baseColor, wikiResolves);
 }
 
-
 int measureInlineLines(TextRenderer& text, const std::vector<InlineRun>& runs, int maxWidth, float size) {
   int lines = 1;
   int x = 0;
