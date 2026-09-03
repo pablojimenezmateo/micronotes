@@ -225,6 +225,7 @@ add_executable(micronotes
   src/app/RawPane.cpp
   src/app/Ribbon.cpp
   src/app/RightPanel.cpp
+  src/app/Scroll.cpp
   src/app/SessionState.cpp
   src/app/SettingsDialog.cpp
   src/app/Sidebar.cpp
@@ -283,6 +284,7 @@ add_executable(micronotes_tests
   tests/TabsTests.cpp
   tests/TextUtilTests.cpp
   tests/TextFieldTests.cpp
+  tests/WheelTests.cpp
   tests/WikiLinkTests.cpp
   tests/WorkspaceModelTests.cpp
   tests/WrappedLinesTests.cpp

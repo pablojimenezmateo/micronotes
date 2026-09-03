@@ -8,6 +8,7 @@
 #include "app/PageHeader.h"
 #include "app/SessionState.h"
 #include "app/Ribbon.h"
+#include "app/Scroll.h"
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
 #include "app/EditorBlocks.h"
@@ -2025,42 +2026,6 @@ static void selectLineAtCursor(UiRuntime& ui) {
   ui.editor.selectRange(start, end);
 }
 
-static void scrollPaneUnderPointer(TextRenderer& text, UiRuntime& ui, float notches, int width, int height) {
-  perf::addCounter(perf::CounterId::InputWheelEvents);
-  const ShellLayout layout = shellLayout(ui, width, height);
-  Rect editorRect = layout.content;
-  Rect viewerRect = layout.content;
-  bool wheelEditor = false;
-  bool wheelViewer = false;
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
-    wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Editor;
-  } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
-    wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY) || ui.focus == FocusArea::Viewer;
-  } else {
-    editorRect.w = layout.content.w / 2.0f;
-    viewerRect = {layout.content.x + editorRect.w, layout.content.y, layout.content.w - editorRect.w, layout.content.h};
-    wheelEditor = contains(editorRect, ui.mouseX, ui.mouseY);
-    wheelViewer = contains(viewerRect, ui.mouseX, ui.mouseY);
-  }
-  // SDL reports wheel.y in notches for a discrete wheel and in fractions
-  // of a notch for precise devices. Accumulate, take the whole part, and
-  // keep the remainder for the next event.
-  if(wheelViewer) {
-    ui.viewerScrollRemainder += -notches * kViewerScrollPixelsPerNotch;
-    const float whole = std::trunc(ui.viewerScrollRemainder);
-    ui.viewerScrollRemainder -= whole;
-    ui.viewerScroll = std::clamp(ui.viewerScroll + static_cast<int>(whole), 0,
-                                 ui.viewerMaxScroll);
-  } else if(wheelEditor) {
-    ui.editorScrollRemainder += -notches * kEditorScrollLinesPerNotch;
-    const float whole = std::trunc(ui.editorScrollRemainder);
-    ui.editorScrollRemainder -= whole;
-    ui.editorScroll = std::clamp(ui.editorScroll + static_cast<int>(whole), 0,
-                                 editorMaxScroll(text, ui, editorRect));
-    ui.revealEditorCursor = false;
-  }
-}
-
 static void handleText(UiRuntime& ui, const char* input) {
   if(!input) return;
   if(ui.overlays.active()) {
@@ -3200,19 +3165,8 @@ int run(ApplicationOptions options) {
                                                          std::max(ui::kMinSidebarWidth, static_cast<float>(width) - 520.0f));
         }
         updateCursor(width, height);
-      } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.overlays.active()) {
-        // An open overlay owns the wheel outright, or a long palette would
-        // scroll the note behind it instead of itself.
-        ui.overlays.handleWheel(event.wheel.y);
-      } else if(event.type == SDL_EVENT_MOUSE_WHEEL &&
-                contains(shellLayout(ui, width, height).sidebar, ui.mouseX, ui.mouseY)) {
-        // The tree can be taller than the window, so the pointer's column
-        // decides where a wheel goes before the pane mode does.
-        ui.sidebarScroll = std::clamp(ui.sidebarScroll - static_cast<int>(event.wheel.y * 48), 0, ui.sidebarMaxScroll);
-      } else if(event.type == SDL_EVENT_MOUSE_WHEEL && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
-        ui.livePage.setScroll(ui.livePage.scroll() - static_cast<int>(event.wheel.y * 60));
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
-        scrollPaneUnderPointer(text, ui, event.wheel.y, width, height);
+        routeWheel(text, ui, event.wheel.y, width, height);
       } else if(event.type == SDL_EVENT_DROP_FILE) {
         if(event.drop.data) attachPathToEditor(ui, event.drop.data);
       } else if(event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||
