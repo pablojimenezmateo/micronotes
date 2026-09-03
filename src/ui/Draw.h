@@ -235,9 +235,44 @@ private:
     };
   }
 
+  // The physical size an icon is cached at. Icons are drawn into a row-height
+  // box -- 16 logical pixels everywhere the shell uses one -- and a colour
+  // emoji face hands back one fixed bitmap strike, 136 pixels for Noto. Two
+  // pixels of source per pixel of destination is as far as the renderer's own
+  // bilinear filter can be trusted; beyond that it samples four texels out of
+  // seventy and the glyph arrives as noise. So the surface is walked down to
+  // this size first and the renderer is left the gentle last step.
+  static constexpr int kIconCachePx = 32;
+
+  // Halve until one more halving would overshoot, then land exactly on the
+  // target. Repeated halving is a box filter over every source pixel, which is
+  // what a single large downscale is missing; doing it on the surface costs one
+  // pass per step, once, against every frame the texture is drawn.
+  static SDL_Surface* downscale(SDL_Surface* surface, int target) {
+    while(surface && surface->w > target * 2 && surface->h > target * 2) {
+      SDL_Surface* half = SDL_ScaleSurface(surface, surface->w / 2, surface->h / 2, SDL_SCALEMODE_LINEAR);
+      if(!half) return surface;
+      SDL_DestroySurface(surface);
+      surface = half;
+    }
+    if(!surface || (surface->w <= target && surface->h <= target)) return surface;
+    const float fit = std::min(static_cast<float>(target) / static_cast<float>(surface->w),
+                               static_cast<float>(target) / static_cast<float>(surface->h));
+    SDL_Surface* fitted = SDL_ScaleSurface(surface, std::max(1, static_cast<int>(std::lround(surface->w * fit))),
+                                           std::max(1, static_cast<int>(std::lround(surface->h * fit))),
+                                           SDL_SCALEMODE_LINEAR);
+    if(!fitted) return surface;
+    SDL_DestroySurface(surface);
+    return fitted;
+  }
+
   const CachedText* iconTexture(std::string_view text, SDL_Color color) {
     if(const auto* hit = iconCache_.find(text, color, render::TextTextureCache::Style {})) return hit;
     SDL_Surface* surface = fonts_.renderIcon(text, color);
+    if(!surface) return nullptr;
+    // Cached at one size for every caller, because the display scale is in the
+    // key of nothing here and clear() drops the cache when it changes.
+    surface = downscale(surface, static_cast<int>(std::lround(kIconCachePx * fonts_.displayScale())));
     if(!surface) return nullptr;
     SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);
     CachedText entry {created, surface->w, surface->h};
