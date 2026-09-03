@@ -322,6 +322,18 @@ private:
   std::map<std::string, CachedImage> cache_;
 };
 
+// The y one line of `style` is drawn at to sit centred in `row`.
+//
+// Row heights are chrome and stay put; text grows with the reader's text size.
+// The gap above a line is therefore not a constant -- and it was written as one
+// at a dozen call sites, each nudged by eye at the medium size, which is why the
+// same list had rows at +3, +4 and +5 and why the large size drew a row's text
+// over the row beneath it. Never negative: a line taller than the row it is in
+// starts at the top and is clipped at the bottom rather than above.
+inline float textTop(Rect row, const TextRenderer& text, const TextStyle& style) {
+  return std::round(row.y + std::max(0.0f, (row.h - static_cast<float>(text.lineHeight(style))) / 2.0f));
+}
+
 // A section heading over a list of rows: FAVORITES, TAGS, RECENT.
 void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y);
 
