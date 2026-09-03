@@ -4,6 +4,7 @@
 #include "core/perf/PerformanceCounters.h"
 #include "core/render/TextTextureCache.h"
 
+#include "ui/ClipGuard.h"
 #include "ui/Fonts.h"
 #include "ui/TextMeasureCache.h"
 #include "ui/Rect.h"
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -24,22 +26,6 @@
 #include <vector>
 
 namespace micronotes::ui {
-
-class ClipGuard {
-public:
-  ClipGuard(SDL_Renderer* renderer, Rect rect) : renderer_(renderer) {
-    clip_ = clipRect(rect);
-    SDL_SetRenderClipRect(renderer_, &clip_);
-  }
-
-  ~ClipGuard() {
-    SDL_SetRenderClipRect(renderer_, nullptr);
-  }
-
-private:
-  SDL_Renderer* renderer_ = nullptr;
-  SDL_Rect clip_ {};
-};
 
 // One-time renderer setup the palette depends on.
 //
@@ -321,6 +307,15 @@ public:
   void clear() {
     for(auto& [_, texture] : cache_) SDL_DestroyTexture(texture.texture);
     cache_.clear();
+    ++generation_;
+  }
+
+  // Moves whenever what this cache holds changes. A surface that memoises a
+  // layout containing an image has to key on it: an image's height is the
+  // texture's, and until the file has been loaded there is no texture, so the
+  // block is a placeholder one frame and a picture the next.
+  std::uint64_t generation() const {
+    return generation_;
   }
 
   SDL_Texture* load(const std::filesystem::path& path, float& width, float& height) {
@@ -334,6 +329,7 @@ public:
       SDL_GetTextureSize(texture, &image.w, &image.h);
       if(cache_.size() > 512) clear();
       found = cache_.emplace(key, image).first;
+      ++generation_;
     }
     width = found->second.w;
     height = found->second.h;
@@ -355,6 +351,7 @@ private:
 
   SDL_Renderer* renderer_ = nullptr;
   std::map<std::string, CachedImage> cache_;
+  std::uint64_t generation_ = 0;
 };
 
 // The y one line of `style` is drawn at to sit centred in `row`.
@@ -375,8 +372,18 @@ void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float
 // An empty place says what it is, what to do about it, and which keys do that.
 // The third line is what turns a dead end into an offer, so it is dimmer than
 // the rest rather than left out.
-void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
-                      std::string_view keys = {});
+//
+// Takes an origin and a width, and **returns the height it used**, because that
+// height is not something a caller can know: the detail wraps to the column and
+// the key line is optional, so the message is between two and five lines tall
+// depending on the text and on the reader's text size. Every caller used to
+// pass a rect with a made-up height -- 100, 110, 120 -- which nothing checked
+// and nothing read, so at the large text size a three-line empty state ran past
+// the box it claimed to be in. Nothing was drawn under any of them, which is
+// why nobody noticed; the first surface to put something there would have
+// inherited the bug.
+float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail,
+                       float x, float y, float width, std::string_view keys = {});
 
 // A vertical scrollbar down the right of a viewport, drawn only when there is
 // something to scroll. The geometry is exposed because the hit test and the

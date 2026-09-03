@@ -213,6 +213,7 @@ add_executable(micronotes
   src/app/main.cpp
   src/app/Application.cpp
   src/app/InlineText.cpp
+  src/app/LivePage.cpp
   src/app/PageHeader.cpp
   src/app/PageView.cpp
   src/app/Screenshot.cpp
@@ -223,6 +224,7 @@ add_executable(micronotes
   src/app/Notes.cpp
   src/app/Options.cpp
   src/app/RawPane.cpp
+  src/app/ReadingPane.cpp
   src/app/Ribbon.cpp
   src/app/RightPanel.cpp
   src/app/Scroll.cpp
@@ -261,6 +263,7 @@ add_executable(micronotes_tests
   tests/ArchitectureTests.cpp
   tests/AttachmentTests.cpp
   tests/BlockScanTests.cpp
+  tests/ClipGuardTests.cpp
   tests/ColorMathTests.cpp
   tests/EditorViewerTests.cpp
   tests/EditsTests.cpp
@@ -280,6 +283,7 @@ add_executable(micronotes_tests
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/ShellLayoutTests.cpp
+  tests/SidebarRowsTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp
   tests/TextUtilTests.cpp
