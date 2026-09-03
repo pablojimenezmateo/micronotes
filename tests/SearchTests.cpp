@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include <chrono>
+
 #include "library/LibraryIndex.h"
 #include "library/Library.h"
 #include "library/Metadata.h"
@@ -457,6 +459,73 @@ MICRONOTES_TEST(library_index_keeps_only_the_snippets_anything_will_draw) {
   // Still the first three lines, in order, rather than an arbitrary three.
   MICRONOTES_REQUIRE(results[0].snippets[0].matchLine == "a needle on line 0");
   MICRONOTES_REQUIRE(results[0].snippets[2].matchLine == "a needle on line 2");
+  std::filesystem::remove_all(root);
+}
+
+// The fts row for a note is filed under the note row's own rowid, which is what
+// lets a re-index delete it without scanning the whole index. Get that wrong
+// and the failure is not an error: it is an old copy of the note left behind in
+// the index, so a word the writer deleted keeps returning the note for as long
+// as the library exists.
+MICRONOTES_TEST(library_index_replaces_a_note_rather_than_adding_a_second_copy) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-reindex";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "reindexed";
+  metadata.title = "Reindexed";
+  const auto path = library.createNote(metadata, "the original zarquon body");
+  // A second note, so the index has more than one row and a rowid mix-up has
+  // somewhere to go.
+  micronotes::library::NoteMetadata other;
+  other.id = "other";
+  other.title = "Other";
+  library.createNote(other, "an unrelated note");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+  MICRONOTES_REQUIRE(index.search("zarquon").size() == 1);
+
+  // Rewrite it. The mtime has to move or the refresh is right to skip the file.
+  library.saveNote(path, metadata, "the replacement blorple body");
+  std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() +
+                                           std::chrono::seconds(2));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+  MICRONOTES_REQUIRE(index.search("blorple").size() == 1);
+  MICRONOTES_REQUIRE(index.search("zarquon").empty());
+  MICRONOTES_REQUIRE(index.search("unrelated").size() == 1);
+
+  // And a removal takes its fts row with it.
+  std::filesystem::remove(path);
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+  MICRONOTES_REQUIRE(index.search("blorple").empty());
+  MICRONOTES_REQUIRE(index.search("unrelated").size() == 1);
+  std::filesystem::remove_all(root);
+}
+
+// An index built by an earlier run is reopened, not rebuilt, so whatever
+// `migrate` decided about it has to leave the standing rows searchable.
+MICRONOTES_TEST(library_index_reopens_an_existing_index_and_still_finds_its_notes) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-reopen";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "kept";
+  metadata.title = "Kept";
+  library.createNote(metadata, "a note with the word plugh in it");
+  {
+    micronotes::library::LibraryIndex index;
+    MICRONOTES_REQUIRE(index.open(root));
+    MICRONOTES_REQUIRE(index.refreshChangedFiles());
+    MICRONOTES_REQUIRE(index.search("plugh").size() == 1);
+  }
+  micronotes::library::LibraryIndex reopened;
+  MICRONOTES_REQUIRE(reopened.open(root));
+  MICRONOTES_REQUIRE(reopened.search("plugh").size() == 1);
+  // And a refresh over an unchanged tree neither loses nor duplicates it.
+  MICRONOTES_REQUIRE(reopened.refreshChangedFiles());
+  MICRONOTES_REQUIRE(reopened.search("plugh").size() == 1);
   std::filesystem::remove_all(root);
 }
 
