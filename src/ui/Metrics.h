@@ -37,6 +37,13 @@ inline constexpr float kWindowFrameThickness = 6.0f;
 // shell where nothing lines up: `small` is for controls the size of a row --
 // chips, checkboxes, the search field; `medium` is for blocks inside the page
 // -- callouts, code, properties; `large` is for things that float over it.
+// The mark in a callout's gutter: a dot the size and inset of which are read by
+// the live surface and by the reading pane, which draw the same callout. Both
+// had `7.0f` and `+ 6.0f` written out inline, in two files, which is two chances
+// for a callout to look like a different shape depending on which pane it is in.
+inline constexpr float kCalloutMarkSize = 7.0f;
+inline constexpr float kCalloutMarkInset = 6.0f;
+
 inline constexpr float kRadiusSmall = 4.0f;
 inline constexpr float kRadiusMedium = 8.0f;
 inline constexpr float kRadiusLarge = 12.0f;
@@ -123,5 +130,49 @@ inline constexpr float kTooltipPadY = 5.0f;
 // cursor are the same region, so one number governs both and they cannot drift.
 inline constexpr float kResizeGutterInflate = 3.0f;
 inline constexpr float kScrollbarHitInflate = 4.0f;
+
+// The vertical scrollbar every scrolling surface draws: the track's inset from
+// the viewport's trailing edge and from its ends, its width, and the thumb --
+// wider than the track, so it reads as a handle on it rather than as a fill of
+// it.
+//
+// Here because the numbers were written out four times: twice inside
+// `ui::drawVerticalScrollbar` and its `scrollbarTrack`/`scrollbarThumb`
+// siblings, and a fourth time as a private copy in `PageView`. The live page
+// painted its scrollbar from that private copy and was hit-tested against
+// ui's, so the two agreeing was a coincidence rather than a fact.
+inline constexpr float kScrollbarInsetX = 7.0f;
+inline constexpr float kScrollbarInsetY = 9.0f;
+inline constexpr float kScrollbarTrackWidth = 3.0f;
+inline constexpr float kScrollbarThumbWidth = 5.0f;
+inline constexpr float kScrollbarMinTrack = 24.0f;
+inline constexpr float kScrollbarMinThumb = 22.0f;
+// A thumb no shorter than this share of the track, so a very long note still
+// leaves something to grab.
+inline constexpr float kScrollbarMinThumbRatio = 0.08f;
+
+// The page -- the writing surface itself -- inside the pane that holds it, and
+// the measure of the text column on it.
+//
+// One set of numbers, because three surfaces draw a page into a pane -- the
+// live editing page, the reading pane and the raw pane -- and the inset was
+// written out **seven** times: once each in `PageView` and `ReadingPane`, twice
+// in `RawPane`, and four times inline in `Application.cpp`'s hit tests. Two of
+// those spellings were `h - kPagePad * 3.5` and `h - 28`, which are the same
+// number for as long as nobody changes the padding.
+//
+// The column floors differed as well (120 on the live page, 80 in the reading
+// pane). Neither is reachable today -- `kMinContentWidth` keeps the page well
+// above the width where either would bind -- so this is a divergence waiting
+// for a narrower minimum rather than one on screen now.
+inline constexpr float kPagePad = 8.0f;
+// Taken off the bottom on top of `kPagePad`, so the page stops clear of the
+// status bar rather than running under it.
+inline constexpr float kPageBottomPad = 12.0f;
+// The air either side of the text column inside the page.
+inline constexpr float kPageColumnPad = 28.0f;
+// The narrowest a measure is allowed to get before the page gives up centring
+// it and lets it use the gutter's room instead.
+inline constexpr float kPageMinColumn = 120.0f;
 
 }

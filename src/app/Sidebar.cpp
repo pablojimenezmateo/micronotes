@@ -70,19 +70,21 @@ static ui::TextStyle snippetTextStyle() {
 // The one place with nothing to list says which nothing it is, because the way
 // out of each is different.
 static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
-  const Rect where {list.x + 8.0f, list.y + 8.0f, list.w - 16.0f, 120.0f};
+  const float x = list.x + 8.0f;
+  const float y = list.y + 8.0f;
+  const float width = list.w - 16.0f;
   if(!ui.state.hasLibrary()) {
     drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
-                     where, ui::keysFor(ui::ActionId::Settings) + "  Settings");
+                     x, y, width, ui::keysFor(ui::ActionId::Settings) + "  Settings");
   } else if(!ui.search.empty()) {
     drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.search.text() + "\".",
-                     where, "Esc  clear the search");
+                     x, y, width, "Esc  clear the search");
   } else if(!ui.state.selection().tag.empty()) {
     drawEmptyMessage(text, "No notes with this tag", "Nothing carries #" + ui.state.selection().tag + " any more.",
-                     where, "click the tag again to clear the filter");
+                     x, y, width, "click the tag again to clear the filter");
   } else {
     drawEmptyMessage(text, "No notes yet", "Notes here are plain .md files.",
-                     where, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
+                     x, y, width, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
   }
 }
 
@@ -190,17 +192,14 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
 
   ClipGuard listClip(renderer, list);
   const auto& selection = ui.state.selection();
-  // TD-3: this walks every row to find the visible ones. `rect.y` is
-  // non-decreasing across the list, so the band is two binary searches -- the
-  // same shape as `DocumentLayout::blockRange`.
   const auto snippetWidth = [&](std::string_view value) {
+    perf::addCounter(perf::CounterId::SidebarSnippetMeasures);
     return text.width(value, snippetStyle);
   };
-  for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
-    if(ui.sidebarRows[i].rect.y + ui.sidebarRows[i].rect.h < list.y ||
-       ui.sidebarRows[i].rect.y > list.y + list.h) {
-      continue;
-    }
+  // The visible band, not the library: two binary searches over a row list that
+  // tiles the panel. See `sidebarRowRange`.
+  const auto [firstRow, lastRow] = sidebarRowRange(ui.sidebarRows, list.y, list.y + list.h);
+  for(std::size_t i = firstRow; i < lastRow; ++i) {
     // Trimmed now that the row is known to be painted. See `fillSearchSnippets`.
     fillSearchSnippets(ui, i, list.w, snippetWidth);
     const auto& row = ui.sidebarRows[i];

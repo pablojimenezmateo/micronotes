@@ -24,11 +24,6 @@ struct PageViewHooks {
   // Whether a `[[target]]` names a note that exists. The page has a buffer, not
   // a library, so it asks; unset means "assume it does".
   std::function<bool(std::string_view)> wikiLinkResolves;
-  // Moves whenever that answer could have changed. A block's cached layout is
-  // keyed on its own bytes, and this is the one thing it depends on that is not
-  // in them, so without it a link that starts or stops resolving keeps its old
-  // colour until the block is edited.
-  std::uint64_t wikiLinkRevision = 0;
 };
 
 struct PageLink {
@@ -104,7 +99,20 @@ struct PageToolbarButton {
 // the buffer and every pixel maps back to one.
 class PageView {
 public:
+  // Installed once, not per frame. The hooks' captures -- the renderer, the
+  // text renderer, the runtime -- do not change for the life of the process,
+  // and each closure is larger than a `std::function`'s inline buffer, so
+  // rebuilding them per frame was three heap allocations and three frees on a
+  // frame that draws several hundred runs. `wired()` is how the caller knows
+  // whether it has done it yet.
   void setHooks(PageViewHooks hooks);
+  bool wired() const;
+  // The one part of the wikilink wiring that moves per frame: a stamp that
+  // shifts whenever `wikiLinkResolves` could answer differently. A block's
+  // cached layout is keyed on its own bytes, and this is the one thing it
+  // depends on that is not in them, so without it a link that starts or stops
+  // resolving keeps its old colour until the block is edited.
+  void setWikiLinkRevision(std::uint64_t revision);
 
   // Lays the note out for this frame. `rect` is the whole content pane.
   void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
@@ -115,6 +123,12 @@ public:
   // note. Zero -- the default -- means "cannot say", and the layout falls back
   // to comparing bytes and re-asking the fold predicate per block.
   void setRevisions(std::uint64_t source, std::uint64_t folds);
+  // Where the last edit landed, stamped with the two source revisions it took
+  // the buffer between. It lets the layout bound the comparison it otherwise
+  // makes over the whole note to find the edit; a stamp that does not line up
+  // with what the layout holds is discarded there, so a stale one costs the
+  // comparison rather than the answer.
+  void setEditedSpan(doc::LayoutOptions::EditedSpan span);
   void draw(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t caret, const PageSelection& selection,
             bool focused, std::string_view findQuery);
 
@@ -135,7 +149,13 @@ public:
   // Start offset of the code block whose copy button is under the point.
   std::optional<std::size_t> copyButtonAt(float x, float y) const;
 
+  // Also installed once. Whether the *current* note has anything collapsed is
+  // per-frame state instead: the layout skips resolving folds entirely when it
+  // is handed no predicate, which is a stronger statement than a predicate that
+  // always answers false, so the predicate stays installed and this decides
+  // whether it is passed on.
   void setFolds(PageFolds folds);
+  void setFoldsActive(bool active);
 
   // Room reserved above the note's first block, for whatever the application
   // wants to draw there. It is taken out of the scrolling space rather than off
@@ -221,8 +241,12 @@ private:
   std::vector<PageFoldHit> foldHits_;
   std::vector<PageCodeButton> codeButtons_;
   PageFolds folds_;
+  bool wired_ = false;
+  bool foldsActive_ = false;
+  std::uint64_t wikiLinkRevision_ = 0;
   std::uint64_t sourceRevision_ = 0;
   std::uint64_t foldRevision_ = 0;
+  doc::LayoutOptions::EditedSpan editedSpan_;
   // Where the find query matches, found once and kept until the query or the
   // buffer moves. Recomputing it per frame made an open find bar cost a pass
   // over the note at frame rate; drawing all of it made the highlight cost the

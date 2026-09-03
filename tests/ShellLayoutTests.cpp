@@ -1,12 +1,16 @@
 #include "TestSupport.h"
 
 #include "ui/Metrics.h"
+#include "ui/Settings.h"
 #include "ui/ShellLayout.h"
+
+#include <cmath>
 
 using micronotes::ui::computeShellLayout;
 using micronotes::ui::LayoutMode;
 using micronotes::ui::resolveLayoutMode;
 using micronotes::ui::ShellLayout;
+using micronotes::ui::Rect;
 using micronotes::ui::ShellLayoutInputs;
 
 namespace {
@@ -173,4 +177,61 @@ MICRONOTES_TEST(shell_layout_inputs_compare_by_value) {
   b.rightPanelVisible = true;
   MICRONOTES_REQUIRE(!(a == b));
   MICRONOTES_REQUIRE(!(computeShellLayout(a) == computeShellLayout(b)));
+}
+
+// The page inside a pane, and the measure on it. Both live here rather than in
+// each surface that draws a page because three of them do -- the live page, the
+// reading pane and the raw pane -- and the inset used to be written out seven
+// times.
+MICRONOTES_TEST(page_rect_is_inset_on_all_four_sides_and_lower_at_the_foot) {
+  const Rect page = micronotes::ui::pageRectIn({100.0f, 50.0f, 800.0f, 600.0f});
+  MICRONOTES_REQUIRE(page.x == 100.0f + micronotes::ui::kPagePad);
+  MICRONOTES_REQUIRE(page.y == 50.0f + micronotes::ui::kPagePad);
+  MICRONOTES_REQUIRE(page.w == 800.0f - micronotes::ui::kPagePad * 2.0f);
+  // Deeper at the foot, so the page stops clear of the status bar.
+  MICRONOTES_REQUIRE(page.h < 600.0f - micronotes::ui::kPagePad * 2.0f);
+  MICRONOTES_REQUIRE(page.y + page.h < 50.0f + 600.0f);
+}
+
+MICRONOTES_TEST(page_rect_never_reports_a_negative_size) {
+  // A pane squeezed smaller than its own padding hands back an empty page
+  // rather than a negative one every hit test downstream would have to defend
+  // against.
+  const Rect page = micronotes::ui::pageRectIn({0.0f, 0.0f, 4.0f, 4.0f});
+  MICRONOTES_REQUIRE(page.w == 0.0f);
+  MICRONOTES_REQUIRE(page.h == 0.0f);
+}
+
+MICRONOTES_TEST(page_column_is_centred_and_capped_at_the_reader_page_width) {
+  const Rect page = micronotes::ui::pageRectIn({0.0f, 0.0f, 1400.0f, 900.0f});
+  const auto column = micronotes::ui::pageColumnIn(page, 0.0f);
+  // Extra width becomes margin, not more characters per line.
+  MICRONOTES_REQUIRE(column.width == micronotes::ui::pageWidthPx());
+  const float leftMargin = column.left - page.x;
+  const float rightMargin = page.x + page.w - (column.left + column.width);
+  MICRONOTES_REQUIRE(std::abs(leftMargin - rightMargin) <= 1.0f);
+}
+
+MICRONOTES_TEST(page_column_gives_the_gutter_its_room_before_it_centres) {
+  // Narrow enough that a centred column would start inside the gutter. The
+  // gutter wins: the live page's insert, drag and fold handles have to land
+  // somewhere.
+  const Rect page = micronotes::ui::pageRectIn({0.0f, 0.0f, 420.0f, 900.0f});
+  const float gutter = 78.0f;
+  const auto centred = micronotes::ui::pageColumnIn(page, 0.0f);
+  MICRONOTES_REQUIRE(centred.left - page.x < gutter);
+  const auto shifted = micronotes::ui::pageColumnIn(page, gutter);
+  MICRONOTES_REQUIRE(shifted.left == page.x + gutter);
+  MICRONOTES_REQUIRE(shifted.width < centred.width);
+  // And it still ends inside the page.
+  MICRONOTES_REQUIRE(shifted.left + shifted.width <= page.x + page.w + 0.001f);
+}
+
+MICRONOTES_TEST(page_column_matches_between_a_gutterless_surface_and_a_wide_page) {
+  // The live page and the reading pane draw the same note. On any page wide
+  // enough to centre the measure clear of the gutter they must agree on it
+  // exactly, or switching panes re-wraps every line.
+  const Rect page = micronotes::ui::pageRectIn({44.0f, 30.0f, 1100.0f, 900.0f});
+  MICRONOTES_REQUIRE(micronotes::ui::pageColumnIn(page, 78.0f) ==
+                     micronotes::ui::pageColumnIn(page, 0.0f));
 }

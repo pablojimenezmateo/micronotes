@@ -159,34 +159,40 @@ void drawRoundedSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, 
   strokeRounded(renderer, rect, borderColor, radius);
 }
 
-void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
-  if(maxScroll <= 0) return;
-  Rect track {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, std::max(24.0f, viewport.h - 18.0f)};
-  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
-  const float thumbH = std::max(22.0f, track.h * visibleRatio);
-  const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
-  Rect thumb {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
-  fill(renderer, track, theme().scrollTrack);
-  fill(renderer, thumb, theme().scrollThumb);
-  stroke(renderer, thumb, theme().scrollThumbBorder);
-}
-
 Rect scrollbarTrack(Rect viewport) {
-  const float trackH = std::max(24.0f, viewport.h - 18.0f);
-  return {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, trackH};
+  return {viewport.x + viewport.w - kScrollbarInsetX, viewport.y + kScrollbarInsetY,
+          kScrollbarTrackWidth,
+          std::max(kScrollbarMinTrack, viewport.h - kScrollbarInsetY * 2.0f)};
 }
 
 Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll) {
   if(maxScroll <= 0) return {};
   const auto track = scrollbarTrack(viewport);
-  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
-  const float thumbH = std::max(22.0f, track.h * visibleRatio);
+  const float visibleRatio =
+    std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), kScrollbarMinThumbRatio, 1.0f);
+  const float thumbH = std::max(kScrollbarMinThumb, track.h * visibleRatio);
   const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
-  return {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
+  // Centred on the track, which is what makes the thumb read as a handle on it
+  // rather than as a wider fill of it.
+  return {track.x - (kScrollbarThumbWidth - kScrollbarTrackWidth) / 2.0f,
+          track.y + (track.h - thumbH) * t, kScrollbarThumbWidth, thumbH};
+}
+
+// Composed from the two above rather than repeating their arithmetic, so what
+// is painted and what is hit-tested cannot drift. They did: `PageView` carried
+// a private fourth copy of these numbers, painted the live page's scrollbar
+// from it, and was hit-tested against these -- identical only by luck.
+void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
+  if(maxScroll <= 0) return;
+  fill(renderer, scrollbarTrack(viewport), theme().scrollTrack);
+  const Rect thumb = scrollbarThumb(viewport, scroll, maxScroll);
+  fill(renderer, thumb, theme().scrollThumb);
+  stroke(renderer, thumb, theme().scrollThumbBorder);
 }
 
 Rect scrollbarHitRect(Rect thumb) {
-  return {thumb.x - 7.0f, thumb.y - 2.0f, thumb.w + 14.0f, thumb.h + 4.0f};
+  return {thumb.x - kScrollbarInsetX, thumb.y - kScrollbarHitInflate / 2.0f,
+          thumb.w + kScrollbarInsetX * 2.0f, thumb.h + kScrollbarHitInflate};
 }
 
 int scrollFromThumbY(Rect viewport, float y, float dragOffsetY, int maxScroll) {
@@ -224,14 +230,15 @@ void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float
   text.draw(label, x, y, theme().dim);
 }
 
-void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail, Rect rect,
-                      std::string_view keys) {
+float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail,
+                       float x, float y, float width, std::string_view keys) {
   const TextStyle titleStyle {FontFamily::Sans, true, false, type().ui};
   const TextStyle bodyStyle {FontFamily::Sans, false, false, type().small};
   const TextStyle keyStyle {FontFamily::Sans, false, false, type().tiny};
-  const int room = static_cast<int>(std::max(60.0f, rect.w - 36.0f));
-  float y = rect.y + 14.0f;
-  text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), rect.x + 18.0f, y, theme().text, titleStyle);
+  const int room = static_cast<int>(std::max(60.0f, width - 36.0f));
+  const float top = y;
+  y += 14.0f;
+  text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), x + 18.0f, y, theme().text, titleStyle);
   y += static_cast<float>(text.lineHeight(titleStyle)) + 6.0f;
 
   // The detail wraps rather than being cut off at the column. Every one of
@@ -250,13 +257,16 @@ void drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_vi
   for(std::size_t i = 0; i < rows.size() && i < kMaxLines; ++i) {
     const bool last = i + 1 == kMaxLines && rows.size() > kMaxLines;
     text.draw(last ? ellipsizeToWidth(text, rows[i].text + "...", room, bodyStyle) : rows[i].text,
-              rect.x + 18.0f, y, theme().muted, bodyStyle);
+              x + 18.0f, y, theme().muted, bodyStyle);
     y += bodyStep;
   }
 
-  if(keys.empty()) return;
-  y += 8.0f;
-  text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), rect.x + 18.0f, y, theme().dim, keyStyle);
+  if(!keys.empty()) {
+    y += 8.0f;
+    text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), x + 18.0f, y, theme().dim, keyStyle);
+    y += static_cast<float>(text.lineHeight(keyStyle));
+  }
+  return y + 14.0f - top;
 }
 
 }

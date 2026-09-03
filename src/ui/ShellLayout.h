@@ -75,4 +75,32 @@ LayoutMode resolveLayoutMode(float windowWidth, LayoutMode previous);
 // with what was actually painted.
 ShellLayout computeShellLayout(const ShellLayoutInputs& inputs);
 
+// The page -- the writing surface itself -- inside `ShellLayout::content`.
+//
+// Every surface that draws a page into a pane wants this rect, and each used
+// to derive it itself -- seven spellings of it, two of which agreed only by
+// arithmetic accident (`h - kPagePad * 3.5` against `h - 28`).
+Rect pageRectIn(Rect pane);
+
+// The measure of the text column on that page.
+//
+// Notion's rule: extra width becomes margin rather than more characters per
+// line, so the column is capped at the reader's chosen page width and centred
+// in whatever is left.
+//
+// `gutter` is the room the surface needs to the left of the text for its own
+// affordances -- 78 on the live page for the insert, drag and fold handles,
+// zero in the reading pane, which has none. When the page is too narrow to
+// centre a column and still clear the gutter, the column stops being centred
+// and starts at the gutter instead: the handles always have somewhere to live.
+// A surface with no gutter passes zero and never reaches that branch.
+struct PageColumn {
+  float left = 0.0f;
+  float width = 0.0f;
+
+  friend bool operator==(const PageColumn&, const PageColumn&) = default;
+};
+
+PageColumn pageColumnIn(Rect page, float gutter);
+
 }

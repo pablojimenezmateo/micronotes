@@ -409,6 +409,74 @@ std::uint64_t counter(microcore::perf::CounterId id) {
   return microcore::perf::readCounter(id);
 }
 
+// One fenced block thousands of rows long: the shape that made `caretRect` walk
+// row by row. It is a single `SourceBlock`, so no amount of block-level
+// searching helps -- the search has to be inside the block's runs.
+std::string oneHugeFence(int lines) {
+  std::string out = "```cpp\n";
+  for(int i = 0; i < lines; ++i) out += "  int value_" + std::to_string(i) + " = " + std::to_string(i) + ";\n";
+  out += "```\n";
+  return out;
+}
+
+// What `caretRect` used to do: walk every row of the caret's block and every
+// run of every row, taking the first run that contains the offset, else the
+// last run that ended before it, else the block's first row. Kept here as the
+// reference the binary search is checked against.
+Rect caretRectByWalking(const DocumentLayout& layout, std::size_t offset) {
+  const LayoutOptions& options = layout.options();
+  Rect rect {0.0f, 0.0f, 2.0f, options.type.body * options.type.lineHeightRatio};
+  if(layout.blockCount() == 0) return rect;
+  std::size_t blockIndex = 0;
+  while(blockIndex + 1 < layout.blockCount() && layout.blocks()[blockIndex + 1].start <= offset) {
+    ++blockIndex;
+  }
+  const auto& block = layout.layout(blockIndex);
+  if(block.lines.empty()) return rect;
+  const float top = layout.blockTop(blockIndex);
+  const std::size_t local = offset - layout.blocks()[blockIndex].start;
+
+  const micronotes::doc::TextRun* best = nullptr;
+  const micronotes::doc::VisualLine* bestLine = nullptr;
+  const micronotes::doc::TextRun* before = nullptr;
+  const micronotes::doc::VisualLine* beforeLine = nullptr;
+  for(const auto& line : block.lines) {
+    for(const auto& run : block.runsOf(line)) {
+      if(local >= run.srcStart && local < run.srcEnd) {
+        best = &run;
+        bestLine = &line;
+        break;
+      }
+      if(run.srcEnd <= local) {
+        before = &run;
+        beforeLine = &line;
+      }
+    }
+    if(best) break;
+  }
+  if(!best) {
+    best = before;
+    bestLine = beforeLine;
+  }
+  if(!best) {
+    rect.x = block.textLeft;
+    rect.y = top + block.lines.front().y;
+    rect.h = block.lines.front().height;
+    return rect;
+  }
+  float x = best->rect.x;
+  if(local > best->srcStart && !best->text.empty()) {
+    const std::size_t take = std::min(local - best->srcStart, best->text.size());
+    x += stubMeasure(std::string_view(best->text).substr(0, take), best->style);
+  } else if(local >= best->srcEnd) {
+    x = best->rect.x + best->rect.w;
+  }
+  rect.x = x;
+  rect.y = top + bestLine->y;
+  rect.h = bestLine->height;
+  return rect;
+}
+
 }
 
 // The live surface re-lays the note out once per frame whether or not anything
@@ -783,6 +851,7 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
     LayoutOptions freshOptions = options;
     freshOptions.sourceRevision = 0;
     freshOptions.foldRevision = 0;
+    freshOptions.editedSpan = {};
     fresh.update(source, freshOptions);
 
     std::string why;
@@ -958,8 +1027,15 @@ void walkRandomEdits(std::uint64_t seed, int steps) {
   };
 
   int step = 0;
+  // The span the caller claims it edited, carried alongside the stamp. It is
+  // handed over on every settle, stale or not: the layout is supposed to check
+  // it against the buffer it holds and fall back to comparing bytes when the
+  // stamps do not line up, and a step that changes the width or the caret
+  // rather than the text is exactly that case.
+  LayoutOptions::EditedSpan claim;
   const auto settle = [&](bool stamped) {
     options.sourceRevision = stamped ? revision : 0;
+    options.editedSpan = claim;
     incremental.update(source, options);
 
     DocumentLayout fresh;
@@ -993,6 +1069,7 @@ void walkRandomEdits(std::uint64_t seed, int steps) {
       const std::size_t at = pick(source.size() + 1);
       const std::string_view snippet = kSnippets[pick(kSnippetCount)];
       source.insert(at, snippet);
+      claim = {revision, revision + 1, at, at, at + snippet.size()};
       ++revision;
       options.caretOffset = at + snippet.size();
     } else if(what < 11) {
@@ -1000,6 +1077,7 @@ void walkRandomEdits(std::uint64_t seed, int steps) {
       const std::size_t at = pick(source.size());
       const std::size_t count = std::min<std::size_t>(pick(12) + 1, source.size() - at);
       source.erase(at, count);
+      claim = {revision, revision + 1, at, at + count, at};
       ++revision;
       options.caretOffset = at;
     } else if(what < 15) {
@@ -1040,6 +1118,97 @@ MICRONOTES_TEST(layout_incremental_updates_match_under_a_random_edit_sequence) {
 // tokenizers: a block the inline scanner finds nothing in skips the per-byte
 // attribute table entirely, and the two paths have to agree about this or a
 // hand-wrapped sentence gains its indentation back as visible spaces.
+// An edit used to be located by comparing: forward to the first differing byte
+// and backward to the first differing byte from the end, two passes summing to
+// about the length of the note in order to find one typed character.
+// `layout.edit_bytes_matched` read fourteen bytes for every byte that moved.
+// The caller knows where it edited, so it says, and the comparison starts from
+// the claim instead of from the ends.
+MICRONOTES_TEST(layout_uses_the_callers_edited_span_instead_of_comparing_the_note) {
+  std::string source = manyBlocks(2000);
+  MICRONOTES_REQUIRE(source.size() > 100000);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  options.sourceRevision = 7;
+  layout.update(source, options);
+
+  using microcore::perf::CounterId;
+  const auto usedBefore = counter(CounterId::LayoutEditSpansUsed);
+  const auto bytesBefore = counter(CounterId::LayoutEditBytesCompared);
+  const std::size_t at = source.size() / 2;
+  source.insert(at, "z");
+  options.sourceRevision = 8;
+  options.caretOffset = at + 1;
+  options.editedSpan = {7, 8, at, at, at + 1};
+  layout.update(source, options);
+  const std::uint64_t used = counter(CounterId::LayoutEditSpansUsed) - usedBefore;
+  const std::uint64_t bytes = counter(CounterId::LayoutEditBytesCompared) - bytesBefore;
+  MICRONOTES_REQUIRE(used == 1);
+  // The claim leaves only the bytes it did not exclude to be read. Comparing
+  // would have read the whole note either side of the edit.
+  micronotes::tests::require(bytes < 1024, "read " + std::to_string(bytes) +
+                                             " bytes with a span that named the edit");
+
+  // And the answer is still the answer.
+  DocumentLayout fresh;
+  fresh.setMetrics(stubMetrics());
+  LayoutOptions freshOptions = options;
+  freshOptions.sourceRevision = 0;
+  freshOptions.editedSpan = {};
+  fresh.update(source, freshOptions);
+  std::string why;
+  micronotes::tests::require(layoutsAgree(layout, fresh, &why), "claimed edit diverged: " + why);
+}
+
+// A claim is checked, not trusted. One stamped for a different pair of buffers
+// -- two edits landed between two updates, which is what a frame handling two
+// keystrokes looks like -- and one whose arithmetic cannot describe any pair of
+// buffers are both discarded, and the full comparison runs.
+MICRONOTES_TEST(layout_discards_an_edited_span_that_describes_another_pair_of_buffers) {
+  using microcore::perf::CounterId;
+  const auto run = [](const LayoutOptions::EditedSpan& claim, const std::string& expectedNote) {
+    std::string source = manyBlocks(200);
+    DocumentLayout layout;
+    layout.setMetrics(stubMetrics());
+    LayoutOptions options;
+    options.width = 700.0f;
+    options.sourceRevision = 3;
+    layout.update(source, options);
+
+    const auto comparedBefore = counter(CounterId::LayoutEditSpansCompared);
+    // Two edits, one update: the buffer the layout holds is two revisions old.
+    const std::size_t at = source.size() / 3;
+    source.insert(at, "alpha ");
+    source.insert(source.size() / 2, "beta ");
+    options.sourceRevision = 5;
+    options.editedSpan = claim;
+    layout.update(source, options);
+    micronotes::tests::require(
+      counter(CounterId::LayoutEditSpansCompared) - comparedBefore == 1,
+      expectedNote + ": the span should have been discarded");
+
+    DocumentLayout fresh;
+    fresh.setMetrics(stubMetrics());
+    LayoutOptions freshOptions = options;
+    freshOptions.sourceRevision = 0;
+    freshOptions.editedSpan = {};
+    fresh.update(source, freshOptions);
+    std::string why;
+    micronotes::tests::require(layoutsAgree(layout, fresh, &why), expectedNote + " diverged: " + why);
+  };
+
+  // Stamped for the second of the two edits only, so its `from` is not the
+  // buffer the layout is standing on.
+  run({4, 5, 100, 100, 106}, "a stamp from the wrong pair");
+  // Right stamps, impossible arithmetic: the bytes it leaves outside itself do
+  // not come to the same count on each side.
+  run({3, 5, 100, 100, 101}, "a span whose sizes do not add up");
+  // No stamps at all is what a caller with nothing to say offers.
+  run({}, "an absent span");
+}
+
 MICRONOTES_TEST(layout_folds_a_hand_wrapped_line_ending_into_one_space) {
   const auto drawnText = [](const std::string& source) {
     DocumentLayout layout;
@@ -1171,6 +1340,103 @@ MICRONOTES_TEST(layout_row_lookups_binary_search_the_index) {
 // down by one row has to cross a whole run of them in a single move -- which is
 // the case a "find the block at this row" written as a scan gets right by
 // accident and one written as a search only gets right deliberately.
+// The two searches in `caretRect` rest on one invariant: a block's runs are
+// non-decreasing in both `srcStart` and `srcEnd`, and its lines own contiguous
+// run ranges in order. If a future flow emits a run out of order the partition
+// point silently returns the wrong run, so the invariant is asserted rather
+// than assumed -- over the fixture, at a narrow measure, with markers revealed
+// and hidden, which is every shape the flow has.
+MICRONOTES_TEST(layout_runs_are_ordered_within_a_block) {
+  for(const bool reveal : {false, true}) {
+    for(const float width : {160.0f, 700.0f}) {
+      const std::string source = std::string(kFixture) + oneHugeFence(40);
+      DocumentLayout layout;
+      layout.setMetrics(stubMetrics());
+      LayoutOptions options;
+      options.width = width;
+      options.revealAll = reveal;
+      layout.update(source, options);
+      for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+        const auto& block = layout.layout(i);
+        std::size_t lastStart = 0;
+        std::size_t lastEnd = 0;
+        for(const auto& run : block.runs) {
+          micronotes::tests::require(run.srcStart >= lastStart, "run srcStart went backwards");
+          micronotes::tests::require(run.srcEnd >= lastEnd, "run srcEnd went backwards");
+          micronotes::tests::require(run.srcEnd >= run.srcStart, "run ends before it starts");
+          lastStart = run.srcStart;
+          lastEnd = run.srcEnd;
+        }
+        std::uint32_t nextRun = 0;
+        for(const auto& line : block.lines) {
+          micronotes::tests::require(line.runBegin >= nextRun, "line runs are not in order");
+          micronotes::tests::require(line.runEnd >= line.runBegin, "line run range is inverted");
+          micronotes::tests::require(line.runEnd <= block.runs.size(), "line runs escape the block");
+          nextRun = line.runEnd;
+        }
+      }
+    }
+  }
+}
+
+// The caret is drawn once per frame, and its block used to be walked row by row
+// -- 7.1 us for a caret at the end of a 4,000-line fence, which is one block.
+// Both the run and its owning line are found by partition point now, so the
+// probe count is logarithmic in the block and the answer is byte-identical to
+// the walk it replaced.
+MICRONOTES_TEST(layout_caret_lookups_binary_search_the_runs) {
+  const std::string source = oneHugeFence(2000);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.blockCount() < 4);
+  MICRONOTES_REQUIRE(layout.layout(0).lines.size() > 1500);
+
+  using microcore::perf::CounterId;
+  const auto queriesBefore = counter(CounterId::LayoutCaretQueries);
+  const auto probesBefore = counter(CounterId::LayoutCaretProbes);
+  const Rect atEnd = layout.caretRect(source.size() - 4);
+  const std::uint64_t queries = counter(CounterId::LayoutCaretQueries) - queriesBefore;
+  const std::uint64_t probes = counter(CounterId::LayoutCaretProbes) - probesBefore;
+  MICRONOTES_REQUIRE(queries == 1);
+  // Two searches, each at most ceil(log2(n)) + 1 steps. The walk took one step
+  // per run plus one per row, which here is thousands.
+  MICRONOTES_REQUIRE(probes < 40);
+  MICRONOTES_REQUIRE(atEnd.y > layout.totalHeight() * 0.9f);
+
+  const Rect reference = caretRectByWalking(layout, source.size() - 4);
+  micronotes::tests::require(std::abs(atEnd.x - reference.x) < 0.001f &&
+                                 std::abs(atEnd.y - reference.y) < 0.001f &&
+                                 std::abs(atEnd.h - reference.h) < 0.001f,
+                             "caret at the end of a fence disagrees with the walk");
+}
+
+// ...and it agrees with the walk everywhere, not only at the end of a fence:
+// every code-point boundary of the fixture, at both measures, revealed and not.
+MICRONOTES_TEST(layout_caret_search_agrees_with_the_walk_everywhere) {
+  for(const bool reveal : {false, true}) {
+    for(const float width : {160.0f, 700.0f}) {
+      const std::string source = std::string(kFixture) + oneHugeFence(12);
+      DocumentLayout layout;
+      layout.setMetrics(stubMetrics());
+      LayoutOptions options;
+      options.width = width;
+      options.revealAll = reveal;
+      layout.update(source, options);
+      for(std::size_t offset = 0; offset <= source.size(); offset = nextBoundary(source, offset)) {
+        const Rect got = layout.caretRect(offset);
+        const Rect want = caretRectByWalking(layout, offset);
+        micronotes::tests::require(std::abs(got.x - want.x) < 0.001f &&
+                                       std::abs(got.y - want.y) < 0.001f &&
+                                       std::abs(got.h - want.h) < 0.001f,
+                                   "caret disagrees with the walk at offset " + std::to_string(offset));
+      }
+    }
+  }
+}
+
 MICRONOTES_TEST(layout_row_motion_steps_over_collapsed_blocks) {
   const std::string source = manyBlocks(6);
   DocumentLayout layout;

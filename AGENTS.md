@@ -92,6 +92,8 @@ timings several times the real ones, which looks like a measurement and is not:
 ```bash
 tools/run-checks.sh perf          # -> /tmp/micronotes-perf.log
 tools/perf-compare.py main        # working tree vs a commit, in a worktree
+tools/session-compare.sh main     # the same, through a REAL headless session:
+                                  # interleaved runs, pixel cmp, counter diff
 ```
 
 **The harness stops at `doc::` and `library::`.** Nothing in it goes through
@@ -119,7 +121,9 @@ DISPLAY=:97 MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 \
 
 The headless form prints both tables and exits, so it is a command rather than a
 sitting -- and two of them alternated between builds is the interleaved A/B the
-run-to-run spread makes necessary. `docs/performance.md` has the full recipe.
+run-to-run spread makes necessary. `tools/session-compare.sh` does exactly that
+and diffs the counters and the pixels as well; `docs/performance.md` has the
+full recipe behind it.
 
 Adding a counter is two steps, and skipping the second fails the build:
 
@@ -155,7 +159,7 @@ when the counters went in it turned out to be 70% of every frame.
   only at a durable polymorphic boundary.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
-- `src/app/Application.cpp` is a 3,300-line catch-all doing layout, input,
+- `src/app/Application.cpp` is a 2,800-line catch-all doing layout, input,
   rendering, and persistence. Do not grow it: `ArchitectureTests` holds it to a
   line budget that only ever goes down. New behaviour wants a named unit under
   `src/`, not another function in that file.

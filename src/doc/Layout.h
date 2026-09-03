@@ -212,6 +212,41 @@ struct LayoutOptions {
   // to what is collapsed *and* on a change of which note is being folded.
   std::uint64_t sourceRevision = 0;
   std::uint64_t foldRevision = 0;
+
+  // What the caller changed, and between which two source stamps.
+  //
+  // `update` is otherwise handed a buffer and no account of what happened to
+  // it, so it finds the edit by comparing: forward to the first differing byte
+  // and backward to the first differing byte from the end, two `memcmp` passes
+  // that on a small edit sum to about the length of the note.
+  // `layout.edit_bytes_matched` read 34,835,299 over the harness run against
+  // `layout.source_bytes_copied`'s 2,459,143 -- fourteen bytes read for every
+  // byte that moved, to locate one typed character.
+  //
+  // The caller knows: every edit in `src/doc/Edits.h` returns the span it
+  // changed, and the editor records the span of every mutation it makes. So
+  // this says "everything outside [start, oldEnd) of the buffer you are holding
+  // and [start, newEnd) of this one is unchanged", and the comparison starts
+  // from there instead of from the ends -- the same claim-and-verify shape
+  // `sourceRevision` and `sourceMatches` already have.
+  //
+  // The two stamps are what make it checkable rather than a matter of trust.
+  // `fromRevision` must be the stamp of the buffer the layout is standing on
+  // and `toRevision` the stamp of `source`; a claim whose `from` does not match
+  // what the layout holds -- two edits landed between updates, or a frame was
+  // skipped -- is *discarded*, and the full comparison runs. So is one whose
+  // arithmetic does not add up: the bytes outside the span have to be the same
+  // count on both sides, or the claim describes some other pair of buffers.
+  // Either stamp zero means "cannot say", which is what a caller with no span
+  // to offer -- a test, the perf harness -- gets.
+  struct EditedSpan {
+    std::uint64_t fromRevision = 0;
+    std::uint64_t toRevision = 0;
+    std::size_t start = 0;
+    std::size_t oldEnd = 0;
+    std::size_t newEnd = 0;
+  };
+  EditedSpan editedSpan;
   // Moves whenever `wikiLinkResolves` would answer differently -- a note
   // created, renamed, deleted, or the library re-listed.
   //
@@ -349,7 +384,21 @@ private:
     std::size_t prefix = 0;
     std::size_t suffix = 0;
   };
-  static EditWindow matchEdges(std::string_view oldSource, std::string_view newSource);
+  // The caller's edited span, when it describes the pair of buffers *this*
+  // update is about: the one the layout is standing on, and the one it was
+  // handed. A claim stamped for any other pair is dropped here and the
+  // comparison runs in full, which is what makes a stale claim cost speed
+  // rather than correctness -- two edits landing between two updates is the
+  // ordinary case of that, and it happens whenever a frame handles more than
+  // one keystroke.
+  LayoutOptions::EditedSpan claimFor(const LayoutOptions& options) const;
+
+  // `claim` bounds the search when it describes this pair of buffers, and is
+  // ignored when it does not. The answer is the same either way: the loops only
+  // ever *narrow* the window, so a claim merely says where to start narrowing
+  // from.
+  static EditWindow matchEdges(std::string_view oldSource, std::string_view newSource,
+                               const LayoutOptions::EditedSpan& claim);
 
   // `blocks_` brought up to date with `source_`, given the window the edit fell
   // inside and how many bytes the buffer held before it.

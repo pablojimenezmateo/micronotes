@@ -16,202 +16,123 @@ turned out to be fine is a register nobody reads.
 
 ---
 
-## TD-1 — `caretRect` walks every row of the caret's block
-
-`src/doc/Layout.cpp`, `DocumentLayout::caretRect`.
-
-Finding the run that holds the caret is a linear walk of every visual row of the
-block and every run of every row. For ordinary prose a block is one short
-paragraph and this is nothing. A fenced code block is a *single* `SourceBlock`
-that can be thousands of rows long, and the caret is drawn once per frame:
-
-| caret position | cost per frame |
-| --- | --- |
-| prose, mid-note (7,018 blocks) | 0.02 us |
-| in a 4,000-line fence, at the start | 0.01 us |
-| in a 4,000-line fence, at the end | **7.1 us** |
-
-**Why it is still here.** 7 us is 0.35% of the 2 ms frame budget, and the shape
-that provokes it — one enormous fence — is uncommon. Against that, a wrong
-caret rectangle is *visibly* wrong, and the fallbacks in that function (the run
-containing the offset, else the last run before it, else the block's first row)
-are the fiddly part of it.
-
-**What the fix is.** A block's `runs` are monotonically non-decreasing in
-`srcStart`: `Flow` emits them in group order, groups are filled in source order,
-`splitWord` emits its pieces in order, the hidden opening fence is pushed in
-front of the first line's content, and `appendTrailingLine` appends the largest
-offset last. So the row can be found by binary search and only that row's runs
-walked. It is O(rows) today and O(log rows) after, with the same answer.
-
-The measurement that would justify it: `caretRect` does not have a scope timer.
-Give it one before touching it, because 7 us will not show up in
-`shell.content`.
-
-## TD-2 — trimming one search snippet costs 0.25 ms
-
-`src/ui/TextUtil.cpp`, `snippetAroundMatch` and `ellipsizeToFit`.
-
-Fitting one matching line into the sidebar's column measures the whole line,
-bisects to find how much of the head to give up, and then bisects again inside
-`ellipsizeToFit` to trim the tail. Around eighteen measurements, and **every
-probe is a string nothing has measured before** — a unique substring of a unique
-line — so `TextMeasureCache` cannot help and each probe is a real shaping call.
-The probes are long, too: both bisections start from the whole string and work
-down, so the early probes measure hundreds of bytes to discover they do not fit.
-
-`sidebar.snippets_trimmed` is the counter.
-
-**Why it is still here.** It used to be paid 600 times in the frame after a
-keystroke in the search box, which was a 200-300 ms freeze per character; that
-is fixed, by trimming only the rows about to be drawn (d6e8c34). At 36 calls a
-query it is ~9 ms of the ~30 ms that frame still costs — worth having, no longer
-worth a risky change to text truncation.
-
-**What the fix is.** Predict instead of bisecting from the top. The full-line
-measurement is already taken for the early-out, so `width / bytes` gives an
-advance estimate; the fitting length is `bytes * maxWidth / width` to within a
-few characters for proportional text. Start the bracket there, verify, and widen
-only if the estimate was wrong. That turns ~18 long probes into ~3 short ones
-without weakening the guarantee, which is that a cut is only accepted once it
-has been *measured* to fit.
-
-`TextUtilTests` covers the edges — a match wider than the column, a match at
-either end, multi-byte code points — so the change is verifiable.
-
-## TD-3 — the sidebar's draw scans every row to find the visible ones
-
-`src/app/Sidebar.cpp`, `drawSidebar`.
-
-The draw loop walks `ui.sidebarRows` in full and tests each row against the
-list rect. Rows are laid out top to bottom in one pass, so `rect.y` is
-non-decreasing across the list and the visible band is two binary searches —
-which is exactly what `DocumentLayout::blockRange` is for the page, and for the
-same reason.
-
-**Cost.** ~400 iterations of a float comparison per frame on a 400-note library
-with folders open, to draw thirteen rows. A couple of microseconds. It is listed
-because it is O(library) per frame and the library is the thing that grows: at
-10,000 notes it is 10,000 comparisons a frame, and `sidebar.rows_drawn` will
-still read thirteen.
-
-**Why it is still here.** Two microseconds, and the loop body also assigns
-hover and drop-target state that a reader has to check does not depend on rows
-outside the band before narrowing it.
-
-**There is a second site.** `sidebarRowAt` in `src/app/SidebarModel.cpp` is the
-same linear walk, and it runs on every mouse-motion event rather than every
-frame — the cursor classifier asks it what is under the pointer. A pointer moved
-across the sidebar is a hundred events a second, so the same bound is paid more
-often there than in the draw. Both should take the same binary search, and they
-should take it from the same helper: a row list that is sorted by `rect.y` for
-the draw and searched linearly for the hit test is a list whose two readers
-disagree about what it is.
-
-## TD-4 — `turnBlocksInto` rescans its chunk once per block
-
-`src/doc/Edits.cpp`, `turnBlocksInto`.
-
-The multi-block turn-into copies the selected span into a `chunk`, then walks
-its blocks back to front calling `turnInto` on each — and each of those scans
-`chunk` again. O(blocks in the selection) scans of the selection.
-
-**Why it is still here.** Deliberately. Lending the chunk's partition to the
-inner calls *would* be safe, because the walk goes back to front and every
-rewrite lands at a higher offset than the next iteration reads — but that makes
-the correctness of the whole function depend on the loop's direction, with
-nothing at the point of the loop to say so. The cost is bounded by the
-selection, not by the note, and the scan of the *note* that this function used
-to pay for twice over is gone (f19e00c). See the comment in the loop.
-
-**What the fix is.** If it ever matters: rescan `chunk` once per iteration into
-a buffer the function owns, rather than lending a stale partition. Same
-complexity, no allocation per block.
-
-## TD-5 — the library directory is walked twice on startup
-
-Cross-reference: `docs/performance.md`, "Resolved: the library directory was
-walked three times on startup" — the third walk is still open at the end of that
-section, and `library.directory_entries_visited` reads 814 for a 401-note
-library because of it. The note there also names the deeper duplication: the
-index has already read every file and holds each one's id, path and title in
-SQLite, and the organization service then opens all of them again for those same
-three fields plus tags and icon. Two columns on the index would make the note
-list a `SELECT`.
-
 ## TD-6 — performance debt tracked in `docs/performance.md`
 
 Not repeated here. Each is a `### Open:` section with its own numbers:
 
 - an edit still touches every block below it (materialised positions vs. a
-  Fenwick tree)
+  Fenwick tree) — written down as the thing to reach for *if the shift shows
+  up*, not as a fix waiting to happen
 - `resolveFolds` is still O(blocks) on every edit *that has a fold in it*
 - `SourceBlock` is 88 bytes and holds a `std::string`
 - the staging tokens are built only to be thrown away
 - the harness cannot see the font path
-- `matchEdges` compares the whole buffer to find a one-byte edit
-- the live page's hooks are rebuilt every frame
 - the cache sweep frees what the next relayout is about to allocate
-  (unmeasured)
+  (unmeasured, and it undoes a decision that file already justified: measure
+  `peak_rss` before touching it)
 
-## TD-7 — the reading pane is a second renderer for the same Markdown
+## TD-9 — the reading pane is still a second renderer for the same Markdown
 
-`src/app/Application.cpp`, `drawViewer` — about 230 lines.
+`src/app/ReadingPane.cpp`.
 
 The live surface renders through `doc::BlockScan` and `doc::Layout` into
-`PageView`, which caches per block, lays out only what has changed, and draws
-only the visible band. The reading pane renders the same note a second time,
-from a separate md4c `markdown::Document`, with its own geometry written inline:
-its own indent step, its own quote gutter, its own callout tint and 7-pixel mark,
-its own task checkbox, its own code block, its own table, its own image scaling.
+`PageView`. The reading pane renders the same note a second time, from a
+separate md4c `markdown::Document`, with its own geometry: its own indent step,
+its own quote gutter, its own callout box, its own task checkbox, its own code
+block, its own table, its own image scaling.
 
-**What it costs today.**
+**What it costs today.** Divergence, and only divergence — the *speed* half of
+this is paid. The pane is memoised per block and bands its draw to the viewport
+now, so it costs 0.37 ms a frame on a 242 KB note where it used to cost 7.6 ms
+(`docs/performance.md`, "Resolved: the reading pane measured the whole note
+twice a frame"). What is left is that a change to how a callout, a quote or a
+list marker looks has to be made twice, and the two copies have already drifted
+three times: an Html block's bottom spacing, an image's rounding, and the
+callout label's case. The first two are fixed by there being one walk; the third
+is fixed by `ui::calloutLabel`, and the mark's geometry by
+`ui::kCalloutMarkSize` / `kCalloutMarkInset`. Those are three shared numbers
+against a whole second renderer.
 
-*Divergence.* The two have already drifted, and the comments in `drawViewer`
-admit it: `ui::calloutStyle` is called there with the note "the same palette the
-live surface uses, so a callout does not change colour when the note is read
-instead of edited" — a comment that only needs writing because the colour is the
-only thing the two share. The geometry is not shared: the callout mark is
-`markSize = 7.0f` at `callout.x + 6.0f` in both files, written out twice, and
-`PageView` lowercases a callout's kind for its label while the reading pane
-draws `block.admonitionType` as the author typed it.
+**Why it is still here — and this is the part the previous entry got wrong.**
+The old entry claimed "the live surface already draws everything the reading
+pane draws, minus the caret, the gutter handles and the block toolbar". That is
+not true, and pointing the reading pane at `PageView` today would *lose*
+features:
 
-*Speed.* It is O(document) per frame with no cache of any kind — the whole note
-measured, then the whole note walked again to draw it, where the live pane's
-equivalent is O(visible) after the first layout. Measured on a 371 KB note at
-1600x1000 (Release, three headless runs of 60 frames): `shell.content` is 23-65
-ms per frame in the reading pane, of which a scope timer put 94-96% in the
-measure walk. The live pane draws the same note in a fraction of that.
+- **Images.** `doc::InlineScan` treats `![alt](target)` as a link-styled text
+  run; the live surface never draws the bitmap. The reading pane loads the
+  texture, fits it to the column and to 55% of the page height, and falls back
+  to a placeholder line. Merging means `doc::Layout` learning that a block's
+  height can be a *texture's* height, and `PageView` learning to draw one —
+  which also means images start appearing while the note is being edited, which
+  is a product decision and not a refactor.
+- **Anchors.** An in-note `[#heading]` link and a footnote reference jump by
+  scrolling to a recorded offset. The reading pane's memo carries that map;
+  `PageView` has no notion of it.
+- **Footnote definitions** get a `[label]` drawn in the gutter, and md4c's
+  ordered-list numbering (`orderedNumber`) is honoured where the live scanner
+  derives its own.
 
-**Why it is still here.** It is a rewrite, not a fix: the reading pane would have
-to become `PageView` with the caret and the hover affordances off, which means
-`doc::Layout` growing a read-only mode and the anchors, the link regions and the
-image cache moving with it. That is worth doing and it is not worth doing under
-another change. The duplicate *scroll measurement* — the part that was costing a
-note-sized walk per mouse-motion event — is gone (`perf(viewer)`), which takes
-the sharp edge off it.
+**What the fix is, in order.** Give `doc::Layout` an image block — a measured
+height from a hook, the way `measureComplex` already works for tables — and
+`PageView` the draw for it. Then anchors, as a block-index-to-top query the page
+can answer. Then the reading pane becomes `PageView` with the caret, the gutter
+and the toolbar off, all three of which are already conditional on focus or
+hover, and the file deletes.
 
-**What the fix is.** Point the reading pane at `PageView`. The live surface
-already draws everything the reading pane draws, minus the caret, the gutter
-handles and the block toolbar, all of which are already conditional on focus or
-hover. The 230 lines then delete, and there is one Markdown renderer again.
+## TD-10 — `ClipGuard` does not nest
 
-## TD-8 — three empty-state rects with a height nobody measured
+`src/ui/Draw.h`.
 
-`src/app/Sidebar.cpp` `drawSidebarEmpty`, `src/app/RightPanel.cpp`, and
-`ui::drawEmptyMessage` itself.
+`ClipGuard`'s constructor sets the renderer's clip rect and its destructor sets
+it to `nullptr` — it clears the clip rather than restoring whatever was there
+before. So an inner guard's destructor drops an outer guard's clip, and every
+draw after that point in the outer scope is unclipped.
 
-Every caller of `drawEmptyMessage` passes a rect with a made-up height — 100,
-110, 120 — and the message lays its three lines out inside whatever it was
-given. Nothing checks that the lines fit, so at the large text size a
-three-line empty state can run past the box it was told about, and the box is
-not drawn so nobody notices until the text collides with something below it.
+**What it costs today: nothing, by luck.** The nested sites happen to be safe.
+`drawSidebar` holds a guard for the panel and a second for the list, and the
+second outlives every draw that needed the first. `drawReadingPane`'s empty
+message takes one inside the page's, and returns immediately after. That is a
+property of today's call sites, not of the code: the next `ClipGuard` written
+inside another one, with anything drawn after it, silently paints outside its
+pane — and the symptom is text over the tab strip, which reads as a layout bug
+rather than a clipping one.
 
-**Why it is still here.** Nothing is drawn below any of the three today, so the
-overflow is invisible. It is listed because that is a property of the current
-layout rather than of the code: the first surface that puts something under an
-empty state inherits the bug.
+**Why it is still here.** It has never bitten, and the fix wants care about what
+"restore" means: SDL's clip is a single rect, so a correct guard has to
+`SDL_GetRenderClipRect` in the constructor and put that back — and an inner
+clip should arguably *intersect* the outer one rather than replace it, which is
+a behaviour change at the two sites that currently rely on replacement.
 
-**What the fix is.** `drawEmptyMessage` should take an origin and a width and
-return the height it used, the way every other measured thing in the shell does.
-The callers then have a number instead of a guess.
+**What the fix is.** Save and restore in the guard, and intersect on
+construction. Then check the two nesting sites still draw what they drew: a
+`cmp` of two screenshots is the whole test.
+
+## TD-11 — nothing under `src/app/` can be tested
+
+`CMakeLists.txt`.
+
+`micronotes_tests` links `micronotes_core`, which is `src/core`, `src/doc`,
+`src/library` and most of `src/ui`. Everything under `src/app/` is compiled only
+into the `micronotes` executable, so no test can reach it.
+
+**What it costs today.** `src/app/` holds `PageView` (881 lines), the sidebar
+model, the reading pane, the tab strip, the frame policy and `Application.cpp`
+itself — and none of it has a unit test. The consequences show up as
+workarounds: `sidebarRowRange` is a four-line adapter over `ui::rowBand` in
+`src/ui/` purely so the search behind it could be tested at all, and the
+reading pane's correctness is checked by comparing screenshots because there is
+no way to call it. Both are the right shape for other reasons; neither should
+have been *forced*.
+
+**Why it is still here.** `src/app/Shell.h` pulls in SDL3, `PageView.h`,
+`ui/Draw.h` and `ui/Overlay.h`, so moving a file to the tested library moves
+that world with it — and `UiRuntime` holds an `AppState` by value, which a test
+would have to be able to construct.
+
+**What the fix is.** Two steps, and the first is worth doing alone: add the
+`src/app/` files whose only dependency is data (`SidebarModel.cpp`,
+`FramePolicy.cpp`, `Scroll.cpp`, `Tabs`-shaped things) to the library, and see
+what actually fails to link. The second is separating `UiRuntime` from the
+drawing headers, which is the same decomposition `Application.cpp`'s line budget
+is already pushing.

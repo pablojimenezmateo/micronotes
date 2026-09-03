@@ -1,8 +1,10 @@
 #include "ui/ShellLayout.h"
 
 #include "ui/Metrics.h"
+#include "ui/Settings.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace micronotes::ui {
 namespace {
@@ -80,6 +82,25 @@ ShellLayout computeShellLayout(const ShellLayoutInputs& inputs) {
   layout.rightPanel = {contentX + contentW, bodyY, right, paneHeight};
   layout.status = {0.0f, paneBottom, inputs.windowWidth, kStatusBarHeight};
   return layout;
+}
+
+Rect pageRectIn(Rect pane) {
+  return {pane.x + kPagePad, pane.y + kPagePad, std::max(0.0f, pane.w - kPagePad * 2.0f),
+          std::max(0.0f, pane.h - kPagePad * 2.0f - kPageBottomPad)};
+}
+
+PageColumn pageColumnIn(Rect page, float gutter) {
+  PageColumn column;
+  const float available = std::max(kPageMinColumn, page.w - kPageColumnPad);
+  column.width = std::min(available, pageWidthPx());
+  column.left = page.x + std::round((page.w - column.width) / 2.0f);
+  // Centring would put the column's left edge inside the gutter, so it stops
+  // being centred: the gutter keeps its room and the column takes the rest.
+  if(column.left < page.x + gutter) {
+    column.width = std::max(kPageMinColumn, page.w - gutter - kPageColumnPad / 2.0f);
+    column.left = page.x + gutter;
+  }
+  return column;
 }
 
 }

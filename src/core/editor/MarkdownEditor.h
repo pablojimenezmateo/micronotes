@@ -64,6 +64,32 @@ public:
   std::size_t wordEndAfter(std::size_t offset) const;
   bool undo();
   bool redo();
+
+  // The change that took the buffer from one revision to the next.
+  //
+  // Everything outside [start, oldEnd) of the buffer at `fromRevision`, and
+  // outside [start, newEnd) of the buffer at `toRevision`, is byte-for-byte
+  // unchanged. That is what a consumer holding the older buffer needs in order
+  // to bound work that is otherwise a pass over the whole note: the live
+  // layout's edit window is two `memcmp` passes summing to the length of the
+  // note, run to locate one typed character.
+  //
+  // Both revisions are here so a consumer can *check* rather than trust. One
+  // standing on some other revision -- two edits landed between its frames, or
+  // it skipped one -- sees a pair that does not match what it holds and falls
+  // back to comparing bytes. A whole-buffer replacement (setText, undo, redo)
+  // honestly reports the whole buffer, which bounds nothing and so needs no
+  // special case at either end.
+  //
+  // Zero for `toRevision` means nothing has changed yet.
+  struct TextChange {
+    std::uint64_t fromRevision = 0;
+    std::uint64_t toRevision = 0;
+    std::size_t start = 0;
+    std::size_t oldEnd = 0;
+    std::size_t newEnd = 0;
+  };
+  const TextChange& lastChange() const;
   // Ends the open typing run, so the next edit starts a fresh undo step.
   // Called on focus changes, saves, and anything structural.
   void breakUndoGroup();
@@ -103,10 +129,17 @@ private:
     bool selecting = false;
   };
 
-  // Every text mutation goes through here, so `dirty_` and `revision_` cannot
-  // drift apart: a site that forgets to mark the buffer changed also fails to
-  // save it, which is a bug nobody ships.
-  void markChanged();
+  // Every text mutation goes through here, so `dirty_`, `revision_` and
+  // `lastChange_` cannot drift apart: a site that forgets to mark the buffer
+  // changed also fails to save it, which is a bug nobody ships. It takes the
+  // span it changed rather than deriving it, so a new mutation cannot be added
+  // without saying what it touched -- `lastChange` is only sound while that
+  // holds, and a compile error is how it keeps holding.
+  void markChanged(std::size_t start, std::size_t oldEnd, std::size_t newEnd);
+  // The span half of the above, for the one site that bumps `revision_` itself
+  // because it is *not* an edit: `setText` replaces the buffer and clears the
+  // dirty flag rather than setting it.
+  void recordChange(std::size_t start, std::size_t oldEnd, std::size_t newEnd);
 
   void snapshot(EditKind kind);
   void closeEdit();
@@ -117,6 +150,7 @@ private:
   bool selecting_ = false;
   bool dirty_ = false;
   std::uint64_t revision_ = 0;
+  TextChange lastChange_;
   std::vector<Snapshot> undo_;
   std::vector<Snapshot> redo_;
   EditKind groupKind_ = EditKind::Structural;

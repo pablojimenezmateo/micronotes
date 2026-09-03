@@ -3,6 +3,7 @@
 #include "CoreAliases.h"
 
 #include "library/Library.h"
+#include "library/LibraryIndex.h"
 
 #include <filesystem>
 #include <optional>
@@ -34,7 +35,12 @@ struct NoteListItem {
 
 class OrganizationService {
 public:
-  explicit OrganizationService(const Library& library);
+  // The index is where the note list comes from: it has already read every
+  // note's front matter, so the list is a `SELECT` rather than a second walk of
+  // the library and a re-open of every file in it. The library is still here
+  // for the root path, and as the fallback for an index that would not open --
+  // a library whose SQLite file cannot be written must still list its notes.
+  OrganizationService(const Library& library, const LibraryIndex& index);
 
   // Every note in the library, sorted by title. The sidebar tree needs all of
   // them at once, not one folder at a time.
@@ -57,13 +63,15 @@ public:
 
 private:
   const Library& library_;
+  const LibraryIndex& index_;
   mutable std::optional<std::vector<NoteListItem>> notes_;
   // Keys are views into the ids in `notes_`, so this is filled by the same call
   // that finalises that vector and never outlives it.
-  mutable std::unordered_map<std::string_view, std::size_t> index_;
-  // Every directory under the root, library-relative, from the same walk that
-  // built `notes_`. The tree needs the empty ones, which the note list cannot
-  // name; before this they cost a second walk of the whole library.
+  mutable std::unordered_map<std::string_view, std::size_t> byId_;
+  // Every directory under the root, library-relative. Taken from the index's
+  // own refresh walk when the index is open, and from a walk of our own only on
+  // the fallback path. The tree needs the empty ones, which no list of notes
+  // can name.
   mutable std::vector<std::filesystem::path> directories_;
   mutable std::optional<std::vector<FolderNode>> folders_;
   mutable std::optional<std::vector<std::string>> tags_;

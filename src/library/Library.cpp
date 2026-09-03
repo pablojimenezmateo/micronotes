@@ -387,12 +387,6 @@ bool Library::restoreFromTrash(const std::string& name) const {
   return true;
 }
 
-std::vector<std::filesystem::directory_entry> Library::noteFileEntries() const {
-  std::vector<std::filesystem::directory_entry> files;
-  walk(&files, nullptr);
-  return files;
-}
-
 void Library::walk(std::vector<std::filesystem::directory_entry>* filesOut,
                    std::vector<std::filesystem::path>* directoriesOut) const {
   perf::addCounter(perf::CounterId::LibraryNoteFilesCalls);
@@ -432,7 +426,8 @@ void Library::walk(std::vector<std::filesystem::directory_entry>* filesOut,
 }
 
 std::vector<std::filesystem::path> Library::noteFiles() const {
-  const auto entries = noteFileEntries();
+  std::vector<std::filesystem::directory_entry> entries;
+  walk(&entries, nullptr);
   std::vector<std::filesystem::path> files;
   files.reserve(entries.size());
   for(const auto& entry : entries) files.push_back(entry.path());

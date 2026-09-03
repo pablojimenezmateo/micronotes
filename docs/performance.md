@@ -251,6 +251,11 @@ the window out and exits, so a session is a command rather than a sitting. It
 prints the same two tables the harness does, over the real renderer and the
 real faces.
 
+`tools/session-compare.sh <baseline-ref>` is the two-sided form of this, and is
+what to reach for when comparing a change against a commit: it builds both,
+alternates the runs, `cmp`s the pixels and diffs the counters. See "the harness
+cannot see the font path" below for why interleaving rather than averaging.
+
 It is also the **rendering regression check**. A layout optimisation is only
 safe if it cannot be observed, and the cheapest proof of that is the pixels:
 capture the same note in `live`, `viewer` and `split` before and after and
@@ -1438,11 +1443,26 @@ The shaping half still is not, and it is still the largest number left in the
 app: first paint is `Metrics::measure` being a font rather than a
 multiplication.
 
-**The session is now cheap enough to be the answer.** See "Running a real
-session without a screen" above: `Xvfb` plus `--screenshot` turns "open the app
-and watch it" into a command that prints both tables over the real renderer, and
-two of them alternated is an interleaved A/B of the font path. The same
-mechanism doubles as the rendering regression check.
+**The session is now cheap enough to be the answer, and it is a script.**
+`tools/session-compare.sh <ref>` builds the named commit in a worktree, builds
+the working tree, and runs both through the same headless session **alternated**
+-- baseline, working, baseline, working -- because the run-to-run spread on a
+real renderer is wider than a real regression. It prints the `shell.content`
+self time per round, `cmp`s the screenshots, and diffs the counters, which are
+deterministic and so are the half of the output that is signal rather than
+spread:
+
+```bash
+tools/session-compare.sh main                       # every pane, three rounds
+tools/session-compare.sh HEAD~3 --panes reading --rounds 2 \
+  --library ~/notes --select "Some Note"
+```
+
+That closes the actionable half of this entry: a change above the document
+layout can now be measured, and its pixels checked, in one command. What is
+still open is the *fixture*: `tools/PerfMain.cpp`'s budgets remain stubbed, so
+`run-checks.sh perf` still cannot see a shaping regression and a layout change
+still has to be taken to a session before it is believed.
 
 `src/ui/TextMeasureCache.{h,cpp}` is the answer on the app side, and a real
 session now says so: over a 185 KB note it reports 63,449 measure calls against
@@ -1459,30 +1479,65 @@ the call -- measured no difference across three interleaved sessions. And the
 direct-mapped measure cache is not thrashing: 98.5% is not a hit rate with room
 in it. What is left is the token staging below, which is the next thing to try.
 
-### Open: `matchEdges` compares the whole buffer to find a one-byte edit
+### Resolved: `matchEdges` compared the whole buffer to find a one-byte edit
 
-Every edit runs two `memcmp` passes -- forward to the first differing byte,
+Every edit ran two `memcmp` passes -- forward to the first differing byte,
 backward to the first differing byte from the end -- and on a small edit those
 two sum to about the length of the note. ~200 KB of `memcmp` to locate one typed
-character, and it is the largest single item left in a 16 us keystroke.
+character, and it was the largest single item left in a 16 us keystroke.
 
-It has a counter now. `layout.edit_bytes_matched` reads 34,835,299 over the
-harness run against `layout.source_bytes_copied`'s 2,459,143: **fourteen bytes
-read for every byte that moved.**
+`layout.edit_bytes_matched` read 34,835,299 over the harness run against
+`layout.source_bytes_copied`'s 2,459,143: **fourteen bytes read for every byte
+that moved.**
 
-It is there because `update` is handed a buffer and no account of what happened
-to it. The caller *does* know: every edit in `src/doc/Edits.h` returns the span it
-changed, and `LayoutOptions` already carries a `sourceRevision` stamp from the
-same caller for the same reason. An edited-span field beside it would make the
-window O(1) and leave the comparison as the fallback for a caller that does not
-offer one -- which is exactly how `sourceRevision` and `sourceMatches` already
-relate.
+It was there because `update` was handed a buffer and no account of what
+happened to it. The caller does know, and now says so. `MarkdownEditor` records
+the span of every mutation it makes -- `markChanged` takes the span rather than
+deriving it, so a new mutation cannot be added without stating what it touched
+-- and `LayoutOptions::editedSpan` carries that span with the two source
+revisions it took the buffer between.
 
-Not done because a *wrong* span is a silently wrong layout rather than a slow
-one, and the honest form of the change is to keep the comparison and use the
-caller's span to bound it: start the forward scan at the claimed start and the
-backward scan at the claimed end, so a caller that lies costs correctness nothing
-and only loses the speed-up.
+The honest form of the change, and the one that was made: **keep the comparison
+and use the claim to bound it.** The window starts at the claim instead of at
+the ends of the buffer, and the two loops then run exactly as they did -- they
+only ever widen the matched prefix and suffix, which narrows the window, so a
+true claim gives byte-for-byte the answer the full comparison gives. What
+changes is how much has to be read to get there.
+
+Three things make a bad claim cost speed rather than correctness:
+
+- **The stamps are checked, not trusted.** `claimFor` accepts a claim only when
+  its `fromRevision` is the stamp of the buffer the layout is standing on and
+  its `toRevision` is the stamp of the buffer it was handed. A frame that
+  handles two keystrokes produces a claim for the second edit only, its `from`
+  does not match, and it is discarded.
+- **The arithmetic is checked.** The bytes a claim leaves outside itself have to
+  come to the same count on each side -- `old.size() - oldEnd == new.size() -
+  newEnd` -- and nothing but a real edit of that span does.
+- **An absent claim is the old path.** Every stamp defaults to zero, which means
+  "cannot say", so the tests and the perf harness still compare bytes. That is
+  why `layout.edit_spans_compared` reads 183 and `edit_spans_used` reads zero in
+  `run-checks.sh perf`: the fixture has no editor behind it.
+
+`layout.edit_bytes_compared` is the new counter and the one to watch. It counts
+what the two passes actually **read**, where `edit_bytes_matched` counts the
+window they concluded; without a claim the two are equal, and the gap between
+them is the note the caller saved being read. On a 193 KB note, a one-byte
+insertion in the middle:
+
+| | bytes read to find the edit |
+| --- | --- |
+| comparing | 193,780 |
+| with the caller's span | **under 1,024** |
+
+`LayoutTests` pins both halves: `layout_uses_the_callers_edited_span_instead_of_comparing_the_note`
+asserts the byte count *and* that the result still agrees with a layout built
+from scratch, and
+`layout_discards_an_edited_span_that_describes_another_pair_of_buffers` asserts
+that a stale stamp, impossible arithmetic and an absent claim all fall back and
+all still land on the right answer. The random-edit walk carries a claim through
+every insertion and deletion of its 250 steps, against a from-scratch layout at
+each one.
 
 One thing that looks like a free win here and is not: skipping `sourceMatches`
 when the caller's source stamp says the buffer moved. It reads like a redundant
@@ -1490,28 +1545,39 @@ second pass over the same half of the note, and it is not one -- `sourceMatches`
 compares the *lengths* first, and every insertion and deletion changes the
 length, so on an ordinary keystroke it already returns without reading a byte.
 Four interleaved rounds put `type.middle` at 16 us with and without it. It was
-written, measured, and reverted; the counter above is what came out of the
-attempt.
+written, measured, and reverted.
 
-### Open: the live page's hooks are rebuilt every frame
+### Resolved: the live page's hooks were rebuilt every frame
 
-`drawLive` constructs a `PageViewHooks` and a `PageFolds` and moves them into
+`drawLive` constructed a `PageViewHooks` and a `PageFolds` and moved them into
 `ui.livePage` on every frame. Between them that is five `std::function`
 assignments, and each closure captures more than a `std::function`'s inline
-buffer holds -- so it is five heap allocations and five frees per frame, for
+buffer holds -- so it was five heap allocations and five frees per frame, for
 closures whose captures (the renderer, the text renderer, the runtime) do not
 change for the life of the process.
 
-Three of the five are the hooks, and those could be installed once. The two
-fold closures genuinely change with the selected note, and one of them exists or
-does not depending on whether that note has a fold -- but both could capture
-nothing and read the current selection when called, which would make them
-installable once as well.
+All five are installed once now, and `PageView::wired()` is how the caller knows
+whether it has done it. The three hooks were the easy half. The two fold
+closures looked like the hard half and were not: they capture the *runtime*
+rather than the note, and read the current selection and the current buffer when
+they are called, which is what makes installing them once correct rather than
+merely cheaper.
 
-Not done because five allocations against a frame that draws several hundred
-runs is not where a frame goes, and `PageView` would need a way to say whether
-it has been wired. Listed because "constructed per frame and thrown away" is the
-shape that was wrong in five other places in this file.
+Two things did have to move out of the closures, because they are per-frame data
+rather than per-frame behaviour:
+
+- `wikiLinkRevision` was a field of the hooks struct. It is
+  `PageView::setWikiLinkRevision` now.
+- Whether the selected note has *anything* collapsed was expressed by leaving
+  `PageFolds::collapsed` unset, and that distinction matters: a caller offering
+  no predicate lets the layout skip resolving folds over the whole block list,
+  where a predicate that always answers false costs a call per foldable block
+  per edit (see `resolveFolds`, above). The predicate stays installed and
+  `setFoldsActive` decides whether it is passed on, so the skip survives -- 
+  `layout.fold_resolutions_skipped` reads 60 of 60 frames before and after.
+
+`drawLive` itself moved to `src/app/LivePage.cpp` with the wiring, which is 70
+lines out of `Application.cpp`.
 
 ### Open (unmeasured): the cache sweep frees what the next relayout is about to allocate
 
@@ -1570,13 +1636,13 @@ held a reference to.
 
 ### Resolved: the library directory was walked three times on startup
 
-Two of the three are gone, and the third is left deliberately.
+All three are gone, and the deeper duplication behind two of them with them.
 
 `OrganizationService::folders()` ran its own `recursive_directory_iterator` a
 few microseconds after `notes()` had walked the same tree, because the only
 thing it needs that a list of notes cannot give it is the directories with *no*
-notes in them. `Library::walk` reports those alongside the files now, and both
-lists are memoised off the one scan. That walk had no counter, which is why it
+notes in them. `Library::walk` reports those alongside the files, and both lists
+are memoised off the one scan. That walk had no counter, which is why it
 survived: `library.directory_entries_visited` did not move when it went away.
 
 Every caller also re-derived each note's folder with `lexically_relative` plus
@@ -1587,16 +1653,63 @@ And `folders()` counted notes into folders with a `find_if` over the folder list
 per note, which on a library filed into as many folders as it has notes is
 quadratic; it is a hash lookup per note.
 
-What is left is two walks: one by the index refresh, which needs each
-`directory_entry`'s cached stat, and one by the organization service, which
-needs each note's front matter. Merging them means `AppState` doing the walk and
-handing it to both, which trades a self-contained memoisation for a shared one.
-At 1 ms per walk over 401 notes that is not yet worth the coupling -- but the
-deeper duplication is: the index has just read every file and has the id, path
-and title of all of them in SQLite, and the organization service then opens all
-of them again for the same three fields plus tags and icon. Two columns on the
-index would make the note list a `SELECT`.
+The third walk was the organization service's own, and behind it was the real
+duplication: the index refresh had *just* read every file and held each one's
+id, path and title in SQLite, and the organization service then opened all of
+them again for those same three fields plus tags and icon. Two columns closed
+it. `notes` carries `tags` and `icon` (schema 3, and the index is a cache of
+what is on disk, so an older shape is dropped and refilled by the next refresh
+rather than migrated), `LibraryIndex::notes()` is one `SELECT`, and the
+directories come from the refresh's own walk through
+`LibraryIndex::directories()`.
 
+| | before | after |
+| --- | --- | --- |
+| `app_state.open_select_and_list` (self) | 5.689 ms | **0.704 ms** |
+| `library.note_files_calls` (4 refreshes, 1,001 notes) | 5 | 4 |
+| `library.directory_entries_visited` | 5,018 | 4,014 |
+| note list built by | a walk + 1,001 file opens | `library_index.notes`, 0.616 ms |
+
+`library.note_rows_selected` is the counter that says the list came out of the
+index. The walk is still there as the fallback for an index that will not open
+-- a library whose SQLite file cannot be written must still list its notes --
+and `organization_falls_back_to_the_tree_without_an_index` is the test that says
+so.
+
+### Resolved: the reading pane measured the whole note twice a frame
+
+The reading pane renders the note through md4c, and it did so with no cache of
+any kind: one walk of the document to find how far it scrolls, and a second walk
+to paint it, both measuring every block's inline runs, on **every frame** --
+including the frames a hover caused.
+
+Measured on a 242 KB note at 1600x1000, Release, headless, 60 frames, twice
+each way:
+
+| | `shell.content` per frame | `frame.draw_micros` (60 frames) |
+| --- | --- | --- |
+| before | 7.6 ms / 7.5 ms | 466,648 / 456,918 |
+| after | **0.37 ms / 0.36 ms** | **30,654 / 29,396** |
+
+One walk now, memoised on the parsed note and the geometry, and the draw reads
+block tops out of it and bands to the viewport with the same two binary searches
+the live surface and the sidebar use (`ui::rowBand`). `viewer.blocks_measured`
+reads 5,611 once -- the note's block count -- and `viewer.blocks_drawn` reads 23
+a frame. `viewer.layout_builds` is 1 against `layout_reused`'s 59.
+
+Two things came free with having one walk instead of two. The image cache grew a
+`generation()`, because a texture that finishes loading changes the height of the
+block that shows it and the memo has to key on that. And the two walks had
+**disagreed** in three places -- an Html block's bottom spacing (the measure
+passed the real answer, the draw passed `false`), an image's rounding, and the
+callout label's case -- each of which is a scroll extent or a box that does not
+match the text in it. Two parallel walks of the same blocks is a shape that
+cannot be checked; one walk cannot drift from itself.
+
+The pane is `src/app/ReadingPane.cpp` now, which is 247 lines out of
+`Application.cpp`. What is *not* resolved is that it is still a second renderer
+for the same Markdown -- see `docs/tech-debt.md` TD-9, which records what the
+merge into `PageView` actually needs.
 
 ## The fifth pass: what the three instruments could not see
 
@@ -1777,7 +1890,19 @@ about to paint: `sidebar.snippets_trimmed` reads 36 where it read 600. Rows keep
 their own trimmed lines, so scrolling back over one does not trim it again, and
 the scroll-shift that keeps a scroll off the rebuild path is untouched.
 
-What remains in that ~30 ms is mostly the 36 trims themselves. See TD-2.
+What remained in that ~30 ms was mostly the 36 trims themselves, and most of
+*that* is gone too. Both searches inside `snippetAroundMatch` used to bisect
+down from the whole line, so the early probes measured hundreds of bytes to find
+out that hundreds of bytes do not fit -- around eighteen real shaping passes a
+snippet, because every probe is a unique substring of a unique line and the
+measure cache cannot serve one. The full-line measurement the early-out already
+takes gives an advance per byte, so the fitting length is a division and the
+search only has to confirm it: `sidebar.snippet_measures` reads 6 per snippet
+against `snippets_trimmed`. The guarantee is unchanged -- a cut is only accepted
+once it has been *measured* to fit -- and `TextUtilTests` checks the three trims
+against a linear reference over every code point boundary, under a measurer
+whose per-character widths vary by a factor of ten, which is what makes a wrong
+estimate cost probes rather than correctness.
 
 ### Where an idle frame goes now
 

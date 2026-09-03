@@ -169,8 +169,15 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   // An empty view has nothing to scroll, and the message says so where the rows
   // would have been.
   const auto empty = [&](std::string_view title, std::string_view detail, std::string_view keys = {}) {
-    setMaxScroll(ui, rect, 0.0f);
-    ui::drawEmptyMessage(text, title, detail, {list.x, list.y, list.w, list.h}, keys);
+    // The message's height is measured, not assumed, so a three-line empty
+    // state at the large text size scrolls like every other view in this panel
+    // instead of running off the bottom of it. Drawn at the standing scroll,
+    // which the previous frame clamped, and the height reported afterwards --
+    // the same order every list here uses.
+    ui::ClipGuard clip(renderer, list);
+    const float used = ui::drawEmptyMessage(text, title, detail, list.x,
+                                            list.y - static_cast<float>(ui.rightPanelScroll), list.w, keys);
+    setMaxScroll(ui, rect, used);
   };
 
   if(ui.state.selection().noteId.empty()) {

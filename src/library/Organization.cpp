@@ -6,33 +6,60 @@
 
 namespace micronotes::library {
 
-OrganizationService::OrganizationService(const Library& library) : library_(library) {}
+OrganizationService::OrganizationService(const Library& library, const LibraryIndex& index)
+    : library_(library), index_(index) {}
 
 const std::vector<NoteListItem>& OrganizationService::notes() const {
   if(notes_) return *notes_;
   std::vector<NoteListItem> notes;
-  // One walk of the tree, not two. `folders()` used to run a second
-  // `recursive_directory_iterator` over the same directories a few
-  // microseconds after this one, because the only thing it needed that a list
-  // of notes cannot give it is the folders with no notes in them.
-  std::vector<std::filesystem::directory_entry> files;
-  library_.walk(&files, &directories_);
-  notes.reserve(files.size());
-  for(const auto& entry : files) {
-    const auto& path = entry.path();
-    auto metadata = library_.loadNoteMetadata(path);
-    // One `lexically_relative` per note, here, rather than one per note per
-    // caller. Its `generic_string` form is also what the fallback id is made
-    // from, so the two share the single call.
-    auto relative = path.lexically_relative(library_.root());
-    notes.push_back({
-      metadata.id.empty() ? fallbackNoteId(relative.generic_string()) : metadata.id,
-      path,
-      metadata.title.empty() ? path.stem().string() : metadata.title,
-      std::move(metadata.tags),
-      std::move(metadata.icon),
-      relative.parent_path(),
-    });
+  // From the index, which has already read every note. The refresh that runs
+  // before this opens each changed file once and writes its id, path, title,
+  // tags and icon to SQLite -- which is the whole of what a note list needs --
+  // so the list is one statement. It used to be a second recursive walk of the
+  // library and a re-open plus a front-matter parse of every note in it, a few
+  // microseconds after the refresh had read the same files for the same fields.
+  auto indexed = index_.notes();
+  if(!indexed.empty()) {
+    notes.reserve(indexed.size());
+    for(auto& row : indexed) {
+      // `relativePath` is what the index stores, so the absolute path is a join
+      // and the folder is its parent -- neither needs `lexically_relative`.
+      auto folder = row.relativePath.parent_path();
+      notes.push_back({
+        std::move(row.id),
+        library_.root() / row.relativePath,
+        std::move(row.title),
+        std::move(row.tags),
+        std::move(row.icon),
+        std::move(folder),
+      });
+    }
+    // The directories come from the refresh's own walk, so the startup is one
+    // walk of the tree rather than two.
+    directories_ = index_.directories();
+  } else {
+    // No index -- it would not open, or it is genuinely empty. Either way the
+    // notes have to come from the tree, and the walk that finds them reports
+    // the directories alongside them.
+    std::vector<std::filesystem::directory_entry> files;
+    library_.walk(&files, &directories_);
+    notes.reserve(files.size());
+    for(const auto& entry : files) {
+      const auto& path = entry.path();
+      auto metadata = library_.loadNoteMetadata(path);
+      // One `lexically_relative` per note, here, rather than one per note per
+      // caller. Its `generic_string` form is also what the fallback id is made
+      // from, so the two share the single call.
+      auto relative = path.lexically_relative(library_.root());
+      notes.push_back({
+        metadata.id.empty() ? fallbackNoteId(relative.generic_string()) : metadata.id,
+        path,
+        metadata.title.empty() ? path.stem().string() : metadata.title,
+        std::move(metadata.tags),
+        std::move(metadata.icon),
+        relative.parent_path(),
+      });
+    }
   }
   std::sort(notes.begin(), notes.end(), [](const auto& lhs, const auto& rhs) {
     return lhs.title < rhs.title;
@@ -42,9 +69,9 @@ const std::vector<NoteListItem>& OrganizationService::notes() const {
   // `notes_` -- cannot outlive or predate the vector they point into. Two notes
   // carrying the same front-matter id resolve to the last of them, which is
   // what the linear scan this replaces did as well.
-  index_.clear();
-  index_.reserve(notes_->size());
-  for(std::size_t i = 0; i < notes_->size(); ++i) index_[(*notes_)[i].id] = i;
+  byId_.clear();
+  byId_.reserve(notes_->size());
+  for(std::size_t i = 0; i < notes_->size(); ++i) byId_[(*notes_)[i].id] = i;
   return *notes_;
 }
 
@@ -109,8 +136,8 @@ std::vector<NoteListItem> OrganizationService::notesWithTag(const std::string& t
 
 const NoteListItem* OrganizationService::noteById(std::string_view noteId) const {
   const auto& list = notes();
-  const auto found = index_.find(noteId);
-  return found == index_.end() ? nullptr : &list[found->second];
+  const auto found = byId_.find(noteId);
+  return found == byId_.end() ? nullptr : &list[found->second];
 }
 
 std::optional<NoteListItem> OrganizationService::findNote(std::string_view noteId) const {

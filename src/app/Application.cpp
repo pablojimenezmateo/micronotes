@@ -6,6 +6,8 @@
 #include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
 #include "app/PageHeader.h"
+#include "app/LivePage.h"
+#include "app/ReadingPane.h"
 #include "app/SessionState.h"
 #include "app/Ribbon.h"
 #include "app/Scroll.h"
@@ -118,15 +120,6 @@ using micronotes::ui::theme;
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
 // The shell's geometry, as a pure function of the window and the shell model.
-static const markdown::Document& previewDocument(UiRuntime& ui) {
-  const auto& source = ui.editor.text();
-  if(!ui.cachedMarkdownDocument || ui.cachedMarkdownSource != source) {
-    ui.cachedMarkdownSource = source;
-    ui.cachedMarkdownDocument = ui.parser.parse(ui.cachedMarkdownSource);
-  }
-  return *ui.cachedMarkdownDocument;
-}
-
 // Block transforms arrive as one erase-and-insert, so they land on the editor's
 // single undo stack instead of keeping state of their own.
 static bool applyEdit(UiRuntime& ui, const doc::Edit& edit) {
@@ -789,10 +782,6 @@ static bool spawnDetached(const std::vector<std::string>& command) {
 
 
 
-static Rect viewerPageRect(Rect viewerRect) {
-  return {viewerRect.x + 8.0f, viewerRect.y + 8.0f, viewerRect.w - 16.0f, viewerRect.h - 28.0f};
-}
-
 // A hidden panel has no edge to grab: its width is zero, so its right edge sits
 // on top of the next panel's left one and dragging there would resize a panel
 // nobody can see.
@@ -804,93 +793,6 @@ static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
   return nearEdge(layout.sidebar) ||
          (!ui::empty(layout.rightPanel) &&
           std::abs(x - layout.rightPanel.x) <= ui::kResizeGutterInflate + 1.0f);
-}
-
-static std::vector<std::string> codeBlockLines(const markdown::Block& block) {
-  auto lines = splitLines(blockText(block));
-  if(lines.size() > 1 && lines.back().empty()) lines.pop_back();
-  if(lines.empty()) lines.emplace_back();
-  return lines;
-}
-
-static std::vector<markdown::Inline> blockImages(const markdown::Block& block) {
-  std::vector<markdown::Inline> out;
-  for(const auto& inlineItem : block.inlines) {
-    if(inlineItem.type == markdown::InlineType::Image) out.push_back(inlineItem);
-  }
-  return out;
-}
-
-static std::string anchorFor(std::string value) {
-  std::string out;
-  bool pendingDash = false;
-  for(unsigned char c : value) {
-    if(std::isalnum(c)) {
-      if(pendingDash && !out.empty()) out.push_back('-');
-      out.push_back(static_cast<char>(std::tolower(c)));
-      pendingDash = false;
-    } else if(!out.empty()) {
-      pendingDash = true;
-    }
-  }
-  return out;
-}
-
-// A block's own text style. Headings scale by level; code uses the mono face.
-// Notion caps the reading measure so long lines stay readable; extra width
-// becomes margin rather than more characters per line.
-static void contentColumn(Rect page, float& left, float& width) {
-  const float available = std::max(80.0f, page.w - 28.0f);
-  width = std::min(available, ui::pageWidthPx());
-  left = page.x + std::round((page.w - width) / 2.0f);
-}
-
-
-static float listMarkerWidth(const markdown::Block& block) {
-  if(block.type == markdown::BlockType::OrderedItem) return 26.0f;
-  if(block.type == markdown::BlockType::UnorderedItem) return 18.0f;
-  return 0.0f;
-}
-
-static float blockBottomSpacing(const markdown::Block& block, bool heading, bool html) {
-  if(block.type == markdown::BlockType::BlankLine) return 0.0f;
-  if(block.type == markdown::BlockType::OrderedItem || block.type == markdown::BlockType::UnorderedItem) return 2.0f;
-  return heading ? 14.0f : html ? 8.0f : 10.0f;
-}
-
-// The room a callout's chrome takes before its first word: the mark in the
-// gutter, the kind's name, and the gaps either side. The measure and the draw
-// both read it, so the label cannot be drawn into space nobody reserved.
-// Where a callout's name starts, measured from the box's left edge: clear of
-// the mark that sits in the gutter beside it.
-constexpr float kAdmonitionLabelLeft = 18.0f;
-
-static float admonitionLabelWidth(TextRenderer& text, const markdown::Block& block) {
-  if(block.type != markdown::BlockType::Admonition) return 0.0f;
-  const auto label = block.admonitionType.empty() ? "note" : block.admonitionType;
-  return kAdmonitionLabelLeft + static_cast<float>(text.width(label, false, false, true)) + 10.0f;
-}
-
-static float footnoteLabelWidth(TextRenderer& text, const markdown::Block& block) {
-  if(block.type != markdown::BlockType::Footnote) return 0.0f;
-  const auto label = "[" + (block.footnoteLabel.empty() ? std::string("*") : block.footnoteLabel) + "]";
-  return static_cast<float>(text.width(label)) + 12.0f;
-}
-
-static std::string imagePlaceholder(const markdown::Inline& image, const UiRuntime& ui, attachments::AttachmentService& attachmentService) {
-  if(isRemoteTarget(image.target) || !ui.state.hasLibrary()) return "[remote image skipped: " + image.target + "]";
-  try {
-    const auto path = attachmentService.resolveManaged(ui.state.libraryRoot(), image.target);
-    if(!attachmentService.isSupportedImage(path)) return "[image link: " + image.target + "]";
-  } catch(const std::exception&) {
-    return "[unsafe image path]";
-  }
-  return "[image unavailable: " + image.target + "]";
-}
-
-static float imagePlaceholderHeight(TextRenderer& text, std::string_view placeholder, float width) {
-  const auto lines = wrapText(text, placeholder, static_cast<int>(width), false, true);
-  return static_cast<float>(std::max<std::size_t>(1, lines.size()) * (text.lineHeight() + 2) + 8);
 }
 
 // One place where a sidebar row turns into a selection, so a click, an arrow
@@ -1046,7 +948,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   }
 
   if(hasViewer && contains(viewerRect, x, y)) {
-    const Rect page = viewerPageRect(viewerRect);
+    const Rect page = ui::pageRectIn(viewerRect);
     if(scrollbarHit(page, ui.viewerScroll, ui.viewerMaxScroll, x, y)) {
       return CursorKind::Pointer;
     }
@@ -1056,323 +958,6 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   }
 
   return CursorKind::Default;
-}
-
-static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, Rect rect) {
-  fill(renderer, rect, theme().viewerBg);
-  Rect page {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
-  // No border. A rule around a page that fills its pane draws a box nobody is
-  // outside of; which pane has the keyboard is said by the focus edge instead.
-  ui::fillRounded(renderer, page, theme().pageSurface, ui::kRadiusMedium);
-  ui::drawFocusEdge(renderer, page, ui.focus == FocusArea::Viewer);
-  attachments::AttachmentService attachmentService;
-  const auto& doc = previewDocument(ui);
-  // The same reservation viewerMaxScroll() makes, for the same reason: the
-  // header is part of the note's scrolling space, above its first block.
-  const float headerHeight = pageHeaderHeight(text, ui);
-  const float scrollTop = page.y + 14.0f;
-  const float contentTop = scrollTop + headerHeight;
-  float contentLeft = 0.0f;
-  float contentWidth = 0.0f;
-  contentColumn(page, contentLeft, contentWidth);
-  float measureY = contentTop;
-  int orderedIndex = 1;
-  int footnoteIndex = 1;
-  ui.viewerAnchors.clear();
-  for(const auto& block : doc.blocks) {
-    const bool heading = block.type == markdown::BlockType::Heading;
-    const bool code = block.type == markdown::BlockType::Code;
-    const bool ordered = block.type == markdown::BlockType::OrderedItem;
-    const bool rule = block.type == markdown::BlockType::HorizontalRule;
-    const bool table = block.type == markdown::BlockType::Table;
-    const bool footnote = block.type == markdown::BlockType::Footnote;
-    const bool html = block.type == markdown::BlockType::Html;
-    const bool blankLine = block.type == markdown::BlockType::BlankLine;
-    if(!ordered) orderedIndex = 1;
-    if(heading) {
-      const auto anchor = anchorFor(blockText(block));
-      if(!anchor.empty()) ui.viewerAnchors[anchor] = static_cast<int>(std::max(0.0f, measureY - contentTop));
-    } else if(footnote && !block.footnoteLabel.empty()) {
-      ui.viewerAnchors["fn-" + block.footnoteLabel] = static_cast<int>(std::max(0.0f, measureY - contentTop));
-      ui.viewerAnchors["fn-" + std::to_string(footnoteIndex++)] = static_cast<int>(std::max(0.0f, measureY - contentTop));
-    }
-    const float indentW = static_cast<float>(std::max(0, block.depth - 1)) * 14.0f;
-    const float markerW = listMarkerWidth(block);
-    const float quoteW = block.type == markdown::BlockType::Quote ? 16.0f : 0.0f;
-    const ui::TextStyle blockStyle = blockTextStyle(block);
-    if(blankLine) {
-      measureY += static_cast<float>(text.lineHeight());
-    } else if(rule) {
-      measureY += 22.0f;
-    } else if(table) {
-      measureY += tableHeight(text, block, contentWidth - indentW) + 12.0f;
-    } else if(code) {
-      const auto lines = codeBlockLines(block);
-      measureY += static_cast<float>(std::max<std::size_t>(1, lines.size()) * lineStepFor(text, blockStyle, 1.5f)) + 18.0f;
-    } else {
-      const auto value = blockText(block);
-      if(!value.empty()) {
-        const auto runs = inlineRuns(block, theme().text);
-        const int lineStep = blockLineStep(text, block);
-        const float chromeW = markerW + quoteW + indentW + admonitionLabelWidth(text, block) + footnoteLabelWidth(text, block);
-        measureY += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(contentWidth - chromeW), blockStyle.size) * lineStep) + blockBottomSpacing(block, heading, html);
-      }
-      for(const auto& image : blockImages(block)) {
-        float imageW = 0;
-        float imageH = 0;
-        float renderedH = imagePlaceholderHeight(text, imagePlaceholder(image, ui, attachmentService), contentWidth);
-        if(!isRemoteTarget(image.target) && ui.state.hasLibrary()) {
-          try {
-            const auto path = attachmentService.resolveManaged(ui.state.libraryRoot(), image.target);
-            SDL_Texture* texture = images.load(path, imageW, imageH);
-            if(texture && imageW > 0 && imageH > 0) {
-              const float maxW = std::max(40.0f, std::min(contentWidth, 720.0f));
-              const float maxH = std::max(40.0f, page.h * 0.55f);
-              const float scale = std::min(1.0f, maxW / imageW);
-              renderedH = imageH * std::min(scale, maxH / imageH) + 14.0f;
-            }
-          } catch(const std::exception&) {
-          }
-        }
-        measureY += renderedH;
-      }
-    }
-    if(ordered) ++orderedIndex;
-  }
-  // Recorded rather than recomputed. There used to be a second copy of the walk
-  // above -- a whole-document measure, block by block, each one measuring its
-  // inline runs -- called to answer "is the pointer over the scrollbar" on every
-  // mouse motion, and again per motion event for the length of a scrollbar drag.
-  // The reading pane now says how far it can be scrolled the way the live pane
-  // always did: the draw is the one thing that has laid the note out, so the
-  // draw is what knows.
-  ui.viewerMaxScroll = std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
-  ui.viewerScroll = std::clamp(ui.viewerScroll, 0, ui.viewerMaxScroll);
-  {
-    ClipGuard clip(renderer, {page.x + 1, page.y + 1, page.w - 2, page.h - 2});
-    drawPageHeader(renderer, text, ui, {contentLeft, scrollTop, contentWidth, headerHeight},
-                   scrollTop - static_cast<float>(ui.viewerScroll));
-    float y = contentTop - static_cast<float>(ui.viewerScroll);
-    orderedIndex = 1;
-    for(const auto& block : doc.blocks) {
-      const bool heading = block.type == markdown::BlockType::Heading;
-      const bool code = block.type == markdown::BlockType::Code;
-      const bool ordered = block.type == markdown::BlockType::OrderedItem;
-      const bool unordered = block.type == markdown::BlockType::UnorderedItem;
-      const bool quote = block.type == markdown::BlockType::Quote;
-      const bool rule = block.type == markdown::BlockType::HorizontalRule;
-      const bool table = block.type == markdown::BlockType::Table;
-      const bool admonition = block.type == markdown::BlockType::Admonition;
-      const bool footnote = block.type == markdown::BlockType::Footnote;
-      const bool blankLine = block.type == markdown::BlockType::BlankLine;
-      if(!ordered) orderedIndex = 1;
-      const float indentW = static_cast<float>(std::max(0, block.depth - 1)) * 14.0f;
-      const float markerW = listMarkerWidth(block);
-      const float quoteW = quote ? 16.0f : 0.0f;
-      const float extraW = admonitionLabelWidth(text, block) + footnoteLabelWidth(text, block);
-      const float textX = contentLeft + indentW + markerW + quoteW + extraW;
-      const ui::TextStyle blockStyle = blockTextStyle(block);
-      if(blankLine) {
-        y += static_cast<float>(text.lineHeight());
-      } else if(rule) {
-        if(y + 12.0f >= page.y && y <= page.y + page.h) {
-          hLine(renderer, contentLeft + indentW, contentLeft + contentWidth, y + 8.0f, theme().divider);
-        }
-        y += 22.0f;
-      } else if(table) {
-        const float blockH = tableHeight(text, block, contentWidth - indentW);
-        if(y + blockH >= page.y && y <= page.y + page.h) {
-          drawTable(renderer, text, ui.linkRegions, block, {contentLeft + indentW, y, contentWidth - indentW, blockH});
-        }
-        y += blockH + 12.0f;
-      } else if(code) {
-        const auto lines = codeBlockLines(block);
-        const float blockH = static_cast<float>(std::max<std::size_t>(1, lines.size()) * lineStepFor(text, blockStyle, 1.5f)) + 10.0f;
-        Rect codeRect {contentLeft + indentW, y - 6.0f, contentWidth - indentW, blockH};
-        if(codeRect.y + codeRect.h >= page.y && codeRect.y <= page.y + page.h) {
-          ui::fillRounded(renderer, codeRect, theme().codeBg, ui::kRadiusSmall);
-          float codeY = y;
-          for(const auto& codeLine : lines) {
-            text.draw(ellipsizeToWidth(text, codeLine, static_cast<int>(codeRect.w - 20.0f), false, true), codeRect.x + 10.0f, codeY, theme().text, blockStyle);
-            codeY += static_cast<float>(lineStepFor(text, blockStyle, 1.5f));
-          }
-        }
-        y += blockH + 8.0f;
-      } else {
-        const auto value = blockText(block);
-        if(!value.empty()) {
-          const auto runs = inlineRuns(block, theme().text);
-          const int lineStep = blockLineStep(text, block);
-          const float blockWidth = contentWidth - indentW - markerW - quoteW - extraW;
-          const float blockH = static_cast<float>(measureInlineLines(text, runs, static_cast<int>(blockWidth), blockStyle.size) * lineStep);
-          if(quote && y + blockH >= page.y && y <= page.y + page.h) {
-            fill(renderer, {contentLeft + indentW, y - 2.0f, 3.0f, blockH + 2.0f}, theme().divider);
-          }
-          if(admonition && y + blockH >= page.y && y <= page.y + page.h) {
-            // The same palette the live surface uses, so a callout does not
-            // change colour when the note is read instead of edited.
-            const ui::CalloutStyle callStyle = ui::calloutStyle(block.admonitionType);
-            Rect callout {contentLeft + indentW, y - 7.0f, contentWidth - indentW, blockH + 12.0f};
-            ui::fillRounded(renderer, callout, callStyle.surface, ui::kRadiusMedium);
-            const float markSize = 7.0f;
-            ui::fillRounded(renderer, {std::round(callout.x + 6.0f),
-                                       std::round(y + (static_cast<float>(text.lineHeight()) - markSize) / 2.0f),
-                                       markSize, markSize},
-                            callStyle.accent, markSize / 2.0f);
-            const auto label = block.admonitionType.empty() ? "note" : block.admonitionType;
-            text.draw(label, callout.x + kAdmonitionLabelLeft, y, callStyle.accent, false, false, true);
-          }
-          if(footnote && y + blockH >= page.y && y <= page.y + page.h) {
-            const auto label = block.footnoteLabel.empty() ? "*" : block.footnoteLabel;
-            text.draw("[" + label + "]", contentLeft + indentW, y, theme().accent);
-          }
-          if(ordered && y + blockH >= page.y && y <= page.y + page.h) {
-            const int number = block.orderedNumber > 0 ? block.orderedNumber : orderedIndex;
-            text.draw(std::to_string(number) + ".", contentLeft + indentW, y, theme().muted);
-          } else if(unordered && y + blockH >= page.y && y <= page.y + page.h) {
-            if(block.task) {
-              Rect box {contentLeft + indentW, y + 3.0f, 13.0f, 13.0f};
-              if(block.taskChecked) {
-                ui::fillRounded(renderer, box, theme().accent, ui::kRadiusSmall);
-                const SDL_Color tick = theme().onAccent;
-                SDL_SetRenderDrawColor(renderer, tick.r, tick.g, tick.b, tick.a);
-                SDL_RenderLine(renderer, box.x + 3.0f, box.y + 6.5f, box.x + 5.5f, box.y + 9.0f);
-                SDL_RenderLine(renderer, box.x + 5.5f, box.y + 9.0f, box.x + 10.0f, box.y + 4.0f);
-              } else {
-                ui::strokeRounded(renderer, box, theme().dim, ui::kRadiusSmall);
-              }
-            } else {
-              text.draw("\u2022", contentLeft + indentW, y, theme().muted);
-            }
-          }
-          if(y + blockH >= page.y && y <= page.y + page.h) {
-            drawInlineRuns(renderer, text, &ui.linkRegions, runs, textX, y, static_cast<int>(blockWidth), lineStep, blockStyle.size);
-          }
-          y += blockH + blockBottomSpacing(block, heading, false);
-        }
-        for(const auto& image : blockImages(block)) {
-          float imageW = 0;
-          float imageH = 0;
-          SDL_Texture* texture = nullptr;
-          std::string placeholder = imagePlaceholder(image, ui, attachmentService);
-          if(!isRemoteTarget(image.target) && ui.state.hasLibrary()) {
-            try {
-              const auto path = attachmentService.resolveManaged(ui.state.libraryRoot(), image.target);
-              if(attachmentService.isSupportedImage(path)) {
-                texture = images.load(path, imageW, imageH);
-              }
-            } catch(const std::exception&) {
-            }
-          }
-          if(texture && imageW > 0 && imageH > 0) {
-            const float maxW = std::max(40.0f, std::min(contentWidth, 720.0f));
-            const float maxH = std::max(40.0f, page.h * 0.55f);
-            const float scale = std::min(1.0f, maxW / imageW);
-            const float finalScale = std::min(scale, maxH / imageH);
-            SDL_FRect dst {contentLeft, std::round(y), std::round(imageW * finalScale), std::round(imageH * finalScale)};
-            if(dst.y + dst.h >= page.y && dst.y <= page.y + page.h) {
-              SDL_RenderTexture(renderer, texture, nullptr, &dst);
-              ui.linkRegions.push_back({{dst.x, dst.y, dst.w, dst.h}, image.target});
-            }
-            y += dst.h + 14.0f;
-          } else {
-            const auto lines = wrapText(text, placeholder, static_cast<int>(contentWidth), false, true);
-            float placeholderY = y;
-            const bool clickablePlaceholder = isRemoteTarget(image.target);
-            for(const auto& line : lines) {
-              if(placeholderY + text.lineHeight() >= page.y && placeholderY <= page.y + page.h) {
-                const auto lineW = static_cast<float>(text.width(line, false, true));
-                text.draw(line, contentLeft, placeholderY, clickablePlaceholder ? theme().accent : theme().dim, false, true);
-                if(clickablePlaceholder && lineW > 0.0f) {
-                  ui.linkRegions.push_back({{contentLeft, placeholderY, lineW, static_cast<float>(text.lineHeight())}, image.target});
-                  hLine(renderer, contentLeft, contentLeft + lineW, placeholderY + static_cast<float>(text.lineHeight() - 2), theme().accentDim);
-                }
-              }
-              placeholderY += static_cast<float>(text.lineHeight() + 2);
-            }
-            y = placeholderY + 8.0f;
-          }
-        }
-      }
-      if(ordered) ++orderedIndex;
-    }
-    if(doc.blocks.empty()) {
-      drawEmptyMessage(text, "Nothing to read yet", "This note has no text in it.", page,
-                       ui.state.workspace().paneMode() == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
-    }
-  }
-  drawVerticalScrollbar(renderer, page, ui.viewerScroll, ui.viewerMaxScroll);
-}
-
-
-static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  PageViewHooks hooks;
-  hooks.measureComplex = [&text, &ui](const doc::SourceBlock& block, float width) {
-    return measureComplexBlock(text, ui, block, width);
-  };
-  // Asked once per wikilink per layout, so the answer is memoised against the
-  // library's refresh generation rather than re-listing every note per link.
-  hooks.wikiLinkResolves = [&ui](std::string_view target) {
-    return wikiLinkResolves(ui, target);
-  };
-  hooks.wikiLinkRevision = ui.wikiNotesRevision;
-  hooks.drawComplex = [renderer, &text, &ui](const doc::SourceBlock& block, Rect area) {
-    drawComplexBlock(renderer, text, ui, block, area);
-  };
-  ui.livePage.setHooks(std::move(hooks));
-
-  auto folds = noteFolds(ui.folds, ui.editor, ui.state.selection().noteId);
-  ui.livePage.setFolds(std::move(folds.page));
-  // The source stamp is the editor's revision; +1 because zero means "cannot
-  // say" to the layout's reuse check.
-  ui.livePage.setRevisions(ui.editor.revision() + 1ull, folds.stamp);
-  ui.livePage.setPointer(ui.mouseX, ui.mouseY);
-  ui.livePage.setBlockSelection({ui.blockSelectActive, ui.blockSelectAnchor, ui.blockSelectFocus});
-  ui.livePage.setDropOffset(ui.draggingBlock ? ui.blockDropOffset : std::nullopt);
-  ui.livePage.setSelecting(ui.selectingEditorText);
-  // Measured before the layout, because the header is room the page has to
-  // reserve at the top of its scrolling space rather than something drawn over
-  // it afterwards.
-  ui.livePage.setHeaderHeight(pageHeaderHeight(text, ui));
-  ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), rect);
-
-  // Leaving a block that was dropped to raw text hands it back to md4c.
-  if(const auto raw = ui.livePage.rawOffset()) {
-    const auto& blocks = ui.livePage.document().blocks();
-    const auto index = doc::blockIndexAt(blocks, std::min(*raw, ui.editor.text().size()));
-    const auto& block = blocks[index];
-    const auto cursor = ui.editor.cursor();
-    if(cursor < block.start || cursor >= block.end) {
-      ui.livePage.setRawOffset(std::nullopt);
-      ui.livePage.layout(text, ui.editor.text(), cursor, rect);
-    }
-  }
-
-  if(ui.revealEditorCursor) {
-    ui.livePage.revealCaret(ui.editor.cursor());
-    ui.revealEditorCursor = false;
-  }
-  PageSelection selection;
-  if(ui.editor.hasSelection()) {
-    selection.start = ui.editor.selectionStart();
-    selection.end = ui.editor.selectionEnd();
-  }
-  ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.find.text());
-  {
-    // Clipped to the page, so the header scrolls off the top rather than
-    // running up over the tab strip on its way out.
-    const ui::ClipGuard clip(renderer, ui.livePage.pageRect());
-    const Rect header = ui.livePage.headerRect();
-    drawPageHeader(renderer, text, ui, header, header.y);
-  }
-  for(const auto& link : ui.livePage.links()) ui.linkRegions.push_back({link.rect, link.target, link.wiki});
-  if(ui.editor.text().empty()) {
-    // On the content column rather than the page edge, so the prompt sits
-    // exactly where the first character typed will appear.
-    const Rect column = ui.livePage.columnRect();
-    const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().body};
-    text.draw("Write something. Press / for a block.", column.x, column.y, theme().dim, style);
-  }
 }
 
 // One frame of the whole window. Every surface it calls is timed separately:
@@ -1429,12 +1014,12 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     // the app is for before it says which key to press.
     drawEmptyMessage(text, "Open a folder of notes",
                      "micronotes reads and writes plain Markdown files in one local folder. Nothing leaves your disk.",
-                     {layout.content.x + 18, layout.content.y + 40, layout.content.w - 36, 130},
+                     layout.content.x + 18.0f, layout.content.y + 40.0f, layout.content.w - 36.0f,
                      ui::keysFor(ui::ActionId::Settings) + "  Settings          or start with  --library <path>");
   } else if(ui.state.selection().noteId.empty()) {
     fill(renderer, layout.content, theme().editorBg);
     drawEmptyMessage(text, "Nothing open", "Pick a note from the sidebar, or start a new one.",
-                     {layout.content.x + 18, layout.content.y + 40, layout.content.w - 36, 130},
+                     layout.content.x + 18.0f, layout.content.y + 40.0f, layout.content.w - 36.0f,
                      ui::keysFor(ui::ActionId::GoToNote) + "  go to note          " + ui::keysFor(ui::ActionId::NewNote) +
                      "  new note          " + ui::keysFor(ui::ActionId::Shortcuts) + "  every shortcut");
   } else {
@@ -1445,12 +1030,12 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     } else if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
       drawEditor(renderer, text, ui, content);
     } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
-      drawViewer(renderer, text, images, ui, content);
+      drawReadingPane(renderer, text, images, ui, content);
     } else {
       const float split = content.w / 2.0f;
       drawEditor(renderer, text, ui, {content.x, content.y, split, content.h});
       fill(renderer, {content.x + split, content.y, 1, content.h}, theme().hairline);
-      drawViewer(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
+      drawReadingPane(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
     }
   }
   {
@@ -2503,7 +2088,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       viewerRect = {layout.content.x + editorRect.w, layout.content.y, layout.content.w - editorRect.w, layout.content.h};
     }
     if(hasEditor) {
-      Rect writing {editorRect.x + 8, editorRect.y + 8, editorRect.w - 16, editorRect.h - 28};
+      const Rect writing = editorWritingRect(editorRect);
       const int maxScroll = editorMaxScroll(text, ui, editorRect);
       const auto thumb = scrollbarThumb(writing, ui.editorScroll, maxScroll);
       if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
@@ -2515,7 +2100,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       }
     }
     if(hasViewer) {
-      Rect page {viewerRect.x + 8, viewerRect.y + 8, viewerRect.w - 16, viewerRect.h - 28};
+      const Rect page = ui::pageRectIn(viewerRect);
       const int maxScroll = ui.viewerMaxScroll;
       const auto thumb = scrollbarThumb(page, ui.viewerScroll, maxScroll);
       if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
@@ -2634,9 +2219,9 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
           const auto anchorPart = hash == std::string::npos ? std::string() : target.substr(hash + 1);
           if(filePart.empty() && !anchorPart.empty()) {
             const auto anchor = anchorFor(anchorPart);
-            auto found = ui.viewerAnchors.find(anchor);
-            if(found == ui.viewerAnchors.end()) found = ui.viewerAnchors.find(anchorPart);
-            if(found != ui.viewerAnchors.end()) {
+            auto found = ui.viewerLayout.anchors.find(anchor);
+            if(found == ui.viewerLayout.anchors.end()) found = ui.viewerLayout.anchors.find(anchorPart);
+            if(found != ui.viewerLayout.anchors.end()) {
               ui.viewerScroll = std::max(0, found->second);
               ui.focus = FocusArea::Viewer;
               ui.status = "Jumped to " + anchorPart;
@@ -2654,8 +2239,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
             const auto sameNote = filePart.empty() || (note && (note->item.path.filename() == std::filesystem::path(filePart).filename()));
             if(sameNote) {
               const auto anchor = anchorFor(anchorPart);
-              auto found = ui.viewerAnchors.find(anchor);
-              if(found != ui.viewerAnchors.end()) {
+              auto found = ui.viewerLayout.anchors.find(anchor);
+              if(found != ui.viewerLayout.anchors.end()) {
                 ui.viewerScroll = std::max(0, found->second);
                 ui.focus = FocusArea::Viewer;
                 ui.status = "Jumped to " + anchorPart;
@@ -3130,7 +2715,7 @@ int run(ApplicationOptions options) {
           } else if(ui.scrollDragTarget == ScrollDragTarget::Editor) {
             Rect editorRect = layout.content;
             if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
-            Rect writing {editorRect.x + 8, editorRect.y + 8, editorRect.w - 16, editorRect.h - 28};
+            const Rect writing = editorWritingRect(editorRect);
             const int maxScroll = editorMaxScroll(text, ui, editorRect);
             ui.editorScroll = scrollFromThumbY(writing, event.motion.y, ui.scrollDragOffsetY, maxScroll);
             ui.revealEditorCursor = false;
@@ -3140,7 +2725,7 @@ int run(ApplicationOptions options) {
               const float split = layout.content.w / 2.0f;
               viewerRect = {layout.content.x + split, layout.content.y, layout.content.w - split, layout.content.h};
             }
-            Rect page {viewerRect.x + 8, viewerRect.y + 8, viewerRect.w - 16, viewerRect.h - 28};
+            const Rect page = ui::pageRectIn(viewerRect);
             ui.viewerScroll = scrollFromThumbY(page, event.motion.y, ui.scrollDragOffsetY, ui.viewerMaxScroll);
           }
         } else if(ui.draggingNote || ui.draggingFolder) {

@@ -432,14 +432,49 @@ static std::pair<std::size_t, std::size_t> diffSpan(const std::uint8_t* a, const
   return {low, high};
 }
 
+LayoutOptions::EditedSpan DocumentLayout::claimFor(const LayoutOptions& options) const {
+  const auto& claim = options.editedSpan;
+  if(claim.fromRevision == 0 || claim.toRevision == 0) return {};
+  if(sourceRevision_ == 0 || options.sourceRevision == 0) return {};
+  if(claim.fromRevision != sourceRevision_ || claim.toRevision != options.sourceRevision) return {};
+  return claim;
+}
+
 DocumentLayout::EditWindow DocumentLayout::matchEdges(std::string_view oldSource,
-                                                     std::string_view newSource) {
+                                                     std::string_view newSource,
+                                                     const LayoutOptions::EditedSpan& claim) {
   // A block at a time through `memcmp`, which is vectorised, then a byte at a
   // time to land exactly. Byte-at-a-time throughout was 70 microseconds over a
   // 200 KB note -- as much as the walk this whole comparison exists to shorten.
   constexpr std::size_t kChunk = 64;
   const std::size_t limit = std::min(oldSource.size(), newSource.size());
   EditWindow window;
+  // Where the caller says the edit is, when the claim is about these two
+  // buffers. The checks are the whole safety argument: the span has to fit
+  // inside both buffers, and the bytes it leaves outside itself have to be the
+  // same count on each side -- an insertion of n and a deletion of m leave
+  // old.size() - oldEnd == new.size() - newEnd, and nothing else does. A claim
+  // that fails either test is discarded rather than trusted, and the loops
+  // below then start where they always did.
+  //
+  // Both loops only widen the matched prefix and suffix -- which narrows the
+  // window -- so starting them at the claim gives the same answer it gives from
+  // zero whenever the claim is true, and the counter says how much reading it
+  // saved.
+  std::size_t seededPrefix = 0;
+  std::size_t seededSuffix = 0;
+  if(claim.fromRevision != 0 && claim.toRevision != 0 && claim.start <= claim.oldEnd &&
+     claim.start <= claim.newEnd && claim.oldEnd <= oldSource.size() &&
+     claim.newEnd <= newSource.size() &&
+     oldSource.size() - claim.oldEnd == newSource.size() - claim.newEnd) {
+    perf::addCounter(perf::CounterId::LayoutEditSpansUsed);
+    window.prefix = std::min(claim.start, limit);
+    window.suffix = std::min(oldSource.size() - claim.oldEnd, limit - window.prefix);
+    seededPrefix = window.prefix;
+    seededSuffix = window.suffix;
+  } else {
+    perf::addCounter(perf::CounterId::LayoutEditSpansCompared);
+  }
   while(window.prefix + kChunk <= limit &&
         std::memcmp(oldSource.data() + window.prefix, newSource.data() + window.prefix, kChunk) == 0) {
     window.prefix += kChunk;
@@ -449,6 +484,7 @@ DocumentLayout::EditWindow DocumentLayout::matchEdges(std::string_view oldSource
   }
 
   const std::size_t tailLimit = limit - window.prefix;
+  window.suffix = std::min(window.suffix, tailLimit);
   while(window.suffix + kChunk <= tailLimit &&
         std::memcmp(oldSource.data() + oldSource.size() - window.suffix - kChunk,
                     newSource.data() + newSource.size() - window.suffix - kChunk, kChunk) == 0) {
@@ -460,6 +496,13 @@ DocumentLayout::EditWindow DocumentLayout::matchEdges(std::string_view oldSource
     ++window.suffix;
   }
   perf::addCounter(perf::CounterId::LayoutEditBytesMatched, window.prefix + window.suffix);
+  // What the two passes actually read, as against what they concluded. Without
+  // a claim the two are the same number; with one, the difference is the note
+  // the caller saved us reading. `seededSuffix` can exceed the final suffix,
+  // because the clamp against `tailLimit` only ever reduces it.
+  perf::addCounter(perf::CounterId::LayoutEditBytesCompared,
+                   (window.prefix - seededPrefix) +
+                     (window.suffix > seededSuffix ? window.suffix - seededSuffix : 0));
   return window;
 }
 
@@ -757,7 +800,7 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
     // rather than against a copy of it. Taking this window first is what lets
     // everything below be a patch: the source, the block list and the placement
     // are all carried forward through it instead of rebuilt.
-    const EditWindow window = matchEdges(source_, source);
+    const EditWindow window = matchEdges(source_, source, claimFor(options));
     const std::size_t previousBytes = source_.size();
     // The layout keeps its own copy of the buffer because every run of every
     // cached block points into it, and the caller's buffer is not the layout's
@@ -1365,11 +1408,35 @@ const BlockLayout* DocumentLayout::layoutForOffset(std::size_t offset, std::size
   return placed_[index].layout;
 }
 
-// TD-1: this walks every row of the caret's block and every run of every row,
-// which is nothing for a paragraph and 7.1 us per frame for a caret at the end
-// of a 4,000-line fence. `runs` is monotone in `srcStart`, so the row is a
-// binary search away; see docs/tech-debt.md for why that has not been done.
+// A block's runs are monotonically non-decreasing in `srcStart` and in
+// `srcEnd`: `Flow` emits them in group order, groups are filled in source
+// order, `splitWord` emits its pieces in order, the hidden opening fence is
+// pushed in front of the first line's content, and `appendTrailingLine` appends
+// the largest offset last. `LayoutTests` asserts that invariant over a corpus,
+// because the two searches below depend on it.
+//
+// The line owning run `index`. Lines are emitted in order and own contiguous
+// half-open ranges of the block's run array, so the owner is a binary search.
+// An empty line at `index` is stepped over, which is what the linear scan did.
+namespace {
+
+const VisualLine* lineOwningRun(const BlockLayout& layout, std::size_t index,
+                                std::uint64_t& probes) {
+  std::size_t lo = 0;
+  std::size_t hi = layout.lines.size();
+  while(lo < hi) {
+    ++probes;
+    const std::size_t mid = lo + (hi - lo) / 2;
+    if(layout.lines[mid].runEnd <= index) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo == layout.lines.size() ? nullptr : &layout.lines[lo];
+}
+
+}
+
 Rect DocumentLayout::caretRect(std::size_t offset) const {
+  const perf::ScopeTimer timer("layout.caret_rect");
   Rect rect {0.0f, 0.0f, 2.0f, options_.type.body * options_.type.lineHeightRatio};
   std::size_t blockIndex = 0;
   const BlockLayout* layout = layoutForOffset(offset, &blockIndex);
@@ -1378,29 +1445,30 @@ Rect DocumentLayout::caretRect(std::size_t offset) const {
   // Cached runs address their own block, so the caret offset comes down to it.
   const std::size_t local = offset - blocks_[blockIndex].start;
 
-  const TextRun* best = nullptr;
-  const VisualLine* bestLine = nullptr;
-  const TextRun* before = nullptr;
-  const VisualLine* beforeLine = nullptr;
-  for(const auto& line : layout->lines) {
-    for(const auto& run : layout->runsOf(line)) {
-      if(local >= run.srcStart && local < run.srcEnd) {
-        best = &run;
-        bestLine = &line;
-        break;
-      }
-      if(run.srcEnd <= local) {
-        before = &run;
-        beforeLine = &line;
-      }
-    }
-    if(best) break;
+  // The first run that has not already ended at or before the caret. Every run
+  // before it ended earlier, so the last of those is the linear scan's
+  // `before`; every run after it starts later, so none of them can contain the
+  // caret either. One partition point answers both questions.
+  std::uint64_t probes = 0;
+  std::size_t lo = 0;
+  std::size_t hi = layout->runs.size();
+  while(lo < hi) {
+    ++probes;
+    const std::size_t mid = lo + (hi - lo) / 2;
+    if(layout->runs[mid].srcEnd <= local) lo = mid + 1;
+    else hi = mid;
   }
-  if(!best) {
-    best = before;
-    bestLine = beforeLine;
-  }
-  if(!best) {
+
+  std::size_t chosen = layout->runs.size();
+  if(lo < layout->runs.size() && layout->runs[lo].srcStart <= local) chosen = lo;
+  else if(lo > 0) chosen = lo - 1;   // the last run that ended before the caret
+
+  const TextRun* best = chosen < layout->runs.size() ? &layout->runs[chosen] : nullptr;
+  const VisualLine* bestLine =
+      best ? lineOwningRun(*layout, chosen, probes) : nullptr;
+  perf::addCounter(perf::CounterId::LayoutCaretQueries);
+  perf::addCounter(perf::CounterId::LayoutCaretProbes, probes);
+  if(!best || !bestLine) {
     bestLine = &layout->lines.front();
     rect.x = layout->textLeft;
     rect.y = top + bestLine->y;

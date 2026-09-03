@@ -39,6 +39,31 @@ static std::string columnText(sqlite3_stmt* stmt, int index) {
   return text ? reinterpret_cast<const char*>(text) : std::string();
 }
 
+// Tags round-trip through one column as a space-separated list. A tag cannot
+// hold whitespace -- `ui::splitTags` is what parses one, and it splits on it --
+// so this is lossless, and it keeps the row a row rather than a second table
+// joined on every note list.
+static std::string joinTagList(const std::vector<std::string>& tags) {
+  std::string out;
+  for(const auto& tag : tags) {
+    if(!out.empty()) out.push_back(' ');
+    out += tag;
+  }
+  return out;
+}
+
+static std::vector<std::string> splitTagList(std::string_view value) {
+  std::vector<std::string> tags;
+  std::size_t i = 0;
+  while(i < value.size()) {
+    while(i < value.size() && value[i] == ' ') ++i;
+    const std::size_t start = i;
+    while(i < value.size() && value[i] != ' ') ++i;
+    if(i > start) tags.emplace_back(value.substr(start, i - start));
+  }
+  return tags;
+}
+
 static std::string lowerCopy(std::string value) {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return value;
@@ -199,7 +224,13 @@ bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
 //    row's own. Version 1 filed it under an auto-assigned rowid and carried a
 //    redundant `id` column, so the fts row for a note could only be found by
 //    scanning the whole index.
-static constexpr int kSchemaVersion = 2;
+// 3: `notes` carries `tags` and `icon`. Those two fields are the only things
+//    the sidebar's note list needed that the index did not already hold, and
+//    without them the note list was a second recursive walk of the library and
+//    a re-open plus a front-matter parse of every note in it -- immediately
+//    after the refresh had read the same files for the same fields. Two
+//    columns turn that into a `SELECT`.
+static constexpr int kSchemaVersion = 3;
 
 bool LibraryIndex::migrate() {
   if(!db_.isOpen()) return false;
@@ -207,26 +238,30 @@ bool LibraryIndex::migrate() {
   // No PRAGMA statements here: journal_mode, synchronous and foreign_keys are
   // applied by SqliteDb::open, because the latter two are per-connection and
   // setting them during migration configured only migration's own connection.
-  bool ok =
-    db.exec("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, mtime INTEGER NOT NULL, size INTEGER NOT NULL, body TEXT NOT NULL);") &&
-    // One row per (note, target it names). `target` is the text as written --
-    // resolution happens at query time so a rename does not invalidate rows.
-    db.exec("CREATE TABLE IF NOT EXISTS links(src_id TEXT NOT NULL, target TEXT NOT NULL, line TEXT NOT NULL, PRIMARY KEY(src_id, target));") &&
-    db.exec("CREATE INDEX IF NOT EXISTS links_target ON links(target COLLATE NOCASE);");
-  if(!ok) return false;
-
   int version = 0;
   if(Statement versionStmt = db.prepare("PRAGMA user_version;"); versionStmt) {
     if(sqlite3_step(versionStmt) == SQLITE_ROW) version = sqlite3_column_int(versionStmt, 0);
   }
-  // An index written by an older build has its fts rows under rowids that mean
-  // nothing to `notes`, so it is rebuilt rather than repaired -- the content is
-  // all in `notes` already, which is what makes that one statement.
-  if(version < kSchemaVersion) ok = ok && db.exec("DROP TABLE IF EXISTS notes_fts;");
-  ok = ok && db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, body, path);");
+
+  // The index is a cache of what is on disk, so an older shape is dropped and
+  // refilled rather than migrated. `refreshChangedFiles` then finds every file
+  // changed and re-reads each one exactly once, which is what migrating the
+  // rows would have cost anyway -- and there is no second code path holding an
+  // older schema's assumptions about the rows it is reading.
+  bool ok = true;
+  if(version < kSchemaVersion) {
+    ok = db.exec("DROP TABLE IF EXISTS notes_fts;") && db.exec("DROP TABLE IF EXISTS notes;") &&
+         db.exec("DROP TABLE IF EXISTS links;");
+  }
+  ok = ok &&
+    db.exec("CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, path TEXT NOT NULL, title TEXT NOT NULL, mtime INTEGER NOT NULL, size INTEGER NOT NULL, tags TEXT NOT NULL, icon TEXT NOT NULL, body TEXT NOT NULL);") &&
+    // One row per (note, target it names). `target` is the text as written --
+    // resolution happens at query time so a rename does not invalidate rows.
+    db.exec("CREATE TABLE IF NOT EXISTS links(src_id TEXT NOT NULL, target TEXT NOT NULL, line TEXT NOT NULL, PRIMARY KEY(src_id, target));") &&
+    db.exec("CREATE INDEX IF NOT EXISTS links_target ON links(target COLLATE NOCASE);") &&
+    db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, body, path);");
   if(ok && version < kSchemaVersion) {
-    ok = db.exec("INSERT INTO notes_fts(rowid,title,body,path) SELECT rowid,title,body,path FROM notes;") &&
-         db.exec("PRAGMA user_version=" + std::to_string(kSchemaVersion) + ";");
+    ok = db.exec("PRAGMA user_version=" + std::to_string(kSchemaVersion) + ";");
   }
   return ok;
 }
@@ -241,12 +276,15 @@ bool LibraryIndex::rebuild() {
     return false;
   }
 
-  Statement noteStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?);");
+  Statement noteStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,tags,icon,body) VALUES(?,?,?,?,?,?,?,?);");
   Statement ftsStmt = db.prepare("INSERT INTO notes_fts(rowid,title,body,path) VALUES(?,?,?,?);");
   Statement linkStmt = db.prepare("INSERT OR REPLACE INTO links(src_id,target,line) VALUES(?,?,?);");
 
   Library library(root_);
-  for(const auto& path : library.noteFiles()) {
+  std::vector<std::filesystem::directory_entry> entries;
+  library.walk(&entries, &directories_);
+  for(const auto& entry : entries) {
+    const auto& path = entry.path();
     perf::addCounter(perf::CounterId::LibraryIndexFilesScanned);
     const auto note = library.loadNote(path);
     const auto relative = path.lexically_relative(root_).generic_string();
@@ -263,7 +301,9 @@ bool LibraryIndex::rebuild() {
     bindText(noteStmt, 3, title);
     sqlite3_bind_int64(noteStmt, 4, static_cast<sqlite3_int64>(mtime));
     sqlite3_bind_int64(noteStmt, 5, static_cast<sqlite3_int64>(size));
-    bindText(noteStmt, 6, note.body);
+    bindText(noteStmt, 6, joinTagList(note.metadata.tags));
+    bindText(noteStmt, 7, note.metadata.icon);
+    bindText(noteStmt, 8, note.body);
     sqlite3_step(noteStmt);
 
     // The fts row takes the note row's own rowid. See `refreshChangedFiles`:
@@ -333,7 +373,9 @@ bool LibraryIndex::refreshChangedFiles() {
 
   {
   perf::ScopeTimer scanTimer("library_index.refresh.scan_tree");
-  for(const auto& entry : library.noteFileEntries()) {
+  std::vector<std::filesystem::directory_entry> entries;
+  library.walk(&entries, &directories_);
+  for(const auto& entry : entries) {
     const auto& path = entry.path();
     auto relative = path.lexically_relative(root_).generic_string();
     // Both of these read the directory_entry's cached stat, so this is one
@@ -373,7 +415,7 @@ bool LibraryIndex::refreshChangedFiles() {
   if(hasWork) {
     if(!db.exec("BEGIN IMMEDIATE;")) return false;
 
-    Statement upsertStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,body) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,body=excluded.body;");
+    Statement upsertStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,tags,icon,body) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,tags=excluded.tags,icon=excluded.icon,body=excluded.body;");
     // The fts row is addressed by rowid, and the rowid it carries is the note
     // row's own. `id` in `notes_fts` is UNINDEXED -- fts5 stores it and builds
     // no index over it -- so `DELETE ... WHERE id=?` was a full scan of the
@@ -410,7 +452,9 @@ bool LibraryIndex::refreshChangedFiles() {
         bindText(upsertStmt, 3, title);
         sqlite3_bind_int64(upsertStmt, 4, static_cast<sqlite3_int64>(file.mtime));
         sqlite3_bind_int64(upsertStmt, 5, static_cast<sqlite3_int64>(file.size));
-        bindText(upsertStmt, 6, note.body);
+        bindText(upsertStmt, 6, joinTagList(note.metadata.tags));
+        bindText(upsertStmt, 7, note.metadata.icon);
+        bindText(upsertStmt, 8, note.body);
         ok = sqlite3_step(upsertStmt) == SQLITE_DONE;
         if(!ok) break;
 
@@ -559,6 +603,33 @@ std::vector<Backlink> LibraryIndex::backlinks(std::string_view title, std::strin
 
 std::size_t LibraryIndex::size() const {
   return rows_.size();
+}
+
+bool LibraryIndex::isOpen() const {
+  return db_.isOpen();
+}
+
+std::vector<IndexedNote> LibraryIndex::notes() const {
+  perf::ScopeTimer timer("library_index.notes");
+  std::vector<IndexedNote> notes;
+  if(!db_.isOpen()) return notes;
+  Statement stmt = db_.prepare("SELECT id,path,title,tags,icon FROM notes;");
+  if(!stmt) return notes;
+  while(sqlite3_step(stmt) == SQLITE_ROW) {
+    perf::addCounter(perf::CounterId::LibraryNoteRowsSelected);
+    notes.push_back(IndexedNote {
+      columnText(stmt, 0),
+      std::filesystem::path(columnText(stmt, 1)),
+      columnText(stmt, 2),
+      splitTagList(columnText(stmt, 3)),
+      columnText(stmt, 4),
+    });
+  }
+  return notes;
+}
+
+const std::vector<std::filesystem::path>& LibraryIndex::directories() const {
+  return directories_;
 }
 
 }

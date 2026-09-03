@@ -18,6 +18,15 @@
   X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
   X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \
+  /* Note-list rows read back out of the index instead of off the disk. The    */   \
+  /* sidebar's list needs an id, a path, a title, tags and an icon per note,   */   \
+  /* and the refresh has just read every changed file and written all five to  */   \
+  /* SQLite -- so the list is one statement. It used to be a second recursive  */   \
+  /* walk of the library plus an open and a front-matter parse of every note   */   \
+  /* in it, microseconds after the refresh read the same files for the same    */   \
+  /* fields. Read against note_files_calls: that should now be one walk per    */   \
+  /* refresh, and zero per note list.                                          */   \
+  X(LibraryNoteRowsSelected, "library.note_rows_selected")                             \
   X(LibrarySearchCalls, "library.search_calls")                                        \
   /* --- crash recovery ----------------------------------------------------- */      \
   /* Recovery copies posted against recovery copies actually written. A post is  */    \
@@ -73,6 +82,14 @@
   /* how many it uses.                                                           */    \
   X(SidebarRowsBuilt, "sidebar.rows_built")                                            \
   X(SidebarRowsDrawn, "sidebar.rows_drawn")                                            \
+  /* Visible-band lookups over the row list, and the binary-search steps they  */    \
+  /* took. Both readers of the list share them: the draw asks once a frame and  */    \
+  /* the hit test asks once per mouse-motion event, which is the hundred-a-     */    \
+  /* second one. Each used to walk every row -- 400 float compares to draw      */    \
+  /* thirteen on a 400-note library, and O(library) per frame as the library    */    \
+  /* grows. probes/queries should sit near 2*log2(rows).                        */    \
+  X(SidebarRowRangeQueries, "sidebar.row_range_queries")                               \
+  X(SidebarRowRangeProbes, "sidebar.row_range_probes")                                 \
   X(SidebarRowsReused, "sidebar.rows_reused")                                          \
   /* Search snippets trimmed to the sidebar's column. One is ~0.25 ms: it       */    \
   /* measures the whole matching line and then bisects, and every probe is a    */    \
@@ -82,6 +99,13 @@
   /* first frame of a query and zero thereafter, and against a 200-result       */    \
   /* query's 600 lines it must never be all of them in one frame.               */    \
   X(SidebarSnippetsTrimmed, "sidebar.snippets_trimmed")                                \
+  /* Shaping passes those trimmings paid for. Read against snippets_trimmed:    */   \
+  /* it was around eighteen a snippet, because both bisections started from the */   \
+  /* whole line and worked down. The full-line measurement the early-out already*/   \
+  /* takes gives an advance per byte, so the fitting length is a division and   */   \
+  /* the search only has to confirm it -- three or four probes a snippet, near  */   \
+  /* the answer's own length rather than the line's.                            */   \
+  X(SidebarSnippetMeasures, "sidebar.snippet_measures")                                \
   X(TreeRowsBuilt, "tree.rows_built")                                                  \
   /* The right panel's two memos: derivations performed against derivations   */    \
   /* served from the cache. Every one of its three views was rebuilt per frame, */    \
@@ -134,6 +158,20 @@
   /* account of what it did to it. Read against source_bytes_copied: the ratio   */    \
   /* is how much of the note was read to find how little of it moved.            */    \
   X(LayoutEditBytesMatched, "layout.edit_bytes_matched")                                \
+  /* ...and how many of those the comparison actually had to read. Without a     */    \
+  /* caller's span the two are the same number, and the gap between them is the  */    \
+  /* note the caller saved being read. This is the one to watch: matched is the   */    \
+  /* window's size, which a claim establishes without touching a byte.           */    \
+  X(LayoutEditBytesCompared, "layout.edit_bytes_compared")                             \
+  /* Updates whose caller said where it had edited, against updates that had to  */    \
+  /* find out by comparing. edit_bytes_matched read fourteen bytes for every one */    \
+  /* that moved -- two memcmp passes summing to the length of the note, to       */    \
+  /* locate one typed character -- and a claim turns that into the length of the */    \
+  /* edit. spans_compared should be the updates a claim cannot cover: the first   */    \
+  /* layout of a note, an unstamped caller, and a frame that handled two         */    \
+  /* keystrokes at once.                                                          */    \
+  X(LayoutEditSpansUsed, "layout.edit_spans_used")                                     \
+  X(LayoutEditSpansCompared, "layout.edit_spans_compared")                             \
   X(LayoutSourceBytesCopied, "layout.source_bytes_copied")                             \
   X(LayoutSourceBytesMoved, "layout.source_bytes_moved")                               \
   X(LayoutKeyBytesHashed, "layout.key_bytes_hashed")                                   \
@@ -203,6 +241,14 @@
   /* paid a pass over every row in the document.                                  */   \
   X(LayoutRowIndexQueries, "layout.row_index_queries")                                 \
   X(LayoutRowIndexProbes, "layout.row_index_probes")                                   \
+  /* Caret rectangles asked for, and the binary-search steps they took. The     */   \
+  /* caret is drawn once a frame and its block used to be walked row by row and  */   \
+  /* run by run, which is free for a paragraph and 7.1 us for a caret at the end */   \
+  /* of a 4,000-line fence -- one `SourceBlock` holding thousands of rows. Both  */   \
+  /* the run and its owning line are found by partition point now, so probes     */   \
+  /* should sit near log2(runs) + log2(rows) rather than near their sum.         */   \
+  X(LayoutCaretQueries, "layout.caret_queries")                                        \
+  X(LayoutCaretProbes, "layout.caret_probes")                                          \
   /* Fold predicate calls. Answered per block per update, and each answer that is */   \
   /* not the cheap early-out builds a fold key string.                            */   \
   X(LayoutFoldQueries, "layout.fold_queries")                                          \
@@ -256,4 +302,15 @@
   /* so scan_bytes counts one pass per edit and highlights_drawn counts the window */  \
   /* rather than the note. Both are zero when nothing is being searched.           */  \
   X(PageFindScanBytes, "page.find_scan_bytes")                                         \
-  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")
+  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")                             \
+  /* --- reading pane ---------------------------------------------------------- */    \
+  /* The reading pane renders the note through md4c, and it used to do so with   */    \
+  /* no cache of any kind: one walk of the whole document to measure it and a    */    \
+  /* second to draw it, on every frame. layout_builds against layout_reused is   */    \
+  /* the memo working -- builds should track the typing rate and reused should    */    \
+  /* track the frame count -- and blocks_measured against blocks_drawn is the     */    \
+  /* other half: a build costs the note, a frame costs the window.               */    \
+  X(ViewerLayoutBuilds, "viewer.layout_builds")                                        \
+  X(ViewerLayoutReused, "viewer.layout_reused")                                        \
+  X(ViewerBlocksMeasured, "viewer.blocks_measured")                                    \
+  X(ViewerBlocksDrawn, "viewer.blocks_drawn")

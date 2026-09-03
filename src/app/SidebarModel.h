@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <utility>
+#include <vector>
 #include <string_view>
 
 // The sidebar's row list: what rows exist, where each one sits, and which one
@@ -81,17 +83,40 @@ void buildSidebarRows(UiRuntime& ui, ui::Rect rect, const SidebarMetrics& metric
 
 // Trims row `index`'s matching lines to the column, once. Called by the draw for
 // the rows it is about to paint rather than by the build for all of them:
-// trimming one line measures it and then bisects with a measurement per probe,
-// and every probe is a string nothing has measured before, so it costs about
-// 0.25 ms and the measure cache cannot help. A 200-result query carries 600 of
-// them -- 150 ms and up in the first frame after a keystroke in the search box,
-// to produce the three dozen lines a sidebar can show.
+// trimming one line measures it and then searches with a measurement per probe,
+// and every probe is a string nothing has measured before, so the measure cache
+// cannot help. A 200-result query carries 600 of them -- which was 150 ms and
+// up in the first frame after a keystroke in the search box, to produce the
+// three dozen lines a sidebar can show.
+//
+// `sidebar.snippet_measures` against `sidebar.snippets_trimmed` is what one
+// costs: it was around eighteen shaping passes a snippet when both searches
+// bisected down from the whole line, and is six now that they estimate the
+// answer from the full-line measurement and confirm it.
 //
 // The row keeps its own trimmed lines, so scrolling back over a row does not
 // trim it again, and the row list still holds every result because the heights
 // have to add up to a scrollbar.
 void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
                         const SnippetMeasure& measure);
+
+// Half-open range of row indices whose boxes intersect the vertical band
+// [top, bottom] in list space.
+//
+// Rows tile the list: every push advances the cursor by exactly the row's own
+// height, so `rect.y` is non-decreasing and so is `rect.y + rect.h`. That makes
+// the band two binary searches -- the same shape, and for the same reason, as
+// `DocumentLayout::blockRange` is for the page.
+//
+// Both readers of the row list go through here, and that is the point of it
+// existing. The draw walked all of them and tested each against the list rect;
+// `sidebarRowAt` walked all of them and tested each against the pointer, on
+// every mouse-motion event -- a hundred a second while the cursor crosses the
+// panel. Both were O(library) to answer a question about a dozen rows, and a
+// list that is sorted by `rect.y` for one reader and scanned linearly by the
+// other is a list whose readers disagree about what it is.
+std::pair<std::size_t, std::size_t> sidebarRowRange(const std::vector<SidebarRow>& rows,
+                                                    float top, float bottom);
 
 // The row under the pointer, or nothing when the pointer is off the list.
 std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, ui::Rect sidebar, float x, float y);

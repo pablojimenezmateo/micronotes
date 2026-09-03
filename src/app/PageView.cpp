@@ -8,11 +8,13 @@
 #include "ui/Fonts.h"
 #include "ui/Metrics.h"
 #include "ui/Settings.h"
+#include "ui/ShellLayout.h"
 #include "ui/Theme.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <optional>
 #include <utility>
 
 namespace micronotes::app {
@@ -27,7 +29,6 @@ using micronotes::ui::hLine;
 using micronotes::ui::stroke;
 using micronotes::ui::theme;
 
-constexpr float kPagePadding = 8.0f;
 constexpr float kContentTopPadding = 18.0f;
 // Reserved to the left of the content column for the hover handles. The
 // column is centred when the page is wide enough and pushed right when it is
@@ -85,22 +86,6 @@ Rect toRect(const doc::Rect& rect, float originX, float originY) {
   return {rect.x + originX, rect.y + originY, rect.w, rect.h};
 }
 
-Rect scrollTrack(Rect viewport) {
-  return {viewport.x + viewport.w - 7.0f, viewport.y + 9.0f, 3.0f, std::max(24.0f, viewport.h - 18.0f)};
-}
-
-void drawScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
-  if(maxScroll <= 0) return;
-  const Rect track = scrollTrack(viewport);
-  const float visibleRatio = std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), 0.08f, 1.0f);
-  const float thumbH = std::max(22.0f, track.h * visibleRatio);
-  const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
-  fill(renderer, track, theme().scrollTrack);
-  Rect thumb {track.x - 1.0f, track.y + (track.h - thumbH) * t, 5.0f, thumbH};
-  fill(renderer, thumb, theme().scrollThumb);
-  stroke(renderer, thumb, theme().scrollThumbBorder);
-}
-
 }
 
 void PageView::setRevisions(std::uint64_t source, std::uint64_t folds) {
@@ -110,6 +95,23 @@ void PageView::setRevisions(std::uint64_t source, std::uint64_t folds) {
 
 void PageView::setHooks(PageViewHooks hooks) {
   hooks_ = std::move(hooks);
+  wired_ = true;
+}
+
+bool PageView::wired() const {
+  return wired_;
+}
+
+void PageView::setWikiLinkRevision(std::uint64_t revision) {
+  wikiLinkRevision_ = revision;
+}
+
+void PageView::setFoldsActive(bool active) {
+  foldsActive_ = active;
+}
+
+void PageView::setEditedSpan(doc::LayoutOptions::EditedSpan span) {
+  editedSpan_ = span;
 }
 
 const doc::DocumentLayout& PageView::document() const {
@@ -164,15 +166,12 @@ float PageView::originY() const {
 void PageView::layout(TextRenderer& text, std::string_view source, std::size_t caret, Rect rect) {
   const perf::ScopeTimer timer("page.layout");
   rect_ = rect;
-  page_ = {rect.x + kPagePadding, rect.y + kPagePadding, rect.w - kPagePadding * 2.0f, rect.h - kPagePadding * 3.5f};
-  const float available = std::max(120.0f, page_.w - 28.0f);
-  columnWidth_ = std::min(available, ui::pageWidthPx());
-  float left = page_.x + std::round((page_.w - columnWidth_) / 2.0f);
-  if(left < page_.x + kGutterWidth) {
-    columnWidth_ = std::max(120.0f, page_.w - kGutterWidth - 14.0f);
-    left = page_.x + kGutterWidth;
-  }
-  columnLeft_ = left;
+  page_ = ui::pageRectIn(rect);
+  // The same two functions the reading pane lays itself out with, so the same
+  // note has the same measure in both panes. See ui::pageColumnIn.
+  const ui::PageColumn column = ui::pageColumnIn(page_, kGutterWidth);
+  columnWidth_ = column.width;
+  columnLeft_ = column.left;
   // The header is part of the scroll, not part of the viewport: the first block
   // starts below it, and scrolling down takes both away together.
   contentTop_ = page_.y + kContentTopPadding + headerHeight_;
@@ -203,11 +202,12 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.type = typeMetrics();
   options.caretOffset = caret;
   options.rawOffset = rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone;
-  options.folded = folds_.collapsed;
+  options.folded = foldsActive_ ? folds_.collapsed : nullptr;
   options.wikiLinkResolves = hooks_.wikiLinkResolves;
-  options.wikiLinkRevision = hooks_.wikiLinkRevision;
+  options.wikiLinkRevision = wikiLinkRevision_;
   options.sourceRevision = sourceRevision_;
   options.foldRevision = foldRevision_;
+  options.editedSpan = editedSpan_;
   document_.update(source, options);
 
   // The caret must never be stranded inside something collapsed - Ctrl+End, an
@@ -400,8 +400,10 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   const float oy = originY();
   const float viewTop = page_.y;
   const float viewBottom = page_.y + page_.h;
-  const SDL_Rect pageClip = ui::clipRect({page_.x + 1.0f, page_.y + 1.0f, page_.w - 2.0f, page_.h - 2.0f});
-  SDL_SetRenderClipRect(renderer, &pageClip);
+  // Everything below is clipped to the page, and the guard scope ends before
+  // the gutter, the fold controls and the toolbar, which draw beside it.
+  {
+  const ui::ClipGuard pageClip(renderer, {page_.x + 1.0f, page_.y + 1.0f, page_.w - 2.0f, page_.h - 2.0f});
 
   if(blockSelection_.active) {
     // Whole blocks, highlighted edge to edge: a block selection is an object
@@ -493,11 +495,14 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
       continue;
     }
 
-    const bool clipToColumn = block.kind == doc::BlockKind::Code || layout.raw;
-    if(clipToColumn) {
-      const SDL_Rect columnClip = ui::clipRect({ox, std::max(page_.y + 1.0f, top), columnWidth_,
-                                                std::min(layout.height, page_.y + page_.h - top)});
-      SDL_SetRenderClipRect(renderer, &columnClip);
+    // A code block and a block dropped to raw text are both kept inside the
+    // column: a long line scrolls off its own right edge rather than out over
+    // the gutter. `std::optional` because the guard is the scope, and this one
+    // has to end with the block rather than with the loop body it lives in.
+    std::optional<ui::ClipGuard> columnClip;
+    if(block.kind == doc::BlockKind::Code || layout.raw) {
+      columnClip.emplace(renderer, Rect {ox, std::max(page_.y + 1.0f, top), columnWidth_,
+                                         std::min(layout.height, page_.y + page_.h - top)});
     }
     for(const auto& line : layout.lines) {
       const float lineY = top + line.y;
@@ -533,7 +538,6 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         }
       }
     }
-    if(clipToColumn) SDL_SetRenderClipRect(renderer, &pageClip);
   }
   perf::addCounter(perf::CounterId::PageBlocksDrawn, blocksDrawn);
   perf::addCounter(perf::CounterId::PageRunsDrawn, runsDrawn);
@@ -551,11 +555,11 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   }
   drawCodeChrome(renderer, text);
   drawDropIndicator(renderer);
-  SDL_SetRenderClipRect(renderer, nullptr);
+  }
   drawFoldControls(renderer);
   drawGutter(renderer, text);
   drawToolbar(renderer, text, selection);
-  drawScrollbar(renderer, page_, scroll_, maxScroll());
+  ui::drawVerticalScrollbar(renderer, page_, scroll_, maxScroll());
 }
 
 // Highlighting a find query used to be two O(document) costs on every frame the
@@ -670,25 +674,23 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     const float lineY = callout.y + (layout.lines.empty() ? 8.0f : layout.lines.front().y);
     const float lineH = layout.lines.empty() ? 20.0f : layout.lines.front().height;
     // Sized and placed to sit inside the quote gutter the layout already
-    // reserves, so the mark never crowds the title beside it.
-    const float markSize = 7.0f;
-    fillRounded(renderer, {std::round(callout.x + 6.0f), std::round(lineY + (lineH - markSize) / 2.0f),
-                           markSize, markSize},
-                style.accent, markSize / 2.0f);
+    // reserves, so the mark never crowds the title beside it. The size and the
+    // inset are `ui::Metrics`' because the reading pane draws the same mark.
+    fillRounded(renderer,
+                {std::round(callout.x + ui::kCalloutMarkInset),
+                 std::round(lineY + (lineH - ui::kCalloutMarkSize) / 2.0f),
+                 ui::kCalloutMarkSize, ui::kCalloutMarkSize},
+                style.accent, ui::kCalloutMarkSize / 2.0f);
 
     bool titled = false;
     if(!layout.lines.empty()) {
       for(const auto& run : layout.runsOf(layout.lines.front())) titled = titled || !run.text.empty();
     }
     if(titled) continue;
-    std::string name = block.info;
-    for(std::size_t c = 1; c < name.size(); ++c) {
-      name[c] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[c])));
-    }
     ui::TextStyle label;
     label.size = ui::type().body;
     label.strong = true;
-    text.draw(name, ox + layout.textLeft, lineY, style.accent, label);
+    text.draw(ui::calloutLabel(block.info), ox + layout.textLeft, lineY, style.accent, label);
   }
 }
 

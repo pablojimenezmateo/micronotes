@@ -223,4 +223,14 @@ ThemeMode themeModeFromName(std::string_view name) {
   return name == "light" ? ThemeMode::Light : ThemeMode::Dark;
 }
 
+
+std::string calloutLabel(std::string_view kind) {
+  if(kind.empty()) return "note";
+  std::string name(kind);
+  for(std::size_t i = 1; i < name.size(); ++i) {
+    name[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
+  }
+  return name;
+}
+
 }

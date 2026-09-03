@@ -55,16 +55,17 @@ public:
   // Puts an entry back where it came from, renaming around anything that has
   // taken its place. False when the trashed file is no longer there.
   bool restoreFromTrash(const std::string& name) const;
+  // Every note in the library, by path. For a caller that has no use for the
+  // stat each entry carries; everything on a measured path takes `walk`.
   std::vector<std::filesystem::path> noteFiles() const;
 
-  // The same walk, but keeping each directory_entry rather than just its path.
-  // A directory_entry caches the stat it performs, so a caller that needs both
-  // the size and the modification time pays one syscall instead of two -- which
-  // is the whole cost of a refresh that finds nothing changed.
-  std::vector<std::filesystem::directory_entry> noteFileEntries() const;
-
-  // The one walk both of the above are made of, with the directories it passed
-  // through reported alongside the notes. Either output may be null.
+  // The one walk of the tree, with the directories it passed through reported
+  // alongside the notes. Either output may be null.
+  //
+  // A `directory_entry` caches the stat it performs, so a caller that needs
+  // both a file's size and its modification time pays one syscall instead of
+  // the two the free functions make -- which is the whole cost of a refresh
+  // that finds nothing changed.
   //
   // The directories are here because the sidebar tree needs them -- including
   // the empty ones, which no list of notes can name -- and the alternative was

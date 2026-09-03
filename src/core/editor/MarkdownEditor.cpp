@@ -70,11 +70,14 @@ bool isWordByte(char c) {
 }
 
 void MarkdownEditor::setText(std::string text) {
+  const std::size_t was = text_.size();
   text_ = std::move(text);
   cursor_ = text_.size();
   selectionAnchor_ = cursor_;
   selecting_ = false;
   dirty_ = false;
+  // The whole buffer, honestly: nothing about the old one survives.
+  recordChange(0, was, text_.size());
   ++revision_;
   undo_.clear();
   redo_.clear();
@@ -88,15 +91,16 @@ void MarkdownEditor::insert(std::string_view text) {
   // on its own.
   const bool structural = hasSelection() || text.find('\n') != std::string_view::npos;
   snapshot(structural ? EditKind::Structural : EditKind::Insert);
+  const std::size_t from = hasSelection() ? selectionStart() : cursor_;
+  const std::size_t replaced = hasSelection() ? selectionEnd() : cursor_;
   if(hasSelection()) {
-    const auto start = selectionStart();
-    text_.erase(start, selectionEnd() - start);
-    cursor_ = start;
+    text_.erase(from, replaced - from);
+    cursor_ = from;
   }
   text_.insert(cursor_, text);
   cursor_ += text.size();
   clearSelection();
-  markChanged();
+  markChanged(from, replaced, from + text.size());
   closeEdit();
 }
 
@@ -110,7 +114,7 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
   text_.insert(start, text);
   cursor_ = start + text.size();
   clearSelection();
-  markChanged();
+  markChanged(start, end, start + text.size());
   closeEdit();
 }
 
@@ -122,10 +126,11 @@ void MarkdownEditor::erasePrevious() {
   if(cursor_ == 0) return;
   snapshot(EditKind::Erase);
   const auto previous = previousCodepoint(text_, cursor_);
+  const auto was = cursor_;
   text_.erase(previous, cursor_ - previous);
   cursor_ = previous;
   clearSelection();
-  markChanged();
+  markChanged(previous, was, previous);
   closeEdit();
 }
 
@@ -136,9 +141,10 @@ void MarkdownEditor::eraseNext() {
   }
   if(cursor_ >= text_.size()) return;
   snapshot(EditKind::Erase);
-  text_.erase(cursor_, nextCodepoint(text_, cursor_) - cursor_);
+  const auto next = nextCodepoint(text_, cursor_);
+  text_.erase(cursor_, next - cursor_);
   clearSelection();
-  markChanged();
+  markChanged(cursor_, next, cursor_);
   closeEdit();
 }
 
@@ -222,10 +228,11 @@ void MarkdownEditor::eraseSelection() {
   if(!hasSelection()) return;
   snapshot(EditKind::Structural);
   const auto start = selectionStart();
-  text_.erase(start, selectionEnd() - start);
+  const auto end = selectionEnd();
+  text_.erase(start, end - start);
   cursor_ = start;
   clearSelection();
-  markChanged();
+  markChanged(start, end, start);
   closeEdit();
 }
 
@@ -338,6 +345,7 @@ std::size_t MarkdownEditor::undoBytes() const {
 
 bool MarkdownEditor::undo() {
   if(undo_.empty()) return false;
+  const std::size_t was = text_.size();
   redo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
   text_ = std::move(undo_.back().text);
   cursor_ = std::min(undo_.back().cursor, text_.size());
@@ -348,13 +356,16 @@ bool MarkdownEditor::undo() {
     clearSelection();
   }
   undo_.pop_back();
-  markChanged();
+  // A snapshot restore is the whole buffer. It could be narrowed by comparing
+  // the two, and comparing the two is exactly the work this exists to avoid.
+  markChanged(0, was, text_.size());
   breakUndoGroup();
   return true;
 }
 
 bool MarkdownEditor::redo() {
   if(redo_.empty()) return false;
+  const std::size_t was = text_.size();
   undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
   text_ = std::move(redo_.back().text);
   cursor_ = std::min(redo_.back().cursor, text_.size());
@@ -365,7 +376,7 @@ bool MarkdownEditor::redo() {
     clearSelection();
   }
   redo_.pop_back();
-  markChanged();
+  markChanged(0, was, text_.size());
   breakUndoGroup();
   return true;
 }
@@ -388,12 +399,24 @@ bool MarkdownEditor::dirty() const {
 }
 
 void MarkdownEditor::markDirty() {
-  markChanged();
+  // Nothing moved, so every span is an honest one; the whole buffer is the one
+  // that bounds nothing, which is the right answer for a caller that is saying
+  // "assume this changed" rather than saying what did.
+  markChanged(0, text_.size(), text_.size());
 }
 
-void MarkdownEditor::markChanged() {
+void MarkdownEditor::recordChange(std::size_t start, std::size_t oldEnd, std::size_t newEnd) {
+  lastChange_ = TextChange {revision_, revision_ + 1, start, oldEnd, newEnd};
+}
+
+void MarkdownEditor::markChanged(std::size_t start, std::size_t oldEnd, std::size_t newEnd) {
+  recordChange(start, oldEnd, newEnd);
   dirty_ = true;
   ++revision_;
+}
+
+const MarkdownEditor::TextChange& MarkdownEditor::lastChange() const {
+  return lastChange_;
 }
 
 std::uint64_t MarkdownEditor::revision() const {

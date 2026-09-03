@@ -75,63 +75,123 @@ std::string joinTags(const std::vector<std::string>& tags) {
 }
 
 
-// Every code point boundary in `value`, including both ends. Cutting a string
-// only ever at one of these is what keeps a truncation from handing the
-// renderer half of a UTF-8 sequence.
-static void codePointStops(std::string_view value, std::vector<std::size_t>* out) {
-  out->clear();
-  out->reserve(value.size() + 1);
-  for(std::size_t i = 0; i <= value.size();) {
-    out->push_back(i);
-    if(i == value.size()) break;
-    ++i;
-    while(i < value.size() && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) ++i;
+namespace {
+
+// The code point boundary at or before `i`. A cut only ever lands on one of
+// these, which is what keeps a truncation from handing the renderer half of a
+// UTF-8 sequence. Continuation bytes are `10xxxxxx` and a sequence is at most
+// four bytes long, so this steps back three times at most -- which is why the
+// three searches below index *bytes* and snap, rather than first building a
+// vector of every boundary in the string. That vector was eight bytes per byte
+// of the line, allocated and filled to be probed a handful of times.
+std::size_t snapBack(std::string_view value, std::size_t i) {
+  if(i >= value.size()) return value.size();
+  while(i > 0 && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) --i;
+  return i;
+}
+
+// The boundary after `i`, which is where a cut goes when one code point has to
+// be kept whether it fits or not.
+std::size_t nextStop(std::string_view value, std::size_t i) {
+  if(i >= value.size()) return value.size();
+  ++i;
+  while(i < value.size() && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) ++i;
+  return i;
+}
+
+// The largest offset in [low, high) that `fits`, where `fits` is monotone --
+// true up to a crossover and false from there on -- `low` is taken to fit
+// whether it does or not, and `high` is known not to.
+//
+// The bracket is opened at `guess` and galloped outwards rather than started at
+// the midpoint, and that is the whole point of this function. Every probe here
+// is a substring nothing has measured before -- a unique piece of a unique line
+// -- so the measure cache cannot serve one and each is a real shaping pass; and
+// a bisection from the top spends its first probes measuring hundreds of bytes
+// to discover that hundreds of bytes do not fit. The caller has already
+// measured the whole string for its early-out, so `width / bytes` is an advance
+// per byte and the answer is a division away, to within a few characters for
+// proportional text. Two or three probes near the answer's own length replace
+// eighteen starting at the line's.
+//
+// The guarantee is unchanged: a cut is only ever returned once it has been
+// *measured* to fit. A bad guess costs probes, never correctness.
+template <typename Fits>
+std::size_t largestFitting(std::size_t low, std::size_t high, std::size_t guess, const Fits& fits) {
+  if(low + 1 >= high) return low;
+  guess = std::clamp(guess, low + 1, high - 1);
+  std::size_t step = 1;
+  if(fits(guess)) {
+    low = guess;
+    while(low + step < high) {
+      if(!fits(low + step)) {
+        high = low + step;
+        break;
+      }
+      low += step;
+      step *= 2;
+    }
+  } else {
+    high = guess;
+    while(high - low > step) {
+      if(fits(high - step)) {
+        low = high - step;
+        break;
+      }
+      high -= step;
+      step *= 2;
+    }
   }
+  while(low + 1 < high) {
+    const std::size_t mid = low + (high - low) / 2;
+    if(fits(mid)) low = mid;
+    else high = mid;
+  }
+  return low;
+}
+
+// The smallest offset in (low, high] that `fits`, where `fits` is false below
+// the crossover and true from there on, `high` is taken to fit and `low` is
+// known not to. That is `largestFitting` read backwards, so it is that function
+// with the index reflected through the bracket rather than a second copy of a
+// search this delicate.
+template <typename Fits>
+std::size_t smallestFitting(std::size_t low, std::size_t high, std::size_t guess, const Fits& fits) {
+  const auto reflect = [&](std::size_t i) { return low + high - i; };
+  const auto reflected = [&](std::size_t i) { return fits(reflect(i)); };
+  return reflect(largestFitting(low, high, reflect(std::clamp(guess, low, high)), reflected));
+}
+
 }
 
 std::string ellipsizeToFit(std::string value, int maxWidth,
                            const std::function<int(std::string_view)>& measure) {
   if(maxWidth <= 0) return "";
-  if(measure(value) <= maxWidth) return value;
-
-  std::vector<std::size_t> stops;
-  codePointStops(value, &stops);
+  const int full = measure(value);
+  if(full <= maxWidth) return value;
 
   static constexpr std::string_view kEllipsis = "...";
   std::string candidate;
-  const auto fitsAt = [&](std::size_t stop) {
-    candidate.assign(value, 0, stops[stop]);
+  const auto fitsAt = [&](std::size_t cut) {
+    candidate.assign(value, 0, snapBack(value, cut));
     candidate.append(kEllipsis);
     return measure(candidate) <= maxWidth;
   };
-  std::size_t fits = 0;
-  std::size_t over = stops.size() - 1;  // the whole string, already known not to
-  while(fits + 1 < over) {
-    const std::size_t mid = fits + (over - fits) / 2;
-    if(fitsAt(mid)) fits = mid;
-    else over = mid;
-  }
-  // `fits == 0` means not even one character and the ellipsis fit, and the
+  // `full` is the width of every byte of the string, so the room left once the
+  // ellipsis has taken its share converts straight back into a byte count. The
+  // ellipsis is the same three bytes at every call site, so its measurement is
+  // the one probe here the cache does serve.
+  const int room = maxWidth - measure(kEllipsis);
+  const std::size_t guess =
+      room <= 0 || full <= 0
+          ? 0
+          : static_cast<std::size_t>(static_cast<double>(value.size()) * room / full);
+  // A cut of zero means not even one character and the ellipsis fit, and the
   // answer is the ellipsis alone -- which is what an empty prefix produces.
-  return value.substr(0, stops[fits]) + std::string(kEllipsis);
+  const std::size_t cut = snapBack(value, largestFitting(0, value.size(), guess, fitsAt));
+  return value.substr(0, cut) + std::string(kEllipsis);
 }
 
-namespace {
-
-// The stop at or before `offset`, so a cut lands on a code point boundary.
-std::size_t stopAtOrBefore(const std::vector<std::size_t>& stops, std::size_t offset) {
-  std::size_t at = 0;
-  while(at + 1 < stops.size() && stops[at + 1] <= offset) ++at;
-  return at;
-}
-
-}
-
-// TD-2: about 0.25 ms a call. Both bisections here start from the whole string
-// and work down, and every probe is a substring nothing has measured before, so
-// the measure cache never helps and the early probes are hundreds of bytes long.
-// The caller now asks only for the rows it is drawing, which is what made this
-// affordable; docs/tech-debt.md has the fix if it stops being.
 SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, std::size_t matchLength,
                                  int maxWidth, const std::function<int(std::string_view)>& measure) {
   static constexpr std::string_view kEllipsis = "...";
@@ -143,7 +203,8 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
 
   // The common case, and the cheap one: the whole line fits and there is
   // nothing to decide.
-  if(measure(line) <= maxWidth) {
+  const int full = measure(line);
+  if(full <= maxWidth) {
     out.text = std::string(line);
     out.start = matchStart;
     out.length = matchLength;
@@ -156,11 +217,11 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
   // how much of the head to give up for the head ellipsis, the match, and that
   // trailing one to fit together; anything less and the tail trim eats into the
   // match, which is the bug this function exists to make unwriteable.
-  std::vector<std::size_t> stops;
-  codePointStops(line, &stops);
   const std::size_t matchEnd = matchStart + matchLength;
+  std::string probe;
   const auto survives = [&](std::size_t from) {
-    std::string probe;
+    from = snapBack(line, from);
+    probe.clear();
     if(from > 0) probe += kEllipsis;
     probe.append(line.substr(from, matchEnd - from));
     probe.append(kEllipsis);
@@ -171,23 +232,25 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
   // read from its start needs no explaining.
   std::size_t from = 0;
   if(!survives(0)) {
-    // Bisect for the smallest head cut that does fit. Monotone: a later cut is
-    // a shorter string, so once one fits every later one does. `over` starts at
-    // the stop just tested and known not to fit, `fits` at the match's own
-    // start, which keeps no run-up at all.
-    std::size_t over = 0;
-    std::size_t fits = stopAtOrBefore(stops, matchStart);
-    if(!survives(stops[fits])) {
+    // The least head that can go is none of it; the most is all of it up to the
+    // match, which keeps no run-up at all. Monotone in between: a later cut is
+    // a shorter string, so once one fits every later one does.
+    const std::size_t atMatch = snapBack(line, matchStart);
+    if(!survives(atMatch)) {
       // The match is wider than the column by itself. Nothing can show all of
       // it, so show its start and let the trim clip the rest.
-      from = stops[fits];
+      from = atMatch;
     } else {
-      while(over + 1 < fits) {
-        const std::size_t mid = over + (fits - over) / 2;
-        if(survives(stops[mid])) fits = mid;
-        else over = mid;
-      }
-      from = stops[fits];
+      // Two ellipses and the match have to fit together, and `full` says what a
+      // byte of this line costs, so the run-up that is affordable is a division
+      // rather than a search from the top.
+      const int room = maxWidth - 2 * measure(kEllipsis);
+      const std::size_t affordable =
+          room <= 0 || full <= 0
+              ? 0
+              : static_cast<std::size_t>(static_cast<double>(line.size()) * room / full);
+      const std::size_t guess = matchEnd > affordable ? matchEnd - affordable : 0;
+      from = snapBack(line, smallestFitting(0, atMatch, guess, survives));
     }
   }
 
@@ -208,21 +271,19 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
 std::size_t breakToFit(std::string_view value, int maxWidth,
                        const std::function<int(std::string_view)>& measure) {
   if(value.empty()) return 0;
-  if(maxWidth <= 0 || measure(value) <= maxWidth) return value.size();
+  if(maxWidth <= 0) return value.size();
+  const int full = measure(value);
+  if(full <= maxWidth) return value.size();
 
-  std::vector<std::size_t> stops;
-  codePointStops(value, &stops);
-  // `fits` is the last stop known to fit, `over` the first known not to. The
-  // whole string is already known not to, and one code point is taken to fit
-  // whether it does or not, because it has nowhere else to go.
-  std::size_t fits = 1;
-  std::size_t over = stops.size() - 1;
-  while(fits + 1 < over) {
-    const std::size_t mid = fits + (over - fits) / 2;
-    if(measure(value.substr(0, stops[mid])) <= maxWidth) fits = mid;
-    else over = mid;
-  }
-  return stops[fits];
+  const auto fitsAt = [&](std::size_t cut) {
+    return measure(value.substr(0, snapBack(value, cut))) <= maxWidth;
+  };
+  // One code point is taken whether it fits or not, because it has nowhere else
+  // to go, so that boundary is the floor of the search rather than a case in it.
+  const std::size_t first = nextStop(value, 0);
+  const std::size_t guess =
+      static_cast<std::size_t>(static_cast<double>(value.size()) * maxWidth / full);
+  return snapBack(value, largestFitting(first, value.size(), guess, fitsAt));
 }
 
 }

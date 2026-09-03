@@ -40,11 +40,15 @@ bool AppState::openOrCreateLibrary(const std::filesystem::path& root) {
   library_.emplace(root);
   library_->ensureLayout();
   ++revision_;
-  organization_.emplace(*library_);
   // After `ensureLayout`, so the recovery directory's parent exists, and before
   // the index opens, so no edit can be posted against the previous root.
   recovery_.setRoot(library_->root());
-  return index_.open(root) && index_.refreshChangedFiles();
+  // The index first: the note list is a `SELECT` over it, so it has to have
+  // seen the library before anything asks for one. `organization_` is lazy, so
+  // the order matters only in that nothing may read it in between.
+  const bool ok = index_.open(root) && index_.refreshChangedFiles();
+  organization_.emplace(*library_, index_);
+  return ok;
 }
 
 bool AppState::hasLibrary() const {
@@ -371,8 +375,11 @@ bool AppState::restoreFromTrash(const std::string& name) {
 bool AppState::refreshLibrary() {
   if(!library_) return false;
   ++revision_;
-  organization_.emplace(*library_);
-  return index_.refreshChangedFiles();
+  const bool ok = index_.refreshChangedFiles();
+  // Emplaced after the refresh, for the reason `openOrCreateLibrary` gives: the
+  // note list reads the index, so the index has to have seen the change first.
+  organization_.emplace(*library_, index_);
+  return ok;
 }
 
 std::uint64_t AppState::revision() const {

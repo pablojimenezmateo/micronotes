@@ -3,10 +3,12 @@
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
+#include "ui/RowBand.h"
 #include "ui/TreeModel.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -342,10 +344,24 @@ void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
   }
 }
 
+std::pair<std::size_t, std::size_t> sidebarRowRange(const std::vector<SidebarRow>& rows,
+                                                    float top, float bottom) {
+  std::uint64_t probes = 0;
+  const auto range = ui::rowBand(rows.size(), top, bottom,
+                                 [&rows](std::size_t i) { return rows[i].rect; }, &probes);
+  perf::addCounter(perf::CounterId::SidebarRowRangeQueries);
+  perf::addCounter(perf::CounterId::SidebarRowRangeProbes, probes);
+  return range;
+}
+
 // The row under the pointer, or nothing when the pointer is off the list.
 std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, Rect sidebar, float x, float y) {
   if(!contains(sidebar, x, y)) return std::nullopt;
-  for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
+  // A band of zero height is the rows the pointer's y is inside. Rows tile, so
+  // a pointer exactly on a boundary is inside two of them and the first one
+  // wins -- which is the answer the walk gave.
+  const auto [begin, end] = sidebarRowRange(ui.sidebarRows, y, y);
+  for(std::size_t i = begin; i < end; ++i) {
     if(ui.sidebarRows[i].kind == SidebarRow::Kind::SectionLabel) continue;
     if(contains(ui.sidebarRows[i].rect, x, y)) return i;
   }

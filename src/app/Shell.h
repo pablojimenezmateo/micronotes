@@ -157,11 +157,12 @@ struct SidebarRow {
   // -- a note whose title matched but whose text did not.
   //
   // Filled on the first frame the row is *drawn*, not when the list is built.
-  // Trimming one matching line to the column costs 0.25 ms -- it measures the
-  // whole line, then bisects with a measurement per probe, and every probe is a
-  // string nothing has measured before, so the measure cache cannot help. A
-  // 200-result query has 600 of them, and building all of them up front made
-  // the first frame of a query a 150-500 ms freeze, per keystroke of the query.
+  // Trimming one matching line to the column measures the whole line and then
+  // searches, with a measurement per probe, and every probe is a string nothing
+  // has measured before -- so the measure cache cannot help and each is a real
+  // shaping pass. A 200-result query has 600 of them, and building all of them
+  // up front made the first frame of a query a 150-500 ms freeze, per keystroke
+  // of the query.
   // The row list stays O(results), because the heights have to add up to a
   // scrollbar; the trimming is O(viewport).
   std::vector<ui::SnippetWindow> matchLines;
@@ -280,8 +281,14 @@ struct UiRuntime {
   // `std::less<>` rather than the default, so finding a parse does not first
   // allocate a copy of the bytes to look it up by.
   std::map<std::string, markdown::Document, std::less<>> complexCache;
+  // The reading pane's md4c parse, and the buffer revision it was taken at.
+  // Keyed on the revision rather than on the bytes: comparing the cached source
+  // to the live one is a `memcmp` of the whole note, and the reading pane asked
+  // for the parse once a frame -- so an idle frame over a 240 KB note compared
+  // 240 KB to find out that nothing had changed.
   std::string cachedMarkdownSource;
   std::optional<markdown::Document> cachedMarkdownDocument;
+  std::uint64_t cachedMarkdownRevision = 0;
   std::string cachedEditorRowsSource;
   int cachedEditorRowsWidth = -1;
   std::vector<editor::SoftWrapRow> cachedEditorRows;
@@ -295,7 +302,39 @@ struct UiRuntime {
   editor::TextField folderRename;
   std::string status;
   std::vector<LinkRegion> linkRegions;
-  std::map<std::string, int> viewerAnchors;
+  // The reading pane's block geometry, memoised.
+  //
+  // Laying that pane out is a walk of the whole document that measures every
+  // block's inline runs: 94-96% of a `shell.content` that ran 23-65 ms per
+  // frame on a 371 KB note, and paid again on every frame -- including the ones
+  // a hover caused. It is a pure function of the parsed note and the geometry,
+  // so it is derived once per (note, geometry) and the draw reads block tops
+  // out of it, which is what lets the draw cost the viewport.
+  //
+  // It also makes the measure and the draw agree by construction. They used to
+  // be two parallel walks of the same blocks, and they disagreed in three
+  // places -- an Html block's bottom spacing, an image's rounding, a callout's
+  // label -- so a note carrying raw HTML scrolled past its own end.
+  struct ViewerLayout {
+    bool valid = false;
+    std::size_t blocks = 0;
+    std::uint64_t sourceRevision = 0;
+    std::uint64_t imageGeneration = 0;
+    float contentWidth = 0.0f;
+    float pageHeight = 0.0f;
+    float fontScale = 0.0f;
+    float bodySize = 0.0f;
+    // Block `i` occupies [top[i], top[i + 1]) of the note's scrolling space, so
+    // there is one entry more than there are blocks and the last of them is the
+    // content height.
+    std::vector<float> top;
+    // The number an ordered item draws. Per block, because it counts up a run
+    // of siblings and a draw that starts at the first *visible* block cannot
+    // count from the top of the note.
+    std::vector<int> ordinal;
+    std::map<std::string, int> anchors;
+  };
+  ViewerLayout viewerLayout;
   std::vector<ButtonRegion> buttonRegions;
   int noteCursor = 0;
   int folderCursor = 0;

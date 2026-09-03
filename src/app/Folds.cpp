@@ -6,26 +6,28 @@
 #include "ui/FoldState.h"
 
 #include <functional>
-#include <utility>
+#include <string>
 
 namespace micronotes::app {
 
-NoteFolds noteFolds(ui::FoldState& folds, const editor::MarkdownEditor& editor,
-                    std::string noteId) {
-  NoteFolds out;
-  if(folds.anyFolded(noteId)) {
-    out.page.collapsed = [&folds, &editor, noteId](const doc::SourceBlock& block) {
-      return folds.folded(noteId, doc::foldKey(editor.text(), block));
-    };
-  }
-  out.page.expand = [&folds, &editor, noteId](const doc::SourceBlock& block) {
-    folds.unfold(noteId, doc::foldKey(editor.text(), block));
+PageFolds livePageFolds(UiRuntime& ui) {
+  PageFolds page;
+  page.collapsed = [&ui](const doc::SourceBlock& block) {
+    return ui.folds.folded(ui.state.selection().noteId, doc::foldKey(ui.editor.text(), block));
   };
-  // What the layout's reuse check needs so it does not re-derive the fold state
-  // from the document. Never zero, because zero means "cannot say"; and the
-  // note is mixed in, since switching notes changes what `collapsed` answers
-  // without the fold state moving at all.
-  out.stamp = folds.revision() * 1000003ull + std::hash<std::string> {}(noteId) + 1ull;
+  page.expand = [&ui](const doc::SourceBlock& block) {
+    ui.folds.unfold(ui.state.selection().noteId, doc::foldKey(ui.editor.text(), block));
+  };
+  return page;
+}
+
+NoteFoldStamp noteFoldStamp(const ui::FoldState& folds, std::string_view noteId) {
+  NoteFoldStamp out;
+  out.anyFolded = folds.anyFolded(noteId);
+  // Never zero, because zero means "cannot say"; and the note is mixed in,
+  // since switching notes changes what `collapsed` answers without the fold
+  // state moving at all.
+  out.stamp = folds.revision() * 1000003ull + std::hash<std::string_view> {}(noteId) + 1ull;
   return out;
 }
 

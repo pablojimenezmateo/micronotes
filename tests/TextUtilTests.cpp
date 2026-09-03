@@ -2,8 +2,10 @@
 
 #include "ui/TextUtil.h"
 
+#include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using micronotes::ui::breakToFit;
 using micronotes::ui::ellipsizeToFit;
@@ -237,4 +239,178 @@ MICRONOTES_TEST(snippet_cuts_multibyte_text_at_a_code_point) {
     }
     i += width;
   }
+}
+
+// --- the searches behind the trimming -----------------------------------
+//
+// All three trims estimate the answer from the full-string measurement they
+// already took and then confirm it, rather than bisecting down from the whole
+// string. The estimate is only ever an estimate -- a proportional font is not a
+// fixed advance -- so what has to be pinned is that a wrong guess costs probes
+// and never correctness. These compare against a linear reference over every
+// code point boundary, under a measurer whose per-character widths vary by a
+// factor of ten.
+
+namespace {
+
+// A deliberately lumpy stand-in: `i` is narrow, `W` is wide, and a multi-byte
+// code point is wider still. An advance-per-byte estimate is wrong here in both
+// directions, which is the point.
+int measureLumpy(std::string_view value) {
+  int width = 0;
+  for(std::size_t i = 0; i < value.size(); ++i) {
+    const auto byte = static_cast<unsigned char>(value[i]);
+    if((byte & 0xC0) == 0x80) continue;
+    if(byte >= 0x80) width += 22;
+    else if(value[i] == 'i' || value[i] == 'l' || value[i] == '.') width += 3;
+    else if(value[i] == 'W' || value[i] == 'M') width += 26;
+    else if(value[i] == ' ') width += 5;
+    else width += 11;
+  }
+  return width;
+}
+
+std::vector<std::size_t> boundaries(std::string_view value) {
+  std::vector<std::size_t> stops;
+  for(std::size_t i = 0; i <= value.size();) {
+    stops.push_back(i);
+    if(i == value.size()) break;
+    ++i;
+    while(i < value.size() && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) ++i;
+  }
+  return stops;
+}
+
+// What `ellipsizeToFit` promises, worked out by trying every boundary.
+std::string ellipsizeReference(std::string_view value, int maxWidth,
+                               const std::function<int(std::string_view)>& measure) {
+  if(maxWidth <= 0) return "";
+  if(measure(value) <= maxWidth) return std::string(value);
+  std::size_t best = 0;
+  for(const std::size_t stop : boundaries(value)) {
+    if(measure(std::string(value.substr(0, stop)) + "...") <= maxWidth) best = stop;
+  }
+  return std::string(value.substr(0, best)) + "...";
+}
+
+// ...and what `breakToFit` promises.
+std::size_t breakReference(std::string_view value, int maxWidth,
+                           const std::function<int(std::string_view)>& measure) {
+  if(value.empty()) return 0;
+  if(maxWidth <= 0 || measure(value) <= maxWidth) return value.size();
+  const auto stops = boundaries(value);
+  std::size_t best = stops.size() > 1 ? stops[1] : value.size();
+  for(const std::size_t stop : stops) {
+    if(stop > best && measure(value.substr(0, stop)) <= maxWidth) best = stop;
+  }
+  return best;
+}
+
+// The head cut `snippetAroundMatch` settles on: the smallest run-up that lets
+// the head ellipsis, the match and the trailing ellipsis fit together.
+std::size_t snippetHeadReference(std::string_view line, std::size_t matchStart, std::size_t matchLength,
+                                 int maxWidth, const std::function<int(std::string_view)>& measure) {
+  const std::size_t matchEnd = matchStart + matchLength;
+  const auto survives = [&](std::size_t from) {
+    std::string probe;
+    if(from > 0) probe += "...";
+    probe.append(line.substr(from, matchEnd - from));
+    probe.append("...");
+    return measure(probe) <= maxWidth;
+  };
+  const auto stops = boundaries(line);
+  std::size_t atMatch = 0;
+  for(const std::size_t stop : stops) {
+    if(stop <= matchStart) atMatch = stop;
+  }
+  if(survives(0)) return 0;
+  if(!survives(atMatch)) return atMatch;
+  for(const std::size_t stop : stops) {
+    if(stop <= atMatch && survives(stop)) return stop;
+  }
+  return atMatch;
+}
+
+const char* kLumpyLines[] = {
+  "a needle and then a great deal more text after it",
+  "WWWW MMMM iiii llll a needle WWWW MMMM iiii llll and more besides",
+  "iiiiiiiiiiiiiiiiiiiiiiiiiiiiii needle",
+  "\xc3\xa9\xc3\xa9\xc3\xa9 WW iii \xc3\xa9\xc3\xa9 needle \xc3\xa9\xc3\xa9\xc3\xa9 WW",
+  "needle at the very front of a line that runs on for a while yet",
+  "a line that runs on for a while yet and ends with the needle",
+};
+
+}
+
+MICRONOTES_TEST(ellipsize_to_fit_matches_a_linear_reference_under_a_lumpy_font) {
+  for(const char* line : kLumpyLines) {
+    for(int width = -4; width <= 400; width += 3) {
+      const std::string got = ellipsizeToFit(line, width, measureLumpy);
+      const std::string want = ellipsizeReference(line, width, measureLumpy);
+      micronotes::tests::require(got == want, std::string("ellipsize \"") + line + "\" at " +
+                                                  std::to_string(width) + ": got \"" + got +
+                                                  "\" want \"" + want + "\"");
+    }
+  }
+}
+
+MICRONOTES_TEST(break_to_fit_matches_a_linear_reference_under_a_lumpy_font) {
+  for(const char* line : kLumpyLines) {
+    for(int width = -4; width <= 400; width += 3) {
+      const std::size_t got = breakToFit(line, width, measureLumpy);
+      const std::size_t want = breakReference(line, width, measureLumpy);
+      micronotes::tests::require(got == want, std::string("break \"") + line + "\" at " +
+                                                  std::to_string(width) + ": got " +
+                                                  std::to_string(got) + " want " + std::to_string(want));
+    }
+  }
+}
+
+// The snippet's head cut, checked through the window it produces: the text has
+// to fit, the match has to be in it, and the run-up kept has to be the shortest
+// one that works -- one boundary less and the trailing trim would eat the match.
+MICRONOTES_TEST(snippet_head_cut_matches_a_linear_reference_under_a_lumpy_font) {
+  for(const char* raw : kLumpyLines) {
+    const std::string line = raw;
+    const auto at = line.find("needle");
+    if(at == std::string::npos) continue;
+    for(int width = 1; width <= 400; width += 1) {
+      const auto window = micronotes::ui::snippetAroundMatch(line, at, 6, width, measureLumpy);
+      std::string want;
+      if(measureLumpy(line) <= width) {
+        want = line;
+      } else {
+        const std::size_t from = snippetHeadReference(line, at, 6, width, measureLumpy);
+        if(from > 0) want += "...";
+        want.append(line.substr(from));
+        want = ellipsizeToFit(std::move(want), width, measureLumpy);
+      }
+      micronotes::tests::require(window.text == want,
+                                 std::string("snippet at ") + std::to_string(width) + ": got \"" +
+                                     window.text + "\" want \"" + want + "\"");
+      micronotes::tests::require(measureLumpy(window.text) <= width || window.text == "...",
+                                 "snippet overflowed its column at " + std::to_string(width));
+    }
+  }
+}
+
+// The number this was all about. One snippet was ~18 shaping passes because
+// both searches bisected down from the whole line; the estimate turns that into
+// a handful, and the handful must not creep back up.
+MICRONOTES_TEST(snippet_measures_a_handful_of_times_not_eighteen) {
+  const std::string line =
+      "a great deal of run-up text before the needle finally appears, and then a "
+      "great deal more text after it so that neither end of the line fits";
+  const auto at = line.find("needle");
+  int measures = 0;
+  const auto counted = [&](std::string_view value) {
+    ++measures;
+    return measureEight(value);
+  };
+  const auto window = micronotes::ui::snippetAroundMatch(line, at, 6, 200, counted);
+  requireMarksTheMatch(window, "needle");
+  // Under a fixed advance the estimate is exact, so this is: the whole line,
+  // the two ellipsis probes, the head search confirming its guess and its
+  // neighbour, and the tail trim doing the same.
+  micronotes::tests::require(measures <= 10, "snippet took " + std::to_string(measures) + " measurements");
 }

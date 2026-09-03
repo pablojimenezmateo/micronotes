@@ -293,6 +293,65 @@ MICRONOTES_TEST(edits_act_on_every_block_a_range_touches) {
   MICRONOTES_REQUIRE(applied(source, micronotes::doc::deleteBlocks(source, 1, 1)) == "two\n\nthree\n");
 }
 
+// A multi-block turn-into is exactly the single-block turn-into applied to each
+// block of the selection, and nothing else. It used to be written that way --
+// rewriting one buffer in place, back to front, rescanning it once per block --
+// and the rewrite that made the partition lendable has to produce the same
+// bytes. Checked against the loop it replaced, over every kind the scanner
+// models and every span of a mixed note.
+//
+// `selects` is what tells the two paths apart: only the range rewrite sets it,
+// so an edit without it is the single-block fallback for a span that held
+// nothing to rewrite.
+MICRONOTES_TEST(edits_turn_a_range_into_what_turning_each_block_would) {
+  const std::string source =
+    "# Heading\n\ntext\n\n- a\n  - b\n\n1. one\n2. two\n\n- [ ] task\n- [x] done\n\n"
+    "> quote\n> more\n\n```py\ncode\n```\n\n---\n\nlast\n";
+  const BlockKind kinds[] = {BlockKind::Bullet, BlockKind::Todo,    BlockKind::Ordered,
+                             BlockKind::Quote,  BlockKind::Heading, BlockKind::Code,
+                             BlockKind::Paragraph};
+  for(const BlockKind kind : kinds) {
+    for(std::size_t from = 0; from <= source.size(); from += 3) {
+      for(const std::size_t width : {std::size_t {0}, std::size_t {14}, std::size_t {60}}) {
+        const std::size_t to = std::min(from + width, source.size());
+        const auto ranged = micronotes::doc::turnBlocksInto(source, from, to, kind, 2);
+        const std::string where = " at [" + std::to_string(from) + ", " + std::to_string(to) + ")";
+        if(!ranged.selects) {
+          // Either nothing to rewrite at all, or a span that held only blanks
+          // and fell back to the caret's own block.
+          const Edit fallback = micronotes::doc::turnInto(source, from, kind, 2);
+          micronotes::tests::require(ranged.valid == fallback.valid, "fallback validity" + where);
+          if(fallback.valid) {
+            micronotes::tests::require(ranged.text == fallback.text, "fallback text" + where);
+            micronotes::tests::require(ranged.start == fallback.start && ranged.end == fallback.end,
+                                       "fallback bounds" + where);
+          }
+          continue;
+        }
+
+        // The loop this replaced: copy the span, walk its blocks back to front,
+        // and rewrite each one in place against the buffer as it stands.
+        std::string chunk = source.substr(ranged.start, ranged.end - ranged.start);
+        const auto chunkBlocks = micronotes::doc::scanBlocks(chunk);
+        bool changed = false;
+        for(std::size_t i = chunkBlocks.size(); i-- > 0;) {
+          if(chunkBlocks[i].kind == BlockKind::Blank) continue;
+          const Edit one = micronotes::doc::turnInto(chunk, chunkBlocks[i].contentStart, kind, 2);
+          if(!one.valid) continue;
+          chunk.replace(one.start, one.end - one.start, one.text);
+          changed = true;
+        }
+        micronotes::tests::require(changed, "range rewrote nothing" + where);
+        micronotes::tests::require(ranged.text == chunk,
+                                   "range text" + where + ": got \"" + ranged.text + "\" want \"" +
+                                       chunk + "\"");
+        micronotes::tests::require(ranged.cursor == ranged.start + chunk.size(), "range cursor" + where);
+        micronotes::tests::require(ranged.anchor == ranged.start, "range anchor" + where);
+      }
+    }
+  }
+}
+
 MICRONOTES_TEST(edits_refuse_a_range_that_holds_nothing) {
   const std::string source = "one\n";
   MICRONOTES_REQUIRE(!micronotes::doc::deleteBlocks("", 0, 0).valid);

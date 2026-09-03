@@ -3,6 +3,7 @@
 #include "app/Shell.h"
 
 #include "ui/Metrics.h"
+#include "ui/ShellLayout.h"
 #include "ui/Theme.h"
 
 #include <algorithm>
@@ -49,7 +50,7 @@ int editorMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
 
 
 Rect editorWritingRect(Rect editorRect) {
-  return {editorRect.x + 8.0f, editorRect.y + 8.0f, editorRect.w - 16.0f, editorRect.h - 28.0f};
+  return ui::pageRectIn(editorRect);
 }
 
 void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui, const std::string& line, Rect writing, float y) {
@@ -86,7 +87,7 @@ void placeEditorCursor(TextRenderer& text, UiRuntime& ui, Rect rect, float x, fl
 
 void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   fill(renderer, rect, theme().editorBg);
-  Rect writing {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
+  const Rect writing = editorWritingRect(rect);
   drawSurface(renderer, writing, theme().pageSurface, ui.focus == FocusArea::Editor ? theme().accentDim : theme().hairline);
   const int lineHeight = text.lineHeight();
   const auto& rows = editorRows(text, ui, rect);

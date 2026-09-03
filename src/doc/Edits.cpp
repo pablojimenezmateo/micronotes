@@ -479,37 +479,49 @@ Edit turnBlocksInto(std::string_view source, std::size_t fromCaret, std::size_t 
   // be started - which is exactly what the slash menu does there.
   if(!range.valid) return turnInto(source, fromCaret, kind, level);
 
-  // Work on the span alone, back to front, so each rewrite leaves the offsets
-  // ahead of it untouched and the rescan `turnInto` does stays proportional to
-  // the selection rather than to the note.
-  std::string chunk(source.substr(range.start, range.end - range.start));
+  // Work on the span alone, and on the span's *own* bytes rather than on a
+  // buffer this loop keeps rewriting. Every rewrite `turnInto` produces lands
+  // inside the block it came from -- it replaces either the marker or the whole
+  // block, never anything outside it -- so taken front to back the rewrites are
+  // disjoint and in increasing order, and the answer is a concatenation.
+  //
+  // That is what lets the chunk's partition be lent to every call: `chunk` is
+  // never modified, so its partition never stops describing it. This used to
+  // rewrite the chunk in place, which cost a rescan *and* a vector allocation
+  // per block and made the loop's direction load-bearing -- back to front was
+  // the only order in which the offsets it read were still true. Now nothing
+  // depends on the direction, and nothing is scanned twice.
+  const std::string chunk(source.substr(range.start, range.end - range.start));
   const auto chunkBlocks = scanBlocks(chunk);
+  std::string out;
+  out.reserve(chunk.size() + 16);
+  std::size_t copied = 0;
   bool changed = false;
-  for(std::size_t i = chunkBlocks.size(); i-- > 0;) {
-    if(chunkBlocks[i].kind == BlockKind::Blank) continue;
-    // TD-4. Deliberately not lent `chunkBlocks`: `chunk` is rewritten inside this
-    // loop, so that partition stops describing it. Walking back to front means
-    // the offsets this iteration reads are all below the ones already rewritten
-    // and it would in fact be safe -- but "safe as long as nobody reorders the
-    // loop" is not a precondition worth leaving in the code for a scan of a
-    // selection. The scan of the *note*, which is what this function used to pay
-    // for twice over, is the one that mattered and it is gone.
-    const Edit one = turnInto(chunk, chunkBlocks[i].contentStart, kind, level);
+  for(const auto& block : chunkBlocks) {
+    if(block.kind == BlockKind::Blank) continue;
+    const Edit one = turnInto(chunk, block.contentStart, kind, level, chunkBlocks);
     if(!one.valid) continue;
-    chunk.replace(one.start, one.end - one.start, one.text);
+    // Disjoint and in order, per the argument above. A rewrite that reached
+    // back into bytes already copied would mean two blocks claiming the same
+    // ones; the guard says so rather than corrupting the output if it ever does.
+    if(one.start < copied) continue;
+    out.append(chunk, copied, one.start - copied);
+    out.append(one.text);
+    copied = one.end;
     changed = true;
   }
   // A range holding nothing but blank lines has no block to rewrite - but the
   // caret still sits somewhere a block can be started.
   if(!changed) return turnInto(source, fromCaret, kind, level, blocks);
+  out.append(chunk, copied, chunk.size() - copied);
 
   edit.valid = true;
   edit.start = range.start;
   edit.end = range.end;
-  edit.text = chunk;
   edit.anchor = range.start;
-  edit.cursor = range.start + chunk.size();
+  edit.cursor = range.start + out.size();
   edit.selects = true;
+  edit.text = std::move(out);
   return edit;
 }
 

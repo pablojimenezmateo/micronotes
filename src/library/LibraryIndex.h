@@ -48,6 +48,19 @@ struct SearchResult {
   std::vector<Snippet> snippets {};
 };
 
+// A note as the index already holds it. Everything the note list needs, without
+// opening the file a second time: the refresh has just read every file that
+// changed and written these five fields to SQLite, so the note list is a
+// `SELECT` where it used to be a second recursive walk of the library plus a
+// re-open and a front-matter parse of every note in it.
+struct IndexedNote {
+  std::string id;
+  std::filesystem::path relativePath;
+  std::string title;
+  std::vector<std::string> tags;
+  std::string icon;
+};
+
 // One note pointing at another, with the line it did so on. The line is what
 // separates a useful backlinks panel from a list of titles.
 struct Backlink {
@@ -74,11 +87,25 @@ public:
   // `title` and `stem` are the two spellings a link is allowed to use.
   std::vector<Backlink> backlinks(std::string_view title, std::string_view stem) const;
   std::size_t size() const;
+  bool isOpen() const;
+
+  // Every indexed note, in no particular order. One statement, no file reads.
+  std::vector<IndexedNote> notes() const;
+
+  // Every directory under the root, library-relative, as the last refresh saw
+  // them. The note list cannot name the *empty* folders and the sidebar tree
+  // needs them, so somebody has to walk the tree for them -- and the refresh
+  // already does, once, with the stat it needs for each file. Handing that
+  // walk's directories out is what leaves the startup at one walk rather than
+  // two.
+  const std::vector<std::filesystem::path>& directories() const;
 
 private:
   std::filesystem::path root_;
   std::filesystem::path dbPath_;
   std::vector<SearchResult> rows_;
+  // Filled by every walk this class makes, so `directories()` never causes one.
+  std::vector<std::filesystem::path> directories_;
   // One connection for the index's lifetime. Every method used to open its own,
   // which recompiled its SQL each call and left sqlite.connection_opens reading
   // zero -- the counter looked like "no connections" rather than "not measured".
