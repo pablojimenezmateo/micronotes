@@ -12,6 +12,7 @@
 #include "ui/AppState.h"
 #include "ui/Draw.h"
 #include "ui/NoteProperties.h"
+#include "ui/Outline.h"
 #include "ui/FoldState.h"
 #include "ui/Actions.h"
 #include "ui/Overlay.h"
@@ -303,6 +304,38 @@ struct UiRuntime {
   // Where the title was drawn last frame, so a click can find it without
   // laying the header out a second time.
   Rect headerTitleRect;
+
+  // What the right panel is showing, cached against the inputs that decide it.
+  //
+  // All three of its views were rebuilt on every frame, and each was expensive
+  // in a different way. Measured over a real session on a 400-note library with
+  // a 200 KB note open, per frame: the outline scanned the whole note for its
+  // headings, 0.30 ms; the backlinks ran a SQLite query, 0.25 ms; and the tags
+  // *read the note back off disk*, 0.53 ms. The same frame drew the note itself
+  // in 0.16 ms -- so an idle frame spent two to three times as long on the panel
+  // beside the note as on the note.
+  //
+  // Two keys, because the three views do not depend on the same things. The
+  // outline is a function of the buffer, so it turns on the editor's revision
+  // and has to move while the user types. Backlinks and tags come from the
+  // library -- the index and the note's front matter -- so they turn on the note
+  // id and the library's revision, and typing must *not* move them.
+  //
+  // Keyed rather than invalidated by a flag, for the reason the page header
+  // above gives: a flag has to be raised at every mutation site and the one that
+  // forgets leaves the panel describing a note that has moved on.
+  struct RightPanelMemo {
+    std::vector<ui::OutlineEntry> outline;
+    std::uint64_t outlineRevision = 0;
+    bool outlineValid = false;
+
+    std::vector<library::Backlink> backlinks;
+    std::vector<std::string> tags;
+    std::string noteId;
+    std::uint64_t libraryRevision = 0;
+    bool libraryValid = false;
+  };
+  RightPanelMemo rightPanel;
 
   // What the pointer is resting on. Cleared at the start of a frame and set by
   // whichever surface the pointer is over, so exactly one is ever showing.

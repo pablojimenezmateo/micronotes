@@ -22,11 +22,12 @@
   /* --- crash recovery ----------------------------------------------------- */      \
   /* Recovery copies posted against recovery copies actually written. A post is  */    \
   /* a memcpy and a notify; a write is two `fsync` barriers, which measured      */    \
-  /* 8.7 ms median on this machine and used to happen on the UI thread on every  */    \
-  /* keystroke. posts is the typing rate, writes is what the disk saw, and the   */    \
-  /* gap between them is the mailbox coalescing a burst into one write of the    */    \
-  /* newest text. writes climbing to meet posts means the coalescing stopped     */    \
-  /* working and every character is waiting for a barrier again.                 */    \
+  /* 1.1 ms median on ext4 here -- 8.7 ms with the disk busy -- and used to run   */    \
+  /* on the UI thread on every keystroke. posts is the typing rate, writes is    */    \
+  /* what the disk saw, and the gap between them is the mailbox coalescing a     */    \
+  /* burst of typing into one write of the newest text. writes climbing to meet  */    \
+  /* posts means the coalescing stopped working and every character is waiting   */    \
+  /* for a barrier again.                                                         */    \
   X(RecoveryPosts, "recovery.posts")                                                   \
   X(RecoveryWrites, "recovery.writes")                                                 \
   /* --- text rendering --------------------------------------------------- */        \
@@ -74,6 +75,18 @@
   X(SidebarRowsDrawn, "sidebar.rows_drawn")                                            \
   X(SidebarRowsReused, "sidebar.rows_reused")                                          \
   X(TreeRowsBuilt, "tree.rows_built")                                                  \
+  /* The right panel's two memos: derivations performed against derivations   */    \
+  /* served from the cache. Every one of its three views was rebuilt per frame, */    \
+  /* and each was expensive differently -- the outline scanned the whole note   */    \
+  /* for headings, the backlinks ran a SQLite query, and the tags read the note */    \
+  /* back off disk. Read against frame.presents: outline_builds should track    */    \
+  /* the typing rate and library_builds should be near zero, and either of them */    \
+  /* tracking the frame count means its memo key has stopped discriminating and */    \
+  /* the panel is costing more per frame than the note beside it does.          */    \
+  X(RightPanelOutlineBuilds, "right_panel.outline_builds")                             \
+  X(RightPanelOutlineReused, "right_panel.outline_reused")                             \
+  X(RightPanelLibraryBuilds, "right_panel.library_builds")                             \
+  X(RightPanelLibraryReused, "right_panel.library_reused")                             \
   /* Text the shell had to shorten to fit. Each call used to pop one byte at a   */    \
   /* time and re-measure the whole string, so a long title cost dozens of        */    \
   /* shaping passes; measures is what says whether that is still true.           */    \

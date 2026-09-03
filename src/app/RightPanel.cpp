@@ -3,6 +3,8 @@
 #include "app/Notes.h"
 #include "app/Shell.h"
 
+#include "core/perf/PerformanceCounters.h"
+
 #include "ui/Metrics.h"
 #include "ui/Outline.h"
 #include "ui/Theme.h"
@@ -22,11 +24,6 @@ constexpr float kRowHeight = 24.0f;
 constexpr float kPadX = 14.0f;
 constexpr float kIndentStep = 12.0f;
 constexpr float kBacklinkHeight = 44.0f;
-
-struct PanelRow {
-  Rect rect;
-  std::size_t entry = 0;
-};
 
 // The tab a click lands on, and where each one is drawn. One geometry, read by
 // both the paint and the hit test, so a tab cannot be painted off its own
@@ -48,14 +45,53 @@ const char* viewLabel(ui::RightPanelView view) {
 constexpr ui::RightPanelView kViews[] = {ui::RightPanelView::Outline, ui::RightPanelView::Backlinks,
                                         ui::RightPanelView::Tags};
 
-std::vector<PanelRow> outlineRows(const std::vector<ui::OutlineEntry>& entries, Rect rect) {
-  std::vector<PanelRow> rows;
-  float y = rect.y + kHeaderHeight + 4.0f;
-  for(std::size_t i = 0; i < entries.size(); ++i) {
-    rows.push_back({{rect.x, y, rect.w, kRowHeight}, i});
-    y += kRowHeight;
+// The rows are a fixed pitch from the top of the panel, so the row for entry
+// `i` is arithmetic. It used to be a `vector<PanelRow>` built for every heading
+// in the note and then walked until the first one fell off the bottom -- an
+// allocation per frame to address the twenty rows a panel can show.
+Rect outlineRowRect(Rect rect, std::size_t index) {
+  return {rect.x, rect.y + kHeaderHeight + 4.0f + static_cast<float>(index) * kRowHeight, rect.w,
+          kRowHeight};
+}
+
+// The outline of the open buffer, rebuilt only when the buffer has moved.
+const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui) {
+  auto& memo = ui.rightPanel;
+  const std::uint64_t revision = ui.editor.revision();
+  if(memo.outlineValid && memo.outlineRevision == revision) {
+    perf::addCounter(perf::CounterId::RightPanelOutlineReused);
+    return memo.outline;
   }
-  return rows;
+  perf::addCounter(perf::CounterId::RightPanelOutlineBuilds);
+  memo.outlineValid = true;
+  memo.outlineRevision = revision;
+  memo.outline = ui::outlineOf(ui.editor.text());
+  return memo.outline;
+}
+
+// The two views that come from the library rather than from the buffer. Both are
+// filled together because both turn on the same key, and asking for either is
+// what says the note or the library has moved.
+void refreshLibraryViews(UiRuntime& ui) {
+  auto& memo = ui.rightPanel;
+  const std::string& noteId = ui.state.selection().noteId;
+  const std::uint64_t revision = ui.state.revision();
+  if(memo.libraryValid && memo.noteId == noteId && memo.libraryRevision == revision) {
+    perf::addCounter(perf::CounterId::RightPanelLibraryReused);
+    return;
+  }
+  perf::addCounter(perf::CounterId::RightPanelLibraryBuilds);
+  memo.libraryValid = true;
+  memo.noteId = noteId;
+  memo.libraryRevision = revision;
+  memo.backlinks.clear();
+  memo.tags.clear();
+  if(noteId.empty() || !ui.state.hasLibrary()) return;
+  memo.backlinks = ui.state.backlinksToSelected();
+  // Only the tags are kept, not the whole note: `selectedNote` reads the file
+  // and hands back its body as well, and holding that here would be a second
+  // copy of the open buffer for the sake of a row of chips.
+  if(const auto note = ui.state.selectedNote()) memo.tags = note->metadata.tags;
 }
 
 }
@@ -89,31 +125,36 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   }
 
   if(workspace.rightPanelView == ui::RightPanelView::Outline) {
-    const auto entries = ui::outlineOf(ui.editor.text());
+    const auto& entries = outlineFor(ui);
     if(entries.empty()) {
       ui::drawEmptyMessage(text, "No headings", "Headings in this note show up here.",
                            {rect.x, rect.y + kHeaderHeight, rect.w, 100.0f});
       return;
     }
+    // Which entry the caret is in is not memoised: it moves with the caret
+    // rather than with the buffer, and it is a walk of the headings rather than
+    // of the note.
     const auto current = ui::outlineEntryAt(entries, ui.editor.cursor());
-    for(const auto& row : outlineRows(entries, rect)) {
-      if(row.rect.y > rect.y + rect.h) break;
-      const auto& entry = entries[row.entry];
-      const bool here = row.entry == current;
-      const bool hot = ui::contains(row.rect, ui.mouseX, ui.mouseY);
-      ui::drawSelection(renderer, row.rect, here, hot);
+    for(std::size_t i = 0; i < entries.size(); ++i) {
+      const Rect row = outlineRowRect(rect, i);
+      if(row.y > rect.y + rect.h) break;
+      const auto& entry = entries[i];
+      const bool here = i == current;
+      const bool hot = ui::contains(row, ui.mouseX, ui.mouseY);
+      ui::drawSelection(renderer, row, here, hot);
       const float x = rect.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
       // A top-level heading carries the note's structure and reads as the
       // strong row; anything nested under it is support.
       const auto colour = here ? theme().text : (entry.depth == 0 ? theme().muted : theme().dim);
       text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(rect.x + rect.w - x - kPadX), rowStyle),
-                x, row.rect.y + 3.0f, colour, rowStyle);
+                x, row.y + 3.0f, colour, rowStyle);
     }
     return;
   }
 
+  refreshLibraryViews(ui);
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
-    const auto backlinks = ui.state.backlinksToSelected();
+    const auto& backlinks = ui.rightPanel.backlinks;
     if(backlinks.empty()) {
       ui::drawEmptyMessage(text, "Nothing links here",
                            "Write [[the title of this note]] in another note and it will show up.",
@@ -140,8 +181,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     return;
   }
 
-  const auto note = ui.state.selectedNote();
-  const auto& tags = note ? note->metadata.tags : std::vector<std::string>();
+  const auto& tags = ui.rightPanel.tags;
   if(tags.empty()) {
     ui::drawEmptyMessage(text, "No tags", "This note carries none yet.",
                          {rect.x, rect.y + kHeaderHeight, rect.w, 100.0f},
@@ -176,15 +216,20 @@ bool handleRightPanelClick(UiRuntime& ui, Rect rect, float x, float y) {
     return true;
   }
   if(workspace.rightPanelView != ui::RightPanelView::Outline) return true;
-  const auto entries = ui::outlineOf(ui.editor.text());
-  for(const auto& row : outlineRows(entries, rect)) {
-    if(!ui::contains(row.rect, x, y)) continue;
-    // Clicking a heading is a way of scrolling to it, so the caret goes to its
-    // text rather than to the marker in front of it.
-    ui.editor.moveCursor(entries[row.entry].offset);
-    ui.revealEditorCursor = true;
-    ui.focus = FocusArea::Editor;
-    return true;
+  const auto& entries = outlineFor(ui);
+  // The rows are a fixed pitch, so the one under the pointer is arithmetic
+  // rather than a walk of every heading in the note.
+  const float offset = y - (rect.y + kHeaderHeight + 4.0f);
+  if(offset >= 0.0f) {
+    const auto index = static_cast<std::size_t>(offset / kRowHeight);
+    if(index < entries.size() && ui::contains(outlineRowRect(rect, index), x, y)) {
+      // Clicking a heading is a way of scrolling to it, so the caret goes to its
+      // text rather than to the marker in front of it.
+      ui.editor.moveCursor(entries[index].offset);
+      ui.revealEditorCursor = true;
+      ui.focus = FocusArea::Editor;
+      return true;
+    }
   }
   // The panel swallows clicks that land on its own background, or a click meant
   // for a row would fall through to the page behind it.
