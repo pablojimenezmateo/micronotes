@@ -239,6 +239,22 @@ public:
   void update(std::string_view source, const LayoutOptions& options);
 
   const std::vector<SourceBlock>& blocks() const;
+  // The blocks, but only when they still partition the buffer stamped
+  // `sourceRevision`; an empty span otherwise.
+  //
+  // This exists so that the block edits -- Enter, Tab, Backspace, the block
+  // commands -- can stop re-deriving a partition the layout is already holding.
+  // Each of them used to call `scanBlocks` over the whole note to find the one
+  // block it acts on, which measured ~200 us on a 200 KB note against the 40 us
+  // the keystroke's own layout update costs; Enter ran two or three of them.
+  //
+  // The stamp is the whole safety argument. `blocks_` describes `source_`, and
+  // `sourceRevision_` is what the caller said `source_` was -- so a caller that
+  // hands back its own stamp and gets a non-empty span has been told, by the
+  // only party that knows, that these blocks are its buffer's. A caller whose
+  // buffer has moved since the last update gets nothing and scans, which is
+  // what an unstamped caller gets too.
+  BlockSpan blocksAt(std::uint64_t sourceRevision) const;
   std::size_t blockCount() const;
   const BlockLayout& layout(std::size_t index) const;
   // True when the block sits inside a collapsed toggle.

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -78,16 +79,23 @@ using ResumeAt = std::function<bool(std::size_t)>;
 std::size_t scanBlocksFrom(std::string_view source, std::size_t from, std::size_t tailBytes,
                            const ResumeAt& resume, std::vector<SourceBlock>* out);
 
+// The blocks a caller is reading, without saying who owns them. A span rather
+// than a `const vector&` because the two callers that matter hold different
+// things: the layout keeps a `vector<SourceBlock>` it splices per keystroke, and
+// an edit borrows a window of it. A vector converts implicitly, so nothing that
+// hands one over had to change.
+using BlockSpan = std::span<const SourceBlock>;
+
 // Index of the block owning `offset`. Offsets on a block boundary belong to the
 // block that starts there; `source.size()` belongs to the last block.
-std::size_t blockIndexAt(const std::vector<SourceBlock>& blocks, std::size_t offset);
+std::size_t blockIndexAt(BlockSpan blocks, std::size_t offset);
 
 bool isListKind(BlockKind kind);
 
 // Consecutive `>` lines are one quote, or one callout, on screen: each line
 // stays its own block, and the container is drawn once over the whole run. A
 // `[!KIND]` line always starts a new one.
-bool startsQuoteRun(const std::vector<SourceBlock>& blocks, std::size_t index);
-bool endsQuoteRun(const std::vector<SourceBlock>& blocks, std::size_t index);
+bool startsQuoteRun(BlockSpan blocks, std::size_t index);
+bool endsQuoteRun(BlockSpan blocks, std::size_t index);
 
 }

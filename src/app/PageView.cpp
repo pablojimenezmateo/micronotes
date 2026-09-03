@@ -116,6 +116,10 @@ const doc::DocumentLayout& PageView::document() const {
   return document_;
 }
 
+doc::BlockSpan PageView::blocksAt(std::uint64_t sourceRevision) const {
+  return document_.blocksAt(sourceRevision);
+}
+
 const std::vector<PageLink>& PageView::links() const {
   return links_;
 }

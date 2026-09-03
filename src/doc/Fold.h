@@ -22,9 +22,18 @@ bool foldableKind(BlockKind kind);
 
 // One past the last block a fold at `index` hides. Equal to `index + 1` when
 // there is nothing nested under it.
-std::size_t foldEnd(const std::vector<SourceBlock>& blocks, std::size_t index);
+std::size_t foldEnd(BlockSpan blocks, std::size_t index);
 
-bool foldable(const std::vector<SourceBlock>& blocks, std::size_t index);
+bool foldable(BlockSpan blocks, std::size_t index);
+
+// The block whose fold would swallow `index`: itself when it heads one, and
+// otherwise the nearest one above that reaches down to it. `blocks.size()` when
+// nothing does.
+//
+// The inverse of `foldEnd`, and it is a search because `foldEnd` only runs
+// forwards -- which is also why the incremental fold resolution in
+// `doc/Layout.cpp` is still an open item.
+std::size_t foldHeadFor(BlockSpan blocks, std::size_t index);
 
 // A fold's identity across edits: its shape and its text, not its offset, so
 // typing above a folded heading does not silently unfold it. Two blocks written

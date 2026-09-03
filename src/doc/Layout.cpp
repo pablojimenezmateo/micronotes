@@ -349,6 +349,11 @@ const std::vector<SourceBlock>& DocumentLayout::blocks() const {
   return blocks_;
 }
 
+BlockSpan DocumentLayout::blocksAt(std::uint64_t sourceRevision) const {
+  if(!built_ || sourceRevision == 0 || sourceRevision != sourceRevision_) return {};
+  return blocks_;
+}
+
 std::size_t DocumentLayout::blockCount() const {
   return blocks_.size();
 }

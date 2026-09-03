@@ -10,6 +10,7 @@
 #include "app/Ribbon.h"
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
+#include "app/EditorBlocks.h"
 #include "app/Folds.h"
 #include "app/FramePolicy.h"
 #include "app/FrameTrace.h"
@@ -138,10 +139,12 @@ static bool applyEdit(UiRuntime& ui, const doc::Edit& edit) {
 
 // Runs a transform against the buffer as it stands right now. Chaining these
 // with `||` is safe: a transform only sees the buffer when the earlier ones
-// declined to change it.
+// declined to change it -- and a transform that did change it has moved the
+// editor's revision on, so the next one in the chain is handed no partition
+// rather than a stale one.
 template <typename Transform>
 static bool applyTransform(UiRuntime& ui, Transform&& transform) {
-  return applyEdit(ui, transform(ui.editor.text(), ui.editor.cursor()));
+  return applyEdit(ui, transform(ui.editor.text(), ui.editor.cursor(), editorBlocks(ui)));
 }
 
 static void wrapEditorSelection(UiRuntime& ui, std::string_view open, std::string_view close, std::string_view label) {
@@ -167,7 +170,7 @@ static std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime&
 }
 
 static void selectBlockAtCursor(UiRuntime& ui) {
-  const auto blocks = doc::scanBlocks(ui.editor.text());
+  const EditorBlocks blocks(ui);
   std::size_t index = doc::blockIndexAt(blocks, ui.editor.cursor());
   // A blank line - the empty last line included - is a separator, not something
   // to select: step back to the nearest real block.
@@ -201,7 +204,7 @@ static void syncBlockSelectionToEdit(UiRuntime& ui) {
 // Moves the focus end of a block selection by whole blocks. Blanks are skipped:
 // they are separators, not something a user means to select.
 static void moveBlockSelection(UiRuntime& ui, int delta, bool extend) {
-  const auto blocks = doc::scanBlocks(ui.editor.text());
+  const EditorBlocks blocks(ui);
   std::size_t next = doc::blockIndexAt(blocks, ui.blockSelectFocus);
   bool moved = false;
   while(true) {
@@ -228,7 +231,7 @@ static void moveBlockSelection(UiRuntime& ui, int delta, bool extend) {
 static void turnCurrentBlockInto(UiRuntime& ui, doc::BlockKind kind, int level, std::string_view label) {
   if(ui.focus != FocusArea::Editor) return;
   const auto [from, to] = blockSelectionCarets(ui);
-  if(applyEdit(ui, doc::turnBlocksInto(ui.editor.text(), from, to, kind, level))) {
+  if(applyEdit(ui, doc::turnBlocksInto(ui.editor.text(), from, to, kind, level, editorBlocks(ui)))) {
     syncBlockSelectionToEdit(ui);
     ui.status = std::string(label);
   } else {
@@ -273,28 +276,18 @@ static const BlockKindEntry* blockKindFor(std::string_view id) {
 
 static bool moveSelectedBlocks(UiRuntime& ui, int delta) {
   const auto [from, to] = blockSelectionCarets(ui);
-  if(!applyEdit(ui, doc::moveBlocks(ui.editor.text(), from, to, delta))) return false;
+  if(!applyEdit(ui, doc::moveBlocks(ui.editor.text(), from, to, delta, editorBlocks(ui)))) return false;
   syncBlockSelectionToEdit(ui);
   ui.status = delta < 0 ? "Moved block up" : "Moved block down";
   return true;
-}
-
-// The block whose fold would swallow `index`: itself when it heads one, and
-// otherwise the nearest one above that reaches down to it.
-static std::size_t foldHeadFor(const std::vector<doc::SourceBlock>& blocks, std::size_t index) {
-  if(index < blocks.size() && doc::foldable(blocks, index)) return index;
-  for(std::size_t i = index; i-- > 0;) {
-    if(doc::foldEnd(blocks, i) > index) return i;
-  }
-  return blocks.size();
 }
 
 // Folding changes what is on screen and never the file, so it goes nowhere near
 // the editor or the undo stack.
 static void toggleFoldAt(UiRuntime& ui, std::size_t caret) {
   const std::string& source = ui.editor.text();
-  const auto blocks = doc::scanBlocks(source);
-  const std::size_t index = foldHeadFor(blocks, doc::blockIndexAt(blocks, std::min(caret, source.size())));
+  const EditorBlocks blocks(ui);
+  const std::size_t index = doc::foldHeadFor(blocks, doc::blockIndexAt(blocks, std::min(caret, source.size())));
   if(index >= blocks.size()) {
     ui.status = "Nothing to fold here";
     return;
@@ -321,12 +314,12 @@ static void performBlockCommand(UiRuntime& ui, const std::string& id) {
   }
   const auto [from, to] = blockSelectionCarets(ui);
   if(id == "duplicate") {
-    if(applyEdit(ui, doc::duplicateBlocks(ui.editor.text(), from, to))) {
+    if(applyEdit(ui, doc::duplicateBlocks(ui.editor.text(), from, to, editorBlocks(ui)))) {
       syncBlockSelectionToEdit(ui);
       ui.status = "Duplicated block";
     }
   } else if(id == "delete") {
-    if(applyEdit(ui, doc::deleteBlocks(ui.editor.text(), from, to))) {
+    if(applyEdit(ui, doc::deleteBlocks(ui.editor.text(), from, to, editorBlocks(ui)))) {
       syncBlockSelectionToEdit(ui);
       ui.status = "Deleted block";
     }
@@ -1775,8 +1768,8 @@ static void openBlockMenu(UiRuntime& ui, float x, float y) {
   overlay.anchorY = y;
   overlay.width = 240.0f;
   // Fold is offered only where the document already nests something to hide.
-  const auto blocks = doc::scanBlocks(ui.editor.text());
-  const std::size_t head = foldHeadFor(blocks, doc::blockIndexAt(blocks, ui.editor.cursor()));
+  const EditorBlocks blocks(ui);
+  const std::size_t head = doc::foldHeadFor(blocks, doc::blockIndexAt(blocks, ui.editor.cursor()));
   const bool folds = head < blocks.size();
   const bool folded = folds && ui.folds.folded(ui.state.selection().noteId, doc::foldKey(ui.editor.text(), blocks[head]));
   overlay.items = {
@@ -1819,7 +1812,8 @@ static void openInsertMenu(UiRuntime& ui, std::size_t blockStart) {
 static void commitSlashMenu(UiRuntime& ui, const std::string& itemId) {
   const BlockKindEntry* entry = blockKindFor(itemId);
   if(ui.slashInserts) {
-    if(entry && applyEdit(ui, doc::insertBlockAfter(ui.editor.text(), ui.slashAfterBlock, entry->kind, entry->level))) {
+    if(entry && applyEdit(ui, doc::insertBlockAfter(ui.editor.text(), ui.slashAfterBlock, entry->kind, entry->level,
+                                             editorBlocks(ui)))) {
       ui.status = entry->label;
     }
     return;
@@ -2054,7 +2048,7 @@ static void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
   }
   const auto [from, to] = blockSelectionCarets(ui);
   const auto& source = ui.editor.text();
-  const auto blocks = doc::scanBlocks(source);
+  const EditorBlocks blocks(ui);
   const auto& first = blocks[doc::blockIndexAt(blocks, std::min(from, source.size()))];
   const auto& last = blocks[doc::blockIndexAt(blocks, std::min(to, source.size()))];
   std::string moved = source.substr(first.start, last.end - first.start);
@@ -2067,7 +2061,7 @@ static void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
     ui.status = "Move failed";
     return;
   }
-  if(applyEdit(ui, doc::deleteBlocks(source, from, to))) {
+  if(applyEdit(ui, doc::deleteBlocks(source, from, to, editorBlocks(ui)))) {
     ui.clearBlockSelection();
     ui.status = "Moved blocks to " + target->title;
   }
@@ -2441,7 +2435,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(shortcut(SDLK_C, SDL_SCANCODE_C)) {
     if(ui.focus == FocusArea::Editor && ui.blockSelectActive) {
       const auto [from, to] = blockSelectionCarets(ui);
-      const auto blocks = doc::scanBlocks(ui.editor.text());
+      const EditorBlocks blocks(ui);
       const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
       const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end;
       ui.status = setClipboardText(std::string_view(ui.editor.text()).substr(start, end - start))
@@ -2598,7 +2592,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       syncBlockSelectionToEdit(ui);
     } else if(key == SDLK_RETURN || key == SDLK_KP_ENTER) {
       // Enter puts the caret back into the first selected block's text.
-      const auto blocks = doc::scanBlocks(ui.editor.text());
+      const EditorBlocks blocks(ui);
       const auto content = blocks[doc::blockIndexAt(blocks, blockSelectionCarets(ui).first)].contentStart;
       ui.clearBlockSelection();
       ui.editor.moveCursor(content);
@@ -3064,7 +3058,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       // caret or start a selection.
       if(const auto blockStart = ui.livePage.checkboxAt(x, y)) {
         const std::size_t caret = ui.editor.cursor();
-        if(applyEdit(ui, doc::toggleTodo(ui.editor.text(), *blockStart))) {
+        if(applyEdit(ui, doc::toggleTodo(ui.editor.text(), *blockStart, editorBlocks(ui)))) {
           // The flip is a one-byte swap, so every other offset survives it.
           ui.editor.moveCursor(std::min(caret, ui.editor.text().size()));
           ui.revealEditorCursor = false;
@@ -3135,7 +3129,8 @@ static void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int wid
   if(button == SDL_BUTTON_LEFT) {
     if(ui.draggingBlock) {
       if(ui.blockDropOffset &&
-         applyEdit(ui, doc::moveBlocksTo(ui.editor.text(), ui.dragBlockAnchor, ui.dragBlockFocus, *ui.blockDropOffset))) {
+         applyEdit(ui, doc::moveBlocksTo(ui.editor.text(), ui.dragBlockAnchor, ui.dragBlockFocus, *ui.blockDropOffset,
+                                           editorBlocks(ui)))) {
         syncBlockSelectionToEdit(ui);
         ui.status = "Moved block";
       }

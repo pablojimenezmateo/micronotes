@@ -15,7 +15,7 @@ bool foldableKind(BlockKind kind) {
   return kind == BlockKind::Heading || isListKind(kind);
 }
 
-std::size_t foldEnd(const std::vector<SourceBlock>& blocks, std::size_t index) {
+std::size_t foldEnd(BlockSpan blocks, std::size_t index) {
   if(index >= blocks.size()) return blocks.size();
   const SourceBlock& head = blocks[index];
   std::size_t end = index + 1;
@@ -48,9 +48,17 @@ std::size_t foldEnd(const std::vector<SourceBlock>& blocks, std::size_t index) {
   return end;
 }
 
-bool foldable(const std::vector<SourceBlock>& blocks, std::size_t index) {
+bool foldable(BlockSpan blocks, std::size_t index) {
   if(index >= blocks.size() || !foldableKind(blocks[index].kind)) return false;
   return foldEnd(blocks, index) > index + 1;
+}
+
+std::size_t foldHeadFor(BlockSpan blocks, std::size_t index) {
+  if(index < blocks.size() && foldable(blocks, index)) return index;
+  for(std::size_t i = index; i-- > 0;) {
+    if(foldEnd(blocks, i) > index) return i;
+  }
+  return blocks.size();
 }
 
 std::string foldKey(std::string_view source, const SourceBlock& block) {

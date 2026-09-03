@@ -296,10 +296,16 @@ static bool scrollBudgets(const std::string& source) {
   return false;
 }
 
-// Enter, Tab and Backspace each rescan the note to find the block they act on.
-// That is once per structural key, not once per character, so the budget is
-// looser than the keystroke one - but it still has to stay off the critical path.
+// Enter, Tab and Backspace each need the note's block partition to find the
+// block they act on. That is once per structural key, not once per character, so
+// the budget is looser than the keystroke one - but it still has to stay off the
+// critical path.
 static constexpr std::uint64_t kTransformBudgetMicros = 4000;
+
+// What the app actually pays, now that the live page lends its partition rather
+// than each edit deriving one. Far tighter than the budget above, because a
+// borrowed partition leaves an edit with no pass over the document in it at all.
+static constexpr std::uint64_t kLentTransformBudgetMicros = 40;
 
 static bool editBudgets(const std::string& source) {
   const std::size_t caret = std::min(source.find("bullet", source.size() / 2) + 6, source.size());
@@ -339,6 +345,35 @@ static bool editBudgets(const std::string& source) {
   if(worst > kTransformBudgetMicros) {
     std::cerr << "BUDGET FAILED: a block transform took " << worst
               << "us, over " << kTransformBudgetMicros << "us\n";
+    return false;
+  }
+
+  // The same transforms with the partition handed in, which is the path the app
+  // takes: `doc::DocumentLayout` keeps one and `app::editorBlocks` lends it. The
+  // measurements above are the fallback for a caller that has none, and the gap
+  // between the two lanes is what the lending is worth. Scanned once here for
+  // all of them, exactly as the layout holds one across a whole editing session.
+  const auto blocks = micronotes::doc::scanBlocks(source);
+  std::uint64_t lentWorst = 0;
+  lentWorst = std::max(lentWorst, time("edits.continue_list_lent_200kb", [&] {
+    return micronotes::doc::continueList(source, caret, blocks);
+  }));
+  lentWorst = std::max(lentWorst, time("edits.outdent_or_unwrap_lent_200kb", [&] {
+    return micronotes::doc::outdentOrUnwrap(source, caret, blocks);
+  }));
+  lentWorst = std::max(lentWorst, time("edits.toggle_todo_lent_200kb", [&] {
+    return micronotes::doc::toggleTodo(source, caret, blocks);
+  }));
+  lentWorst = std::max(lentWorst, time("edits.insert_block_after_lent_200kb", [&] {
+    return micronotes::doc::insertBlockAfter(source, caret, micronotes::doc::BlockKind::Todo, 1, blocks);
+  }));
+  lentWorst = std::max(lentWorst, time("edits.move_blocks_to_lent_200kb", [&] {
+    return micronotes::doc::moveBlocksTo(source, caret, caret, 0, blocks);
+  }));
+  if(lentWorst > kLentTransformBudgetMicros) {
+    std::cerr << "BUDGET FAILED: a block transform with the partition lent took " << lentWorst
+              << "us, over " << kLentTransformBudgetMicros << "us -- an edit that is handed the "
+              << "blocks must not be walking the document\n";
     return false;
   }
   return true;

@@ -172,6 +172,11 @@ public:
   std::optional<std::size_t> rawOffset() const;
 
   const doc::DocumentLayout& document() const;
+  // The block partition of the note as this page last laid it out, when it still
+  // describes the buffer stamped `sourceRevision`; empty otherwise. What the
+  // block edits borrow instead of scanning the note for themselves -- see
+  // `doc::Edits.h`.
+  doc::BlockSpan blocksAt(std::uint64_t sourceRevision) const;
   const std::vector<PageLink>& links() const;
 
 private:

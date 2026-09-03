@@ -422,7 +422,7 @@ void scanBlocksInto(std::string_view source, std::vector<SourceBlock>* out) {
   }
 }
 
-bool startsQuoteRun(const std::vector<SourceBlock>& blocks, std::size_t index) {
+bool startsQuoteRun(BlockSpan blocks, std::size_t index) {
   if(index >= blocks.size()) return false;
   const BlockKind kind = blocks[index].kind;
   if(kind == BlockKind::Callout) return true;
@@ -432,14 +432,14 @@ bool startsQuoteRun(const std::vector<SourceBlock>& blocks, std::size_t index) {
   return previous != BlockKind::Quote && previous != BlockKind::Callout;
 }
 
-bool endsQuoteRun(const std::vector<SourceBlock>& blocks, std::size_t index) {
+bool endsQuoteRun(BlockSpan blocks, std::size_t index) {
   if(index >= blocks.size()) return false;
   const BlockKind kind = blocks[index].kind;
   if(kind != BlockKind::Quote && kind != BlockKind::Callout) return false;
   return index + 1 >= blocks.size() || blocks[index + 1].kind != BlockKind::Quote;
 }
 
-std::size_t blockIndexAt(const std::vector<SourceBlock>& blocks, std::size_t offset) {
+std::size_t blockIndexAt(BlockSpan blocks, std::size_t offset) {
   if(blocks.empty()) return 0;
   std::size_t low = 0;
   std::size_t high = blocks.size();

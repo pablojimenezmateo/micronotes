@@ -4,6 +4,7 @@
 #include "doc/Edits.h"
 #include "core/editor/MarkdownEditor.h"
 
+#include <algorithm>
 #include <string>
 
 namespace {
@@ -377,4 +378,65 @@ MICRONOTES_TEST(edits_turn_a_blank_line_into_a_block) {
   const std::string source = "one\n\n\ntwo\n";
   const auto todo = micronotes::doc::turnBlocksInto(source, 5, 5, BlockKind::Todo);
   MICRONOTES_REQUIRE(applied(source, todo) == "one\n\n- [ ] \ntwo\n");
+}
+
+// Every operation takes the partition either as a loan or by scanning for
+// itself, and the two have to be the same operation. This is the invariant that
+// lets the live page hand its own block list over -- and the one that would
+// break silently if a future edit read something from the partition that the
+// synthesised empty-last-line entry does not carry.
+//
+// Run over sources chosen for the edges: a note with and without a trailing
+// newline, a caret at 0, at the end, and on the empty last line, and blocks of
+// every kind the scanner models.
+MICRONOTES_TEST(edits_lending_the_partition_changes_nothing) {
+  const std::string sources[] = {
+    "# Heading\n\ntext\n\n- a\n  - b\n\n1. one\n2. two\n\n- [ ] task\n- [x] done\n\n"
+    "> quote\n> more\n\n> [!NOTE] callout\n\n```py\ncode\n```\n\n---\n\nlast\n",
+    // The same without the trailing newline: the empty last line is not there,
+    // so the partition has one fewer entry and every index shifts at the end.
+    "# Heading\n\ntext\n\n- a\n  - b\n\n```py\ncode\n```\n\nlast",
+    "",
+    "\n",
+    "- only\n",
+  };
+
+  const auto same = [](const Edit& a, const Edit& b) {
+    return a.valid == b.valid && a.start == b.start && a.end == b.end && a.text == b.text &&
+           a.cursor == b.cursor && a.anchor == b.anchor && a.selects == b.selects;
+  };
+
+  for(const std::string& source : sources) {
+    const auto blocks = micronotes::doc::scanBlocks(source);
+    for(std::size_t caret = 0; caret <= source.size(); ++caret) {
+      using namespace micronotes::doc;
+      MICRONOTES_REQUIRE(same(continueList(source, caret), continueList(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(closeFence(source, caret), closeFence(source, caret, blocks)));
+      MICRONOTES_REQUIRE(
+        same(outdentOrUnwrap(source, caret), outdentOrUnwrap(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(toggleTodo(source, caret), toggleTodo(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(indent(source, caret), indent(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(outdent(source, caret), outdent(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(applyMarkdownShortcut(source, caret),
+                              applyMarkdownShortcut(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(deleteBlock(source, caret), deleteBlock(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(duplicateBlock(source, caret), duplicateBlock(source, caret, blocks)));
+      MICRONOTES_REQUIRE(same(moveBlock(source, caret, -1), moveBlock(source, caret, -1, blocks)));
+      MICRONOTES_REQUIRE(same(moveBlock(source, caret, 1), moveBlock(source, caret, 1, blocks)));
+      MICRONOTES_REQUIRE(same(turnInto(source, caret, BlockKind::Quote),
+                              turnInto(source, caret, BlockKind::Quote, 1, blocks)));
+      MICRONOTES_REQUIRE(same(insertBlockAfter(source, caret, BlockKind::Todo),
+                              insertBlockAfter(source, caret, BlockKind::Todo, 1, blocks)));
+      MICRONOTES_REQUIRE(same(moveBlocksTo(source, caret, caret, 0),
+                              moveBlocksTo(source, caret, caret, 0, blocks)));
+      // The range operations, over a span rather than a point.
+      const std::size_t to = std::min(caret + 12, source.size());
+      MICRONOTES_REQUIRE(same(deleteBlocks(source, caret, to), deleteBlocks(source, caret, to, blocks)));
+      MICRONOTES_REQUIRE(
+        same(duplicateBlocks(source, caret, to), duplicateBlocks(source, caret, to, blocks)));
+      MICRONOTES_REQUIRE(same(moveBlocks(source, caret, to, 1), moveBlocks(source, caret, to, 1, blocks)));
+      MICRONOTES_REQUIRE(same(turnBlocksInto(source, caret, to, BlockKind::Bullet),
+                              turnBlocksInto(source, caret, to, BlockKind::Bullet, 1, blocks)));
+    }
+  }
 }

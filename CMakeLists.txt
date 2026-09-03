@@ -162,6 +162,7 @@ set(MICROCORE_SOURCES
 # micronotes-only code: the live-Markdown document model, the note library,
 # and the app shell state.
 set(MICRONOTES_APP_SOURCES
+  src/app/EditorBlocks.cpp
   src/app/FrameTrace.cpp
   src/doc/BlockScan.cpp
   src/doc/Edits.cpp

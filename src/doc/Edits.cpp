@@ -1,39 +1,87 @@
 #include "doc/Edits.h"
 
 #include <algorithm>
+#include <span>
 #include <utility>
 #include <vector>
 
 namespace micronotes::doc {
 namespace {
 
+// The partition an edit reads, from whichever of the two places it came.
+//
+// A caller that already holds one lends it and nothing is scanned; a caller that
+// does not gets a scan into this object's own vector. Either way the reader sees
+// one indexable sequence, which is why `Context` and `Range` below did not have
+// to learn about the difference.
+//
+// The one thing it adds to both is the empty last line. A buffer ending in a
+// newline leaves a caret position no block covers, and it needs one of its own
+// so Enter there starts a paragraph instead of continuing the list above it, and
+// so the block commands find nothing there to act on. That used to be a real
+// entry pushed onto the scan's vector, which a borrowed span cannot have -- so
+// it is synthesised here, past the end of whatever was handed over.
+class BlockList {
+public:
+  BlockList() = default;
+
+  void reset(std::string_view source, BlockSpan lent) {
+    lent_ = lent;
+    if(lent_.empty()) scanBlocksInto(source, &owned_);
+    lastLine_ = !source.empty() && source.back() == '\n';
+    if(lastLine_) {
+      trailing_ = SourceBlock {};
+      trailing_.kind = BlockKind::Blank;
+      trailing_.start = source.size();
+      trailing_.end = source.size();
+      trailing_.contentStart = source.size();
+      trailing_.contentEnd = source.size();
+    }
+  }
+
+  std::size_t size() const {
+    return real().size() + (lastLine_ ? 1 : 0);
+  }
+
+  const SourceBlock& operator[](std::size_t index) const {
+    const BlockSpan blocks = real();
+    return index < blocks.size() ? blocks[index] : trailing_;
+  }
+
+  // The block owning `offset`, over the synthetic entry as well as the real
+  // ones: `blockIndexAt` knows only about the span it is given, and the empty
+  // last line starts exactly where the last real block ends.
+  std::size_t indexAt(std::string_view source, std::size_t offset) const {
+    const BlockSpan blocks = real();
+    offset = std::min(offset, source.size());
+    if(lastLine_ && offset == source.size()) return blocks.size();
+    return blockIndexAt(blocks, offset);
+  }
+
+private:
+  // Derived rather than stored. A member span pointing into `owned_` dangles the
+  // moment the object is copied or moved -- and `Context` and `Range` are both
+  // returned by value, so whether that happens is a question about copy elision
+  // rather than about this class. One branch per access removes the question.
+  BlockSpan real() const {
+    return lent_.empty() ? BlockSpan(owned_) : lent_;
+  }
+
+  std::vector<SourceBlock> owned_;
+  BlockSpan lent_;
+  SourceBlock trailing_;
+  bool lastLine_ = false;
+};
+
 struct Context {
-  std::vector<SourceBlock> blocks;
+  BlockList blocks;
   std::size_t index = 0;
 };
 
-// A buffer ending in a newline leaves one caret position no block covers: the
-// empty last line. Give it a block of its own, so Enter there starts a
-// paragraph instead of continuing the list above it, and so the block commands
-// find nothing there to act on.
-std::vector<SourceBlock> scanBlocksWithLastLine(std::string_view source) {
-  auto blocks = scanBlocks(source);
-  if(!source.empty() && source.back() == '\n') {
-    SourceBlock trailing;
-    trailing.kind = BlockKind::Blank;
-    trailing.start = source.size();
-    trailing.end = source.size();
-    trailing.contentStart = source.size();
-    trailing.contentEnd = source.size();
-    blocks.push_back(trailing);
-  }
-  return blocks;
-}
-
-Context contextAt(std::string_view source, std::size_t caret) {
+Context contextAt(std::string_view source, std::size_t caret, BlockSpan lent) {
   Context context;
-  context.blocks = scanBlocksWithLastLine(source);
-  context.index = blockIndexAt(context.blocks, std::min(caret, source.size()));
+  context.blocks.reset(source, lent);
+  context.index = context.blocks.indexAt(source, caret);
   return context;
 }
 
@@ -55,12 +103,18 @@ std::size_t shiftedCaret(std::size_t caret, std::size_t contentStart, std::size_
   return newContentStart + (caret - contentStart);
 }
 
-// The span of whole blocks two carets reach across. Unlike `contextAt` this
-// never invents a trailing block: a range operation on the empty last line has
-// nothing to act on, and says so.
+// The span of whole blocks two carets reach across.
+//
+// The empty last line is in the partition here as it is in `contextAt` -- it is
+// somewhere a block can be *started*, which is what the slash menu does there --
+// but it spans no bytes, so a range that lands on it comes back `valid = false`
+// and every operation over a range refuses it. (The comment that used to sit
+// here said this list "never invents a trailing block", which was never what the
+// code did: it called the same scan as `contextAt`. The behaviour it was
+// describing is the `end > start` test below.)
 struct Range {
   bool valid = false;
-  std::vector<SourceBlock> blocks;
+  BlockList blocks;
   std::size_t first = 0;
   std::size_t last = 0;
   std::size_t start = 0;
@@ -77,7 +131,7 @@ struct Separator {
   bool leading = false;  // the run sits before the group rather than after it
 };
 
-Separator separatorFor(const std::vector<SourceBlock>& blocks, std::size_t first, std::size_t last) {
+Separator separatorFor(const BlockList& blocks, std::size_t first, std::size_t last) {
   Separator separator;
   separator.start = separator.end = blocks[last].end;
   const auto blankRun = [&blocks](std::size_t i) {
@@ -101,14 +155,14 @@ Separator separatorFor(const std::vector<SourceBlock>& blocks, std::size_t first
   return separator;
 }
 
-Range rangeAt(std::string_view source, std::size_t from, std::size_t to) {
+Range rangeAt(std::string_view source, std::size_t from, std::size_t to, BlockSpan lent) {
   Range range;
-  range.blocks = scanBlocksWithLastLine(source);
+  range.blocks.reset(source, lent);
   from = std::min(from, source.size());
   to = std::min(to, source.size());
   if(from > to) std::swap(from, to);
-  range.first = blockIndexAt(range.blocks, from);
-  range.last = blockIndexAt(range.blocks, to);
+  range.first = range.blocks.indexAt(source, from);
+  range.last = range.blocks.indexAt(source, to);
   if(range.last < range.first) std::swap(range.first, range.last);
   range.start = range.blocks[range.first].start;
   range.end = range.blocks[range.last].end;
@@ -142,9 +196,10 @@ std::string blockMarker(BlockKind kind, int level, int listDepth, int ordinal, b
   return "";
 }
 
-Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int level) {
+Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int level,
+              BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind == BlockKind::Complex) return edit;
   // Rewriting a block as what it already is does nothing - except where the
@@ -205,9 +260,9 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
   return edit;
 }
 
-Edit toggleTodo(std::string_view source, std::size_t caret) {
+Edit toggleTodo(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind == BlockKind::Todo) {
     // Walk back from the content to the "[" the scanner already validated.
@@ -229,12 +284,12 @@ Edit toggleTodo(std::string_view source, std::size_t caret) {
     edit.cursor = caret >= block.contentStart ? caret + edit.text.size() : caret;
     return edit;
   }
-  return turnInto(source, caret, BlockKind::Todo);
+  return turnInto(source, caret, BlockKind::Todo, 1, blocks);
 }
 
-Edit indent(std::string_view source, std::size_t caret) {
+Edit indent(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(!isListKind(block.kind)) return edit;
 
@@ -256,9 +311,9 @@ Edit indent(std::string_view source, std::size_t caret) {
   return edit;
 }
 
-Edit outdent(std::string_view source, std::size_t caret) {
+Edit outdent(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(!isListKind(block.kind)) return edit;
   const std::size_t whitespace = leadingWhitespace(source, block);
@@ -278,7 +333,7 @@ namespace {
 // `dest`. The separator travels on the group's trailing side going up and its
 // leading side going down, which is what stops two paragraphs from merging into
 // one when they change places.
-Edit moveGroup(std::string_view source, const std::vector<SourceBlock>& blocks, std::size_t first,
+Edit moveGroup(std::string_view source, const BlockList& blocks, std::size_t first,
                std::size_t last, std::size_t dest, std::size_t caret, bool selects) {
   Edit edit;
   const std::size_t gs = blocks[first].start;
@@ -335,37 +390,39 @@ Edit moveGroup(std::string_view source, const std::vector<SourceBlock>& blocks, 
 
 }
 
-Edit moveBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret, int delta) {
+Edit moveBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret, int delta,
+                BlockSpan blocks) {
   Edit edit;
   if(delta == 0) return edit;
-  const Range range = rangeAt(source, fromCaret, toCaret);
+  const Range range = rangeAt(source, fromCaret, toCaret, blocks);
   if(!range.valid) return edit;
-  const auto& blocks = range.blocks;
-  if(range.first == range.last && blocks[range.first].kind == BlockKind::Blank) return edit;
+  const BlockList& partition = range.blocks;
+  if(range.first == range.last && partition[range.first].kind == BlockKind::Blank) return edit;
 
   std::size_t destination = 0;
   if(delta < 0) {
     std::size_t j = range.first;
-    while(j > 0 && blocks[j - 1].kind == BlockKind::Blank) --j;
+    while(j > 0 && partition[j - 1].kind == BlockKind::Blank) --j;
     if(j == 0) return edit;
-    destination = blocks[j - 1].start;
+    destination = partition[j - 1].start;
   } else {
     std::size_t j = range.last;
-    while(j + 1 < blocks.size() && blocks[j + 1].kind == BlockKind::Blank) ++j;
-    if(j + 1 >= blocks.size()) return edit;
-    destination = blocks[j + 1].end;
+    while(j + 1 < partition.size() && partition[j + 1].kind == BlockKind::Blank) ++j;
+    if(j + 1 >= partition.size()) return edit;
+    destination = partition[j + 1].end;
   }
-  return moveGroup(source, blocks, range.first, range.last, destination, std::min(fromCaret, toCaret),
-                   fromCaret != toCaret);
+  return moveGroup(source, partition, range.first, range.last, destination,
+                   std::min(fromCaret, toCaret), fromCaret != toCaret);
 }
 
-Edit moveBlock(std::string_view source, std::size_t caret, int delta) {
-  return moveBlocks(source, caret, caret, delta);
+Edit moveBlock(std::string_view source, std::size_t caret, int delta, BlockSpan blocks) {
+  return moveBlocks(source, caret, caret, delta, blocks);
 }
 
-Edit duplicateBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret) {
+Edit duplicateBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret,
+                     BlockSpan blocks) {
   Edit edit;
-  const Range range = rangeAt(source, fromCaret, toCaret);
+  const Range range = rangeAt(source, fromCaret, toCaret, blocks);
   if(!range.valid) return edit;
   if(range.first == range.last && range.blocks[range.first].kind == BlockKind::Blank) return edit;
 
@@ -390,13 +447,14 @@ Edit duplicateBlocks(std::string_view source, std::size_t fromCaret, std::size_t
   return edit;
 }
 
-Edit duplicateBlock(std::string_view source, std::size_t caret) {
-  return duplicateBlocks(source, caret, caret);
+Edit duplicateBlock(std::string_view source, std::size_t caret, BlockSpan blocks) {
+  return duplicateBlocks(source, caret, caret, blocks);
 }
 
-Edit deleteBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret) {
+Edit deleteBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret,
+                  BlockSpan blocks) {
   Edit edit;
-  const Range range = rangeAt(source, fromCaret, toCaret);
+  const Range range = rangeAt(source, fromCaret, toCaret, blocks);
   if(!range.valid) return edit;
   // The blank line that separated the blocks goes with them; leaving it behind
   // grows a run of empty lines every time a block is removed.
@@ -409,14 +467,14 @@ Edit deleteBlocks(std::string_view source, std::size_t fromCaret, std::size_t to
   return edit;
 }
 
-Edit deleteBlock(std::string_view source, std::size_t caret) {
-  return deleteBlocks(source, caret, caret);
+Edit deleteBlock(std::string_view source, std::size_t caret, BlockSpan blocks) {
+  return deleteBlocks(source, caret, caret, blocks);
 }
 
 Edit turnBlocksInto(std::string_view source, std::size_t fromCaret, std::size_t toCaret,
-                    BlockKind kind, int level) {
+                    BlockKind kind, int level, BlockSpan blocks) {
   Edit edit;
-  const Range range = rangeAt(source, fromCaret, toCaret);
+  const Range range = rangeAt(source, fromCaret, toCaret, blocks);
   // The empty last line spans no bytes, but it is still somewhere a block can
   // be started - which is exactly what the slash menu does there.
   if(!range.valid) return turnInto(source, fromCaret, kind, level);
@@ -425,18 +483,25 @@ Edit turnBlocksInto(std::string_view source, std::size_t fromCaret, std::size_t 
   // ahead of it untouched and the rescan `turnInto` does stays proportional to
   // the selection rather than to the note.
   std::string chunk(source.substr(range.start, range.end - range.start));
-  const auto blocks = scanBlocks(chunk);
+  const auto chunkBlocks = scanBlocks(chunk);
   bool changed = false;
-  for(std::size_t i = blocks.size(); i-- > 0;) {
-    if(blocks[i].kind == BlockKind::Blank) continue;
-    const Edit one = turnInto(chunk, blocks[i].contentStart, kind, level);
+  for(std::size_t i = chunkBlocks.size(); i-- > 0;) {
+    if(chunkBlocks[i].kind == BlockKind::Blank) continue;
+    // Deliberately not lent `chunkBlocks`: `chunk` is rewritten inside this
+    // loop, so that partition stops describing it. Walking back to front means
+    // the offsets this iteration reads are all below the ones already rewritten
+    // and it would in fact be safe -- but "safe as long as nobody reorders the
+    // loop" is not a precondition worth leaving in the code for a scan of a
+    // selection. The scan of the *note*, which is what this function used to pay
+    // for twice over, is the one that mattered and it is gone.
+    const Edit one = turnInto(chunk, chunkBlocks[i].contentStart, kind, level);
     if(!one.valid) continue;
     chunk.replace(one.start, one.end - one.start, one.text);
     changed = true;
   }
   // A range holding nothing but blank lines has no block to rewrite - but the
   // caret still sits somewhere a block can be started.
-  if(!changed) return turnInto(source, fromCaret, kind, level);
+  if(!changed) return turnInto(source, fromCaret, kind, level, blocks);
 
   edit.valid = true;
   edit.start = range.start;
@@ -448,9 +513,10 @@ Edit turnBlocksInto(std::string_view source, std::size_t fromCaret, std::size_t 
   return edit;
 }
 
-Edit insertBlockAfter(std::string_view source, std::size_t caret, BlockKind kind, int level) {
+Edit insertBlockAfter(std::string_view source, std::size_t caret, BlockKind kind, int level,
+                      BlockSpan blocks) {
   Edit edit;
-  const Range range = rangeAt(source, caret, caret);
+  const Range range = rangeAt(source, caret, caret, blocks);
   std::size_t at = source.size();
   std::string separator;
   if(range.valid) {
@@ -478,8 +544,8 @@ Edit insertBlockAfter(std::string_view source, std::size_t caret, BlockKind kind
 }
 
 Edit moveBlocksTo(std::string_view source, std::size_t fromCaret, std::size_t toCaret,
-                  std::size_t destination) {
-  const Range range = rangeAt(source, fromCaret, toCaret);
+                  std::size_t destination, BlockSpan blocks) {
+  const Range range = rangeAt(source, fromCaret, toCaret, blocks);
   if(!range.valid) return {};
   return moveGroup(source, range.blocks, range.first, range.last, destination, std::min(fromCaret, toCaret),
                    fromCaret != toCaret);
@@ -544,9 +610,9 @@ Edit makeLink(std::string_view source, std::size_t start, std::size_t end, std::
   return edit;
 }
 
-Edit continueList(std::string_view source, std::size_t caret) {
+Edit continueList(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   const bool list = isListKind(block.kind);
   const bool quote = block.kind == BlockKind::Quote || block.kind == BlockKind::Callout;
@@ -555,7 +621,7 @@ Edit continueList(std::string_view source, std::size_t caret) {
 
   if(block.contentEnd <= block.contentStart) {
     // Enter on an empty item leaves the list instead of adding another.
-    if(list && block.listDepth > 0) return outdent(source, caret);
+    if(list && block.listDepth > 0) return outdent(source, caret, blocks);
     // Dropping the marker alone is not enough to get out: "- one\ntext" and
     // "> a\ntext" are lazy continuations, so what the file says would still be
     // one list item or one quote, whatever the screen showed. The blank line is
@@ -577,9 +643,9 @@ Edit continueList(std::string_view source, std::size_t caret) {
   return edit;
 }
 
-Edit closeFence(std::string_view source, std::size_t caret) {
+Edit closeFence(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind != BlockKind::Code) return edit;
   if(block.contentEnd != block.end) return edit;  // a closing fence is already there
@@ -600,9 +666,9 @@ Edit closeFence(std::string_view source, std::size_t caret) {
   return edit;
 }
 
-Edit outdentOrUnwrap(std::string_view source, std::size_t caret) {
+Edit outdentOrUnwrap(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(caret != block.contentStart || block.contentStart <= block.start) return edit;
   switch(block.kind) {
@@ -614,7 +680,7 @@ Edit outdentOrUnwrap(std::string_view source, std::size_t caret) {
     default:
       break;
   }
-  if(isListKind(block.kind) && block.listDepth > 0) return outdent(source, caret);
+  if(isListKind(block.kind) && block.listDepth > 0) return outdent(source, caret, blocks);
   edit.valid = true;
   edit.start = block.start;
   edit.end = block.contentStart;
@@ -622,12 +688,12 @@ Edit outdentOrUnwrap(std::string_view source, std::size_t caret) {
   return edit;
 }
 
-Edit applyMarkdownShortcut(std::string_view source, std::size_t caret) {
+Edit applyMarkdownShortcut(std::string_view source, std::size_t caret, BlockSpan blocks) {
   Edit edit;
   // This runs on every typed space, so reject on the two bytes every shortcut
   // ends with before paying for a scan of the buffer.
   if(caret < 3 || caret > source.size() || source[caret - 1] != ' ' || source[caret - 2] != ']') return edit;
-  const Context context = contextAt(source, caret);
+  const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind == BlockKind::Code || block.kind == BlockKind::Complex) return edit;
   const std::size_t from = block.contentStart;
