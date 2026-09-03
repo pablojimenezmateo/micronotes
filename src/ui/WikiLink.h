@@ -3,11 +3,33 @@
 #include "library/Organization.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace micronotes::ui {
+
+// One `[[target]]`, or `[[target|what to call it here]]`, found in a run of
+// plain text.
+//
+// `doc::InlineScan` already claims these on the live surface, from the note
+// buffer with a mask over what other passes have taken. The reading pane has no
+// such structure to work from -- md4c leaves `[[Some Note]]` as literal text,
+// which is why the pane that exists for reading a note used to show the raw
+// brackets and offer nothing to click. It needs the same rule applied to a bare
+// string, so the rule lives here and both are the same rule.
+struct WikiSpan {
+  std::size_t start = 0;   // the first `[`
+  std::size_t end = 0;     // one past the last `]`
+  std::string target;      // what to resolve against the library
+  std::string label;       // what to draw: the alias, or the target itself
+};
+
+// The first wikilink at or after `from`, or nothing. An unterminated `[[`, an
+// empty `[[]]` and an alias with no target before the bar are all left as the
+// literal text they are.
+std::optional<WikiSpan> findWikiLink(std::string_view text, std::size_t from = 0);
 
 // A `[[target]]` split into the parts that mean different things.
 struct WikiTarget {

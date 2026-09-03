@@ -3,6 +3,7 @@
 #include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
 #include "app/PageHeader.h"
+#include "app/WikiLinks.h"
 #include "core/attachments/AttachmentService.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
@@ -84,6 +85,13 @@ float listMarkerWidth(const markdown::Block& block) {
   return 0.0f;
 }
 
+// The three block heights the two passes have to agree on to the pixel. They
+// were written out at both sites, which is how an Html block once measured two
+// pixels taller than it drew.
+constexpr float kRuleHeight = 22.0f;
+constexpr float kCodeBlockPad = 18.0f;
+constexpr float kCodeLineRatio = 1.5f;
+
 float blockBottomSpacing(const markdown::Block& block) {
   if(block.type == markdown::BlockType::BlankLine) return 0.0f;
   if(block.type == markdown::BlockType::OrderedItem || block.type == markdown::BlockType::UnorderedItem) return 2.0f;
@@ -153,9 +161,32 @@ BlockChrome chromeFor(TextRenderer& text, const markdown::Block& block, float co
   return chrome;
 }
 
-// A block's own text height, without whatever follows it.
-float blockTextHeight(TextRenderer& text, const markdown::Block& block, const BlockChrome& chrome) {
-  const auto runs = inlineRuns(block, theme().text);
+// The runs a block's text comes out as, wikilinks and all. One call per block
+// per pass: the draw used to build them, then call `blockTextHeight`, which
+// built them a second time to measure -- two vectors of heap-allocated runs per
+// visible block per frame, for a block whose runs are a pure function of the
+// buffer.
+std::vector<InlineRun> runsFor(const markdown::Block& block, const WikiResolver& wikiResolves) {
+  // A ticked task is done being read: struck through and muted, which is what
+  // the live surface already draws. This pane drew the tick and left the text
+  // exactly as it was, so the same list read as half-finished on one surface
+  // and untouched on the other.
+  const bool done = block.task && block.taskChecked;
+  auto runs = inlineRuns(block, done ? theme().dim : theme().text, wikiResolves);
+  if(!done) return runs;
+  for(auto& run : runs) {
+    run.strikethrough = true;
+    // A link inside a finished task keeps being a link -- it is still where
+    // the writer pointed -- but it stops competing with the live ones.
+    if(!run.target.empty()) run.color = theme().accentDim;
+  }
+  return runs;
+}
+
+// A block's own text height, without whatever follows it. Takes the runs it is
+// measuring rather than rebuilding them.
+float blockTextHeight(TextRenderer& text, const markdown::Block& block,
+                      const std::vector<InlineRun>& runs, const BlockChrome& chrome) {
   const int lineStep = blockLineStep(text, block);
   return static_cast<float>(measureInlineLines(text, runs, static_cast<int>(chrome.textWidth),
                                                blockTextStyle(block).size) * lineStep);
@@ -215,14 +246,17 @@ float imageHeight(TextRenderer& text, ImageCache& images, const UiRuntime& ui,
 // can jump to. Everything the draw needs in order to start at the first visible
 // block instead of measuring its way down to it.
 void buildViewerLayout(TextRenderer& text, ImageCache& images, UiRuntime& ui,
-                       const markdown::Document& doc, float contentWidth, float pageHeight) {
+                       const markdown::Document& doc, float contentWidth, float pageHeight,
+                       const WikiResolver& wikiResolves) {
   const perf::ScopeTimer timer("viewer.layout");
   perf::addCounter(perf::CounterId::ViewerLayoutBuilds);
   auto& memo = ui.viewerLayout;
   memo.top.clear();
+  memo.bodyHeight.clear();
   memo.ordinal.clear();
   memo.anchors.clear();
   memo.top.reserve(doc.blocks.size() + 1);
+  memo.bodyHeight.reserve(doc.blocks.size());
   memo.ordinal.reserve(doc.blocks.size());
 
   attachments::AttachmentService attachmentService;
@@ -245,24 +279,33 @@ void buildViewerLayout(TextRenderer& text, ImageCache& images, UiRuntime& ui,
     }
 
     const BlockChrome chrome = chromeFor(text, block, contentWidth);
+    // The measure that goes in `bodyHeight` is the one the draw would
+    // otherwise take again. Everything else about the block's advance -- the
+    // spacing after it, the images under it -- stays local to this walk.
+    float body = 0.0f;
     if(block.type == markdown::BlockType::BlankLine) {
       y += static_cast<float>(text.lineHeight());
     } else if(block.type == markdown::BlockType::HorizontalRule) {
-      y += 22.0f;
+      y += kRuleHeight;
     } else if(block.type == markdown::BlockType::Table) {
-      y += tableHeight(text, block, contentWidth - chrome.indent) + 12.0f;
+      body = tableHeight(text, block, contentWidth - chrome.indent);
+      y += body + ui::kSpace3;
     } else if(block.type == markdown::BlockType::Code) {
       const auto lines = codeBlockLines(block);
-      y += static_cast<float>(std::max<std::size_t>(1, lines.size()) *
-                              lineStepFor(text, blockTextStyle(block), 1.5f)) + 18.0f;
+      body = static_cast<float>(std::max<std::size_t>(1, lines.size()) *
+                                lineStepFor(text, blockTextStyle(block), kCodeLineRatio));
+      y += body + kCodeBlockPad;
     } else {
-      if(!blockText(block).empty()) {
-        y += blockTextHeight(text, block, chrome) + blockBottomSpacing(block);
+      const auto runs = runsFor(block, wikiResolves);
+      if(!runs.empty()) {
+        body = blockTextHeight(text, block, runs, chrome);
+        y += body + blockBottomSpacing(block);
       }
       for(const auto& image : blockImages(block)) {
         y += imageHeight(text, images, ui, attachmentService, image, contentWidth, pageHeight);
       }
     }
+    memo.bodyHeight.push_back(body);
     if(ordered) ++orderedIndex;
   }
   // One past the last block, so the last block's end and the content height are
@@ -290,6 +333,13 @@ void drawReadingPane(SDL_Renderer* renderer, TextRenderer& text, ImageCache& ima
   const float headerHeight = pageHeaderHeight(text, ui);
   const float scrollTop = page.y + 14.0f;
   const float contentTop = scrollTop + headerHeight;
+  // Asked once per wikilink per pass and memoised on the runtime against the
+  // library's own generation, which is what makes it cheap enough to ask from
+  // inside the measure. The live surface asks the same question through
+  // `PageViewHooks::wikiLinkResolves`.
+  const WikiResolver wikiResolves = [&ui](std::string_view target) {
+    return wikiLinkResolves(ui, target);
+  };
   const ui::PageColumn column = ui::pageColumnIn(page, 0.0f);
   const float contentLeft = column.left;
   const float contentWidth = column.width;
@@ -303,16 +353,18 @@ void drawReadingPane(SDL_Renderer* renderer, TextRenderer& text, ImageCache& ima
   const bool reusable = memo.valid && memo.blocks == doc.blocks.size() &&
                         memo.sourceRevision == ui.editor.revision() &&
                         memo.imageGeneration == images.generation() &&
+                        memo.wikiRevision == ui.wikiNotesRevision &&
                         memo.contentWidth == contentWidth && memo.pageHeight == page.h &&
                         memo.fontScale == text.displayScale() && memo.bodySize == ui::type().body;
   if(reusable) {
     perf::addCounter(perf::CounterId::ViewerLayoutReused);
   } else {
-    buildViewerLayout(text, images, ui, doc, contentWidth, page.h);
+    buildViewerLayout(text, images, ui, doc, contentWidth, page.h, wikiResolves);
     memo.valid = true;
     memo.blocks = doc.blocks.size();
     memo.sourceRevision = ui.editor.revision();
     memo.imageGeneration = images.generation();
+    memo.wikiRevision = ui.wikiNotesRevision;
     memo.contentWidth = contentWidth;
     memo.pageHeight = page.h;
     memo.fontScale = text.displayScale();
@@ -364,17 +416,20 @@ void drawReadingPane(SDL_Renderer* renderer, TextRenderer& text, ImageCache& ima
         hLine(renderer, contentLeft + chrome.indent, contentLeft + contentWidth, y + 8.0f, theme().divider);
         continue;
       }
+      // Every height below comes out of the layout memo. Recomputing one here
+      // is what made the reading pane cost five times the live page's frame:
+      // see `ViewerLayout::bodyHeight`.
+      const float blockH = memo.bodyHeight[i];
       if(table) {
-        const float blockH = tableHeight(text, block, contentWidth - chrome.indent);
         drawTable(renderer, text, ui.linkRegions, block,
                   {contentLeft + chrome.indent, y, contentWidth - chrome.indent, blockH});
         continue;
       }
       if(code) {
         const auto lines = codeBlockLines(block);
-        const int step = lineStepFor(text, blockStyle, 1.5f);
-        const float blockH = static_cast<float>(std::max<std::size_t>(1, lines.size()) * step) + 10.0f;
-        const Rect codeRect {contentLeft + chrome.indent, y - 6.0f, contentWidth - chrome.indent, blockH};
+        const int step = lineStepFor(text, blockStyle, kCodeLineRatio);
+        const Rect codeRect {contentLeft + chrome.indent, y - 6.0f, contentWidth - chrome.indent,
+                             blockH + 10.0f};
         ui::fillRounded(renderer, codeRect, theme().codeBg, ui::kRadiusSmall);
         float codeY = y;
         for(const auto& codeLine : lines) {
@@ -387,10 +442,9 @@ void drawReadingPane(SDL_Renderer* renderer, TextRenderer& text, ImageCache& ima
         continue;
       }
 
-      if(!blockText(block).empty()) {
-        const auto runs = inlineRuns(block, theme().text);
+      const auto runs = runsFor(block, wikiResolves);
+      if(!runs.empty()) {
         const int lineStep = blockLineStep(text, block);
-        const float blockH = blockTextHeight(text, block, chrome);
         if(quote) {
           fill(renderer, {contentLeft + chrome.indent, y - 2.0f, 3.0f, blockH + 2.0f}, theme().divider);
         }

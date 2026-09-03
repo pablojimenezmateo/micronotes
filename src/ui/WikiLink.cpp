@@ -41,6 +41,42 @@ bool nearerTheRoot(const library::NoteListItem& candidate, const library::NoteLi
 
 }
 
+std::optional<WikiSpan> findWikiLink(std::string_view text, std::size_t from) {
+  // The same rule as `doc::InlineScan`'s wikilink pass, which the header
+  // explains: the first `]]` closes, because a `[` inside is someone typing
+  // rather than a nested link -- there is no such thing -- and the first `|`
+  // splits the target from what to show instead of it.
+  for(std::size_t i = from; i + 3 < text.size(); ++i) {
+    if(text[i] != '[' || text[i + 1] != '[') continue;
+    const std::size_t innerStart = i + 2;
+    std::size_t close = std::string_view::npos;
+    for(std::size_t scan = innerStart; scan + 1 < text.size(); ++scan) {
+      if(text[scan] == ']' && text[scan + 1] == ']') {
+        close = scan;
+        break;
+      }
+    }
+    if(close == std::string_view::npos) return std::nullopt;
+    if(close == innerStart) continue;
+    const std::size_t bar = text.substr(innerStart, close - innerStart).find('|');
+    WikiSpan span;
+    span.start = i;
+    span.end = close + 2;
+    if(bar == std::string_view::npos) {
+      span.target = std::string(text.substr(innerStart, close - innerStart));
+      span.label = span.target;
+    } else {
+      span.target = std::string(text.substr(innerStart, bar));
+      span.label = std::string(text.substr(innerStart + bar + 1, close - innerStart - bar - 1));
+    }
+    // An alias with nothing before the bar has no note to go to, and a label
+    // with nothing after it has nothing to draw.
+    if(span.target.empty() || span.label.empty()) continue;
+    return span;
+  }
+  return std::nullopt;
+}
+
 WikiTarget splitWikiTarget(std::string_view target) {
   const auto hash = target.find('#');
   if(hash == std::string_view::npos) return {trimmed(target), {}};

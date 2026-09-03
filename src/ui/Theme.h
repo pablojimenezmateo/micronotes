@@ -78,13 +78,13 @@ struct CalloutStyle {
 
 CalloutStyle calloutStyle(std::string_view kind);
 
-// A callout's name as it is drawn: the kind as the author typed it with its tail
-// lower-cased, and "note" when the author named no kind at all.
+// A callout's name as it is drawn: the kind in title case, and "Note" when the
+// author named no kind at all.
 //
-// One copy, because two surfaces draw it. The live surface lower-cased the tail
-// and the reading pane drew the tag verbatim, so `> [!WARNING]` was headed
-// "Warning" while being edited and "WARNING" while being read -- the same note,
-// the same block, two labels.
+// Normalised rather than echoed, for the reason `calloutStyle` normalises its
+// input: the live surface reads the `[!KIND]` tag as written and the reading
+// pane gets it lower-cased on the way through md4c, so anything that passes
+// either through unchanged draws the same callout under two different names.
 std::string calloutLabel(std::string_view kind);
 
 const Theme& theme();

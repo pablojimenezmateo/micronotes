@@ -320,6 +320,10 @@ struct UiRuntime {
     std::size_t blocks = 0;
     std::uint64_t sourceRevision = 0;
     std::uint64_t imageGeneration = 0;
+    // A wikilink is drawn in one of two colours depending on whether the note
+    // it names exists yet, and creating that note does not touch the buffer --
+    // so the library's answer is an input to this layout like the buffer is.
+    std::uint64_t wikiRevision = 0;
     float contentWidth = 0.0f;
     float pageHeight = 0.0f;
     float fontScale = 0.0f;
@@ -328,6 +332,18 @@ struct UiRuntime {
     // there is one entry more than there are blocks and the last of them is the
     // content height.
     std::vector<float> top;
+    // The height of block `i`'s own body -- its wrapped text, or its table --
+    // without the spacing that follows it or any image under it.
+    //
+    // Recorded rather than recomputed. The draw needed this number for the
+    // quote rule, the callout box and its own advance, and it got it by
+    // re-wrapping the block: `measureInlineLines` walks every word and
+    // measures each one, per visible block, per frame. On a 675-byte note that
+    // was 350 text measurements a frame against the live surface's 54, and it
+    // is the whole reason the reading pane cost five times what the live page
+    // did to show the same thing. A table's height is here for the same reason
+    // -- measuring one measures every cell in it.
+    std::vector<float> bodyHeight;
     // The number an ordered item draws. Per block, because it counts up a run
     // of siblings and a draw that starts at the first *visible* block cannot
     // count from the top of the note.

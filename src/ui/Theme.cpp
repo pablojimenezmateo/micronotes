@@ -225,8 +225,19 @@ ThemeMode themeModeFromName(std::string_view name) {
 
 
 std::string calloutLabel(std::string_view kind) {
-  if(kind.empty()) return "note";
+  // Normalised from the kind, not echoed from the source. The two scanners
+  // hand this function different bytes for the same callout: `doc::BlockScan`
+  // keeps `[!WARNING]` verbatim, md4c lower-cases it on the way through. The
+  // old version only lower-cased the *tail*, so the live surface headed that
+  // callout "Warning" and the reading pane headed it "warning" -- the same
+  // note, the same block, two labels, which is exactly the drift `calloutStyle`
+  // beside this already normalises its input to avoid.
+  //
+  // It also made the label depend on how the author typed the tag: `[!note]`
+  // read as "note" and `[!NOTE]` as "Note" in the same pane, in the same note.
+  if(kind.empty()) return "Note";
   std::string name(kind);
+  name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
   for(std::size_t i = 1; i < name.size(); ++i) {
     name[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
   }

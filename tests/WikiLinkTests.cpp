@@ -1,8 +1,10 @@
 #include "TestSupport.h"
 
+#include "doc/InlineScan.h"
 #include "ui/WikiLink.h"
 
 #include <limits>
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -127,4 +129,71 @@ MICRONOTES_TEST(wiki_retarget_leaves_a_note_with_no_matching_link_untouched) {
 MICRONOTES_TEST(wiki_retarget_handles_a_link_at_the_very_start_and_end) {
   MICRONOTES_REQUIRE(retargetWikiLinks("[[A]]", "A", "B") == "[[B]]");
   MICRONOTES_REQUIRE(retargetWikiLinks("x [[A]]", "A", "B") == "x [[B]]");
+}
+
+// `findWikiLink` applies `doc::InlineScan`'s wikilink rule to a bare string,
+// which is what the reading pane needs: md4c hands `[[Some Note]]` back as
+// literal text, split at every `[`, so the pane has nothing but a string.
+MICRONOTES_TEST(find_wiki_link_reads_a_bare_target) {
+  const auto span = micronotes::ui::findWikiLink("see [[Some Note]] there");
+  MICRONOTES_REQUIRE(span.has_value());
+  MICRONOTES_REQUIRE(span->start == 4);
+  MICRONOTES_REQUIRE(span->end == 17);
+  MICRONOTES_REQUIRE(span->target == "Some Note");
+  // With no alias, the target is also what gets drawn.
+  MICRONOTES_REQUIRE(span->label == "Some Note");
+}
+
+MICRONOTES_TEST(find_wiki_link_splits_an_alias_from_its_target) {
+  const auto span = micronotes::ui::findWikiLink("[[Deep/Note|what to call it]]");
+  MICRONOTES_REQUIRE(span.has_value());
+  MICRONOTES_REQUIRE(span->target == "Deep/Note");
+  MICRONOTES_REQUIRE(span->label == "what to call it");
+}
+
+MICRONOTES_TEST(find_wiki_link_walks_from_an_offset) {
+  const std::string_view text = "[[one]] and [[two]]";
+  const auto first = micronotes::ui::findWikiLink(text);
+  MICRONOTES_REQUIRE(first.has_value() && first->target == "one");
+  const auto second = micronotes::ui::findWikiLink(text, first->end);
+  MICRONOTES_REQUIRE(second.has_value() && second->target == "two");
+  MICRONOTES_REQUIRE(!micronotes::ui::findWikiLink(text, second->end).has_value());
+}
+
+MICRONOTES_TEST(find_wiki_link_leaves_brackets_that_are_not_links_alone) {
+  // Unterminated, empty, and an alias with no target: all of them are the
+  // literal text somebody typed, and drawing them as links would invent a
+  // destination.
+  MICRONOTES_REQUIRE(!micronotes::ui::findWikiLink("[[never closed").has_value());
+  MICRONOTES_REQUIRE(!micronotes::ui::findWikiLink("[[]]").has_value());
+  MICRONOTES_REQUIRE(!micronotes::ui::findWikiLink("[[|alias]]").has_value());
+  MICRONOTES_REQUIRE(!micronotes::ui::findWikiLink("[[target|]]").has_value());
+  // A single-bracket Markdown link is not one either.
+  MICRONOTES_REQUIRE(!micronotes::ui::findWikiLink("[a](b)").has_value());
+}
+
+MICRONOTES_TEST(find_wiki_link_closes_on_the_first_double_bracket) {
+  // The same rule `doc::InlineScan` documents: a `[` inside is somebody
+  // typing, because there is no such thing as a nested wikilink.
+  const auto span = micronotes::ui::findWikiLink("[[a [[b]] c]]");
+  MICRONOTES_REQUIRE(span.has_value());
+  MICRONOTES_REQUIRE(span->target == "a [[b");
+}
+
+// The rule above has to agree with the scanner the live surface uses, or the
+// two panes disagree about what is a link in the same note.
+MICRONOTES_TEST(find_wiki_link_agrees_with_the_inline_scanner) {
+  const std::string_view source = "a [[One]] b [[Two|second]] c [[unclosed";
+  std::vector<std::string> fromScan;
+  for(const auto& span : micronotes::doc::scanInlines(source, 0)) {
+    if(span.kind == micronotes::doc::SpanKind::WikiLink) fromScan.push_back(span.target);
+  }
+  std::vector<std::string> fromFind;
+  for(std::size_t at = 0;;) {
+    const auto span = micronotes::ui::findWikiLink(source, at);
+    if(!span) break;
+    fromFind.push_back(span->target);
+    at = span->end;
+  }
+  MICRONOTES_REQUIRE(fromScan == fromFind);
 }

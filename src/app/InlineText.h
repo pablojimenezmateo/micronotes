@@ -9,6 +9,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -32,11 +33,31 @@ struct InlineRun {
   bool strong = false;
   bool emphasis = false;
   bool strikethrough = false;
+  // A `[[wikilink]]` names a note and every other link names a file or a URL.
+  // Which one it is has to travel with the run: the two are indistinguishable
+  // as strings and are followed in completely different ways.
+  bool wiki = false;
+  // Inline code takes a tinted box behind it, the way the live surface draws
+  // it. Kept as a flag rather than baked into the colour because the fill is
+  // the draw's business and the runs are the model.
+  bool code = false;
 };
 
+// Whether a `[[target]]` names a note that exists. Unset means "assume it
+// does" -- the same contract `PageViewHooks::wikiLinkResolves` has, because it
+// answers the same question for the other surface.
+using WikiResolver = std::function<bool(std::string_view)>;
+
+// md4c has no notion of `[[Some Note]]`: it hands the brackets back as literal
+// text. So the runs are split on them here, by the same rule
+// `doc::InlineScan` applies on the live surface (`ui::findWikiLink`). Without
+// this the pane that exists for *reading* a note showed the raw markup of every
+// link between notes and offered nothing to click.
 std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines,
-                                  SDL_Color baseColor = ui::theme().text);
-std::vector<InlineRun> inlineRuns(const markdown::Block& block, SDL_Color baseColor = ui::theme().text);
+                                  SDL_Color baseColor = ui::theme().text,
+                                  const WikiResolver& wikiResolves = {});
+std::vector<InlineRun> inlineRuns(const markdown::Block& block, SDL_Color baseColor = ui::theme().text,
+                                  const WikiResolver& wikiResolves = {});
 
 // How many wrapped lines these runs need at this width. The measure and the
 // draw wrap through the same tokenizer, so a block cannot be reserved one

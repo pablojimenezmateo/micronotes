@@ -287,6 +287,7 @@ add_executable(micronotes_tests
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp
   tests/TextUtilTests.cpp
+  tests/ThemeTests.cpp
   tests/TextFieldTests.cpp
   tests/WheelTests.cpp
   tests/WikiLinkTests.cpp
