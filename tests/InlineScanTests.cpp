@@ -242,3 +242,34 @@ MICRONOTES_TEST(inline_scan_wikilink_offsets_honour_the_base) {
   MICRONOTES_REQUIRE(link->start == 100 && link->end == 105);
   MICRONOTES_REQUIRE(link->contentStart == 102 && link->contentEnd == 103);
 }
+
+// The scan rejects a block before doing any work when it holds none of the
+// bytes an inline construct can begin with. That is a *claim about the
+// scanner*, not just about the reject: every byte the four passes below key on
+// has to be in the table, or a real span goes missing and nothing else in the
+// suite would notice, because the reject and the full scan agree on the empty
+// answer everywhere except exactly there.
+//
+// So this asserts both directions. Each construct's own opening byte, alone,
+// must survive the reject and still be found; and prose carrying every *other*
+// ASCII punctuation mark must produce nothing, which is the case the fast path
+// exists for.
+MICRONOTES_TEST(inline_scan_rejects_only_text_that_can_hold_no_span) {
+  const std::string plain =
+    "A heading, a list item and a quoted line: no markup here! "
+    "Prices are $5 + 10% = #6 @ 50/50; \"quoted\", 'single', (parens), [], {braces}, "
+    "em-dash - and a trailing question mark?";
+  MICRONOTES_REQUIRE(scanInlines(plain).empty());
+
+  // One sample per construct, each reachable only through its own opening byte.
+  MICRONOTES_REQUIRE(find(scanInlines("a \\* b"), SpanKind::Escape) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a `c` b"), SpanKind::Code) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a <https://x.test> b"), SpanKind::Autolink) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a [l](t) b"), SpanKind::Link) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a ![l](t) b"), SpanKind::Image) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a [[n]] b"), SpanKind::WikiLink) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a *e* b"), SpanKind::Emphasis) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a _e_ b"), SpanKind::Emphasis) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a **s** b"), SpanKind::Strong) != nullptr);
+  MICRONOTES_REQUIRE(find(scanInlines("a ~~g~~ b"), SpanKind::Strike) != nullptr);
+}

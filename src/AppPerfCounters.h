@@ -171,6 +171,13 @@
   /* the byte mask was allocated and zero-filled by every one of these for a scan   */  \
   /* that then found nothing to write in it.                                        */  \
   X(LayoutPlainBlocks, "layout.plain_blocks")                                          \
+  /* Relaid blocks whose content holds not one byte that can begin an inline      */   \
+  /* construct, so the scan answers "nothing here" from a single table-driven     */   \
+  /* pass and never allocates, masks or sorts. Read against plain_blocks: the     */   \
+  /* difference is the blocks that carry a `*` or a `[` which turned out not to   */   \
+  /* mark anything up, and those are the only ones still paying the full scan for */   \
+  /* an empty answer.                                                             */   \
+  X(LayoutInlineScanRejects, "layout.inline_scan_rejects")                             \
   /* --- live page surface --------------------------------------------------- */     \
   /* The draw walks every block in the document and tests each against the        */   \
   /* viewport, so blocks_visited scales with the note and blocks_drawn with the   */   \

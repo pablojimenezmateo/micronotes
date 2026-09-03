@@ -1,6 +1,10 @@
 #include "doc/InlineScan.h"
 
+#include "CoreAliases.h"
+#include "core/perf/PerformanceCounters.h"
+
 #include <algorithm>
+#include <array>
 #include <cctype>
 
 namespace micronotes::doc {
@@ -55,11 +59,30 @@ std::string linkTarget(std::string_view inside) {
   return std::string(inside);
 }
 
-struct Delimiter {
-  std::size_t pos = 0;
-  std::size_t length = 0;
-  char marker = '*';
-};
+using Delimiter = InlineScratch::Delimiter;
+
+// The bytes that can begin any inline construct: an escape, a code span, an
+// autolink, a link, an image (through its `[`), a wikilink, or an emphasis,
+// strong or strikethrough run. Nothing else in a block can produce a span, so
+// a block holding none of them has no markup in it and the four passes below
+// would walk it only to say so.
+//
+// That is four blocks in five in ordinary prose -- a heading, a list item, a
+// quoted line -- and the passes are not what those blocks were paying. The
+// fixed cost was: zero-filling a mask the size of the content, four loop
+// set-ups, and the sort at the end. One table-driven pass replaces all of it.
+constexpr std::array<bool, 256> markupBytes = [] {
+  std::array<bool, 256> table {};
+  for(const unsigned char c : std::string_view("\\`<[*_~")) table[c] = true;
+  return table;
+}();
+
+bool hasMarkupByte(std::string_view text) {
+  for(const char c : text) {
+    if(markupBytes[static_cast<unsigned char>(c)]) return true;
+  }
+  return false;
+}
 
 }
 
@@ -68,6 +91,10 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   std::vector<SourceSpan>& spans = scratch->spans;
   spans.clear();
   if(text.empty()) return spans;
+  if(!hasMarkupByte(text)) {
+    perf::addCounter(perf::CounterId::LayoutInlineScanRejects);
+    return spans;
+  }
 
   // Bytes that structural scanning has claimed. Emphasis delimiters are only
   // recognised outside them. Reassigned rather than reallocated: `assign` keeps
@@ -263,7 +290,8 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   }
 
   // Pass 4: emphasis, strong and strikethrough delimiter runs.
-  std::vector<Delimiter> open;
+  std::vector<Delimiter>& open = scratch->delimiters;
+  open.clear();
   for(std::size_t i = 0; i < text.size();) {
     const char c = text[i];
     if(masked[i] || (c != '*' && c != '_' && c != '~')) {
@@ -330,7 +358,8 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
     if(a.start != b.start) return a.start < b.start;
     return a.end > b.end;
   });
-  std::vector<std::size_t> ends;
+  std::vector<std::size_t>& ends = scratch->ends;
+  ends.clear();
   for(auto& span : spans) {
     while(!ends.empty() && ends.back() <= span.start) ends.pop_back();
     span.depth = static_cast<int>(ends.size());

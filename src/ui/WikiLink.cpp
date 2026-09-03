@@ -90,12 +90,20 @@ std::size_t resolveWikiLink(std::string_view rawTarget, const std::vector<librar
 }
 
 std::string retargetWikiLinks(std::string_view source, std::string_view from, std::string_view to) {
+  // Nothing to rewrite in a note that names no note. Both functions here used
+  // to answer that by scanning every block of the file and every inline span of
+  // every block -- and the overwhelming majority of notes, in any library, carry
+  // no `[[` at all. One `memchr`-speed pass settles it instead.
+  if(source.find("[[") == std::string_view::npos) return std::string(source);
   std::string out;
   out.reserve(source.size());
   std::size_t copied = 0;
-  for(const auto& block : doc::scanBlocks(source)) {
+  std::vector<doc::SourceBlock> blocks;
+  doc::InlineScratch scratch;
+  doc::scanBlocksInto(source, &blocks);
+  for(const auto& block : blocks) {
     const auto content = source.substr(block.contentStart, block.contentEnd - block.contentStart);
-    for(const auto& span : doc::scanInlines(content, block.contentStart)) {
+    for(const auto& span : doc::scanInlinesInto(content, block.contentStart, &scratch)) {
       if(span.kind != doc::SpanKind::WikiLink) continue;
       const auto target = splitWikiTarget(span.target);
       if(target.note != from) continue;
@@ -114,9 +122,19 @@ std::string retargetWikiLinks(std::string_view source, std::string_view from, st
 
 std::vector<WikiReference> wikiReferences(std::string_view source) {
   std::vector<WikiReference> references;
-  for(const auto& block : doc::scanBlocks(source)) {
+  // See `retargetWikiLinks`. This one runs once per note on every index
+  // refresh, so the notes with no links in them are the ones it has to be
+  // cheap for.
+  if(source.find("[[") == std::string_view::npos) return references;
+  // One block list and one inline scratch for the whole note. Scanning through
+  // the allocating forms grew and dropped three vectors per block, on a path
+  // that visits every block of every changed file.
+  std::vector<doc::SourceBlock> blocks;
+  doc::InlineScratch scratch;
+  doc::scanBlocksInto(source, &blocks);
+  for(const auto& block : blocks) {
     const auto content = source.substr(block.contentStart, block.contentEnd - block.contentStart);
-    for(const auto& span : doc::scanInlines(content, block.contentStart)) {
+    for(const auto& span : doc::scanInlinesInto(content, block.contentStart, &scratch)) {
       if(span.kind != doc::SpanKind::WikiLink) continue;
       // The line the link is on, so a backlink can show why it is there.
       const auto lineStart = source.rfind('\n', span.start);

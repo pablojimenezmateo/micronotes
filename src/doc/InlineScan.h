@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,6 +55,18 @@ struct SourceSpan {
 struct InlineScratch {
   std::vector<SourceSpan> spans;
   std::vector<char> masked;
+  // An unmatched `*`, `_` or `~` run the emphasis pass is still holding open.
+  struct Delimiter {
+    std::size_t pos = 0;
+    std::size_t length = 0;
+    char marker = '*';
+  };
+  // The emphasis pass's open-delimiter stack and the nesting-depth pass's end
+  // stack. Both were function locals, so every block carrying markup allocated
+  // two vectors and dropped them again a few microseconds later. Held here they
+  // are grown once for a document.
+  std::vector<Delimiter> delimiters;
+  std::vector<std::size_t> ends;
 };
 
 // `text` is the block's content; every returned offset is `base` plus an offset
