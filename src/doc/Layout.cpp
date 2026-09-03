@@ -629,6 +629,15 @@ const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& 
   hash = hashValue(hash, block.listDepth);
   hash = hashValue(hash, block.ordinal);
   hash = hashValue(hash, block.checked);
+  // Hashed as bytes, which is only correct while the struct has no padding in
+  // it: padding bytes are indeterminate, so hashing them mixes whatever the
+  // stack held into a cache key -- and the failure mode is a block that hashes
+  // to two keys under the same flags, which is a cache that quietly stops
+  // hitting rather than anything that looks like a bug. Seven bools have no
+  // padding; adding a wider field to `Flags` would introduce some, and this is
+  // what makes that a build error rather than a slow afternoon.
+  static_assert(sizeof(Flags) == 7 * sizeof(bool),
+                "Flags is hashed as raw bytes and must have no padding");
   hash = hashBytes(hash, &flags, sizeof(flags));
   *key = hash;
 
@@ -654,6 +663,9 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   geometry = hashValue(geometry, options.quoteGutter);
   geometry = hashValue(geometry, options.blockSpacing);
   geometry = hashValue(geometry, options.headingSpaceAbove);
+  // Same rule as `Flags` below: raw-byte hashed, so it must stay padding-free.
+  static_assert(sizeof(TypeMetrics) == 9 * sizeof(float),
+                "TypeMetrics is hashed as raw bytes and must have no padding");
   geometry = hashBytes(geometry, &options.type, sizeof(options.type));
   geometry = hashValue(geometry, options.wikiLinkRevision);
 
