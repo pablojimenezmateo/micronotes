@@ -124,9 +124,9 @@ One section of the run walks a 200 KB note through what a person actually does
 to one, and prints a line per interaction:
 
 ```
-type.middle           24 us median    31 us worst    15 allocs     4.7 KB    2.4 KB max
-caret.block_to_block   1 us median     3 us worst     4 allocs     0.3 KB    0.4 KB max
-open.cold_layout    8477 us median  8938 us worst 32092 allocs 10889.3 KB 1470.2 KB max
+type.middle           16 us median    21 us worst    11 allocs     4.6 KB    4.2 KB max
+caret.block_to_block   1 us median     2 us worst     3 allocs     0.2 KB    0.4 KB max
+open.cold_layout    5035 us median  5445 us worst 28879 allocs  9123.1 KB  825.9 KB max
 ```
 
 The scenarios are chosen so that each one can fail differently, and between them
@@ -225,7 +225,38 @@ builds disagree there and the counters are identical, the counters are right.
 than measuring all of A and then all of B -- costs nothing and removes the drift
 that made a 12% rise appear in `scan_blocks`, a function neither side had
 touched. An unchanged scope is the control: if it moves, the comparison is
-measuring the machine.
+measuring the machine. `tools/perf-compare.py` does *not* interleave; for a
+change whose effect is smaller than the machine's spread, build the two
+binaries by hand and alternate them, taking the **minimum** of each metric
+across rounds. A minimum is the only statistic on a loaded box that means
+anything: it is the run where the scheduler stayed out of the way.
+
+### Running a real session without a screen
+
+The harness cannot see the font path (below), and for a long time that meant
+the numbers that matter most -- first paint, and anything downstream of glyph
+measurement -- could only be had by opening the app and watching it. They can
+be had headlessly:
+
+```bash
+Xvfb :97 -screen 0 1600x1000x24 &
+DISPLAY=:97 MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 \
+  ./build-release/bin/micronotes --library /path/to/library \
+    --select "Some Note" --size 1600x1000 --pane live --panels sidebar,right \
+    --screenshot /tmp/shot.png
+```
+
+`--screenshot` draws frames until the compositor has sized the window, writes
+the window out and exits, so a session is a command rather than a sitting. It
+prints the same two tables the harness does, over the real renderer and the
+real faces.
+
+It is also the **rendering regression check**. A layout optimisation is only
+safe if it cannot be observed, and the cheapest proof of that is the pixels:
+capture the same note in `live`, `viewer` and `split` before and after and
+`cmp` the files. Use the *same* library path for both captures -- the root
+folder's name is drawn in the sidebar, so two copies of a library under
+different names differ legitimately and tell you nothing.
 
 ## Adding instrumentation
 
@@ -1151,28 +1182,148 @@ Plus `blockscan_resuming_at_every_boundary_matches_a_full_scan` for the property
 the splice rests on, and the sanitizer lanes, which is where a spliced array or
 a patched buffer with an off-by-one shows up rather than as a wrong pixel.
 
+### The fourth pass: startup, and the work nobody was counting
+
+The third pass took the O(document) work out of an *edit*. The fourth went
+looking outside the edit, and found that the largest single number in the
+application had nothing to do with the layout at all.
+
+**Indexing a library was quadratic in the library.** `notes_fts` declared its
+`id` column UNINDEXED, which is fts5 for "store this and build no index over
+it", so `DELETE FROM notes_fts WHERE id=?` was a full scan of the entire
+full-text index -- once per changed file, against a table growing with every
+file already done. The fts row is filed under the note row's own rowid now,
+which is the one address an fts5 table can be found by in less than a scan.
+The three scopes that found it -- `refresh.read_file`, `refresh.write_rows`,
+`refresh.record_links` -- stay, because "the refresh is slow" was true for a
+long time and said nothing about which of the three it was.
+
+**Four blocks in five were being scanned for markup they do not have.**
+`layout.plain_blocks` had been saying so for two passes: 89,759 of 112,300
+relaid blocks reported the inline scan finding nothing. What those blocks paid
+was not the four passes, which have little to walk in a short block, but the
+fixed cost around them -- a zero-filled byte mask the size of the content, four
+loop set-ups, a sort, and two vectors grown and dropped by any block carrying
+markup at all. Every inline construct begins with one of seven bytes, so one
+table-driven pass now settles it.
+
+**A note with nothing folded was resolving folds on every edit.** The app's
+predicate opened with `if(!anyFolded(noteId)) return false`, which is too late:
+the layout still walked the block list, called through a `std::function` per
+foldable block, and compared the all-zero answer against the all-zero one it
+already held. A caller that offers *no predicate* says something stronger, and
+the layout can act on it.
+
+**A vector per visual row, and an estimate that was wrong by a factor of two.**
+`VisualLine` owned its runs, so a document's layout allocated one vector per
+row -- and freed them all again on the next cache sweep. The block vector's
+`size / 48` estimate grew twice on the way to its real size, the last step being
+the largest single allocation the application made; a block spans at least one
+line, so the newline count is an exact bound rather than a guess.
+
+Interleaved A/B, CPU time, min of eight rounds, 200 KB fixture and a 1,000-note
+library:
+
+| | before | after |
+|---|---:|---:|
+| `library_index.refresh_changed_files` total | 154.4 ms | **28.4 ms** |
+| ...of which `refresh.write_rows` | 101.8 ms | **9.0 ms** |
+| `library_index.search` self | 1.48 ms | **0.98 ms** |
+| `fixture.app_state.open_select_and_list` self | 6.35 ms | 5.63 ms |
+| `open.cold_layout` | 5,353 us | 5,035 us |
+| `open.cold_layout` allocations / bytes | 32,092 / 10,889 KB | **28,879 / 9,123 KB** |
+| `open.cold_layout` largest allocation | 1,470 KB | **826 KB** |
+| `resize.width_step` | 6,316 us | 6,137 us |
+| `resize.width_step` allocations | 28,047 | 25,241 |
+| `type.middle` allocations | 15 | **11** |
+| `scroll.idle_frame` allocations | 1 | **0** |
+| `fold.toggle_heading` | 118 us | 106 us |
+| `layout.block.flow` self | 29.78 ms | 22.88 ms |
+| `layout.block.inline_attrs` self | 23.57 ms | 20.92 ms |
+| `layout.update.scan_blocks` self | 4.19 ms | 3.50 ms |
+| `layout.update.resolve_folds` self / calls | 3.29 ms / 513 | 2.88 ms / **31** |
+| `layout.block` self | 15.01 ms | 21.14 ms |
+| `peak_rss` | 28.7 MB | 27.7 MB |
+
+`layout.block`'s own self time is the one row that went the wrong way, and it
+went there on purpose: the run array's reserve moved out of the flow and into
+`layoutBlock`, so the two together are flat and the scenario totals above are
+what actually moved.
+
+**Every other counter is byte-identical across the two sides** -- `blocks_relaid`,
+`visual_rows`, `inline_spans`, `fold_queries`, `blocks_walked`, `source_bytes_*`,
+all of them. The only new rows are the three counters this pass added and three
+extra SQLite statements from the schema migration. Nothing here changed what the
+application computes; it changed how much was done to compute it.
+
+And in a real session -- 185 KB note, 401-note library, 1600x1000, the real
+renderer and the real faces, four interleaved rounds, min:
+
+| | before | after |
+|---|---:|---:|
+| `app_state.open_or_create_library` total | 40.8 ms | **16.4 ms** |
+| `library_index.refresh_changed_files` total | 36.6 ms | **11.8 ms** |
+| `layout.fold_queries` | 880 | **0** |
+| first paint (`layout.update.place_blocks` total) | 10.46 ms | 10.33 ms |
+
+**First paint did not move, and that is the honest headline.** Opening a note is
+still what it was, because what it is is glyph measurement inside `layoutBlock`,
+and nothing in this pass touched that. What moved is the *other* half of a cold
+start: the second and a half of a launch that was the index, not the note.
+
+The same note captured through `--screenshot` in `live`, `viewer` and `split`
+panes with the sidebar and the right panel up is pixel-for-pixel identical
+before and after, and the asan, ubsan, tsan and clang `-Werror` lanes are clean.
+
+### Resolved: a wikilink kept its colour after the library moved under it
+
+Not a performance finding, but found by one. Whether a `[[target]]` resolves
+decides a run's colour, and it was the one input to a block's layout that is not
+a function of the block's own bytes -- so it was not in the cache key, and a link
+that started or stopped resolving kept the colour it had until somebody happened
+to edit that particular block. Create the note a pending link points at and the
+link stayed pending; delete it and the link stayed confident.
+
+`LayoutOptions::wikiLinkRevision` sits beside the two stamps that were already
+there, and is mixed into the geometry -- which is to say into every cache key,
+because a change to the library can change the answer for any link anywhere in
+the note. It moves only when the app drops its candidate list: a note created,
+renamed, deleted, or the library re-listed, each of which already re-reads the
+library, so the relayout it forces is the cheapest thing happening at that
+moment.
+
+The lesson is the general one about stamps. `sourceRevision` and `foldRevision`
+are optimisations -- withhold them and the layout is slower and still right.
+This one is not: withhold it and the layout is wrong. An input a cache key
+cannot see has to be stamped, and the way to find the others is to ask, of every
+`std::function` in `LayoutOptions`, what happens when its answer changes on its
+own.
+
 ### What an edit costs now, and what is left in it
 
-A keystroke on a 200 KB note is 23 us and 15 allocations against a 2 ms budget,
+A keystroke on a 200 KB note is 16 us and 11 allocations against a 2 ms budget,
 and it is worth naming what is still in it, because none of it is a block walk
 any more:
 
 - **`matchEdges`**, two `memcmp` passes that together cover the note -- prefix
   until the first difference, suffix until the first difference from the end. On
   a small edit that sums to about the whole buffer, so ~200 KB of `memcmp`. It
-  is what locates the edit, and the caller does not say where it typed.
+  is what locates the edit, and the caller does not say where it typed. This is
+  now most of the keystroke: `layout.edit_bytes_matched` is 34,835,299 over the
+  run against `layout.source_bytes_copied`'s 2,459,143.
 - **The source memmove**, `layout.source_bytes_moved`, averaging 29 KB an edit
   over the run. A flat buffer has no way around dragging its tail.
 - **The block tail's offsets**, four integer adds per block after the splice
   point. On an edit near the top that is every block in the note.
-- **`resolveFolds`**, which still resolves the fold state over every block on
-  every edit -- `layout.update.resolve_folds` is 4.8 ms over 513 calls.
+- **`resolveFolds`**, but only for a note that has a fold in it. One with none
+  skips the resolution entirely -- `layout.fold_resolutions_skipped` is 482 of
+  634 updates -- and `layout.update.resolve_folds` is down from 513 calls to 31.
 - **The placement's delta pass**, `layout.blocks_shifted`, when the edit changed
   its block's height or line count: one float add and one integer add per block
   below it. Zero when it did not, which is most keystrokes.
 
 Every one of those is a linear pass over integers or bytes with no branches, no
-hashing and no pointer chasing, which is why they add up to 23 us where the walks
+hashing and no pointer chasing, which is why they add up to 16 us where the walks
 they replaced were 337. Three of them are named as open items below.
 
 ### Open: an edit still touches every block below it
@@ -1195,23 +1346,37 @@ The measurement that would justify it is `layout.blocks_shifted` per update
 against `layout.blocks`: today it is 1,812 against 9,612 on average, and a
 keystroke that does not rewrap its own block moves nothing at all.
 
-### Open: `resolveFolds` is still O(blocks) on every edit
+### Open: `resolveFolds` is still O(blocks) on every edit *that has a fold in it*
 
-Every edit re-resolves the fold state over the whole block list -- a
-`foldableKind` test per block and a predicate call per foldable one --
-and then a `memcmp` of the result against the previous generation tells the
-placement which blocks a fold change moved. 4.8 ms over 513 calls, so about 9 us
-of a 23 us keystroke, and the largest single remaining item in one.
+Every edit used to re-resolve the fold state over the whole block list -- a
+`foldableKind` test per block and a predicate call per foldable one -- and then
+a `memcmp` of the result against the previous generation to tell the placement
+which blocks a fold change moved. It ran on every edit whether or not anything
+in the note was collapsed, which for most notes most of the time is a walk of
+the document to produce the all-zero array it was already holding.
 
-Making it incremental is not hard to state and is fiddly to get right: `hidden`
-at block `i` depends on the fold heads at or before `i` and on how far each one
-reaches, so an edit invalidates the resolution from the nearest enclosing head
-onwards, not from the edit. The splice already knows which blocks changed; what
-it does not have is the enclosing head, and `foldEnd` is the function that would
-have to be run backwards.
+Half of that is gone. A caller that offers **no predicate at all** is saying
+something stronger than a predicate that always answers false, and the layout
+acts on it: if nothing was hidden last time either, an all-zero resolution of
+the right length is the answer already in hand. `Application` leaves
+`PageFolds::collapsed` unset for a note with no folds, and
+`layout.fold_resolutions_skipped` reads 482 of 634 updates in the harness and
+60 of 60 frames in a real session. `layout.update.resolve_folds` went from 513
+calls to 31.
 
-Left alone because 9 us is 9 us, and because the fold predicate is a caller's
-closure -- the cost of calling it is not the layout's to bound.
+What remains open is the note that *does* have a fold in it, where the
+resolution is still O(blocks) per edit. Making that incremental is not hard to
+state and is fiddly to get right: `hidden` at block `i` depends on the fold
+heads at or before `i` and on how far each one reaches, so an edit invalidates
+the resolution from the nearest enclosing head onwards, not from the edit. The
+splice already knows which blocks changed; what it does not have is the
+enclosing head, and `foldEnd` is the function that would have to be run
+backwards.
+
+Worth noting for whoever picks it up: the fold state of the blocks *before* the
+splice point is provably unchanged, because `hidden[j]` for `j` under the head
+of the edit depends only on blocks in `[0, j]`. That is half the incremental
+resolution for free, and it is the half an edit at the bottom of a note wants.
 
 ### Open: `SourceBlock` is 88 bytes and holds a `std::string`
 
@@ -1269,21 +1434,41 @@ The allocation counters narrow this: allocator traffic in the layout is the same
 whether the metrics are real or stubbed, so the churn half of a layout change is
 now measurable in the fixture and reproducible under load. The CPU clock narrows
 it further, in that a fixture timing is now trustworthy enough to compare at all.
-The shaping half still is not -- and now that an edit is 23 us, it is by a wide
-margin the largest number left in the app: first paint of a 336 KB note is
-40-58 ms of layout in a real session against the fixture's 8.8 ms for the same
-document, and the whole of that gap is `Metrics::measure` being a font rather
-than a multiplication.
+The shaping half still is not, and it is still the largest number left in the
+app: first paint is `Metrics::measure` being a font rather than a
+multiplication.
 
-`src/ui/TextMeasureCache.{h,cpp}` is the beginning of the answer on the app side.
-Nothing in this file can tell whether it is working.
+**The session is now cheap enough to be the answer.** See "Running a real
+session without a screen" above: `Xvfb` plus `--screenshot` turns "open the app
+and watch it" into a command that prints both tables over the real renderer, and
+two of them alternated is an interleaved A/B of the font path. The same
+mechanism doubles as the rendering regression check.
+
+`src/ui/TextMeasureCache.{h,cpp}` is the answer on the app side, and a real
+session now says so: over a 185 KB note it reports 63,449 measure calls against
+62,473 hits -- **98.5%**, 976 misses. The shaping is not the cost any more. What
+first paint costs now is the run building around it: `layout.block.flow` is
+7.3 ms of a 10.3 ms first paint, and the measure calls inside it are a hash and
+a probe rather than a face.
+
+Two things were tried against that 27 ns per measure and did **not** move it, so
+that the next reader does not spend the afternoon again. Removing the two
+`perf::addCounter` calls from `TextRenderer::width` -- on the theory that two
+relaxed atomic read-modify-writes on a process-wide cacheline were a third of
+the call -- measured no difference across three interleaved sessions. And the
+direct-mapped measure cache is not thrashing: 98.5% is not a hit rate with room
+in it. What is left is the token staging below, which is the next thing to try.
 
 ### Open: `matchEdges` compares the whole buffer to find a one-byte edit
 
 Every edit runs two `memcmp` passes -- forward to the first differing byte,
 backward to the first differing byte from the end -- and on a small edit those
 two sum to about the length of the note. ~200 KB of `memcmp` to locate one typed
-character, and it is now one of the larger items in a 23 us keystroke.
+character, and it is the largest single item left in a 16 us keystroke.
+
+It has a counter now. `layout.edit_bytes_matched` reads 34,835,299 over the
+harness run against `layout.source_bytes_copied`'s 2,459,143: **fourteen bytes
+read for every byte that moved.**
 
 It is there because `update` is handed a buffer and no account of what happened
 to it. The caller *does* know: every edit in `src/doc/Edits.h` returns the span it
@@ -1299,40 +1484,116 @@ caller's span to bound it: start the forward scan at the claimed start and the
 backward scan at the claimed end, so a caller that lies costs correctness nothing
 and only loses the speed-up.
 
-### Open: the cold scan's block vector grows twice, and the second growth is the app's largest allocation
+One thing that looks like a free win here and is not: skipping `sourceMatches`
+when the caller's source stamp says the buffer moved. It reads like a redundant
+second pass over the same half of the note, and it is not one -- `sourceMatches`
+compares the *lengths* first, and every insertion and deletion changes the
+length, so on an ordinary keystroke it already returns without reading a byte.
+Four interleaved rounds put `type.middle` at 16 us with and without it. It was
+written, measured, and reverted; the counter above is what came out of the
+attempt.
 
-`scanBlocksInto` reserves `source.size() / 48 + 8` blocks, and prose runs nearer
-one block per 20 bytes, so a cold vector grows twice: 4,166 -> 8,332 -> 16,664
-entries at 88 bytes each. `open.cold_layout` reports a 1,470 KB largest single
-allocation, which is exactly that last step.
+### Open: the live page's hooks are rebuilt every frame
 
-It is one allocation on the first open of a note -- every later scan reuses the
-capacity -- so it is listed for the shape rather than the cost: the estimate is
-deliberately low to avoid over-allocating for a document that is one long block,
-and the new largest-allocation column is what made the consequence visible. A
-better estimate is a count of newlines, which is one pass over bytes already
-being read.
+`drawLive` constructs a `PageViewHooks` and a `PageFolds` and moves them into
+`ui.livePage` on every frame. Between them that is five `std::function`
+assignments, and each closure captures more than a `std::function`'s inline
+buffer holds -- so it is five heap allocations and five frees per frame, for
+closures whose captures (the renderer, the text renderer, the runtime) do not
+change for the life of the process.
 
-### Open: `pushNoteShortcuts` is O(favorites x notes)
+Three of the five are the hooks, and those could be installed once. The two
+fold closures genuinely change with the selected note, and one of them exists or
+does not depending on whether that note has a fold -- but both could capture
+nothing and read the current selection when called, which would make them
+installable once as well.
 
-`SidebarModel.cpp` resolves each favourite and each recent by a linear scan of
-the whole note list. Bounded at 8 + 5 shortcuts and now off the per-frame path,
-so it is small -- but it wants an id index on the organization service, which is
-also what `findNote` should be using.
+Not done because five allocations against a frame that draws several hundred
+runs is not where a frame goes, and `PageView` would need a way to say whether
+it has been wired. Listed because "constructed per frame and thrown away" is the
+shape that was wrong in five other places in this file.
 
-### Open: the library directory is walked twice on startup
+### Open (unmeasured): the cache sweep frees what the next relayout is about to allocate
 
-`library.note_files_calls` reads 2 and `library.directory_entries_visited` reads
-804 for a 401-file library: the tree is enumerated once by the index refresh and
-once by whoever asks for the note list. 1.7 ms of `library_index.refresh.scan_tree`
-plus a second walk of the same directory, once, at startup -- so it is small, and
-it is listed because two walks is a sign the ownership of "what files are there"
-is split between two callers rather than because of the milliseconds.
+`layout.update.evict_cache` is 14.3 ms over nine sweeps, and a sweep is almost
+entirely `free`: two vectors per evicted block, plus any run string long enough
+to escape the small-string optimisation. A resize then immediately allocates the
+same shapes back, because every key changed with the geometry.
 
-### Open: wikilink resolution does not invalidate a block
+The obvious answer is a pool: the sweep moves each evicted `BlockLayout` onto a
+free list instead of destroying it, and `layoutBlock` takes one and clears its
+vectors -- which keeps their capacity -- instead of building from empty. It
+would turn the sweep's frees and the relayout's allocations into a move each.
 
-Whether a `[[target]]` resolves decides a run's colour, but it is not part of a
-block's cache key -- so a link that starts or stops resolving keeps its old
-colour until the next real edit to that block. This predates the reuse check
-above and is not made worse by it; noted here because looking for it is what
-found it.
+Written down rather than done, and explicitly **not measured**, because the
+pool's bound is the hard part and it undoes a decision this file already
+justified. The cache ceiling is one generation of the document on purpose: three
+generations cost 55.1 MB of peak RSS against 28.7 MB and bought nothing. A pool
+large enough to cover a resize's sweep is a second generation again, in capacity
+if not in content; a pool small enough not to be would cover about a fifth of
+one. Anyone picking this up should measure `peak_rss` first and
+`resize.width_step` second, in that order.
+
+### Resolved: the cold scan's block vector grew twice, and the second growth was the app's largest allocation
+
+`scanBlocksInto` reserved `source.size() / 48 + 8` blocks, and prose runs nearer
+one block per 20 bytes, so a cold vector grew twice: 4,166 -> 8,332 -> 16,664
+entries at 88 bytes each. `open.cold_layout` reported a 1,470 KB largest single
+allocation, which was exactly that last step.
+
+A block spans at least one line, so the newline count is an *exact upper bound*
+rather than an estimate, and counting newlines is one vectorised pass over bytes
+the scan is about to read anyway. It is asked for only when the standing
+capacity is already too small, which on the rescan that runs per keystroke it
+never is. `open.cold_layout`'s largest allocation is 826 KB and its byte total
+10,889 KB -> 9,123 KB.
+
+The general shape is worth keeping: an estimate that is deliberately low to
+avoid over-allocating is a growth curve in disguise, and the
+largest-allocation column is what makes that visible. Prefer a bound you can
+derive to a constant you guessed.
+
+### Resolved: `pushNoteShortcuts` was O(favorites x notes)
+
+`SidebarModel.cpp` resolved each favourite and each recent by a linear scan of
+the whole note list -- thirteen shortcuts against a thousand notes is thirteen
+thousand string compares to draw thirteen rows. `OrganizationService` keeps an
+id index now, built by the same call that finalises the note list, so its keys
+(views into the ids in that list) cannot outlive or predate it. `findNote` is a
+hash lookup, `noteById` is the same lookup without the copy, and the sidebar
+takes the borrow.
+
+That index also fixed the shape one level up: `currentNotes()` resolved every
+search result through the linear scan, so a query returning 200 rows over a
+1,000-note library was 200,000 string compares to fill a list the caller already
+held a reference to.
+
+### Resolved: the library directory was walked three times on startup
+
+Two of the three are gone, and the third is left deliberately.
+
+`OrganizationService::folders()` ran its own `recursive_directory_iterator` a
+few microseconds after `notes()` had walked the same tree, because the only
+thing it needs that a list of notes cannot give it is the directories with *no*
+notes in them. `Library::walk` reports those alongside the files now, and both
+lists are memoised off the one scan. That walk had no counter, which is why it
+survived: `library.directory_entries_visited` did not move when it went away.
+
+Every caller also re-derived each note's folder with `lexically_relative` plus
+`parent_path` -- two path allocations, done per note per caller by the folder
+filter, the tree, the sidebar, the breadcrumb, the wikilink placer and the note
+mover, over a list that had not changed. `NoteListItem` carries `folder` now.
+And `folders()` counted notes into folders with a `find_if` over the folder list
+per note, which on a library filed into as many folders as it has notes is
+quadratic; it is a hash lookup per note.
+
+What is left is two walks: one by the index refresh, which needs each
+`directory_entry`'s cached stat, and one by the organization service, which
+needs each note's front matter. Merging them means `AppState` doing the walk and
+handing it to both, which trades a self-contained memoisation for a shared one.
+At 1 ms per walk over 401 notes that is not yet worth the coupling -- but the
+deeper duplication is: the index has just read every file and has the id, path
+and title of all of them in SQLite, and the organization service then opens all
+of them again for the same three fields plus tags and icon. Two columns on the
+index would make the note list a `SELECT`.
+
