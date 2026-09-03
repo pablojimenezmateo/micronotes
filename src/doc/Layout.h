@@ -266,6 +266,27 @@ public:
 
   Rect caretRect(std::size_t offset) const;
   std::size_t offsetAt(float x, float y) const;
+  // The rects a selection paints, clipped to the document-space band
+  // [bandTop, bandBottom) and appended into a vector the caller owns.
+  //
+  // The band is not an optimisation the caller may skip. A selection is bounded
+  // by the *document*, not by the window: Ctrl+A on a 200 KB note selects 6,600
+  // visual rows, of which a screen shows forty. Building all of them measured
+  // 673 us -- a third of the frame budget -- and then allocating a 6,600-entry
+  // vector to hold them, on every frame the selection was up. The find
+  // highlighter next door in `PageView` was given a visible band for exactly
+  // this reason; the selection was not, and it is the larger of the two because
+  // a selection has no query to be empty.
+  void selectionRectsInto(std::size_t from, std::size_t to, float bandTop, float bandBottom,
+                          std::vector<Rect>* out) const;
+  // The first and last rect the selection paints, without building the ones
+  // between them. What a caller that wants to *place* something relative to a
+  // selection needs -- the formatting toolbar sits above the first row and falls
+  // back to below the last -- and it used to get them by building every rect in
+  // the document and reading `front()` and `back()`.
+  std::optional<std::pair<Rect, Rect>> selectionEnds(std::size_t from, std::size_t to) const;
+  // Every rect, unbounded. For a caller with no viewport to speak of -- the
+  // tests -- and the same relationship `scanBlocks` has to `scanBlocksInto`.
   std::vector<Rect> selectionRects(std::size_t from, std::size_t to) const;
   std::optional<std::size_t> blockAt(float y) const;
   // Half-open range of block indices whose boxes intersect the document-space
@@ -375,6 +396,10 @@ private:
   // and the raw block are -- and on nothing else, which is precisely what lets
   // the placement patch bound the set of blocks a given change can have moved.
   Flags flagsFor(std::size_t index, std::size_t caretBlock, std::size_t rawBlock) const;
+  // The rect one visual row of a selection paints, or nothing when that row
+  // holds none of it.
+  std::optional<Rect> selectionRectFor(std::size_t block, const VisualLine& line, std::size_t from,
+                                       std::size_t to) const;
   // Counted into a local and posted once per update. A counter add is a relaxed
   // atomic read-modify-write on a process-wide cacheline: nothing on a call per
   // frame, and about 25 cycles per block when a cold open resolves ten thousand

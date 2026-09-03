@@ -296,6 +296,53 @@ static bool scrollBudgets(const std::string& source) {
   return false;
 }
 
+// A selection reaching the whole note must still cost the window. Ctrl+A on a
+// 200 KB note selects 6,600 visual rows and a screen shows forty of them; the
+// rects for the other 6,560 are built and discarded, twice per frame -- once to
+// paint the selection, once to place the formatting toolbar above it. The band
+// is what keeps this off the frame, and this is what says the band is still
+// there.
+static constexpr std::uint64_t kSelectAllBudgetMicros = 60;
+
+static bool selectionBudgets(const std::string& source) {
+  micronotes::doc::DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  micronotes::doc::LayoutOptions options;
+  options.width = 700.0f;
+  layout.update(source, options);
+
+  // A window's worth, scrolled to the middle of the note, which is where a band
+  // that has stopped working looks most like one that is.
+  const float bandTop = layout.totalHeight() / 2.0f;
+  const float bandBottom = bandTop + 900.0f;
+  std::vector<micronotes::doc::Rect> rects;
+  // A local median, like `editBudgets` below: `measureIterations` is defined
+  // further down the file and reports allocations these two do not have.
+  const auto median = [](const char* name, auto&& body) {
+    std::vector<std::uint64_t> samples;
+    for(int i = 0; i < 64; ++i) samples.push_back(timeMicros(body));
+    std::sort(samples.begin(), samples.end());
+    const std::uint64_t value = samples[samples.size() / 2];
+    recordMicros(name, value);
+    return value;
+  };
+  const std::uint64_t painted = median("select_all.rects", [&] {
+    layout.selectionRectsInto(0, source.size(), bandTop, bandBottom, &rects);
+  });
+  const std::uint64_t anchored = median("select_all.toolbar_anchor", [&] {
+    (void)layout.selectionEnds(0, source.size());
+  });
+  std::cout << "select_all.rects_in_band: " << rects.size() << " of "
+            << layout.selectionRects(0, source.size()).size() << " in the document\n";
+
+  const std::uint64_t worst = std::max(painted, anchored);
+  if(worst <= kSelectAllBudgetMicros) return true;
+  std::cerr << "BUDGET FAILED: select_all took " << worst << "us, over "
+            << kSelectAllBudgetMicros << "us -- a selection is costing the document rather "
+            << "than the window\n";
+  return false;
+}
+
 // Enter, Tab and Backspace each need the note's block partition to find the
 // block they act on. That is once per structural key, not once per character, so
 // the budget is looser than the keystroke one - but it still has to stay off the
@@ -769,6 +816,7 @@ int main() {
   bool withinBudget = layoutBudgets(&liveNote);
   withinBudget = editBudgets(liveNote) && withinBudget;
   withinBudget = scrollBudgets(liveNote) && withinBudget;
+  withinBudget = selectionBudgets(liveNote) && withinBudget;
   withinBudget = interactionBudgets(liveNote) && withinBudget;
 
   printSamples();

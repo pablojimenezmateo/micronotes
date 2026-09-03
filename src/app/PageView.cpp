@@ -415,7 +415,13 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
       fill(renderer, {band.x - 6.0f, band.y, band.w + 12.0f, std::max(2.0f, band.h)}, theme().selectionBg);
     }
   } else if(selection.start != selection.end) {
-    for(const auto& rect : document_.selectionRects(selection.start, selection.end)) {
+    // Banded to the viewport, in document space. A selection reaching the whole
+    // note is otherwise a pass over every visual row in it, per frame, to paint
+    // the forty the window can show.
+    const float bandTop = page_.y - oy;
+    document_.selectionRectsInto(selection.start, selection.end, bandTop, bandTop + page_.h,
+                                 &selectionRects_);
+    for(const auto& rect : selectionRects_) {
       fill(renderer, toRect(rect, ox, oy), theme().selectionBg);
     }
   }
@@ -594,8 +600,11 @@ void PageView::drawFindHighlights(SDL_Renderer* renderer, std::string_view findQ
   const auto end = std::lower_bound(findMatches_.begin(), findMatches_.end(), to);
   perf::addCounter(perf::CounterId::PageFindHighlightsDrawn,
                    static_cast<std::uint64_t>(end - begin));
+  const float bandTop = page_.y - oy;
   for(auto it = begin; it != end; ++it) {
-    for(const auto& rect : document_.selectionRects(*it, *it + findQuery.size())) {
+    document_.selectionRectsInto(*it, *it + findQuery.size(), bandTop, bandTop + page_.h,
+                                 &selectionRects_);
+    for(const auto& rect : selectionRects_) {
       const Rect hit = toRect(rect, ox, oy);
       fill(renderer, hit, theme().findBg);
       stroke(renderer, hit, theme().findBorder);
@@ -818,8 +827,12 @@ void PageView::drawDropIndicator(SDL_Renderer* renderer) {
 void PageView::drawToolbar(SDL_Renderer* renderer, TextRenderer& text, const PageSelection& selection) {
   if(selecting_ || blockSelection_.active) return;
   if(selection.start == selection.end) return;
-  const auto rects = document_.selectionRects(selection.start, selection.end);
-  if(rects.empty()) return;
+  // Only the two rects this actually places against, not every rect in the
+  // selection: the toolbar reads `front()` to sit above the selection's first
+  // row and `back()` to fall back to below its last, and it used to get them by
+  // building all 6,600 of a select-all's rows and throwing 6,598 away.
+  const auto ends = document_.selectionEnds(selection.start, selection.end);
+  if(!ends) return;
 
   struct Entry { const char* id; const char* label; };
   static constexpr std::size_t kButtons = 6;
@@ -839,12 +852,12 @@ void PageView::drawToolbar(SDL_Renderer* renderer, TextRenderer& text, const Pag
   }
   const float height = 30.0f;
 
-  const Rect first = toRect(rects.front(), originX(), originY());
+  const Rect first = toRect(ends->first, originX(), originY());
   float x = std::clamp(first.x - 8.0f, page_.x + 6.0f, page_.x + page_.w - width - 6.0f);
   float y = first.y - height - 8.0f;
   if(y < page_.y + 4.0f) {
     // No room above: sit below the selection rather than off the page.
-    const Rect last = toRect(rects.back(), originX(), originY());
+    const Rect last = toRect(ends->second, originX(), originY());
     y = last.y + last.h + 8.0f;
   }
   if(y + height > page_.y + page_.h - 4.0f) return;

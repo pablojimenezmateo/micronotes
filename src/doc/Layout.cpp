@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace micronotes::doc {
@@ -1450,48 +1451,104 @@ std::size_t DocumentLayout::offsetAt(float x, float y) const {
   return block.start + chosen->srcStart + chosen->text.size();
 }
 
-std::vector<Rect> DocumentLayout::selectionRects(std::size_t from, std::size_t to) const {
-  std::vector<Rect> rects;
-  if(from > to) std::swap(from, to);
-  if(from == to || placed_.empty()) return rects;
-  // Only a block the range overlaps can contribute a rect, and blocks are
-  // ordered by source offset -- so the walk is the selection's size, not the
-  // document's. It used to visit every visual line in the note on every frame a
-  // selection was up, and discard all but a handful.
-  for(std::size_t i = blockIndexFor(from); i < blocks_.size() && blocks_[i].start < to; ++i) {
-    const BlockLayout& layout = *placed_[i].layout;
-    const std::size_t base = blocks_[i].start;
-    for(const VisualLine& line : layout.lines) {
-      float left = 0.0f;
-      float right = 0.0f;
-      bool any = false;
-      for(const auto& run : layout.runsOf(line)) {
-        if(run.text.empty()) continue;
-        const std::size_t runStart = base + run.srcStart;
-        const std::size_t runEnd = base + run.srcEnd;
-        if(runEnd <= from || runStart >= to) continue;
-        const std::size_t a = std::max(from, runStart);
-        const std::size_t b = std::min(to, runEnd);
-        float x0 = run.rect.x;
-        float x1 = run.rect.x + run.rect.w;
-        if(a > runStart) {
-          x0 += metrics_.measure(std::string_view(run.text).substr(0, std::min(a - runStart, run.text.size())), run.style);
-        }
-        if(b < runEnd) {
-          x1 = run.rect.x + metrics_.measure(std::string_view(run.text).substr(0, std::min(b - runStart, run.text.size())), run.style);
-        }
-        if(!any) {
-          left = x0;
-          right = x1;
-          any = true;
-        } else {
-          left = std::min(left, x0);
-          right = std::max(right, x1);
-        }
-      }
-      if(any) rects.push_back({left, placed_[i].top + line.y, std::max(2.0f, right - left), line.height});
+// The rect one visual line of a selection paints, or nothing when the line holds
+// none of it. Shared by the three entry points below, which differ only in which
+// lines they ask about.
+std::optional<Rect> DocumentLayout::selectionRectFor(std::size_t block, const VisualLine& line,
+                                                     std::size_t from, std::size_t to) const {
+  const BlockLayout& layout = *placed_[block].layout;
+  const std::size_t base = blocks_[block].start;
+  float left = 0.0f;
+  float right = 0.0f;
+  bool any = false;
+  for(const auto& run : layout.runsOf(line)) {
+    if(run.text.empty()) continue;
+    const std::size_t runStart = base + run.srcStart;
+    const std::size_t runEnd = base + run.srcEnd;
+    if(runEnd <= from || runStart >= to) continue;
+    const std::size_t a = std::max(from, runStart);
+    const std::size_t b = std::min(to, runEnd);
+    float x0 = run.rect.x;
+    float x1 = run.rect.x + run.rect.w;
+    if(a > runStart) {
+      x0 += metrics_.measure(
+        std::string_view(run.text).substr(0, std::min(a - runStart, run.text.size())), run.style);
+    }
+    if(b < runEnd) {
+      x1 = run.rect.x + metrics_.measure(
+                          std::string_view(run.text).substr(0, std::min(b - runStart, run.text.size())),
+                          run.style);
+    }
+    if(!any) {
+      left = x0;
+      right = x1;
+      any = true;
+    } else {
+      left = std::min(left, x0);
+      right = std::max(right, x1);
     }
   }
+  if(!any) return std::nullopt;
+  return Rect {left, placed_[block].top + line.y, std::max(2.0f, right - left), line.height};
+}
+
+void DocumentLayout::selectionRectsInto(std::size_t from, std::size_t to, float bandTop,
+                                        float bandBottom, std::vector<Rect>* out) const {
+  std::vector<Rect>& rects = *out;
+  rects.clear();
+  if(from > to) std::swap(from, to);
+  if(from == to || placed_.empty()) return;
+  // Two bounds, and the selection needs both. Only a block the range overlaps
+  // can contribute a rect, and blocks are ordered by source offset, so the
+  // source ends the walk. Only a block the band reaches can contribute a
+  // *visible* one, and blocks tile the document in order, so `blockRange` is a
+  // binary search for that end. Without the second, a selection is O(document)
+  // per frame however little of it is on screen.
+  const auto [bandFirst, bandLast] = blockRange(bandTop, bandBottom);
+  std::size_t i = std::max(blockIndexFor(from), bandFirst);
+  for(; i < bandLast && i < blocks_.size() && blocks_[i].start < to; ++i) {
+    // And the same argument again one level down, for the rows inside a block:
+    // a fenced code block is a single block that can be thousands of rows long,
+    // so a band that stops at the block boundary stops one level too early.
+    for(const VisualLine& line : placed_[i].layout->lines) {
+      const float top = placed_[i].top + line.y;
+      if(top + line.height <= bandTop) continue;
+      if(top >= bandBottom) break;
+      if(const auto rect = selectionRectFor(i, line, from, to)) rects.push_back(*rect);
+    }
+  }
+}
+
+std::optional<std::pair<Rect, Rect>> DocumentLayout::selectionEnds(std::size_t from,
+                                                                  std::size_t to) const {
+  if(from > to) std::swap(from, to);
+  if(from == to || placed_.empty()) return std::nullopt;
+  const std::size_t first = blockIndexFor(from);
+  std::size_t last = blockIndexFor(to == 0 ? to : to - 1);
+  if(last < first) last = first;
+
+  std::optional<Rect> front;
+  for(std::size_t i = first; !front && i <= last && i < blocks_.size(); ++i) {
+    for(const VisualLine& line : placed_[i].layout->lines) {
+      front = selectionRectFor(i, line, from, to);
+      if(front) break;
+    }
+  }
+  if(!front) return std::nullopt;
+  std::optional<Rect> back;
+  for(std::size_t i = last + 1; !back && i-- > first;) {
+    const BlockLayout& layout = *placed_[i].layout;
+    for(std::size_t l = layout.lines.size(); !back && l-- > 0;) {
+      back = selectionRectFor(i, layout.lines[l], from, to);
+    }
+  }
+  return std::make_pair(*front, back ? *back : *front);
+}
+
+std::vector<Rect> DocumentLayout::selectionRects(std::size_t from, std::size_t to) const {
+  std::vector<Rect> rects;
+  selectionRectsInto(from, to, -std::numeric_limits<float>::max(),
+                     std::numeric_limits<float>::max(), &rects);
   return rects;
 }
 

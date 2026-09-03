@@ -228,6 +228,11 @@ private:
   // over the note at frame rate; drawing all of it made the highlight cost the
   // document rather than the window.
   std::vector<std::size_t> findMatches_;
+  // Scratch for the selection and find-highlight rects. A member because both
+  // are per-frame calls and a vector returned by value is an allocation and a
+  // free on every one of them -- for the find highlighter, one per match on
+  // screen.
+  mutable std::vector<doc::Rect> selectionRects_;
   std::string findMatchQuery_;
   std::uint64_t findMatchRevision_ = 0;
   bool findMatchesValid_ = false;

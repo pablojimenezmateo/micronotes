@@ -226,6 +226,82 @@ MICRONOTES_TEST(layout_reports_selection_rectangles_per_line) {
   MICRONOTES_REQUIRE(layout.selectionRects(4, 4).empty());
 }
 
+// The band is a filter over the rects, not a different answer. Anything the
+// banded call returns has to be exactly what the unbanded one returned for the
+// same rows -- otherwise a scroll would repaint the selection differently from
+// how it was painted a frame ago.
+MICRONOTES_TEST(layout_bands_a_selection_to_the_rows_that_are_on_screen) {
+  std::string source;
+  // Long enough that a window's worth is a small fraction of it, and mixed
+  // enough that some blocks wrap and some do not.
+  for(int i = 0; i < 200; ++i) {
+    source += "## Heading\n\nalpha bravo charlie delta echo foxtrot golf hotel india juliet\n\n- item\n\n";
+  }
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 200.0f;
+  layout.update(source, options);
+
+  const auto all = layout.selectionRects(0, source.size());
+  MICRONOTES_REQUIRE(all.size() > 500);
+
+  // Several bands across the document, including ones that start and end inside
+  // a block rather than on a boundary.
+  for(float top : {0.0f, 137.0f, layout.totalHeight() / 3.0f, layout.totalHeight() - 400.0f}) {
+    const float bottom = top + 480.0f;
+    std::vector<Rect> banded;
+    layout.selectionRectsInto(0, source.size(), top, bottom, &banded);
+    // Exactly the rects of `all` whose rows intersect the band, in order.
+    std::vector<Rect> expected;
+    for(const auto& rect : all) {
+      if(rect.y + rect.h > top && rect.y < bottom) expected.push_back(rect);
+    }
+    MICRONOTES_REQUIRE(banded.size() == expected.size());
+    MICRONOTES_REQUIRE(!banded.empty());
+    for(std::size_t i = 0; i < banded.size(); ++i) {
+      MICRONOTES_REQUIRE(banded[i].x == expected[i].x);
+      MICRONOTES_REQUIRE(banded[i].y == expected[i].y);
+      MICRONOTES_REQUIRE(banded[i].w == expected[i].w);
+      MICRONOTES_REQUIRE(banded[i].h == expected[i].h);
+    }
+    // And the band really is a small part of the whole, or this proves nothing.
+    MICRONOTES_REQUIRE(banded.size() * 10 < all.size());
+  }
+}
+
+// The toolbar's two rects have to be the selection's own first and last, however
+// much of the note it covers and wherever the viewport happens to be -- the
+// toolbar is placed against the selection, not against what is on screen.
+MICRONOTES_TEST(layout_finds_a_selections_ends_without_building_the_middle) {
+  std::string source;
+  for(int i = 0; i < 120; ++i) source += "alpha bravo charlie delta echo\n\n";
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 200.0f;
+  layout.update(source, options);
+
+  const std::size_t spans[][2] = {
+    {0, source.size()},
+    {0, 6},
+    {5, 400},
+    {source.size() / 2, source.size() / 2 + 90},
+  };
+  for(const auto& span : spans) {
+    const auto all = layout.selectionRects(span[0], span[1]);
+    const auto ends = layout.selectionEnds(span[0], span[1]);
+    MICRONOTES_REQUIRE(all.empty() == !ends.has_value());
+    if(all.empty()) continue;
+    MICRONOTES_REQUIRE(ends->first.y == all.front().y);
+    MICRONOTES_REQUIRE(ends->first.x == all.front().x);
+    MICRONOTES_REQUIRE(ends->second.y == all.back().y);
+    MICRONOTES_REQUIRE(ends->second.x == all.back().x);
+  }
+  // An empty selection places nothing.
+  MICRONOTES_REQUIRE(!layout.selectionEnds(10, 10).has_value());
+}
+
 MICRONOTES_TEST(layout_gives_complex_blocks_one_caret_position) {
   const std::string source = "text\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
   DocumentLayout layout;
