@@ -487,7 +487,7 @@ Edit turnBlocksInto(std::string_view source, std::size_t fromCaret, std::size_t 
   bool changed = false;
   for(std::size_t i = chunkBlocks.size(); i-- > 0;) {
     if(chunkBlocks[i].kind == BlockKind::Blank) continue;
-    // Deliberately not lent `chunkBlocks`: `chunk` is rewritten inside this
+    // TD-4. Deliberately not lent `chunkBlocks`: `chunk` is rewritten inside this
     // loop, so that partition stops describing it. Walking back to front means
     // the offsets this iteration reads are all below the ones already rewritten
     // and it would in fact be safe -- but "safe as long as nobody reorders the

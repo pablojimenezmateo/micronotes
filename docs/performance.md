@@ -1597,3 +1597,229 @@ and title of all of them in SQLite, and the organization service then opens all
 of them again for the same three fields plus tags and icon. Two columns on the
 index would make the note list a `SELECT`.
 
+
+## The fifth pass: what the three instruments could not see
+
+The four passes above are all about the document layout, and by the end of them
+a keystroke on a 200 KB note was 16 us against a 2 ms budget. The fifth pass
+started from a different question -- *what is on the keystroke path that none of
+the three instruments is pointed at?* -- and the answer was most of the
+keystroke.
+
+The gap was structural, not an oversight. Counters and scope timers only report
+what someone thought to instrument, and everything in `tools/PerfMain.cpp`
+enters through `doc::` and `library::`. Nothing in the harness goes through
+`src/app/`'s key handling, its shell surfaces, or `AppState`'s writes to disk.
+So the instruments were sharp and they were all aimed at the same wall.
+
+Two things closed it, and both are now standing practice:
+
+- **A real session is the instrument for anything above `doc::`.** `Xvfb` plus
+  `--screenshot` prints both tables over the real renderer for a command's worth
+  of effort (see "Running a real session without a screen"). Every finding in
+  this pass except the first came out of reading that table and asking why a
+  panel cost more than the note.
+- **The pixels are the regression check.** Every change below was verified by
+  capturing the same note in `live`, `viewer` and `split` from both builds and
+  `cmp`-ing the files. A layout or paint optimisation that cannot be observed is
+  safe; one that can is a bug, and this is the cheapest possible proof.
+
+### Resolved: every keystroke waited for two `fsync` barriers
+
+`markEdited` ran on every typed character, every Backspace and every Delete,
+and called `writeFileDurably` straight through: temp file, write, `fsync`,
+rename, `fsync` the directory. Two durability barriers, synchronously, on the
+thread drawing the window.
+
+| | median | worst |
+|---|---:|---:|
+| 200 KB note, quiet disk | 1,117 us | 4,000 us |
+| 1 KB note, quiet disk | 961 us | 2,045 us |
+| 200 KB note, disk busy | 8,707 us | 35,643 us |
+
+A 1 KB note costs the same as a 200 KB one, which is what says the cost is the
+barriers and not the bytes. Against a 2 ms frame budget it is a dropped frame
+per character, and it was **twenty-five times the whole layout update** the four
+previous passes were about.
+
+The write has to be durable. Waiting for it never did. `library::RecoveryStore`
+takes a post as a copy into a one-slot-per-note mailbox plus a notify, and one
+writer thread drains it, latest-wins per note:
+
+| | before | after |
+|---|---:|---:|
+| UI thread, per keystroke | 1,117 us | 7.8 us |
+| durable writes for a 200-character burst | 200 | 2 |
+
+So the disk does *less* work as well as later work: a burst of typing collapses
+to one write of the newest text, which is the only version anyone would want
+back. `recovery.posts` against `recovery.writes` is the counter pair; writes
+climbing to meet posts means the coalescing has stopped.
+
+`clear` goes through the same mailbox as a tombstone rather than being performed
+on the spot, and that is correctness rather than tidiness: a direct removal
+races the saves already queued behind it, and losing that race leaves the app
+offering to recover a draft it had already committed.
+
+What it gives up: the copy on disk trails the buffer by whatever write is in
+flight, about a millisecond, instead of being current at every character. The
+*real* save was already debounced 1.2 s, so this is the tighter of the two by
+three orders of magnitude.
+
+### Resolved: every structural key rescanned the whole note
+
+Every operation in `doc/Edits.h` needs the buffer's block partition to find the
+one block it acts on, and every one derived it with a fresh `scanBlocks` -- a
+pass over every byte plus a `vector<SourceBlock>` at 88 bytes a block.
+
+| transform, 200 KB / 12,614 blocks | scanning | lent |
+|---|---:|---:|
+| `continueList` | 373 us | 57 ns |
+| `outdentOrUnwrap` | 375 us | 37 ns |
+| `toggleTodo` | 384 us | 40 ns |
+
+Backspace paid it once. Enter paid it twice -- `closeFence`, then
+`continueList` -- and three times when it landed on an empty nested list item,
+because `continueList` delegates to `outdent`. So Enter was ~750 us of block
+scanning against the 40 us of layout it then triggered.
+
+`DocumentLayout` was holding that exact partition the whole time, spliced rather
+than rescanned on every keystroke -- which is what the third pass above was
+*about*. Each operation now takes a trailing `BlockSpan`; `blocksAt(revision)`
+is what makes lending safe, because it answers only for the revision the layout
+was built from, and every buffer mutation in `MarkdownEditor` goes through
+`markChanged`. A caller whose buffer has moved gets an empty span and scans.
+
+`edits.*_lent_200kb` measures the borrowed path beside the scanning one, under a
+40 us budget rather than the 4 ms the fallback keeps.
+
+### Resolved: a selection cost the document rather than the window
+
+`selectionRects` was bounded by the document. Ctrl+A on a 200 KB note selects
+6,600 visual rows; a window shows forty. Every frame the selection was up built
+all 6,600 into a fresh vector and drew the forty on screen.
+
+Twice per frame, in fact: `drawToolbar` made the same unbounded call and used
+exactly two of the rects, `front()` and `back()`, to decide whether the
+formatting toolbar sits above the selection or below it.
+
+| per frame, 200 KB / 11,571 blocks | before | after |
+|---|---:|---:|
+| selection rects | 190-670 us | 0.5 us |
+| toolbar anchor | the same call again | 0.1 us |
+
+So a frame with a select-all up spent 0.4-1.3 ms of its 2 ms budget building
+rects to discard. This is the same shape as the find highlighter two functions
+below it, which had been given a visible band for exactly this reason -- and the
+selection is the worse of the two, because a find highlight needs a query typed
+and a selection needs Ctrl+A. `selectionRectsInto` takes the band and appends
+into a caller-owned vector; the band applies to rows as well as blocks, because
+a fenced code block is one block that can be thousands of rows long.
+`selectionEnds` answers the toolbar's question without the middle.
+
+`select_all.rects` and `select_all.toolbar_anchor` hold it under a 60 us budget
+and print how much of the selection the band admitted: 19 rows of 6,408.
+
+### Resolved: the right panel cost more per frame than the note beside it
+
+All three of its views were derived from scratch every frame, each expensive
+differently: Outline ran `scanBlocks` over the whole note for its headings,
+Backlinks ran a SQLite query, and Tags called `selectedNote()` -- which **reads
+the note back off disk**, parses its front matter and copies its body -- to draw
+a row of chips.
+
+Real session, 400-note library with a 200 KB note open, `shell.right_panel` per
+frame:
+
+| view | before | after |
+|---|---:|---:|
+| Outline | 0.301 ms | 0.019 ms |
+| Backlinks | 0.251 ms | 0.033 ms |
+| Tags | 0.534 ms | 0.015 ms |
+
+`page.draw` on the same frames is 0.16 ms. So an idle frame was spending two to
+three times as long on the panel beside the note as on the note, and none of it
+could change unless the note or the library had.
+
+Memoised on keys, the way `PageHeader` already does it, and for the reason its
+comment gives: a flag has to be raised at every mutation site and the one that
+forgets leaves the panel describing a note that has moved on. Two keys, because
+the views do not share inputs -- the outline is a function of the buffer and has
+to move while the user types; backlinks and tags come from the library and must
+not. `right_panel.outline_builds` / `_reused` and `right_panel.library_builds` /
+`_reused` read 1 against 59 over 60 frames.
+
+### Resolved: typing in the search box froze the window for a quarter second, per character
+
+`rebuildSidebarRows` trimmed every matching line of every result to the
+sidebar's column up front. One trim is ~0.25 ms: it measures the whole line,
+bisects for the head cut, then bisects again for the tail -- and every probe is
+a string nothing has measured before, so the measure cache cannot help and each
+is a real shaping call. A 200-result query carries 600 of them.
+
+Interleaved A/B over a real session, four rounds alternating the two builds,
+worst frame in `shell.sidebar`:
+
+| | before | after |
+|---|---:|---:|
+| round 1 | 306 ms | 53 ms |
+| round 2 | 232 ms | 37 ms |
+| round 3 | 308 ms | 24 ms |
+| round 4 | 206 ms | 28 ms |
+
+And that frame happens on every keystroke of the query, so a six-character
+search was well over a second of dead window.
+
+The row list is still every result, because the heights have to add up to a
+scrollbar -- but a row's height needs only *how many* lines it will show, which
+is a count and not a measurement. The trimming moved to the draw, per row it is
+about to paint: `sidebar.snippets_trimmed` reads 36 where it read 600. Rows keep
+their own trimmed lines, so scrolling back over one does not trim it again, and
+the scroll-shift that keeps a scroll off the rebuild path is untouched.
+
+What remains in that ~30 ms is mostly the 36 trims themselves. See TD-2.
+
+### Where an idle frame goes now
+
+Real session, 400-note library, 200 KB note open, live pane, both panels, 60
+frames. `shell.present` is excluded: with vsync on it is the refresh interval
+minus the work, and it belongs to the display.
+
+| scope | per frame |
+|---|---:|
+| `shell.sidebar` | 0.257 ms |
+| `page.draw` | 0.225 ms |
+| `shell.title_bar` | 0.068 ms |
+| `shell.right_panel` | 0.047 ms |
+| `shell.content` (self) | 0.051 ms |
+
+Frame work p50 0.70 ms, p95 0.84 ms against a 16.7 ms refresh. The shape is the
+point: the sidebar and the page cost about the same, and nothing else is close
+to either. Before this pass the right panel outranked the page by 2-3x.
+
+### Resolved: a measure-cache key hashed uninitialised padding
+
+Not a timing, but it belongs here because it is about an instrument. The
+`98.5%` measure-cache hit rate reported above was measured through a key built
+like this:
+
+```cpp
+const struct { FontFamily family; bool strong, italic; float size, scale; } fields {...};
+return hashBytes(key, &fields, sizeof(fields));
+```
+
+That struct is sixteen bytes with two of them padding, and aggregate
+initialisation leaves padding *indeterminate* -- so two of the bytes in every
+key were whatever the stack held. gcc at -O2 zeroes them, which is why the hit
+rate is a real number rather than a symptom; it is still reading uninitialised
+memory, and the failure mode when a compiler stops being kind is the same run
+hashing to two keys depending on what ran before it. A hit rate that collapses
+with no code change and nothing to point at.
+
+Packed into a twelve-byte array with every byte written. The two other raw-byte
+hashes -- `DocumentLayout::Flags` and `TypeMetrics`, both cache keys -- are
+padding-free as they stand but only by accident of their current fields, and now
+carry a `static_assert` saying so.
+
+**The general rule:** never hash a struct by its bytes. Hash the fields, or pack
+them somewhere with no padding to reason about.

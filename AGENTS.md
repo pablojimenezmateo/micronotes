@@ -6,6 +6,8 @@ First-stop operating guide for agents working in this repository.
 
 - `micronotes` is a Linux-only Markdown notes app in C++20, CMake, SDL3, SQLite.
 - Priority order: **speed, then correctness, then low CPU/memory**.
+- Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
+  something is unaccounted for, and add to it rather than leaving a `TODO`.
 - `src/core/` is **vendored and shared with `microagenda`**. Read the rule below before touching it.
 - Build with `cmake`, test with `ctest`, and prefer `tools/run-checks.sh` so output lands in a readable log.
 - Performance work is measured, not guessed: `docs/performance.md` explains the three instruments and the harness.
@@ -92,12 +94,32 @@ tools/run-checks.sh perf          # -> /tmp/micronotes-perf.log
 tools/perf-compare.py main        # working tree vs a commit, in a worktree
 ```
 
-or from a real session, which is where the interesting numbers are:
+**The harness stops at `doc::` and `library::`.** Nothing in it goes through
+`src/app/`'s key handling, its shell surfaces or `AppState`'s writes to disk --
+so for anything above the document layout a real session *is* the instrument,
+not a nicety. The fifth pass in `docs/performance.md` found 1.1 ms of `fsync` on
+every keystroke and a right-hand panel costing more per frame than the note,
+neither of which any harness lane could see.
+
+Capture the pixels before and after as well: a paint or layout optimisation that
+cannot be observed is safe, and `cmp` of two screenshots is the cheapest proof
+there is.
+
+Run a session, on screen or headless:
 
 ```bash
 MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 MICRONOTES_TRACE_FRAMES=1 \
   ./build-release/bin/micronotes
+
+Xvfb :97 -screen 0 1600x1000x24 &
+DISPLAY=:97 MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 \
+  ./build-release/bin/micronotes --library /path/to/library --select "Some Note" \
+    --size 1600x1000 --pane live --panels sidebar,right --screenshot /tmp/shot.png
 ```
+
+The headless form prints both tables and exits, so it is a command rather than a
+sitting -- and two of them alternated between builds is the interleaved A/B the
+run-to-run spread makes necessary. `docs/performance.md` has the full recipe.
 
 Adding a counter is two steps, and skipping the second fails the build:
 
@@ -133,9 +155,14 @@ when the counters went in it turned out to be 70% of every frame.
   only at a durable polymorphic boundary.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
-- `src/app/Application.cpp` is a 3,000-line catch-all doing layout, input,
-  rendering, and persistence. Do not grow it. New behaviour wants a named unit
-  under `src/`, not another function in that file.
+- `src/app/Application.cpp` is a 3,300-line catch-all doing layout, input,
+  rendering, and persistence. Do not grow it: `ArchitectureTests` holds it to a
+  line budget that only ever goes down. New behaviour wants a named unit under
+  `src/`, not another function in that file.
+- Debt goes in `docs/tech-debt.md` as a numbered `TD-n`, with what it costs
+  today and why it has not been paid. There are no `TODO` comments in this tree
+  and it should stay that way -- a TODO is invisible to everyone who is not
+  already reading that file.
 
 ## Commits
 

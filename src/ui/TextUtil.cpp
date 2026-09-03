@@ -115,6 +115,11 @@ std::size_t stopAtOrBefore(const std::vector<std::size_t>& stops, std::size_t of
 
 }
 
+// TD-2: about 0.25 ms a call. Both bisections here start from the whole string
+// and work down, and every probe is a substring nothing has measured before, so
+// the measure cache never helps and the early probes are hundreds of bytes long.
+// The caller now asks only for the rows it is drawing, which is what made this
+// affordable; docs/tech-debt.md has the fix if it stops being.
 SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, std::size_t matchLength,
                                  int maxWidth, const std::function<int(std::string_view)>& measure) {
   static constexpr std::string_view kEllipsis = "...";

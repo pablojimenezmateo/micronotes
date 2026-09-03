@@ -158,6 +158,9 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   const auto& selection = ui.state.selection();
   const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
   const ui::TextStyle snippetStyle = snippetTextStyle();
+  // TD-3: this walks every row to find the visible ones. `rect.y` is
+  // non-decreasing across the list, so the band is two binary searches -- the
+  // same shape as `DocumentLayout::blockRange`.
   const auto snippetWidth = [&](std::string_view value) {
     return text.width(value, snippetStyle);
   };

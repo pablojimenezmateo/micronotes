@@ -1365,6 +1365,10 @@ const BlockLayout* DocumentLayout::layoutForOffset(std::size_t offset, std::size
   return placed_[index].layout;
 }
 
+// TD-1: this walks every row of the caret's block and every run of every row,
+// which is nothing for a paragraph and 7.1 us per frame for a caret at the end
+// of a 4,000-line fence. `runs` is monotone in `srcStart`, so the row is a
+// binary search away; see docs/tech-debt.md for why that has not been done.
 Rect DocumentLayout::caretRect(std::size_t offset) const {
   Rect rect {0.0f, 0.0f, 2.0f, options_.type.body * options_.type.lineHeightRatio};
   std::size_t blockIndex = 0;
