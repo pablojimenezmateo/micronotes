@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -70,27 +69,77 @@ static std::string likePattern(std::string_view query) {
   return out;
 }
 
+// Case-insensitive `find`, over views. `query` is already lowered.
+static std::size_t findLowered(std::string_view line, std::string_view lowerQuery) {
+  if(lowerQuery.empty() || line.size() < lowerQuery.size()) return std::string_view::npos;
+  const auto lower = [](char c) {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  };
+  const std::size_t last = line.size() - lowerQuery.size();
+  for(std::size_t at = 0; at <= last; ++at) {
+    std::size_t i = 0;
+    while(i < lowerQuery.size() && lower(line[at + i]) == lowerQuery[i]) ++i;
+    if(i == lowerQuery.size()) return at;
+  }
+  return std::string_view::npos;
+}
+
+// The line `body` holds at `[from, ...)`, and where the one after it starts.
+// The same partition `std::getline` produced: the newline belongs to neither
+// line, and a buffer ending in one does not yield an empty line after it.
+static std::string_view lineAt(std::string_view body, std::size_t from, std::size_t* next) {
+  const auto end = body.find('\n', from);
+  if(end == std::string_view::npos) {
+    *next = body.size();
+    return body.substr(from);
+  }
+  *next = end + 1;
+  return body.substr(from, end - from);
+}
+
+// Walks `body` a line at a time as views, and materialises a string only for
+// the at most three snippets it keeps.
+//
+// This used to copy the whole body into an `istringstream`, then allocate a
+// `std::string` per line of it into a vector, then allocate a lowered copy of
+// each of those to search it -- three allocations per line of every note in the
+// result set, to show three lines of one. On a query returning 200 notes that
+// was the whole cost of the query. Nothing is allocated here per line, and the
+// walk stops as soon as the third snippet has the line under it.
 static void fillSnippet(SearchResult& result, std::string_view body, std::string_view query) {
   if(query.empty()) return;
   const auto lowerQuery = lowerCopy(std::string(query));
 
-  std::vector<std::string> lines;
-  std::istringstream in {std::string(body)};
-  std::string line;
-  while(std::getline(in, line)) lines.push_back(line);
-  for(std::size_t i = 0; i < lines.size() && result.snippets.size() < kMaxSnippets; ++i) {
-    const auto at = lowerCopy(lines[i]).find(lowerQuery);
-    if(at == std::string::npos) continue;
-    SearchResult::Snippet snippet;
-    if(i > 0) snippet.beforeLine = lines[i - 1];
-    snippet.matchLine = lines[i];
-    if(i + 1 < lines.size()) snippet.afterLine = lines[i + 1];
-    // Byte offsets into the line as written. Lowercasing is one-for-one over
-    // the bytes this comparison can match -- ASCII letters -- so the offset
-    // found in the lowered copy addresses the same bytes in the original.
-    snippet.matchStart = at;
-    snippet.matchLength = lowerQuery.size();
-    result.snippets.push_back(std::move(snippet));
+  constexpr std::size_t kNone = static_cast<std::size_t>(-1);
+  std::string_view previous;      // the line above the one being tested
+  std::size_t awaiting = kNone;   // a snippet still missing the line below it
+  std::size_t at = 0;
+  while(at < body.size()) {
+    std::size_t next = 0;
+    const std::string_view line = lineAt(body, at, &next);
+    at = next;
+    if(awaiting != kNone) {
+      result.snippets[awaiting].afterLine = std::string(line);
+      awaiting = kNone;
+    }
+    if(result.snippets.size() < kMaxSnippets) {
+      const auto found = findLowered(line, lowerQuery);
+      if(found != std::string_view::npos) {
+        SearchResult::Snippet snippet;
+        snippet.beforeLine = std::string(previous);
+        snippet.matchLine = std::string(line);
+        // Byte offsets into the line as written. Lowercasing is one-for-one
+        // over the bytes this comparison can match -- ASCII letters -- so the
+        // offset found against the lowered query addresses the same bytes in
+        // the original.
+        snippet.matchStart = found;
+        snippet.matchLength = lowerQuery.size();
+        result.snippets.push_back(std::move(snippet));
+        awaiting = result.snippets.size() - 1;
+      }
+    }
+    previous = line;
+    if(awaiting == kNone && result.snippets.size() >= kMaxSnippets) break;
   }
   if(!result.snippets.empty()) {
     result.beforeLine = result.snippets.front().beforeLine;

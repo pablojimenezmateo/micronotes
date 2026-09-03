@@ -460,6 +460,44 @@ MICRONOTES_TEST(library_index_keeps_only_the_snippets_anything_will_draw) {
   std::filesystem::remove_all(root);
 }
 
+// A snippet is a three-line window, and which three lines it is is the part a
+// streaming walk over the body can get wrong: the line above has to be the one
+// the previous turn of the loop saw, and the line below is not known until the
+// turn after. The first and last lines of a note have no neighbour on one side,
+// which is where an off-by-one shows up as somebody else's text.
+MICRONOTES_TEST(library_index_snippets_carry_the_lines_around_the_match) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-snippet-window";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "window";
+  metadata.title = "Window";
+  library.createNote(metadata, "needle at the top\nsecond\nthird\nneedle in the middle\nfifth\nneedle at the end");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.rebuild());
+  const auto results = index.search("needle");
+  MICRONOTES_REQUIRE(results.size() == 1);
+  const auto& snippets = results[0].snippets;
+  MICRONOTES_REQUIRE(snippets.size() == 3);
+  // Nothing above the first line of the note.
+  MICRONOTES_REQUIRE(snippets[0].beforeLine.empty());
+  MICRONOTES_REQUIRE(snippets[0].matchLine == "needle at the top");
+  MICRONOTES_REQUIRE(snippets[0].afterLine == "second");
+  MICRONOTES_REQUIRE(snippets[1].beforeLine == "third");
+  MICRONOTES_REQUIRE(snippets[1].matchLine == "needle in the middle");
+  MICRONOTES_REQUIRE(snippets[1].afterLine == "fifth");
+  // Nothing below the last, and no trailing newline to invent one.
+  MICRONOTES_REQUIRE(snippets[2].beforeLine == "fifth");
+  MICRONOTES_REQUIRE(snippets[2].matchLine == "needle at the end");
+  MICRONOTES_REQUIRE(snippets[2].afterLine.empty());
+  // The result's own fields mirror the first snippet.
+  MICRONOTES_REQUIRE(results[0].beforeLine == snippets[0].beforeLine);
+  MICRONOTES_REQUIRE(results[0].afterLine == snippets[0].afterLine);
+  std::filesystem::remove_all(root);
+}
+
 // `%` and `_` are SQL LIKE's own wildcards. A query carrying one used to match
 // notes that do not contain the query at all, and each of those rows drew a
 // title with nothing under it -- the snippet under a result is found by a
