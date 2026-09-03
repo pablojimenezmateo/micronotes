@@ -120,6 +120,11 @@ private:
   struct Layout {
     Rect panel;
     Rect field;
+    // Where the hint line goes. Recorded rather than derived at the draw,
+    // because it is not always the panel's foot: on a Confirm the hint is the
+    // consequence of the button beside it ("This cannot be undone."), so it
+    // has to be read *before* the buttons rather than under them.
+    Rect hint;
     std::vector<Rect> itemRects;
     std::vector<int> itemIndices;  // into Overlay::items
   };

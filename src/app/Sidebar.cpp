@@ -32,6 +32,10 @@ using ui::theme;
 // begins, so the string and the geometry cannot drift apart.
 constexpr std::string_view kSearchLabel = "Find";
 
+// Reserved at the trailing edge of a folder row for the note count, so a long
+// folder name is ellipsized before it reaches the number rather than over it.
+constexpr float kCountColumnWidth = 26.0f;
+
 // Core measures text through a callback so it stays free of any font
 // dependency; this binds it to the renderer actually drawing the field.
 editor::TextWidthFn fieldMeasure(const TextRenderer& text) {
@@ -70,9 +74,9 @@ static ui::TextStyle snippetTextStyle() {
 // The one place with nothing to list says which nothing it is, because the way
 // out of each is different.
 static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
-  const float x = list.x + 8.0f;
-  const float y = list.y + 8.0f;
-  const float width = list.w - 16.0f;
+  const float x = list.x + ui::kSpace2;
+  const float y = list.y + ui::kSpace2;
+  const float width = list.w - ui::kSpace2 * 2.0f;
   if(!ui.state.hasLibrary()) {
     drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
                      x, y, width, ui::keysFor(ui::ActionId::Settings) + "  Settings");
@@ -95,7 +99,8 @@ static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
 // sidebar, because filtering and browsing are the same question asked two ways
 // and they used to be in two panels either side of a divider.
 Rect searchBoxRect(Rect sidebar) {
-  return {sidebar.x + 12.0f, sidebar.y + 12.0f, sidebar.w - 24.0f, ui::kSidebarSearchHeight};
+  return {sidebar.x + ui::kSpace3, sidebar.y + ui::kSpace3, sidebar.w - ui::kSpace3 * 2.0f,
+          ui::kSidebarSearchHeight};
 }
 
 // What is inside the search box, left to right: the "Find" label, the field it
@@ -240,7 +245,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
           const float to = static_cast<float>(text.width(shown.substr(0, line.start + line.length), snippetStyle));
           ui::fillRounded(renderer, {snippetX + from, snippetY,
                                      std::max(2.0f, to - from), metrics.snippet - 1.0f},
-                          theme().findBg, 2.0f);
+                          theme().findBg, ui::kRadiusSmall / 2.0f);
         }
         text.draw(line.text, snippetX, snippetY, selected ? theme().accent : theme().dim, snippetStyle);
         snippetY += metrics.snippet;
@@ -290,7 +295,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
                    selected ? theme().accent : theme().dim);
     }
     const float labelY = ui::textTop(row.rect, text, rowStyle);
-    const float countW = row.tree.noteCount > 0 && !isNote ? 26.0f : ui::kSpace2;
+    const float countW = row.tree.noteCount > 0 && !isNote ? kCountColumnWidth : ui::kSpace2;
     text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), rowStyle),
               labelX, labelY, selected || current ? theme().text : (isNote ? theme().muted : theme().text), rowStyle);
     if(!isNote && row.tree.noteCount > 0) {

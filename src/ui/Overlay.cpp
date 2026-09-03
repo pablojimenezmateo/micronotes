@@ -15,6 +15,14 @@ namespace {
 constexpr float kRowHeight = 34.0f;
 constexpr float kFieldHeight = 36.0f;
 constexpr float kPadding = 10.0f;
+// Inside a row, and between the two trailing pieces of one: the shortcut and
+// the detail. Written out as 10, 20 and 12 at seven sites.
+constexpr float kRowPadX = kPadding;
+constexpr float kRowGap = kSpace3;
+// A Confirm's two buttons. Equal width, because they are two answers to one
+// question and the wider of two buttons reads as the recommended one -- which
+// on a deletion is the wrong recommendation to make by accident.
+constexpr float kButtonWidth = 96.0f;
 
 bool usesField(const Overlay& overlay) {
   return overlay.kind == OverlayKind::TextPrompt || (overlay.kind == OverlayKind::List && overlay.filterable);
@@ -130,15 +138,26 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   const int first = std::clamp(overlay.scroll, 0, std::max(0, static_cast<int>(indices.size()) - rowsShown));
   for(std::size_t i = static_cast<std::size_t>(first);
       i < indices.size() && static_cast<int>(i) - first < rowsShown; ++i) {
-    layout.itemRects.push_back({x + 6.0f, cursorY, width - 12.0f, kRowHeight});
+    layout.itemRects.push_back({x + kSpace2 - 2.0f, cursorY, width - (kSpace2 - 2.0f) * 2.0f, kRowHeight});
     layout.itemIndices.push_back(indices[i]);
     cursorY += kRowHeight;
   }
   if(overlay.kind == OverlayKind::Confirm) {
-    layout.itemRects.push_back({x + width - 200.0f, cursorY, 92.0f, kRowHeight});
+    // The consequence, then the buttons. It used to be the other way round --
+    // the buttons went here and the hint was drawn at the panel's foot -- so
+    // "This cannot be undone." sat *below* the Delete button that could not be
+    // undone, which is the one order in which nobody reads it in time.
+    if(hintH > 0.0f) {
+      layout.hint = {x + kPadding, cursorY, width - kPadding * 2.0f, hintH};
+      cursorY += hintH;
+    }
+    const float confirmX = x + width - kPadding - kButtonWidth;
+    layout.itemRects.push_back({confirmX - kSpace2 - kButtonWidth, cursorY, kButtonWidth, kRowHeight});
     layout.itemIndices.push_back(-2);  // cancel
-    layout.itemRects.push_back({x + width - 102.0f, cursorY, 96.0f, kRowHeight});
+    layout.itemRects.push_back({confirmX, cursorY, kButtonWidth, kRowHeight});
     layout.itemIndices.push_back(-1);  // confirm
+  } else if(hintH > 0.0f) {
+    layout.hint = {x + kPadding, y + height - kPadding - hintH, width - kPadding * 2.0f, hintH};
   }
   return layout;
 }
@@ -356,18 +375,21 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
 
   if(usesField(*overlay)) {
     drawRoundedSurface(renderer, layout.field, theme().inputBg, theme().accentDim, kRadiusSmall);
-    const float textY = layout.field.y + (layout.field.h - static_cast<float>(text.lineHeight(bodyStyle))) / 2.0f;
+    // `textTop`, like every other centred line in the shell. These four sites
+    // each centred by hand and none of them rounded, so the palette's text
+    // landed on half pixels and its glyph stems smeared.
+    const float textY = textTop(layout.field, text, bodyStyle);
     if(overlay->value.empty()) {
-      text.draw(overlay->placeholder, layout.field.x + 10.0f, textY, theme().dim, bodyStyle);
+      text.draw(overlay->placeholder, layout.field.x + kRowPadX, textY, theme().dim, bodyStyle);
     } else {
       // The field lays itself out: the view reports where the caret and the
       // selection sit after scrolling, so a long value keeps the caret in
       // sight instead of always pinning the end of the text.
-      const float inner = layout.field.w - 20.0f;
+      const float inner = layout.field.w - kRowPadX * 2.0f;
       const auto measure = [&](std::string_view value) { return text.width(value, bodyStyle); };
       const auto view = editor::layoutSingleLine(overlay->value.editor, inner, overlay->value.scrollX, measure);
       overlay->value.scrollX = view.scrollX;
-      const float left = layout.field.x + 10.0f - view.scrollX;
+      const float left = layout.field.x + kRowPadX - view.scrollX;
       ClipGuard clip(renderer, layout.field);
       if(view.hasSelection) {
         fill(renderer, {left + view.selectionStartX, layout.field.y + 6.0f,
@@ -392,9 +414,8 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
                          isConfirm ? theme().warn : theme().hairline, kRadiusSmall);
       const auto label = isConfirm ? overlay->confirmLabel : std::string("Cancel");
       const int labelW = text.width(label, bodyStyle);
-      text.draw(label, rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f,
-                rect.y + (rect.h - static_cast<float>(text.lineHeight(bodyStyle))) / 2.0f,
-                isConfirm ? theme().onAccent : theme().text, bodyStyle);
+      text.draw(label, std::round(rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f),
+                textTop(rect, text, bodyStyle), isConfirm ? theme().onAccent : theme().text, bodyStyle);
       continue;
     }
 
@@ -406,26 +427,26 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       fillRounded(renderer, rect, theme().hoverBg, kRadiusSmall);
     }
     const SDL_Color label = !item.enabled ? theme().dim : (item.destructive ? theme().warn : theme().text);
-    const float labelY = rect.y + (rect.h - static_cast<float>(text.lineHeight(bodyStyle))) / 2.0f;
-    float labelX = rect.x + 10.0f;
-    int available = static_cast<int>(rect.w - 20.0f);
+    const float labelY = textTop(rect, text, bodyStyle);
+    const float labelX = rect.x + kRowPadX;
+    int available = static_cast<int>(rect.w - kRowPadX * 2.0f);
     // Both trailing pieces are laid out right to left against a running edge:
     // a fixed gap between them only works while the shortcut is short, and a
     // deletion timestamp is not.
-    float right = rect.x + rect.w - 10.0f;
-    const float hintY = rect.y + (rect.h - static_cast<float>(text.lineHeight(hintStyle))) / 2.0f;
+    float right = rect.x + rect.w - kRowPadX;
+    const float hintY = textTop(rect, text, hintStyle);
     if(!item.shortcut.empty()) {
       const int shortcutW = text.width(item.shortcut, hintStyle);
       text.draw(item.shortcut, right - static_cast<float>(shortcutW), hintY, theme().dim, hintStyle);
-      right -= static_cast<float>(shortcutW) + 12.0f;
-      available -= shortcutW + 12;
+      right -= static_cast<float>(shortcutW) + kRowGap;
+      available -= shortcutW + static_cast<int>(kRowGap);
     }
     if(!item.detail.empty()) {
       const auto detail = ellipsizeToWidth(text, item.detail, available / 2, hintStyle);
       const int detailW = text.width(detail, hintStyle);
       text.draw(detail, right - static_cast<float>(detailW), hintY, theme().dim, hintStyle);
-      right -= static_cast<float>(detailW) + 12.0f;
-      available -= detailW + 12;
+      right -= static_cast<float>(detailW) + kRowGap;
+      available -= detailW + static_cast<int>(kRowGap);
     }
     text.draw(ellipsizeToWidth(text, item.label, available, bodyStyle), labelX, labelY, label, bodyStyle);
   }
@@ -435,27 +456,37 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   const auto& filtered = visibleIndices(*overlay);
   if(overlay->kind == OverlayKind::List && !layout.itemRects.empty() &&
      filtered.size() > layout.itemRects.size()) {
-    const Rect firstRow = layout.itemRects.front();
-    const Rect lastRow = layout.itemRects.back();
-    const float top = firstRow.y;
-    const float height = lastRow.y + lastRow.h - top;
+    // The shell's scrollbar, not a fifth private one. This drew its own track
+    // and thumb at its own inset, its own width and its own minimum height,
+    // with no border on the thumb -- so a list that scrolled in the command
+    // palette did not look like a list that scrolled anywhere else.
+    //
+    // `drawVerticalScrollbar` works in pixels and the overlay scrolls in rows,
+    // which is a pure scaling: at `pitch` pixels a row, `viewport.h` is the
+    // rows on screen and `maxScroll` the rows off it, and both the visible
+    // fraction and the thumb's travel come out identical to what was here.
     const float shown = static_cast<float>(layout.itemRects.size());
-    const float thumbH = std::max(18.0f, height * shown / static_cast<float>(filtered.size()));
-    const float hidden = static_cast<float>(filtered.size()) - shown;
-    const float at = std::clamp(static_cast<float>(overlay->scroll) / hidden, 0.0f, 1.0f);
-    const float x = layout.panel.x + layout.panel.w - 6.0f;
-    fill(renderer, {x, top, 3.0f, height}, theme().scrollTrack);
-    fill(renderer, {x, top + (height - thumbH) * at, 3.0f, thumbH}, theme().scrollThumb);
+    const float pitch = (layout.itemRects.back().y + layout.itemRects.back().h - layout.itemRects.front().y) / shown;
+    const Rect band {layout.panel.x, layout.itemRects.front().y - kScrollbarInsetY, layout.panel.w,
+                     shown * pitch + kScrollbarInsetY * 2.0f};
+    const int hidden = static_cast<int>(filtered.size() - layout.itemRects.size());
+    drawVerticalScrollbar(renderer, band, static_cast<int>(std::lround(static_cast<float>(overlay->scroll) * pitch)),
+                          static_cast<int>(std::lround(static_cast<float>(hidden) * pitch)));
   }
 
-  if(!overlay->hint.empty()) {
-    text.draw(overlay->hint, layout.panel.x + kPadding,
-              layout.panel.y + layout.panel.h - kPadding - static_cast<float>(text.lineHeight(hintStyle)),
-              theme().dim, hintStyle);
+  if(!overlay->hint.empty() && layout.hint.h > 0.0f) {
+    text.draw(overlay->hint, layout.hint.x, layout.hint.y, theme().dim, hintStyle);
   }
 
   if(overlay->kind == OverlayKind::List && filtered.empty()) {
-    text.draw("No matches", layout.panel.x + kPadding + 4.0f, layout.panel.y + layout.panel.h - kPadding - 24.0f, theme().dim, bodyStyle);
+    // Where the first row would have been. It used to be placed a bare 24
+    // pixels up from the panel's foot, which is where the hint is drawn -- so a
+    // filterable palette with a hint wrote the two over each other the moment
+    // the query matched nothing.
+    text.draw("No matches", layout.panel.x + kPadding + kSpace1,
+              usesField(*overlay) ? layout.field.y + layout.field.h + kPadding
+                                  : layout.panel.y + kPadding,
+              theme().dim, bodyStyle);
   }
 }
 
