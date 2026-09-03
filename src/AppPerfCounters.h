@@ -19,6 +19,16 @@
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
   X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \
   X(LibrarySearchCalls, "library.search_calls")                                        \
+  /* --- crash recovery ----------------------------------------------------- */      \
+  /* Recovery copies posted against recovery copies actually written. A post is  */    \
+  /* a memcpy and a notify; a write is two `fsync` barriers, which measured      */    \
+  /* 8.7 ms median on this machine and used to happen on the UI thread on every  */    \
+  /* keystroke. posts is the typing rate, writes is what the disk saw, and the   */    \
+  /* gap between them is the mailbox coalescing a burst into one write of the    */    \
+  /* newest text. writes climbing to meet posts means the coalescing stopped     */    \
+  /* working and every character is waiting for a barrier again.                 */    \
+  X(RecoveryPosts, "recovery.posts")                                                   \
+  X(RecoveryWrites, "recovery.writes")                                                 \
   /* --- text rendering --------------------------------------------------- */        \
   /* Measurements asked for, and the ones that had to be shaped. Shaping a run  */     \
   /* costs about a microsecond, and laying out a whole note asks for one per    */     \

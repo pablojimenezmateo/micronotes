@@ -20,16 +20,6 @@
 namespace micronotes::ui {
 namespace {
 
-
-static std::string readFile(const std::filesystem::path& path) {
-  std::ifstream in(path);
-  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
-
-static std::filesystem::path recoveryPath(const library::Library& library, std::string_view noteId) {
-  return library.root() / ".micronotes" / "recovery" / (platform::sanitizeFileStem(std::string(noteId)) + ".body");
-}
-
 static std::string uniqueTitle(const library::Library& library, const std::string& requested, const std::filesystem::path& folder = {}, const std::filesystem::path& currentPath = {}) {
   const auto base = requested.empty() ? "Untitled" : requested;
   std::string candidate = base;
@@ -51,6 +41,9 @@ bool AppState::openOrCreateLibrary(const std::filesystem::path& root) {
   library_->ensureLayout();
   ++revision_;
   organization_.emplace(*library_);
+  // After `ensureLayout`, so the recovery directory's parent exists, and before
+  // the index opens, so no edit can be posted against the previous root.
+  recovery_.setRoot(library_->root());
   return index_.open(root) && index_.refreshChangedFiles();
 }
 
@@ -214,19 +207,17 @@ bool AppState::saveSelectedNote(std::string_view body) {
 
 bool AppState::saveSelectedNoteRecovery(std::string_view body) const {
   if(!library_ || selection_.noteId.empty()) return false;
-  return platform::writeFileDurably(recoveryPath(*library_, selection_.noteId), body);
+  return recovery_.save(selection_.noteId, body);
 }
 
 bool AppState::clearSelectedNoteRecovery() const {
   if(!library_ || selection_.noteId.empty()) return true;
-  return platform::removeFileDurably(recoveryPath(*library_, selection_.noteId));
+  return recovery_.clear(selection_.noteId);
 }
 
 std::optional<std::string> AppState::selectedRecoveryBody() const {
   if(!library_ || selection_.noteId.empty()) return std::nullopt;
-  const auto path = recoveryPath(*library_, selection_.noteId);
-  if(!std::filesystem::exists(path)) return std::nullopt;
-  return readFile(path);
+  return recovery_.read(selection_.noteId);
 }
 
 bool AppState::renameSelectedNote(const std::string& title) {

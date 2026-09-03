@@ -21,6 +21,10 @@ option(MICRONOTES_ENABLE_SDL3_TTF "Enable SDL3_ttf when available" ON)
 option(MICRONOTES_PERF_HARNESS_BUILD "Build performance harness" ON)
 option(MICRONOTES_ASSERT_OFFLINE_BUILD "Fail if generated dependency-fetch hooks are present" ON)
 
+# The recovery writer runs on a thread of its own, so that a durable write --
+# two fsync barriers, ~9 ms -- never happens on the thread drawing the window.
+find_package(Threads REQUIRED)
+
 find_package(PkgConfig QUIET)
 
 find_package(SDL3 CONFIG QUIET)
@@ -168,6 +172,7 @@ set(MICRONOTES_APP_SOURCES
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp
   src/library/Organization.cpp
+  src/library/RecoveryStore.cpp
   src/ui/Actions.cpp
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
@@ -192,7 +197,7 @@ set(MICRONOTES_CORE_SOURCES ${MICROCORE_SOURCES} ${MICRONOTES_APP_SOURCES})
 
 add_library(micronotes_core STATIC ${MICRONOTES_CORE_SOURCES})
 target_include_directories(micronotes_core PUBLIC src)
-target_link_libraries(micronotes_core PUBLIC md4c md4c_html ${MICRONOTES_SQLITE_TARGET} ${MICRONOTES_SDL3_TARGET})
+target_link_libraries(micronotes_core PUBLIC md4c md4c_html ${MICRONOTES_SQLITE_TARGET} ${MICRONOTES_SDL3_TARGET} Threads::Threads)
 if(NOT MICRONOTES_FONTCONFIG_TARGET STREQUAL "")
   target_link_libraries(micronotes_core PUBLIC ${MICRONOTES_FONTCONFIG_TARGET})
 endif()
@@ -249,6 +254,7 @@ add_executable(micronotes_tests
   tests/TreeModelTests.cpp
   tests/ActionsTests.cpp
   tests/AppStateTests.cpp
+  tests/RecoveryStoreTests.cpp
   tests/ArchitectureTests.cpp
   tests/AttachmentTests.cpp
   tests/BlockScanTests.cpp

@@ -5,6 +5,7 @@
 #include "library/Library.h"
 #include "library/LibraryIndex.h"
 #include "library/Organization.h"
+#include "library/RecoveryStore.h"
 #include "ui/WorkspaceModel.h"
 
 #include <cstdint>
@@ -67,6 +68,9 @@ public:
   const library::NoteListItem* noteById(std::string_view noteId) const;
   std::optional<library::NoteListItem> createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body = "");
   bool saveSelectedNote(std::string_view body);
+  // Queues the recovery copy of the open note. Returns false when a write
+  // posted earlier has since failed; see `library::RecoveryStore` for why the
+  // answer is about an earlier post rather than this one.
   bool saveSelectedNoteRecovery(std::string_view body) const;
   bool clearSelectedNoteRecovery() const;
   std::optional<std::string> selectedRecoveryBody() const;
@@ -108,6 +112,9 @@ private:
   std::optional<library::Library> library_;
   mutable std::optional<library::OrganizationService> organization_;
   library::LibraryIndex index_;
+  // Mutable because posting recovery is a side effect of editing, not of
+  // changing the state: every caller of it holds a const `AppState`.
+  mutable library::RecoveryStore recovery_;
   std::uint64_t revision_ = 0;
 };
 
