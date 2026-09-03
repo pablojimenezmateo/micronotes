@@ -80,12 +80,12 @@ Token makeToken(std::string_view source, std::size_t start, std::size_t end, con
 class Flow {
 public:
   Flow(const Metrics& metrics, std::size_t base, float textLeft, float width, float lineHeight,
-       bool wrap, float top, BlockLayout& out, std::vector<TextRun>& runs,
+       bool wrap, float top, BlockLayout& out,
        std::vector<std::pair<std::size_t, float>>& pending)
-      : metrics_(metrics), base_(base), textLeft_(textLeft), right_(textLeft + width), lineHeight_(lineHeight), wrap_(wrap), y_(top), runs_(runs), pending_(pending), out_(out) {
+      : metrics_(metrics), base_(base), textLeft_(textLeft), right_(textLeft + width), lineHeight_(lineHeight), wrap_(wrap), y_(top), pending_(pending), out_(out) {
     penX_ = textLeft_;
-    runs_.clear();
     pending_.clear();
+    lineFirstRun_ = static_cast<std::uint32_t>(out_.runs.size());
   }
 
   // Non-const: a token's text is moved into the run it becomes, rather than
@@ -145,7 +145,7 @@ public:
 
 private:
   void emit(Token& token, float width) {
-    TextRun run;
+    TextRun& run = out_.runs.emplace_back();
     run.srcStart = token.start - base_;
     run.srcEnd = token.end - base_;
     run.rect = {penX_, 0.0f, width, lineHeight_};
@@ -153,8 +153,7 @@ private:
     run.role = token.role;
     run.isMarker = token.isMarker;
     run.linkIndex = token.link;
-    run.text = token.hidden ? std::string() : std::move(token.text);
-    runs_.push_back(std::move(run));
+    if(!token.hidden) run.text = std::move(token.text);
     penX_ += width;
   }
 
@@ -165,17 +164,16 @@ private:
   }
 
   void pushLine() {
+    // The runs are already in the block's array, in order. Closing a line is
+    // recording where it ends -- no vector to allocate, no runs to move, and
+    // nothing to free again when the cache drops the block.
     VisualLine line;
     line.y = y_;
     line.height = lineHeight_;
-    // Move the runs across rather than the vector: handing `runs_`'s buffer to
-    // the line leaves `runs_` with no capacity, so the next line grew from zero
-    // again -- five reallocations per line, on every line of the document.
-    // This way the line gets a right-sized buffer and `runs_` keeps its own.
-    line.runs.reserve(runs_.size());
-    for(auto& run : runs_) line.runs.push_back(std::move(run));
-    runs_.clear();
-    out_.lines.push_back(std::move(line));
+    line.runBegin = lineFirstRun_;
+    line.runEnd = static_cast<std::uint32_t>(out_.runs.size());
+    lineFirstRun_ = line.runEnd;
+    out_.lines.push_back(line);
     y_ += lineHeight_;
     penX_ = textLeft_;
   }
@@ -213,12 +211,12 @@ private:
   bool wrap_ = true;
   float y_ = 0.0f;
   float penX_ = 0.0f;
-  // Both borrowed from the layout, so that they are allocated once for a
-  // document rather than once for each of its blocks.
-  std::vector<TextRun>& runs_;
+  // Where the line being built started in `out_.runs`.
+  std::uint32_t lineFirstRun_ = 0;
   // Whitespace held back until the next word decides whether the line breaks
   // before or after it, as an index into the group being walked plus the width
-  // it was measured at.
+  // it was measured at. Borrowed from the layout, so it is allocated once for a
+  // document rather than once for each of its blocks.
   std::vector<std::pair<std::size_t, float>>& pending_;
   LineGroup* group_ = nullptr;
   float pendingWidth_ = 0.0f;
@@ -1113,13 +1111,14 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     VisualLine line;
     line.y = y;
     line.height = lineHeight;
-    TextRun run;
+    line.runBegin = static_cast<std::uint32_t>(out.runs.size());
+    TextRun& run = out.runs.emplace_back();
     run.srcStart = block.end - block.start;
     run.srcEnd = run.srcStart;
     run.rect = {out.textLeft, 0.0f, 0.0f, lineHeight};
     run.style = base;
-    line.runs.push_back(std::move(run));
-    out.lines.push_back(std::move(line));
+    line.runEnd = static_cast<std::uint32_t>(out.runs.size());
+    out.lines.push_back(line);
     return y + lineHeight;
   };
 
@@ -1140,14 +1139,15 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     VisualLine line;
     line.y = padTop;
     line.height = std::max(lineHeight, height);
-    TextRun run;
+    line.runBegin = static_cast<std::uint32_t>(out.runs.size());
+    TextRun& run = out.runs.emplace_back();
     run.srcStart = 0;
     run.srcEnd = block.end - block.start;
     run.rect = {out.textLeft, 0.0f, 0.0f, line.height};
     run.style = base;
     run.role = TextRole::Body;
-    line.runs.push_back(std::move(run));
-    out.lines.push_back(std::move(line));
+    line.runEnd = static_cast<std::uint32_t>(out.runs.size());
+    out.lines.push_back(line);
     float bottom = padTop + std::max(lineHeight, height);
     if(trailingLine) bottom = appendTrailingLine(bottom);
     out.height = bottom + padBottom;
@@ -1297,11 +1297,18 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       block.contentEnd > block.contentStart ? block.contentEnd - block.contentStart : 0;
     const float inkWidth = static_cast<float>(contentBytes) * base.size * 0.5f;
     out.lines.reserve(static_cast<std::size_t>(inkWidth / std::max(1.0f, available)) + 1);
+    // And exactly how many runs, which is not an estimate: the flow emits one
+    // run per staged token, plus one more for a trailing line. A word split
+    // across a wrap emits more, which is the one case this under-counts and the
+    // one case the doubling is right for.
+    std::size_t tokens = trailingLine ? 1 : 0;
+    for(std::size_t g = 0; g < groupCount; ++g) tokens += groups[g].size();
+    out.runs.reserve(tokens);
   }
 
   const perf::ScopeTimer flowTimer("layout.block.flow");
   Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
-            !raw && block.kind != BlockKind::Code, padTop, out, flowRuns_, flowPending_);
+            !raw && block.kind != BlockKind::Code, padTop, out, flowPending_);
   flow.run(groups, groupCount);
   float bottom = flow.bottom();
   if(trailingLine) bottom = appendTrailingLine(bottom);
@@ -1330,7 +1337,7 @@ Rect DocumentLayout::caretRect(std::size_t offset) const {
   const TextRun* before = nullptr;
   const VisualLine* beforeLine = nullptr;
   for(const auto& line : layout->lines) {
-    for(const auto& run : line.runs) {
+    for(const auto& run : layout->runsOf(line)) {
       if(local >= run.srcStart && local < run.srcEnd) {
         best = &run;
         bestLine = &line;
@@ -1375,17 +1382,18 @@ std::size_t DocumentLayout::offsetAt(float x, float y) const {
   const VisualLine& line = layout.lines[lineIndex];
   const SourceBlock& block = blocks_[blockIndex];
 
+  const auto runs = layout.runsOf(line);
   const TextRun* chosen = nullptr;
-  for(const auto& run : line.runs) {
+  for(const auto& run : runs) {
     if(run.text.empty()) continue;
     if(!chosen || x >= run.rect.x) chosen = &run;
   }
   if(!chosen) {
     const std::size_t content = block.contentStart - block.start;
-    for(const auto& run : line.runs) {
+    for(const auto& run : runs) {
       if(run.srcStart >= content) return block.start + run.srcStart;
     }
-    return block.start + (line.runs.empty() ? 0 : line.runs.front().srcStart);
+    return block.start + (runs.empty() ? 0 : runs.front().srcStart);
   }
   if(x <= chosen->rect.x) return block.start + chosen->srcStart;
 
@@ -1416,7 +1424,7 @@ std::vector<Rect> DocumentLayout::selectionRects(std::size_t from, std::size_t t
       float left = 0.0f;
       float right = 0.0f;
       bool any = false;
-      for(const auto& run : line.runs) {
+      for(const auto& run : layout.runsOf(line)) {
         if(run.text.empty()) continue;
         const std::size_t runStart = base + run.srcStart;
         const std::size_t runEnd = base + run.srcEnd;

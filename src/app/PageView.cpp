@@ -491,7 +491,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     for(const auto& line : layout.lines) {
       const float lineY = top + line.y;
       if(lineY + line.height < viewTop || lineY > viewBottom) continue;
-      for(const auto& run : line.runs) {
+      for(const auto& run : layout.runsOf(line)) {
         if(run.text.empty()) continue;
         ++runsDrawn;
         const ui::TextStyle style = toTextStyle(run.style);
@@ -664,7 +664,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
 
     bool titled = false;
     if(!layout.lines.empty()) {
-      for(const auto& run : layout.lines.front().runs) titled = titled || !run.text.empty();
+      for(const auto& run : layout.runsOf(layout.lines.front())) titled = titled || !run.text.empty();
     }
     if(titled) continue;
     std::string name = block.info;

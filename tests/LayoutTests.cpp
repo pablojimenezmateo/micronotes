@@ -136,8 +136,9 @@ MICRONOTES_TEST(layout_covers_every_source_byte_with_a_run) {
   std::size_t expected = 0;
   for(std::size_t i = 0; i < layout.blockCount(); ++i) {
     const std::size_t base = layout.blocks()[i].start;
-    for(const auto& line : layout.layout(i).lines) {
-      for(const auto& run : line.runs) {
+    const auto& blockLayout = layout.layout(i);
+    for(const auto& line : blockLayout.lines) {
+      for(const auto& run : blockLayout.runsOf(line)) {
         micronotes::tests::require(base + run.srcStart == expected, "run gap at " + std::to_string(base + run.srcStart) +
                                                                         ", expected " + std::to_string(expected));
         expected = base + run.srcEnd;
@@ -158,8 +159,9 @@ MICRONOTES_TEST(layout_hides_markers_outside_the_caret_block) {
 
   const auto markerWidth = [&](std::size_t block) {
     float total = 0.0f;
-    for(const auto& line : layout.layout(block).lines) {
-      for(const auto& run : line.runs) {
+    const auto& blockLayout = layout.layout(block);
+    for(const auto& line : blockLayout.lines) {
+      for(const auto& run : blockLayout.runsOf(line)) {
         if(run.isMarker) total += run.rect.w;
       }
     }
@@ -582,10 +584,12 @@ bool layoutsAgree(const DocumentLayout& a, const DocumentLayout& b, std::string*
       const std::string on = at + " line " + std::to_string(l);
       if(std::abs(leftLine.y - rightLine.y) > 0.001f) return fail("line y" + on);
       if(std::abs(leftLine.height - rightLine.height) > 0.001f) return fail("line height" + on);
-      if(leftLine.runs.size() != rightLine.runs.size()) return fail("run count" + on);
-      for(std::size_t r = 0; r < leftLine.runs.size(); ++r) {
-        const auto& leftRun = leftLine.runs[r];
-        const auto& rightRun = rightLine.runs[r];
+      const auto leftRuns = left.runsOf(leftLine);
+      const auto rightRuns = right.runsOf(rightLine);
+      if(leftRuns.size() != rightRuns.size()) return fail("run count" + on);
+      for(std::size_t r = 0; r < leftRuns.size(); ++r) {
+        const auto& leftRun = leftRuns[r];
+        const auto& rightRun = rightRuns[r];
         const std::string in = on + " run " + std::to_string(r);
         if(leftRun.srcStart != rightRun.srcStart) return fail("run start" + in);
         if(leftRun.srcEnd != rightRun.srcEnd) return fail("run end" + in);
@@ -968,8 +972,9 @@ MICRONOTES_TEST(layout_folds_a_hand_wrapped_line_ending_into_one_space) {
     options.width = 4000.0f;  // wide enough that nothing wraps on screen
     layout.update(source, options);
     std::string drawn;
-    for(const auto& line : layout.layout(0).lines) {
-      for(const auto& run : line.runs) drawn += run.text;
+    const auto& first = layout.layout(0);
+    for(const auto& line : first.lines) {
+      for(const auto& run : first.runsOf(line)) drawn += run.text;
     }
     return drawn;
   };
@@ -1158,7 +1163,7 @@ MICRONOTES_TEST(layout_survives_a_cache_sweep_that_erases_most_of_the_map) {
     top += block.height;
     rows += block.lines.size();
     for(const auto& line : block.lines) {
-      for(const auto& run : line.runs) MICRONOTES_REQUIRE(run.srcEnd >= run.srcStart);
+      for(const auto& run : block.runsOf(line)) MICRONOTES_REQUIRE(run.srcEnd >= run.srcStart);
     }
   }
   MICRONOTES_REQUIRE(rows > 0);

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <utility>
 #include <string>
 #include <string_view>
@@ -105,10 +106,21 @@ struct TextRun {
   std::string text;
 };
 
+// One wrapped row of a block. Its runs live in the block's single run array
+// rather than in a vector of their own: a vector per line was an allocation per
+// visual row of the document -- around 13,000 of the 30,000 a cold open of a
+// 200 KB note made, and the same 13,000 `free` calls again when the cache swept
+// -- to hold on average four runs. Half-open, and always within the owning
+// block's `runs`.
 struct VisualLine {
   float y = 0.0f;
   float height = 0.0f;
-  std::vector<TextRun> runs;
+  std::uint32_t runBegin = 0;
+  std::uint32_t runEnd = 0;
+
+  std::uint32_t runCount() const {
+    return runEnd - runBegin;
+  }
 };
 
 // Cached by content and geometry, so two identical blocks share one layout.
@@ -129,7 +141,15 @@ struct BlockLayout {
   // an empty one is where the view falls back to naming the kind itself.
   bool calloutTitle = false;
   std::vector<VisualLine> lines;
+  // Every line's runs, in line order, so `lines[i]` owns `[runBegin, runEnd)`.
+  std::vector<TextRun> runs;
   std::vector<std::string> links;
+
+  // The runs of one of this block's lines. The line must be one of `lines`;
+  // nothing else can address this array.
+  std::span<const TextRun> runsOf(const VisualLine& line) const {
+    return std::span<const TextRun>(runs).subspan(line.runBegin, line.runCount());
+  }
 };
 
 struct TypeMetrics {
@@ -388,10 +408,9 @@ private:
   std::vector<std::pair<std::size_t, std::size_t>> dirty_;
   // Scratch for the per-block flow. `Flow` is constructed once per block, so a
   // buffer it owns is grown from empty ten thousand times over a document --
-  // which is most of what laying one out allocates. Held here instead, the run
-  // and whitespace buffers are grown once and reused by every block after the
-  // first. `mutable` because laying a block out is logically a const query.
-  mutable std::vector<TextRun> flowRuns_;
+  // which is most of what laying one out allocates. Held here instead, the
+  // whitespace buffer is grown once and reused by every block after the first.
+  // `mutable` because laying a block out is logically a const query.
   mutable std::vector<std::pair<std::size_t, float>> flowPending_;
   // The token groups a block is staged into before it is flowed. Same reason:
   // one per block, and the inner vectors keep their capacity between blocks, so
