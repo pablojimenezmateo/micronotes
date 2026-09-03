@@ -212,6 +212,18 @@ struct LayoutOptions {
   // to what is collapsed *and* on a change of which note is being folded.
   std::uint64_t sourceRevision = 0;
   std::uint64_t foldRevision = 0;
+  // Moves whenever `wikiLinkResolves` would answer differently -- a note
+  // created, renamed, deleted, or the library re-listed.
+  //
+  // Unlike the two above this one is not an optimisation. Whether a `[[target]]`
+  // resolves decides a run's colour, and it is the one input to a block's layout
+  // that is not a function of the block's own bytes, so without it a link that
+  // starts or stops resolving keeps the colour it had until somebody happens to
+  // edit that block. It is mixed into the geometry, which is to say into every
+  // cache key, because a change to the library can change the answer for any
+  // link anywhere in the note -- and it moves only on those handful of actions,
+  // each of which already re-reads the library.
+  std::uint64_t wikiLinkRevision = 0;
 };
 
 class DocumentLayout {

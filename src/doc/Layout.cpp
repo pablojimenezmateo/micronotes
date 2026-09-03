@@ -649,6 +649,7 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   geometry = hashValue(geometry, options.blockSpacing);
   geometry = hashValue(geometry, options.headingSpaceAbove);
   geometry = hashBytes(geometry, &options.type, sizeof(options.type));
+  geometry = hashValue(geometry, options.wikiLinkRevision);
 
   // Identical bytes mean an identical partition, so `blocks_` still describes
   // this source and the fold state can be resolved against it directly. That is

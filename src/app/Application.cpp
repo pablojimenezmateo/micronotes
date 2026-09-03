@@ -4,6 +4,7 @@
 #include "app/PageView.h"
 #include "app/Notes.h"
 #include "app/InlineText.h"
+#include "app/MarkdownBlocks.h"
 #include "app/PageHeader.h"
 #include "app/SessionState.h"
 #include "app/Ribbon.h"
@@ -586,7 +587,7 @@ static void saveRename(UiRuntime& ui) {
     ui.status = "Rename needs a title";
     return;
   }
-  ui.wikiNotesValid = false;
+  invalidateWikiNotes(ui);
   if(ui.state.renameSelectedNote(ui.rename.text())) {
     loadSelectedIntoEditor(ui);
     ui.focus = FocusArea::Editor;
@@ -645,7 +646,7 @@ static void saveFolderRename(UiRuntime& ui) {
 }
 
 static void deleteSelected(UiRuntime& ui) {
-  ui.wikiNotesValid = false;
+  invalidateWikiNotes(ui);
   if(ui.state.deleteSelectedNote()) {
     ui.editor.setText("");
     ui.loadedNoteId.clear();
@@ -705,7 +706,7 @@ static void updateFindStatus(UiRuntime& ui) {
 static void performAction(UiRuntime& ui, UiAction action) {
   switch(action) {
     case UiAction::Refresh:
-      ui.wikiNotesValid = false;
+      invalidateWikiNotes(ui);
       ui.state.refreshLibrary();
       ui.status = "Refreshed library";
       break;
@@ -876,24 +877,6 @@ static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
           std::abs(x - layout.rightPanel.x) <= ui::kResizeGutterInflate + 1.0f);
 }
 
-static std::string blockText(const markdown::Block& block) {
-  std::string out;
-  for(const auto& inlineItem : block.inlines) {
-    if(inlineItem.type == markdown::InlineType::Image) {
-      continue;
-    } else if(inlineItem.type == markdown::InlineType::Link) {
-      out += inlineItem.text.empty() ? inlineItem.target : inlineItem.text;
-    } else if(inlineItem.type == markdown::InlineType::Code) {
-      out += block.type == markdown::BlockType::Code ? inlineItem.text : "`" + inlineItem.text + "`";
-    } else if(inlineItem.type == markdown::InlineType::FootnoteRef) {
-      out += "[" + inlineItem.text + "]";
-    } else {
-      out += inlineItem.text;
-    }
-  }
-  return out;
-}
-
 static std::vector<std::string> codeBlockLines(const markdown::Block& block) {
   auto lines = splitLines(blockText(block));
   if(lines.size() > 1 && lines.back().empty()) lines.pop_back();
@@ -905,18 +888,6 @@ static std::vector<markdown::Inline> blockImages(const markdown::Block& block) {
   std::vector<markdown::Inline> out;
   for(const auto& inlineItem : block.inlines) {
     if(inlineItem.type == markdown::InlineType::Image) out.push_back(inlineItem);
-  }
-  return out;
-}
-
-
-static std::string inlinePlainText(const std::vector<markdown::Inline>& inlines) {
-  std::string out;
-  for(const auto& inlineItem : inlines) {
-    if(inlineItem.type == markdown::InlineType::Image) continue;
-    if(inlineItem.type == markdown::InlineType::Link) out += inlineItem.text.empty() ? inlineItem.target : inlineItem.text;
-    else if(inlineItem.type == markdown::InlineType::FootnoteRef) out += "[" + inlineItem.text + "]";
-    else out += inlineItem.text;
   }
   return out;
 }
@@ -945,29 +916,6 @@ static void contentColumn(Rect page, float& left, float& width) {
   left = page.x + std::round((page.w - width) / 2.0f);
 }
 
-static ui::TextStyle blockTextStyle(const markdown::Block& block) {
-  ui::TextStyle style;
-  style.family = block.type == markdown::BlockType::Code ? ui::FontFamily::Mono : ui::FontFamily::Sans;
-  style.strong = block.type == markdown::BlockType::Heading;
-  if(block.type == markdown::BlockType::Heading) style.size = ui::headingSize(block.level);
-  else if(block.type == markdown::BlockType::Code) style.size = ui::type().mono;
-  else style.size = ui::type().body;
-  return style;
-}
-
-// Baseline-to-baseline distance. The font's own height is roughly 1.2x, which
-// reads too tight for body copy, so the type scale's ratio wins when larger.
-static int lineStepFor(TextRenderer& text, const ui::TextStyle& style, float ratio) {
-  const float logical = style.size > 0.0f ? style.size : ui::type().body;
-  const int fromRatio = static_cast<int>(std::lround(logical * text.displayScale() * ratio));
-  return std::max(text.lineHeight(style), fromRatio);
-}
-
-static int blockLineStep(TextRenderer& text, const markdown::Block& block) {
-  const auto style = blockTextStyle(block);
-  const bool heading = block.type == markdown::BlockType::Heading;
-  return lineStepFor(text, style, heading ? 1.25f : ui::type().lineHeightRatio);
-}
 
 static float listMarkerWidth(const markdown::Block& block) {
   if(block.type == markdown::BlockType::OrderedItem) return 26.0f;
@@ -1014,60 +962,6 @@ static std::string imagePlaceholder(const markdown::Inline& image, const UiRunti
 static float imagePlaceholderHeight(TextRenderer& text, std::string_view placeholder, float width) {
   const auto lines = wrapText(text, placeholder, static_cast<int>(width), false, true);
   return static_cast<float>(std::max<std::size_t>(1, lines.size()) * (text.lineHeight() + 2) + 8);
-}
-
-static float tableHeight(TextRenderer& text, const markdown::Block& block, float width) {
-  const float rowPadY = 8.0f;
-  const int cols = std::max(1, [&]() {
-    int count = 0;
-    for(const auto& row : block.tableRows) count = std::max(count, static_cast<int>(row.cells.size()));
-    return count;
-  }());
-  const float cellW = std::max(48.0f, (width - static_cast<float>(cols + 1)) / static_cast<float>(cols));
-  float h = 0.0f;
-  for(const auto& row : block.tableRows) {
-    int rowLines = 1;
-    for(const auto& cell : row.cells) {
-      rowLines = std::max(rowLines, measureInlineLines(text, inlineRuns(cell.inlines), static_cast<int>(cellW - 14.0f), ui::type().body));
-    }
-    h += static_cast<float>(rowLines * (text.lineHeight() + 2)) + rowPadY * 2.0f;
-  }
-  return h + 10.0f;
-}
-
-static void drawTable(SDL_Renderer* renderer, TextRenderer& text, std::vector<LinkRegion>& links, const markdown::Block& block, Rect rect) {
-  int cols = 0;
-  for(const auto& row : block.tableRows) cols = std::max(cols, static_cast<int>(row.cells.size()));
-  if(cols <= 0) return;
-  const float cellW = std::max(48.0f, (rect.w - static_cast<float>(cols + 1)) / static_cast<float>(cols));
-  float y = rect.y;
-  for(const auto& row : block.tableRows) {
-    int rowLines = 1;
-    for(const auto& cell : row.cells) {
-      rowLines = std::max(rowLines, measureInlineLines(text, inlineRuns(cell.inlines), static_cast<int>(cellW - 14.0f), ui::type().body));
-    }
-    const float rowH = static_cast<float>(rowLines * (text.lineHeight() + 2)) + 16.0f;
-    float x = rect.x;
-    for(int i = 0; i < cols; ++i) {
-      const markdown::TableCell* cell = i < static_cast<int>(row.cells.size()) ? &row.cells[static_cast<std::size_t>(i)] : nullptr;
-      Rect cellRect {x, y, cellW, rowH};
-      fill(renderer, cellRect, row.header ? theme().tableHeaderBg : theme().tableCellBg);
-      stroke(renderer, cellRect, theme().divider);
-      if(cell) {
-        auto runs = inlineRuns(cell->inlines, row.header ? theme().text : theme().muted);
-        const auto cellText = inlinePlainText(cell->inlines);
-        float textX = x + 7.0f;
-        if(cell->align == markdown::Align::Right) {
-          textX = std::max(textX, x + cellW - 7.0f - static_cast<float>(text.width(cellText)));
-        } else if(cell->align == markdown::Align::Center) {
-          textX = std::max(textX, x + (cellW - static_cast<float>(text.width(cellText))) / 2.0f);
-        }
-        drawInlineRuns(renderer, text, &links, runs, textX, y + 8.0f, static_cast<int>(cellW - 14.0f), lineStepFor(text, ui::TextStyle {}, ui::type().lineHeightRatio), ui::type().body);
-      }
-      x += cellW;
-    }
-    y += rowH;
-  }
 }
 
 static int viewerMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
@@ -1670,94 +1564,6 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
   drawVerticalScrollbar(renderer, page, ui.viewerScroll, maxScroll);
 }
 
-// A block the live scanner does not model is parsed on its own and rendered by
-// the md4c path, so tables and raw HTML look the same everywhere.
-static const markdown::Document& complexDocument(UiRuntime& ui, const doc::SourceBlock& block) {
-  const auto& source = ui.editor.text();
-  const std::size_t start = std::min(block.start, source.size());
-  const std::size_t end = std::min(block.end, source.size());
-  std::string key = source.substr(start, end - start);
-  auto found = ui.complexCache.find(key);
-  if(found == ui.complexCache.end()) {
-    if(ui.complexCache.size() > 64) ui.complexCache.clear();
-    found = ui.complexCache.emplace(key, ui.parser.parse(key)).first;
-  }
-  return found->second;
-}
-
-// md4c renders a few constructs (a lone footnote definition, say) to nothing at
-// all. Falling back to the source keeps such a block visible and editable.
-static bool complexRendersNothing(const markdown::Document& document) {
-  for(const auto& item : document.blocks) {
-    if(item.type == markdown::BlockType::Table) return false;
-    if(!blockText(item).empty()) return false;
-  }
-  return true;
-}
-
-static std::vector<std::string> complexSourceLines(UiRuntime& ui, const doc::SourceBlock& block) {
-  const auto& source = ui.editor.text();
-  const std::size_t start = std::min(block.start, source.size());
-  const std::size_t end = std::min(block.end, source.size());
-  return splitLines(std::string_view(source).substr(start, end - start));
-}
-
-static float measureComplexBlock(TextRenderer& text, UiRuntime& ui, const doc::SourceBlock& block, float width) {
-  const auto& document = complexDocument(ui, block);
-  if(complexRendersNothing(document)) {
-    ui::TextStyle mono;
-    mono.family = ui::FontFamily::Mono;
-    mono.size = ui::type().mono;
-    return static_cast<float>(complexSourceLines(ui, block).size() * lineStepFor(text, mono, 1.5f)) + 20.0f;
-  }
-  float height = 10.0f;
-  for(const auto& item : document.blocks) {
-    if(item.type == markdown::BlockType::Table) {
-      height += tableHeight(text, item, width) + 12.0f;
-    } else if(item.type == markdown::BlockType::BlankLine) {
-      height += static_cast<float>(text.lineHeight());
-    } else {
-      const auto runs = inlineRuns(item, theme().text);
-      const auto style = blockTextStyle(item);
-      height += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(width), style.size) * blockLineStep(text, item)) + 6.0f;
-    }
-  }
-  return height + 10.0f;
-}
-
-static void drawComplexBlock(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, const doc::SourceBlock& block, Rect rect) {
-  const auto& document = complexDocument(ui, block);
-  if(complexRendersNothing(document)) {
-    ui::TextStyle mono;
-    mono.family = ui::FontFamily::Mono;
-    mono.size = ui::type().mono;
-    const int step = lineStepFor(text, mono, 1.5f);
-    float y = rect.y + 10.0f;
-    for(const auto& line : complexSourceLines(ui, block)) {
-      text.draw(ellipsizeToWidth(text, line, static_cast<int>(rect.w), mono), rect.x, y, theme().muted, mono);
-      y += static_cast<float>(step);
-    }
-    return;
-  }
-  float y = rect.y + 10.0f;
-  for(const auto& item : document.blocks) {
-    if(item.type == markdown::BlockType::Table) {
-      const float height = tableHeight(text, item, rect.w);
-      drawTable(renderer, text, ui.linkRegions, item, {rect.x, y, rect.w, height});
-      y += height + 12.0f;
-    } else if(item.type == markdown::BlockType::BlankLine) {
-      y += static_cast<float>(text.lineHeight());
-    } else {
-      const auto runs = inlineRuns(item, theme().text);
-      const auto style = blockTextStyle(item);
-      const int step = blockLineStep(text, item);
-      // Where the draw left off, rather than a second full inline layout of it.
-      y = drawInlineRuns(renderer, text, &ui.linkRegions, runs, rect.x, y,
-                         static_cast<int>(rect.w), step, style.size) +
-          static_cast<float>(step) + 6.0f;
-    }
-  }
-}
 
 static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   PageViewHooks hooks;
@@ -1769,6 +1575,7 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
   hooks.wikiLinkResolves = [&ui](std::string_view target) {
     return wikiLinkResolves(ui, target);
   };
+  hooks.wikiLinkRevision = ui.wikiNotesRevision;
   hooks.drawComplex = [renderer, &text, &ui](const doc::SourceBlock& block, Rect area) {
     drawComplexBlock(renderer, text, ui, block, area);
   };
@@ -2313,7 +2120,7 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "settings") openSettings(ui);
   else if(id == "shortcuts") openShortcutHelp(ui);
   else if(id == "refresh") {
-    ui.wikiNotesValid = false;
+    invalidateWikiNotes(ui);
     ui.state.refreshLibrary();
     ui.status = "Refreshed library";
   }
@@ -2616,7 +2423,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(shortcut(SDLK_S, SDL_SCANCODE_S)) {
     saveCurrent(ui);
   } else if(shortcut(SDLK_R, SDL_SCANCODE_R)) {
-    ui.wikiNotesValid = false;
+    invalidateWikiNotes(ui);
     ui.state.refreshLibrary();
     ui.status = "Refreshed library";
   } else if(shortcut(SDLK_T, SDL_SCANCODE_T)) {
@@ -3674,7 +3481,7 @@ int run(ApplicationOptions options) {
         // Only when there is nothing unsaved: reloading under a dirty buffer
         // would put the note back to what is on disk.
         if(ui.state.hasLibrary() && !ui.editor.dirty()) {
-          ui.wikiNotesValid = false;
+          invalidateWikiNotes(ui);
           ui.state.refreshLibrary();
         }
       }

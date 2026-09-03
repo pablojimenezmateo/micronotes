@@ -12,6 +12,12 @@ struct UiRuntime;
 // layout, so the library listing behind it is cached.
 bool wikiLinkResolves(UiRuntime& ui, std::string_view target);
 
+// Drops that cache and moves the revision the layout keys its blocks under.
+// Both, always: dropping the cache without moving the revision leaves every
+// standing block layout coloured by the old answer, and the two used to be one
+// bare assignment repeated at six call sites.
+void invalidateWikiNotes(UiRuntime& ui);
+
 // Follows a `[[target]]`, creating the note when there is not one yet.
 void openWikiLink(UiRuntime& ui, std::string_view target);
 

@@ -5,6 +5,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -23,6 +24,11 @@ struct PageViewHooks {
   // Whether a `[[target]]` names a note that exists. The page has a buffer, not
   // a library, so it asks; unset means "assume it does".
   std::function<bool(std::string_view)> wikiLinkResolves;
+  // Moves whenever that answer could have changed. A block's cached layout is
+  // keyed on its own bytes, and this is the one thing it depends on that is not
+  // in them, so without it a link that starts or stops resolving keeps its old
+  // colour until the block is edited.
+  std::uint64_t wikiLinkRevision = 0;
 };
 
 struct PageLink {

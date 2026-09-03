@@ -213,6 +213,7 @@ add_executable(micronotes
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
   src/app/Folds.cpp
+  src/app/MarkdownBlocks.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
   src/app/RawPane.cpp

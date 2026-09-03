@@ -27,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -232,7 +233,10 @@ struct UiRuntime {
   markdown::MarkdownParser parser;
   PageView livePage;
   // md4c documents for the blocks the live surface hands off, keyed by source.
-  std::map<std::string, markdown::Document> complexCache;
+  // Keyed by the block's own source text, and looked up through a view --
+  // `std::less<>` rather than the default, so finding a parse does not first
+  // allocate a copy of the bytes to look it up by.
+  std::map<std::string, markdown::Document, std::less<>> complexCache;
   std::string cachedMarkdownSource;
   std::optional<markdown::Document> cachedMarkdownDocument;
   std::string cachedEditorRowsSource;
@@ -272,6 +276,10 @@ struct UiRuntime {
   // whole library fifty times per keystroke.
   std::vector<library::NoteListItem> wikiNotes;
   bool wikiNotesValid = false;
+  // Moves with every invalidation of the list above, so the layout can be told
+  // that what a `[[target]]` resolves to may have changed. See
+  // `invalidateWikiNotes`, which is the only thing that should touch either.
+  std::uint64_t wikiNotesRevision = 1;
   // The first "[" of the "[[" that opened the wikilink picker.
   std::size_t wikiStart = 0;
   // Where the backlinks panel drew each row last frame, so a click can find the

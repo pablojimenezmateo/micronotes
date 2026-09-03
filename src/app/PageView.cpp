@@ -201,6 +201,7 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.rawOffset = rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone;
   options.folded = folds_.collapsed;
   options.wikiLinkResolves = hooks_.wikiLinkResolves;
+  options.wikiLinkRevision = hooks_.wikiLinkRevision;
   options.sourceRevision = sourceRevision_;
   options.foldRevision = foldRevision_;
   document_.update(source, options);

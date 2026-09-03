@@ -1201,3 +1201,51 @@ MICRONOTES_TEST(layout_answers_as_empty_between_new_metrics_and_the_next_update)
   layout.update(source, options);
   MICRONOTES_REQUIRE(layout.totalHeight() > 0.0f);
 }
+
+// Whether a `[[target]]` resolves decides a run's colour, and it is the one
+// input to a block's layout that is not a function of the block's own bytes.
+// The cache key is built from those bytes, so without a stamp for it the layout
+// answers a changed library with last library's colour -- and goes on doing so
+// until somebody happens to edit that block.
+MICRONOTES_TEST(layout_recolours_a_wikilink_when_the_library_changes_under_it) {
+  const std::string source = "A note that links to [[Somewhere]] in passing.\n";
+  bool exists = false;
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 600.0f;
+  options.wikiLinkResolves = [&exists](std::string_view) { return exists; };
+  options.sourceRevision = 1;
+  options.wikiLinkRevision = 1;
+  layout.update(source, options);
+
+  const auto roleOfTheLink = [&]() {
+    for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+      const auto& block = layout.layout(i);
+      for(const auto& line : block.lines) {
+        for(const auto& run : block.runsOf(line)) {
+          if(run.role == micronotes::doc::TextRole::WikiLink ||
+             run.role == micronotes::doc::TextRole::WikiLinkUnresolved) {
+            return run.role;
+          }
+        }
+      }
+    }
+    return micronotes::doc::TextRole::Body;
+  };
+  MICRONOTES_REQUIRE(roleOfTheLink() == micronotes::doc::TextRole::WikiLinkUnresolved);
+
+  // The note now exists. Not one byte of the buffer changed, and the caller
+  // says so through the same source stamp -- the wikilink stamp is the only
+  // thing that moved.
+  exists = true;
+  options.wikiLinkRevision = 2;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(roleOfTheLink() == micronotes::doc::TextRole::WikiLink);
+
+  // And back, so this is not a one-way latch.
+  exists = false;
+  options.wikiLinkRevision = 3;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(roleOfTheLink() == micronotes::doc::TextRole::WikiLinkUnresolved);
+}

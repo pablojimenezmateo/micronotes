@@ -28,6 +28,11 @@ bool wikiLinkResolves(UiRuntime& ui, std::string_view target) {
   return ui::resolveWikiLink(target, wikiCandidates(ui)) != std::string::npos;
 }
 
+void invalidateWikiNotes(UiRuntime& ui) {
+  ui.wikiNotesValid = false;
+  ++ui.wikiNotesRevision;
+}
+
 // Follows a `[[target]]`. A target that names nothing is not a mistake -- the
 // link is very often written before the note is -- so it offers to create it
 // rather than reporting a failure.
@@ -61,7 +66,7 @@ void openWikiLink(UiRuntime& ui, std::string_view target) {
     ui.status = "Could not create " + split.note;
     return;
   }
-  ui.wikiNotesValid = false;
+  invalidateWikiNotes(ui);
   selectNoteById(ui, created->id);
   ui.status = "Created " + split.note;
 }
@@ -107,7 +112,7 @@ void commitWikiMenu(UiRuntime& ui, const std::string& title, const std::string& 
   if(title.empty()) ui.editor.moveCursor(start + replacement.size());
   ui.markEdited();
   ui.revealEditorCursor = true;
-  ui.wikiNotesValid = false;
+  invalidateWikiNotes(ui);
 }
 
 }

@@ -61,7 +61,7 @@ void createNote(UiRuntime& ui) {
   }
   if(ui.editor.dirty() && !saveCurrent(ui)) return;
   const auto folder = ui.state.selection().folder;
-  ui.wikiNotesValid = false;
+  invalidateWikiNotes(ui);
   // An empty body, not a `# Untitled` heading. The page draws the note's name
   // above its first block, so seeding one only put the name on screen twice and
   // left the caret on the second copy; the empty page prompts for a first line
