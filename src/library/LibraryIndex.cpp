@@ -153,14 +153,16 @@ static void fillSnippet(SearchResult& result, std::string_view body, std::string
 
 static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out, std::string_view query) {
   while(sqlite3_step(stmt) == SQLITE_ROW) {
-    out.push_back({
-      reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)),
-      {},
-      reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2)),
-    });
-    out.back().path = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-    const unsigned char* body = sqlite3_column_text(stmt, 3);
-    if(body) fillSnippet(out.back(), reinterpret_cast<const char*>(body), query);
+    // Through `columnText`, which is the same read the refresh uses. Building a
+    // `std::string` straight from `sqlite3_column_text` is a construction from
+    // `nullptr` on a NULL column: unreachable today -- every column read here is
+    // declared NOT NULL or comes through an inner join -- but the two spellings
+    // sat four functions apart in this file and only one of them was safe.
+    out.push_back({columnText(stmt, 0), {}, columnText(stmt, 2)});
+    out.back().path = columnText(stmt, 1);
+    if(const auto body = columnText(stmt, 3); !body.empty()) {
+      fillSnippet(out.back(), body, query);
+    }
   }
 }
 
