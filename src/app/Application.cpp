@@ -3010,6 +3010,8 @@ int run(ApplicationOptions options) {
     SDL_Quit();
     return 1;
   }
+  ui::configureRenderer(renderer);
+
   // Held for the lifetime of the window: SDL keeps the pointer and calls back
   // into it on every pointer press near the frame.
   HitTestContext hitTestContext;

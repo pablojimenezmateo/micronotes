@@ -41,6 +41,22 @@ private:
   SDL_Rect clip_ {};
 };
 
+// One-time renderer setup the palette depends on.
+//
+// Seven colours in `Theme` carry an alpha on purpose: the text selection, the
+// find-match fill and its border, the scrollbar track and thumb border, and the
+// raised-surface sheen. SDL's default draw blend mode is SDL_BLENDMODE_NONE,
+// which writes the alpha byte and then ignores it, so every one of those painted
+// opaque -- a scrollbar track set to alpha zero, meaning "do not draw me", drew
+// a solid bar down the edge of every list instead.
+//
+// Worse, it was not consistent within a run. The overlay stack turned blending
+// on before dimming the window behind a palette and never turned it back off,
+// so a session that had opened the command palette once painted the rest of the
+// shell differently from one that had not. Blending belongs to the renderer for
+// its whole life, and this is where that is said.
+void configureRenderer(SDL_Renderer* renderer);
+
 void fill(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void stroke(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void hLine(SDL_Renderer* renderer, float x1, float x2, float y, SDL_Color color);

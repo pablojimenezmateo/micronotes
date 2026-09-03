@@ -10,6 +10,10 @@
 
 namespace micronotes::ui {
 
+void configureRenderer(SDL_Renderer* renderer) {
+  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+}
+
 void fill(SDL_Renderer* renderer, Rect rect, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   auto out = sdlRect(rect);

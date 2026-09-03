@@ -311,8 +311,10 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   Overlay* overlay = top();
   if(!overlay) return;
 
-  // Dim whatever is behind so the overlay reads as the focused surface.
-  SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+  // Dim whatever is behind so the overlay reads as the focused surface. The
+  // renderer blends for its whole life, set once where it is created; this used
+  // to turn blending on here and leave it on, which is how a shell that had
+  // opened a palette painted differently from one that had not.
   fill(renderer, {0, 0, static_cast<float>(windowWidth), static_cast<float>(windowHeight)},
        SDL_Color {0, 0, 0, static_cast<Uint8>(themeMode() == ThemeMode::Dark ? 120 : 60)});
 
