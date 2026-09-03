@@ -20,17 +20,34 @@ using ui::Rect;
 using ui::theme;
 
 constexpr float kHeaderHeight = 34.0f;
-constexpr float kRowHeight = 24.0f;
-constexpr float kPadX = 14.0f;
-constexpr float kIndentStep = 12.0f;
-constexpr float kBacklinkHeight = 44.0f;
+// Rows hold a line of UI text and a line grows with the reader's text size, so
+// the pitch is the taller of a floor and what the text actually needs. A fixed
+// 24 was a row that clipped its own text at the large size.
+constexpr float kRowMinHeight = 24.0f;
+constexpr float kBacklinkMinHeight = 44.0f;
+// The panel's own inset, from the shell's spacing scale rather than from a
+// number local to this file. It used to be 14, which is neither of the two
+// insets the sidebar beside it uses.
+constexpr float kPadX = ui::kSpace3;
+constexpr float kIndentStep = ui::kSpace3;
 
 // The tab a click lands on, and where each one is drawn. One geometry, read by
 // both the paint and the hit test, so a tab cannot be painted off its own
 // target.
 Rect tabRect(Rect rect, int index, int count) {
   const float width = (rect.w - kPadX * 2.0f) / static_cast<float>(std::max(count, 1));
-  return {rect.x + kPadX + width * static_cast<float>(index), rect.y + 6.0f, width, kHeaderHeight - 12.0f};
+  return {rect.x + kPadX + width * static_cast<float>(index), rect.y + ui::kSpace1 + 2.0f, width,
+          kHeaderHeight - 12.0f};
+}
+
+// Everything below the tabs: the scrolling list, which is the only thing the
+// rows are placed in and hit-tested against.
+Rect listRect(Rect rect) {
+  return {rect.x, rect.y + kHeaderHeight, rect.w, std::max(0.0f, rect.h - kHeaderHeight)};
+}
+
+float rowPitch(const ui::TextRenderer& text, const ui::TextStyle& style) {
+  return std::max(kRowMinHeight, static_cast<float>(text.lineHeight(style)) + ui::kSpace1);
 }
 
 const char* viewLabel(ui::RightPanelView view) {
@@ -45,13 +62,42 @@ const char* viewLabel(ui::RightPanelView view) {
 constexpr ui::RightPanelView kViews[] = {ui::RightPanelView::Outline, ui::RightPanelView::Backlinks,
                                         ui::RightPanelView::Tags};
 
-// The rows are a fixed pitch from the top of the panel, so the row for entry
-// `i` is arithmetic. It used to be a `vector<PanelRow>` built for every heading
-// in the note and then walked until the first one fell off the bottom -- an
+// The rows are a fixed pitch from the top of the list, so the row for entry `i`
+// is arithmetic. It used to be a `vector<PanelRow>` built for every heading in
+// the note and then walked until the first one fell off the bottom -- an
 // allocation per frame to address the twenty rows a panel can show.
-Rect outlineRowRect(Rect rect, std::size_t index) {
-  return {rect.x, rect.y + kHeaderHeight + 4.0f + static_cast<float>(index) * kRowHeight, rect.w,
-          kRowHeight};
+Rect outlineRowRect(Rect rect, std::size_t index, float pitch, int scroll) {
+  const Rect list = listRect(rect);
+  return {list.x, list.y + ui::kSpace1 + static_cast<float>(index) * pitch - static_cast<float>(scroll),
+          list.w, pitch};
+}
+
+// How far the panel can be scrolled, given everything the current view would
+// draw. Recorded on the runtime by the draw so a wheel event can clamp against
+// what was actually painted rather than laying the panel out a second time --
+// the same arrangement `PageView` has, and the reason the panel and the wheel
+// cannot disagree about where the bottom is.
+void setMaxScroll(UiRuntime& ui, Rect rect, float contentHeight) {
+  const Rect list = listRect(rect);
+  ui.rightPanelRect = rect;
+  ui.rightPanelMaxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight + ui::kSpace2 - list.h)));
+  ui.rightPanelScroll = std::clamp(ui.rightPanelScroll, 0, ui.rightPanelMaxScroll);
+}
+
+// Switching view or note starts the list at the top. Keyed rather than reset by
+// a flag at every site that could change either, for the reason the memo above
+// gives: the site that forgets leaves the panel scrolled to an offset that
+// belongs to something else.
+void resetScrollOnChange(UiRuntime& ui) {
+  auto& memo = ui.rightPanel;
+  const ui::RightPanelView view = ui.state.workspace().rightPanelView;
+  const std::string& noteId = ui.state.selection().noteId;
+  if(memo.scrollKeyValid && memo.scrollView == view && memo.scrollNoteId == noteId) return;
+  memo.scrollKeyValid = true;
+  memo.scrollView = view;
+  memo.scrollNoteId = noteId;
+  ui.rightPanelScroll = 0;
+  ui.rightPanelWheel.remainder = 0.0f;
 }
 
 // The outline of the open buffer, rebuilt only when the buffer has moved.
@@ -114,41 +160,60 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     else if(hot) ui::fillRounded(renderer, tab, theme().hoverBg, ui::kRadiusSmall);
     const auto label = viewLabel(kViews[i]);
     const float labelX = tab.x + (tab.w - static_cast<float>(text.width(label, tabStyle))) / 2.0f;
-    text.draw(label, labelX, tab.y + 4.0f, active ? theme().text : theme().dim, tabStyle);
+    text.draw(label, labelX, ui::textTop(tab, text, tabStyle), active ? theme().text : theme().dim, tabStyle);
   }
   ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + kHeaderHeight - 1.0f, theme().hairline);
 
+  const Rect list = listRect(rect);
+  resetScrollOnChange(ui);
+  // An empty view has nothing to scroll, and the message says so where the rows
+  // would have been.
+  const auto empty = [&](std::string_view title, std::string_view detail, std::string_view keys = {}) {
+    setMaxScroll(ui, rect, 0.0f);
+    ui::drawEmptyMessage(text, title, detail, {list.x, list.y, list.w, list.h}, keys);
+  };
+
   if(ui.state.selection().noteId.empty()) {
-    ui::drawEmptyMessage(text, "Nothing open", "Open a note to see what is in it.",
-                         {rect.x, rect.y + kHeaderHeight, rect.w, 100.0f});
+    empty("Nothing open", "Open a note to see what is in it.");
     return;
   }
+
+  // Every view scrolls inside the list, so every view is clipped to it: a row
+  // half off the bottom is cut at the edge rather than drawn over the tabs.
+  ui::ClipGuard listClip(renderer, list);
+  const int scroll = ui.rightPanelScroll;
 
   if(workspace.rightPanelView == ui::RightPanelView::Outline) {
     const auto& entries = outlineFor(ui);
     if(entries.empty()) {
-      ui::drawEmptyMessage(text, "No headings", "Headings in this note show up here.",
-                           {rect.x, rect.y + kHeaderHeight, rect.w, 100.0f});
+      empty("No headings", "Headings in this note show up here.");
       return;
     }
+    const float pitch = rowPitch(text, rowStyle);
+    setMaxScroll(ui, rect, static_cast<float>(entries.size()) * pitch);
     // Which entry the caret is in is not memoised: it moves with the caret
     // rather than with the buffer, and it is a walk of the headings rather than
     // of the note.
     const auto current = ui::outlineEntryAt(entries, ui.editor.cursor());
-    for(std::size_t i = 0; i < entries.size(); ++i) {
-      const Rect row = outlineRowRect(rect, i);
-      if(row.y > rect.y + rect.h) break;
+    // The band of rows the list can show, by arithmetic rather than by walking
+    // from the first entry: a note with a thousand headings costs the same as
+    // one with twenty.
+    const std::size_t first = static_cast<std::size_t>(std::max(0.0f, static_cast<float>(scroll) - ui::kSpace1) / pitch);
+    for(std::size_t i = first; i < entries.size(); ++i) {
+      const Rect row = outlineRowRect(rect, i, pitch, scroll);
+      if(row.y > list.y + list.h) break;
       const auto& entry = entries[i];
       const bool here = i == current;
       const bool hot = ui::contains(row, ui.mouseX, ui.mouseY);
       ui::drawSelection(renderer, row, here, hot);
-      const float x = rect.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
+      const float x = list.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
       // A top-level heading carries the note's structure and reads as the
       // strong row; anything nested under it is support.
       const auto colour = here ? theme().text : (entry.depth == 0 ? theme().muted : theme().dim);
-      text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(rect.x + rect.w - x - kPadX), rowStyle),
-                x, row.y + 3.0f, colour, rowStyle);
+      text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(list.x + list.w - x - kPadX), rowStyle),
+                x, ui::textTop(row, text, rowStyle), colour, rowStyle);
     }
+    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
     return;
   }
 
@@ -156,55 +221,73 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
     const auto& backlinks = ui.rightPanel.backlinks;
     if(backlinks.empty()) {
-      ui::drawEmptyMessage(text, "Nothing links here",
-                           "Write [[the title of this note]] in another note and it will show up.",
-                           {rect.x, rect.y + kHeaderHeight, rect.w, 110.0f});
+      empty("Nothing links here",
+            "Write [[the title of this note]] in another note and it will show up.");
       return;
     }
     const ui::TextStyle lineStyle {ui::FontFamily::Sans, false, false, ui::type().small};
-    float y = rect.y + kHeaderHeight + 4.0f;
+    // Two lines and the air around them, which at the large text size is more
+    // than the 44 this row used to be nailed to.
+    const float pitch = std::max(kBacklinkMinHeight,
+                                 static_cast<float>(text.lineHeight(rowStyle) + text.lineHeight(lineStyle)) + ui::kSpace2);
+    setMaxScroll(ui, rect, static_cast<float>(backlinks.size()) * pitch);
+    float y = list.y + ui::kSpace1 - static_cast<float>(scroll);
     ui.backlinkRows.clear();
     for(const auto& link : backlinks) {
-      if(y > rect.y + rect.h) break;
-      const Rect row {rect.x, y, rect.w, kBacklinkHeight};
-      ui::drawSelection(renderer, row, false, ui::contains(row, ui.mouseX, ui.mouseY));
-      const int room = static_cast<int>(rect.w - kPadX * 2.0f);
-      text.draw(ui::ellipsizeToWidth(text, link.title, room, rowStyle),
-                rect.x + kPadX, y + 2.0f, theme().text, rowStyle);
-      // The line the link was written on, which is the whole difference between
-      // a list of titles and a reason to click one.
-      text.draw(ui::ellipsizeToWidth(text, link.line, room, lineStyle),
-                rect.x + kPadX, y + 22.0f, theme().dim, lineStyle);
-      ui.backlinkRows.push_back({row, link.id});
-      y += kBacklinkHeight;
+      if(y + pitch >= list.y && y <= list.y + list.h) {
+        const Rect row {list.x, y, list.w, pitch};
+        ui::drawSelection(renderer, row, false, ui::contains(row, ui.mouseX, ui.mouseY));
+        const int room = static_cast<int>(list.w - kPadX * 2.0f);
+        text.draw(ui::ellipsizeToWidth(text, link.title, room, rowStyle),
+                  list.x + kPadX, y + ui::kSpace1 / 2.0f, theme().text, rowStyle);
+        // The line the link was written on, which is the whole difference
+        // between a list of titles and a reason to click one.
+        text.draw(ui::ellipsizeToWidth(text, link.line, room, lineStyle),
+                  list.x + kPadX, y + ui::kSpace1 / 2.0f + static_cast<float>(text.lineHeight(rowStyle)),
+                  theme().dim, lineStyle);
+        ui.backlinkRows.push_back({row, link.id});
+      }
+      y += pitch;
     }
+    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
     return;
   }
 
   const auto& tags = ui.rightPanel.tags;
   if(tags.empty()) {
-    ui::drawEmptyMessage(text, "No tags", "This note carries none yet.",
-                         {rect.x, rect.y + kHeaderHeight, rect.w, 100.0f},
-                         ui::keysFor(ui::ActionId::EditTags) + "  edit tags");
+    empty("No tags", "This note carries none yet.", ui::keysFor(ui::ActionId::EditTags) + "  edit tags");
     return;
   }
-  float y = rect.y + kHeaderHeight + 8.0f;
+  const float chipHeight = std::max(22.0f, static_cast<float>(text.lineHeight(rowStyle)) + ui::kSpace1);
+  const float chipPitch = chipHeight + ui::kSpace2 - 2.0f;
+  setMaxScroll(ui, rect, static_cast<float>(tags.size()) * chipPitch);
+  float y = list.y + ui::kSpace2 - static_cast<float>(scroll);
   for(const auto& tag : tags) {
-    const std::string label = "#" + tag;
-    const Rect chip {rect.x + kPadX, y, static_cast<float>(text.width(label, rowStyle)) + 16.0f, 22.0f};
-    ui::drawSurface(renderer, chip, theme().chipBg, theme().accentDim);
-    text.draw(label, chip.x + 8.0f, y + 2.0f, theme().accent, rowStyle);
-    y += 28.0f;
+    if(y + chipHeight >= list.y && y <= list.y + list.h) {
+      const std::string label = "#" + tag;
+      const Rect chip {list.x + kPadX, y, static_cast<float>(text.width(label, rowStyle)) + ui::kSpace4, chipHeight};
+      ui::drawSurface(renderer, chip, theme().chipBg, theme().accentDim);
+      text.draw(label, chip.x + ui::kSpace2, ui::textTop(chip, text, rowStyle), theme().accent, rowStyle);
+    }
+    y += chipPitch;
   }
+  ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
 }
 
-bool handleRightPanelClick(UiRuntime& ui, Rect rect, float x, float y) {
+bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
   auto& workspace = ui.state.workspace();
   const int tabCount = static_cast<int>(std::size(kViews));
   for(int i = 0; i < tabCount; ++i) {
     if(!ui::contains(tabRect(rect, i, tabCount), x, y)) continue;
     workspace.rightPanelView = kViews[i];
+    return true;
+  }
+  // A click on the scrollbar is a click on the scrollbar, wherever the rows
+  // under it happen to fall.
+  const Rect list = listRect(rect);
+  if(ui.rightPanelMaxScroll > 0 &&
+     ui::contains(ui::scrollbarHitRect(ui::scrollbarTrack(list)), x, y)) {
     return true;
   }
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
@@ -218,11 +301,15 @@ bool handleRightPanelClick(UiRuntime& ui, Rect rect, float x, float y) {
   if(workspace.rightPanelView != ui::RightPanelView::Outline) return true;
   const auto& entries = outlineFor(ui);
   // The rows are a fixed pitch, so the one under the pointer is arithmetic
-  // rather than a walk of every heading in the note.
-  const float offset = y - (rect.y + kHeaderHeight + 4.0f);
+  // rather than a walk of every heading in the note. The pitch is the drawn
+  // one, and the scroll is the drawn one, or a click lands on the row that
+  // would have been there before the list was scrolled.
+  const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
+  const float pitch = rowPitch(text, rowStyle);
+  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanelScroll);
   if(offset >= 0.0f) {
-    const auto index = static_cast<std::size_t>(offset / kRowHeight);
-    if(index < entries.size() && ui::contains(outlineRowRect(rect, index), x, y)) {
+    const auto index = static_cast<std::size_t>(offset / pitch);
+    if(index < entries.size() && ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanelScroll), x, y)) {
       // Clicking a heading is a way of scrolling to it, so the caret goes to its
       // text rather than to the marker in front of it.
       ui.editor.moveCursor(entries[index].offset);

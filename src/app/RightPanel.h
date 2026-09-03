@@ -18,7 +18,7 @@ struct UiRuntime;
 void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
 // Returns whether the click landed on something the panel owns.
-bool handleRightPanelClick(UiRuntime& ui, ui::Rect rect, float x, float y);
+bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, ui::Rect rect, float x, float y);
 
 // Showing and hiding a panel, and choosing what the right one shows.
 void togglePanel(UiRuntime& ui, bool ui::WorkspaceModel::*panel, std::string_view name);

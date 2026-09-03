@@ -2428,7 +2428,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   // without that, a click between two outline rows would fall through to the
   // page and move the caret somewhere the reader never pointed at.
   if(button == SDL_BUTTON_LEFT && !ui::empty(layout.rightPanel) &&
-     handleRightPanelClick(ui, layout.rightPanel, x, y)) {
+     handleRightPanelClick(ui, text, layout.rightPanel, x, y)) {
     return;
   }
 

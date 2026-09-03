@@ -236,6 +236,7 @@ constexpr float kEditorScrollLinesPerNotch = 3.0f;
 constexpr float kViewerScrollPixelsPerNotch = 42.0f;
 constexpr float kLiveScrollPixelsPerNotch = 42.0f;
 constexpr float kSidebarScrollPixelsPerNotch = 42.0f;
+constexpr float kRightPanelScrollPixelsPerNotch = 42.0f;
 
 // A wheel gesture accumulated to whole units.
 //
@@ -311,6 +312,7 @@ struct UiRuntime {
   WheelAccumulator viewerWheel;
   WheelAccumulator liveWheel;
   WheelAccumulator sidebarWheel;
+  WheelAccumulator rightPanelWheel;
   Uint64 lastRefresh = 0;
   float mouseX = -1;
   float mouseY = -1;
@@ -377,6 +379,15 @@ struct UiRuntime {
     std::string noteId;
     std::uint64_t libraryRevision = 0;
     bool libraryValid = false;
+
+    // Which view of which note the panel's scroll offset belongs to. Switching
+    // either starts the list at the top; see `resetScrollOnChange`. Two fields
+    // rather than one joined key, because this is compared on every frame and a
+    // joined key would build a string on every one of them to find out that
+    // nothing had moved.
+    ui::RightPanelView scrollView = ui::RightPanelView::Outline;
+    std::string scrollNoteId;
+    bool scrollKeyValid = false;
   };
   RightPanelMemo rightPanel;
 
@@ -444,6 +455,15 @@ struct UiRuntime {
   Rect sidebarRect;
   int sidebarScroll = 0;
   int sidebarMaxScroll = 0;
+  // The right-hand panel scrolls like every other list in the shell. It used to
+  // be the one that did not: a note with more headings than the panel was tall
+  // simply stopped listing them, with no scrollbar to say so and a wheel over it
+  // scrolling the note behind instead.
+  int rightPanelScroll = 0;
+  int rightPanelMaxScroll = 0;
+  // Last frame's right-panel rect, so a wheel can be clamped to the same
+  // maximum the draw computed without laying the panel out a second time.
+  Rect rightPanelRect;
   bool creatingFolder = false;
   bool draggingNote = false;
   std::string draggingNoteId;

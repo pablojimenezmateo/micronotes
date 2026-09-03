@@ -59,11 +59,18 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
 
   const ShellLayout layout = shellLayout(ui, width, height);
 
-  // Then the panel the pointer is in. The tree can be taller than the window,
-  // so the pointer's column decides before the pane mode does.
+  // Then whichever panel the pointer is in. The tree and the outline can both
+  // be taller than the window, so the pointer's column decides before the pane
+  // mode does.
   if(contains(layout.sidebar, ui.mouseX, ui.mouseY)) {
     ui.sidebarScroll = std::clamp(ui.sidebarScroll + ui.sidebarWheel.take(notches, kSidebarScrollPixelsPerNotch),
                                   0, ui.sidebarMaxScroll);
+    return;
+  }
+  if(contains(layout.rightPanel, ui.mouseX, ui.mouseY)) {
+    ui.rightPanelScroll = std::clamp(
+      ui.rightPanelScroll + ui.rightPanelWheel.take(notches, kRightPanelScrollPixelsPerNotch),
+      0, ui.rightPanelMaxScroll);
     return;
   }
 
