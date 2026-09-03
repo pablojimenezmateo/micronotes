@@ -160,7 +160,22 @@ struct SidebarRow {
   // what is left, so the draw marks the span and does not have to measure the
   // line again on every frame. `length` is zero when there is nothing to mark
   // -- a note whose title matched but whose text did not.
+  //
+  // Filled on the first frame the row is *drawn*, not when the list is built.
+  // Trimming one matching line to the column costs 0.25 ms -- it measures the
+  // whole line, then bisects with a measurement per probe, and every probe is a
+  // string nothing has measured before, so the measure cache cannot help. A
+  // 200-result query has 600 of them, and building all of them up front made
+  // the first frame of a query a 150-500 ms freeze, per keystroke of the query.
+  // The row list stays O(results), because the heights have to add up to a
+  // scrollbar; the trimming is O(viewport).
   std::vector<ui::SnippetWindow> matchLines;
+  // Which result this row lists, and how many lines it will show once they are
+  // trimmed. The count is known without measuring anything, which is what lets
+  // the row take its final height before its text exists.
+  std::size_t resultIndex = 0;
+  std::size_t matchLineCount = 0;
+  bool matchLinesBuilt = false;
 };
 
 struct SystemCursors {

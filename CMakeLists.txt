@@ -227,6 +227,7 @@ add_executable(micronotes
   src/app/RightPanel.cpp
   src/app/SessionState.cpp
   src/app/SettingsDialog.cpp
+  src/app/Sidebar.cpp
   src/app/SidebarModel.cpp
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp

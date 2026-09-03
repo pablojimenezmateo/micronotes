@@ -74,6 +74,14 @@
   X(SidebarRowsBuilt, "sidebar.rows_built")                                            \
   X(SidebarRowsDrawn, "sidebar.rows_drawn")                                            \
   X(SidebarRowsReused, "sidebar.rows_reused")                                          \
+  /* Search snippets trimmed to the sidebar's column. One is ~0.25 ms: it       */    \
+  /* measures the whole matching line and then bisects, and every probe is a    */    \
+  /* string nothing has measured before, so the measure cache cannot help. This */    \
+  /* is the counter that says whether the trimming is costing the viewport or   */    \
+  /* the result list -- against rows_drawn it should be a few per row for the   */    \
+  /* first frame of a query and zero thereafter, and against a 200-result       */    \
+  /* query's 600 lines it must never be all of them in one frame.               */    \
+  X(SidebarSnippetsTrimmed, "sidebar.snippets_trimmed")                                \
   X(TreeRowsBuilt, "tree.rows_built")                                                  \
   /* The right panel's two memos: derivations performed against derivations   */    \
   /* served from the cache. Every one of its three views was rebuilt per frame, */    \

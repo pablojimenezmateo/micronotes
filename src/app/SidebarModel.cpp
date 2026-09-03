@@ -1,6 +1,7 @@
 #include "app/SidebarModel.h"
 
 #include "CoreAliases.h"
+#include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
 #include "ui/TreeModel.h"
 
@@ -13,6 +14,18 @@
 namespace micronotes::app {
 using ui::Rect;
 using ui::contains;
+
+// The lines a result will show, which is every non-empty matching line it
+// carries. Counted here and trimmed in `fillSearchSnippets`, and the two have to
+// agree or a row's height will not match its text.
+std::size_t countMatchLines(const library::SearchResult& result) {
+  if(result.snippets.empty()) return result.matchLine.empty() ? 0 : 1;
+  std::size_t lines = 0;
+  for(const auto& snippet : result.snippets) {
+    if(!snippet.matchLine.empty()) ++lines;
+  }
+  return lines;
+}
 
 float searchResultRowHeight(std::size_t matchLines) {
   return kSidebarResultTitleHeight + static_cast<float>(matchLines) * kSidebarSnippetHeight + 4.0f;
@@ -41,7 +54,7 @@ namespace {
 // relativises a path and builds a map key for every note before it can place
 // the first row, and every row is a string, a path and a rect. Called through
 // buildSidebarRows(), which is what keeps it off the frame path.
-void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure) {
+void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
   ui.sidebarRows.clear();
   const float top = rect.y + 12.0f;
   float y = top - static_cast<float>(ui.sidebarScroll);
@@ -122,26 +135,18 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure)
       return;
     }
     pushLabel(std::to_string(results.size()) + (results.size() == 1 ? " RESULT" : " RESULTS"));
-    // What the snippets are trimmed to: the row's width, less the indent they
-    // are drawn at and the same margin on the other side.
-    const int snippetRoom = static_cast<int>(rect.w - 16.0f - 28.0f);
-    const auto push = [&](SidebarRow& row, const std::string& line, std::size_t at, std::size_t length) {
-      if(line.empty()) return;
-      row.matchLines.push_back(ui::snippetAroundMatch(line, at, length, snippetRoom, measure));
-    };
-    for(const auto& result : results) {
+    for(std::size_t i = 0; i < results.size(); ++i) {
+      const auto& result = results[i];
       SidebarRow row;
       row.kind = SidebarRow::Kind::SearchResult;
       row.noteId = result.id;
       row.title = result.title;
-      if(result.snippets.empty()) {
-        push(row, result.matchLine, result.matchStart, result.matchLength);
-      } else {
-        for(const auto& snippet : result.snippets) {
-          push(row, snippet.matchLine, snippet.matchStart, snippet.matchLength);
-        }
-      }
-      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, searchResultRowHeight(row.matchLines.size())};
+      row.resultIndex = i;
+      // How many lines the row will show, counted rather than measured. Every
+      // line `fillSearchSnippets` will trim is a non-empty one, so the two
+      // agree without either of them doing the other's work.
+      row.matchLineCount = countMatchLines(result);
+      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, searchResultRowHeight(row.matchLineCount)};
       y += row.rect.h;
       ui.sidebarRows.push_back(std::move(row));
     }
@@ -226,7 +231,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure)
 // do, and both are an offset over a list already built. Rebuilding regardless
 // was ~0.7 ms of a ~1.0 ms frame on a 400-note library, which is most of the
 // frame spent re-deriving three dozen visible rows from four hundred notes.
-void buildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure) {
+void buildSidebarRows(UiRuntime& ui, Rect rect) {
   const auto& workspace = ui.state.workspace();
   const auto& previous = ui.sidebarRowsKey;
   const bool reusable = previous.valid &&
@@ -262,7 +267,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure) {
     return;
   }
 
-  rebuildSidebarRows(ui, rect, measure);
+  rebuildSidebarRows(ui, rect);
 
   auto& key = ui.sidebarRowsKey;
   key.valid = true;
@@ -279,6 +284,39 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SnippetMeasure& measure) {
   key.originY = rect.y;
   // Read back rather than remembered: finish() clamps it.
   key.scroll = ui.sidebarScroll;
+}
+
+void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
+                        const SnippetMeasure& measure) {
+  if(index >= ui.sidebarRows.size()) return;
+  SidebarRow& row = ui.sidebarRows[index];
+  if(row.kind != SidebarRow::Kind::SearchResult || row.matchLinesBuilt) return;
+  row.matchLinesBuilt = true;
+  const auto& results = searchResults(ui);
+  // The row list and the result list share a key, so an index into one holds in
+  // the other -- but the row list survives a scroll without being rebuilt, so
+  // the note id is checked rather than assumed. A row that has come adrift draws
+  // its title with no lines under it, which is what a title-only match looks
+  // like anyway.
+  if(row.resultIndex >= results.size()) return;
+  const auto& result = results[row.resultIndex];
+  if(result.id != row.noteId) return;
+
+  // What the snippets are trimmed to: the row's width, less the indent they are
+  // drawn at and the same margin on the other side.
+  const int room = static_cast<int>(width - 16.0f - 28.0f);
+  const auto push = [&](const std::string& line, std::size_t at, std::size_t length) {
+    if(line.empty()) return;
+    perf::addCounter(perf::CounterId::SidebarSnippetsTrimmed);
+    row.matchLines.push_back(ui::snippetAroundMatch(line, at, length, room, measure));
+  };
+  if(result.snippets.empty()) {
+    push(result.matchLine, result.matchStart, result.matchLength);
+  } else {
+    for(const auto& snippet : result.snippets) {
+      push(snippet.matchLine, snippet.matchStart, snippet.matchLength);
+    }
+  }
 }
 
 // The row under the pointer, or nothing when the pointer is off the list.
