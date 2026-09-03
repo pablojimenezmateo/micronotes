@@ -270,6 +270,10 @@ struct UiRuntime {
   // Rows the raw editor last had room for, so PageUp/PageDown match the view.
   int editorVisibleRows = 20;
   int viewerScroll = 0;
+  // How far the reading pane can be scrolled, as its last draw measured it. The
+  // hit test, the wheel and the scrollbar drag all read it rather than measuring
+  // the document again -- the same arrangement `PageView::maxScroll()` has.
+  int viewerMaxScroll = 0;
   // Fractional remainder of a scroll gesture, in lines (editor) and pixels
   // (viewer). A high-resolution wheel or a trackpad delivers deltas well below
   // 1.0 per event; truncating each one to an int discarded them entirely, so

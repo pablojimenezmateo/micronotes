@@ -892,57 +892,6 @@ static float imagePlaceholderHeight(TextRenderer& text, std::string_view placeho
   return static_cast<float>(std::max<std::size_t>(1, lines.size()) * (text.lineHeight() + 2) + 8);
 }
 
-static int viewerMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
-  Rect page {rect.x + 8, rect.y + 8, rect.w - 16, rect.h - 28};
-  attachments::AttachmentService attachmentService;
-  const auto& doc = previewDocument(ui);
-  // The header belongs to the note, not to the surface it is read on, so the
-  // reading view reserves the same room for it and scrolls it away the same
-  // way. `scrollTop` is where the scroll counts from; `contentTop` is where the
-  // note's own first block starts, which is that plus the header.
-  const float headerHeight = pageHeaderHeight(text, ui);
-  const float scrollTop = page.y + 14.0f;
-  const float contentTop = scrollTop + headerHeight;
-  float contentLeft = 0.0f;
-  float contentWidth = 0.0f;
-  contentColumn(page, contentLeft, contentWidth);
-  float measureY = contentTop;
-  for(const auto& block : doc.blocks) {
-    const bool heading = block.type == markdown::BlockType::Heading;
-    const bool code = block.type == markdown::BlockType::Code;
-    const bool rule = block.type == markdown::BlockType::HorizontalRule;
-    const bool table = block.type == markdown::BlockType::Table;
-    const bool html = block.type == markdown::BlockType::Html;
-    const bool blankLine = block.type == markdown::BlockType::BlankLine;
-    const float indentW = static_cast<float>(std::max(0, block.depth - 1)) * 14.0f;
-    const float markerW = listMarkerWidth(block);
-    const float quoteW = block.type == markdown::BlockType::Quote ? 16.0f : 0.0f;
-    const ui::TextStyle blockStyle = blockTextStyle(block);
-    if(blankLine) {
-      measureY += static_cast<float>(text.lineHeight());
-    } else if(rule) {
-      measureY += 22.0f;
-    } else if(table) {
-      measureY += tableHeight(text, block, contentWidth - indentW) + 12.0f;
-    } else if(code) {
-      const auto lines = codeBlockLines(block);
-      measureY += static_cast<float>(std::max<std::size_t>(1, lines.size()) * lineStepFor(text, blockStyle, 1.5f)) + 18.0f;
-    } else {
-      const auto value = blockText(block);
-      if(!value.empty()) {
-        const auto runs = inlineRuns(block, theme().text);
-        const int lineStep = blockLineStep(text, block);
-        const float chromeW = markerW + quoteW + indentW + admonitionLabelWidth(text, block) + footnoteLabelWidth(text, block);
-        measureY += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(contentWidth - chromeW), blockStyle.size) * lineStep) + blockBottomSpacing(block, heading, html);
-      }
-      for(const auto& image : blockImages(block)) {
-        measureY += imagePlaceholderHeight(text, imagePlaceholder(image, ui, attachmentService), contentWidth);
-      }
-    }
-  }
-  return std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
-}
-
 // One place where a sidebar row turns into a selection, so a click, an arrow
 // key and a drop can never disagree about what selecting a row means.
 static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expandFolder) {
@@ -1097,7 +1046,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 
   if(hasViewer && contains(viewerRect, x, y)) {
     const Rect page = viewerPageRect(viewerRect);
-    if(scrollbarHit(page, ui.viewerScroll, viewerMaxScroll(text, ui, viewerRect), x, y)) {
+    if(scrollbarHit(page, ui.viewerScroll, ui.viewerMaxScroll, x, y)) {
       return CursorKind::Pointer;
     }
     for(const auto& link : ui.linkRegions) {
@@ -1189,8 +1138,15 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
     }
     if(ordered) ++orderedIndex;
   }
-  const int maxScroll = std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
-  ui.viewerScroll = std::clamp(ui.viewerScroll, 0, maxScroll);
+  // Recorded rather than recomputed. There used to be a second copy of the walk
+  // above -- a whole-document measure, block by block, each one measuring its
+  // inline runs -- called to answer "is the pointer over the scrollbar" on every
+  // mouse motion, and again per motion event for the length of a scrollbar drag.
+  // The reading pane now says how far it can be scrolled the way the live pane
+  // always did: the draw is the one thing that has laid the note out, so the
+  // draw is what knows.
+  ui.viewerMaxScroll = std::max(0, static_cast<int>(std::ceil(measureY - scrollTop - page.h + 24.0f)));
+  ui.viewerScroll = std::clamp(ui.viewerScroll, 0, ui.viewerMaxScroll);
   {
     ClipGuard clip(renderer, {page.x + 1, page.y + 1, page.w - 2, page.h - 2});
     drawPageHeader(renderer, text, ui, {contentLeft, scrollTop, contentWidth, headerHeight},
@@ -1344,7 +1300,7 @@ static void drawViewer(SDL_Renderer* renderer, TextRenderer& text, ImageCache& i
                        ui.state.workspace().paneMode() == ui::PaneMode::Split ? "type on the left" : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
     }
   }
-  drawVerticalScrollbar(renderer, page, ui.viewerScroll, maxScroll);
+  drawVerticalScrollbar(renderer, page, ui.viewerScroll, ui.viewerMaxScroll);
 }
 
 
@@ -2094,7 +2050,7 @@ static void scrollPaneUnderPointer(TextRenderer& text, UiRuntime& ui, float notc
     const float whole = std::trunc(ui.viewerScrollRemainder);
     ui.viewerScrollRemainder -= whole;
     ui.viewerScroll = std::clamp(ui.viewerScroll + static_cast<int>(whole), 0,
-                                 viewerMaxScroll(text, ui, viewerRect));
+                                 ui.viewerMaxScroll);
   } else if(wheelEditor) {
     ui.editorScrollRemainder += -notches * kEditorScrollLinesPerNotch;
     const float whole = std::trunc(ui.editorScrollRemainder);
@@ -2606,7 +2562,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     if(hasViewer) {
       Rect page {viewerRect.x + 8, viewerRect.y + 8, viewerRect.w - 16, viewerRect.h - 28};
-      const int maxScroll = viewerMaxScroll(text, ui, viewerRect);
+      const int maxScroll = ui.viewerMaxScroll;
       const auto thumb = scrollbarThumb(page, ui.viewerScroll, maxScroll);
       if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
         ui.scrollDragTarget = ScrollDragTarget::Viewer;
@@ -3229,8 +3185,7 @@ int run(ApplicationOptions options) {
               viewerRect = {layout.content.x + split, layout.content.y, layout.content.w - split, layout.content.h};
             }
             Rect page {viewerRect.x + 8, viewerRect.y + 8, viewerRect.w - 16, viewerRect.h - 28};
-            const int maxScroll = viewerMaxScroll(text, ui, viewerRect);
-            ui.viewerScroll = scrollFromThumbY(page, event.motion.y, ui.scrollDragOffsetY, maxScroll);
+            ui.viewerScroll = scrollFromThumbY(page, event.motion.y, ui.scrollDragOffsetY, ui.viewerMaxScroll);
           }
         } else if(ui.draggingNote || ui.draggingFolder) {
           const ShellLayout layout = shellLayout(ui, width, height);
