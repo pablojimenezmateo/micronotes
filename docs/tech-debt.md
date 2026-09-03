@@ -99,6 +99,15 @@ still read thirteen.
 hover and drop-target state that a reader has to check does not depend on rows
 outside the band before narrowing it.
 
+**There is a second site.** `sidebarRowAt` in `src/app/SidebarModel.cpp` is the
+same linear walk, and it runs on every mouse-motion event rather than every
+frame — the cursor classifier asks it what is under the pointer. A pointer moved
+across the sidebar is a hundred events a second, so the same bound is paid more
+often there than in the draw. Both should take the same binary search, and they
+should take it from the same helper: a row list that is sorted by `rect.y` for
+the draw and searched linearly for the hit test is a list whose two readers
+disagree about what it is.
+
 ## TD-4 — `turnBlocksInto` rescans its chunk once per block
 
 `src/doc/Edits.cpp`, `turnBlocksInto`.
@@ -144,3 +153,65 @@ Not repeated here. Each is a `### Open:` section with its own numbers:
 - the live page's hooks are rebuilt every frame
 - the cache sweep frees what the next relayout is about to allocate
   (unmeasured)
+
+## TD-7 — the reading pane is a second renderer for the same Markdown
+
+`src/app/Application.cpp`, `drawViewer` — about 230 lines.
+
+The live surface renders through `doc::BlockScan` and `doc::Layout` into
+`PageView`, which caches per block, lays out only what has changed, and draws
+only the visible band. The reading pane renders the same note a second time,
+from a separate md4c `markdown::Document`, with its own geometry written inline:
+its own indent step, its own quote gutter, its own callout tint and 7-pixel mark,
+its own task checkbox, its own code block, its own table, its own image scaling.
+
+**What it costs today.**
+
+*Divergence.* The two have already drifted, and the comments in `drawViewer`
+admit it: `ui::calloutStyle` is called there with the note "the same palette the
+live surface uses, so a callout does not change colour when the note is read
+instead of edited" — a comment that only needs writing because the colour is the
+only thing the two share. The geometry is not shared: the callout mark is
+`markSize = 7.0f` at `callout.x + 6.0f` in both files, written out twice, and
+`PageView` lowercases a callout's kind for its label while the reading pane
+draws `block.admonitionType` as the author typed it.
+
+*Speed.* It is O(document) per frame with no cache of any kind — the whole note
+measured, then the whole note walked again to draw it, where the live pane's
+equivalent is O(visible) after the first layout. Measured on a 371 KB note at
+1600x1000 (Release, three headless runs of 60 frames): `shell.content` is 23-65
+ms per frame in the reading pane, of which a scope timer put 94-96% in the
+measure walk. The live pane draws the same note in a fraction of that.
+
+**Why it is still here.** It is a rewrite, not a fix: the reading pane would have
+to become `PageView` with the caret and the hover affordances off, which means
+`doc::Layout` growing a read-only mode and the anchors, the link regions and the
+image cache moving with it. That is worth doing and it is not worth doing under
+another change. The duplicate *scroll measurement* — the part that was costing a
+note-sized walk per mouse-motion event — is gone (`perf(viewer)`), which takes
+the sharp edge off it.
+
+**What the fix is.** Point the reading pane at `PageView`. The live surface
+already draws everything the reading pane draws, minus the caret, the gutter
+handles and the block toolbar, all of which are already conditional on focus or
+hover. The 230 lines then delete, and there is one Markdown renderer again.
+
+## TD-8 — three empty-state rects with a height nobody measured
+
+`src/app/Sidebar.cpp` `drawSidebarEmpty`, `src/app/RightPanel.cpp`, and
+`ui::drawEmptyMessage` itself.
+
+Every caller of `drawEmptyMessage` passes a rect with a made-up height — 100,
+110, 120 — and the message lays its three lines out inside whatever it was
+given. Nothing checks that the lines fit, so at the large text size a
+three-line empty state can run past the box it was told about, and the box is
+not drawn so nobody notices until the text collides with something below it.
+
+**Why it is still here.** Nothing is drawn below any of the three today, so the
+overflow is invisible. It is listed because that is a property of the current
+layout rather than of the code: the first surface that puts something under an
+empty state inherits the bug.
+
+**What the fix is.** `drawEmptyMessage` should take an origin and a width and
+return the height it used, the way every other measured thing in the shell does.
+The callers then have a number instead of a guess.
