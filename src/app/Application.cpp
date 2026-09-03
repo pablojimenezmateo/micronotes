@@ -1681,17 +1681,6 @@ static void openIconPrompt(UiRuntime& ui) {
 }
 
 // `~` for the home directory, as everything else that prints a path does.
-static std::string displayPath(const std::filesystem::path& path) {
-  const auto text = path.generic_string();
-  const char* home = std::getenv("HOME");
-  if(!home || !*home) return text;
-  const std::string prefix(home);
-  if(text.rfind(prefix, 0) != 0) return text;
-  if(text.size() == prefix.size()) return "~";
-  if(text[prefix.size()] != '/') return text;
-  return "~" + text.substr(prefix.size());
-}
-
 // Settings are a list of what can change and what it is now; each row opens the
 // list of its own values. A list overlay rather than a panel of widgets,
 // because the keyboard, the filter and the dismissal rules are then the ones
@@ -1701,7 +1690,7 @@ static void openLibraryPrompt(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "settings-library";
   overlay.title = "Library folder";
-  overlay.value.beginWith(ui.state.hasLibrary() ? displayPath(ui.state.libraryRoot()) : std::string {});
+  overlay.value.beginWith(ui.state.hasLibrary() ? ui::displayPath(ui.state.libraryRoot()) : std::string {});
   overlay.placeholder = "~/Notes";
   overlay.hint = "Enter open   Esc cancel   a folder that is not there is created";
   overlay.width = 520.0f;
@@ -1737,15 +1726,15 @@ void switchLibrary(UiRuntime& ui, const std::string& typed) {
   persistLibraryState(ui);
   try {
     if(!openLibraryRoot(ui, root)) {
-      ui.status = "Could not open " + displayPath(root);
+      ui.status = "Could not open " + ui::displayPath(root);
       return;
     }
   } catch(const std::exception& error) {
-    ui.status = "Could not open " + displayPath(root) + ": " + error.what();
+    ui.status = "Could not open " + ui::displayPath(root) + ": " + error.what();
     return;
   }
   writeConfiguredLibraryRoot(root);
-  ui.status = "Opened " + displayPath(root);
+  ui.status = "Opened " + ui::displayPath(root);
 }
 
 // Every binding the shell has, grouped, from the one table that also feeds the

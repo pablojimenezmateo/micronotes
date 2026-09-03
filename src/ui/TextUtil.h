@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -75,6 +76,13 @@ bool isRemoteTarget(std::string_view target);
 
 // What to call a clipboard image, given the MIME type it arrived as.
 std::string fileNameForMime(std::string_view mime);
+
+// A path as the shell shows it: the home directory written as `~`.
+//
+// One copy. There were two byte-identical ones, in Application.cpp's anonymous
+// namespace and in SettingsDialog.cpp's, which is the shape a helper takes when
+// the file it started in cannot be included from.
+std::string displayPath(const std::filesystem::path& path);
 
 // Tags round-trip through a space-separated line in the tag editor.
 std::vector<std::string> splitTags(std::string_view value);

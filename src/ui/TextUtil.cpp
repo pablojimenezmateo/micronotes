@@ -1,10 +1,22 @@
 #include "ui/TextUtil.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <set>
 #include <sstream>
 
 namespace micronotes::ui {
+
+std::string displayPath(const std::filesystem::path& path) {
+  const auto text = path.generic_string();
+  const char* home = std::getenv("HOME");
+  if(!home || !*home) return text;
+  const std::string prefix(home);
+  if(text.rfind(prefix, 0) != 0) return text;
+  if(text.size() == prefix.size()) return "~";
+  if(text[prefix.size()] != '/') return text;
+  return "~" + text.substr(prefix.size());
+}
 
 std::vector<std::string> splitLines(std::string_view text) {
   std::vector<std::string> lines;

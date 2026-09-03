@@ -3,6 +3,7 @@
 #include "app/Shell.h"
 
 #include "ui/Settings.h"
+#include "ui/TextUtil.h"
 #include "ui/Theme.h"
 
 #include <cstdlib>
@@ -13,17 +14,6 @@ namespace micronotes::app {
 namespace {
 
 // `~` for the home directory, so a library path fits on a settings row.
-std::string displayPath(const std::filesystem::path& path) {
-  const auto text = path.generic_string();
-  const char* home = std::getenv("HOME");
-  if(!home || !*home) return text;
-  const std::string prefix(home);
-  if(text.rfind(prefix, 0) != 0) return text;
-  if(text.size() == prefix.size()) return "~";
-  if(text[prefix.size()] != '/') return text;
-  return "~" + text.substr(prefix.size());
-}
-
 }
 
 void openSettings(UiRuntime& ui) {
@@ -40,7 +30,7 @@ void openSettings(UiRuntime& ui) {
   overlay.items.push_back({"page-width", "Page width", std::string(ui::pageWidthLabel(ui::pageWidth())), "", true, false});
   // Trimmed from the left: a truncated path keeps the half that says which
   // folder this is, not the half every path on the machine shares.
-  std::string library = ui.state.hasLibrary() ? displayPath(ui.state.libraryRoot()) : std::string("none");
+  std::string library = ui.state.hasLibrary() ? ui::displayPath(ui.state.libraryRoot()) : std::string("none");
   if(library.size() > 34) {
     const auto root = ui.state.libraryRoot();
     library = "\xe2\x80\xa6/" + root.parent_path().filename().generic_string() + "/" + root.filename().generic_string();
