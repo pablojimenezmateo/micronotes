@@ -1,6 +1,8 @@
 #include "core/editor/SingleLineView.h"
 #include "ui/Overlay.h"
 
+#include "core/perf/PerformanceCounters.h"
+
 #include "ui/Fuzzy.h"
 #include "ui/Metrics.h"
 
@@ -47,27 +49,44 @@ void OverlayStack::closeAll() {
   stack_.clear();
 }
 
-std::vector<int> OverlayStack::visibleIndices(const Overlay& overlay) const {
-  std::vector<int> indices;
-  if(!overlay.filterable || overlay.value.empty()) {
-    for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) indices.push_back(i);
-    return indices;
+const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) const {
+  const std::string& query = overlay.value.text();
+  if(overlay.filterCacheValid && overlay.filterCacheQuery == query) {
+    perf::addCounter(perf::CounterId::OverlayFilterReused);
+    return overlay.filterCache;
+  }
+  perf::addCounter(perf::CounterId::OverlayFilterRuns);
+  overlay.filterCacheValid = true;
+  overlay.filterCacheQuery = query;
+  // Reused rather than reallocated: the vector is refilled at every keystroke
+  // of a palette the size of the library.
+  overlay.filterCache.clear();
+  if(!overlay.filterable || query.empty()) {
+    overlay.filterCache.reserve(overlay.items.size());
+    for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) overlay.filterCache.push_back(i);
+    return overlay.filterCache;
   }
   std::vector<std::pair<int, int>> scored;  // (score, index)
   for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) {
     const auto& item = overlay.items[static_cast<std::size_t>(i)];
-    auto score = fuzzyScore(item.label, overlay.value.text());
-    if(!score && !item.detail.empty()) score = fuzzyScore(item.detail, overlay.value.text());
+    perf::addCounter(perf::CounterId::OverlayFilterItemsScored);
+    auto score = fuzzyScore(item.label, query);
+    if(!score && !item.detail.empty()) score = fuzzyScore(item.detail, query);
     if(score) scored.emplace_back(*score, i);
   }
   std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
-  for(const auto& [_, index] : scored) indices.push_back(index);
-  return indices;
+  overlay.filterCache.reserve(scored.size());
+  for(const auto& [_, index] : scored) overlay.filterCache.push_back(index);
+  return overlay.filterCache;
 }
 
 OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const {
   Layout layout;
-  const auto indices = visibleIndices(overlay);
+  // A reference into the standing answer: the layout only reads it, and nothing
+  // in here changes the query it is keyed on. On a "Go to note" palette over a
+  // large library this is the difference between one vector and a copy of it per
+  // frame.
+  const std::vector<int>& indices = visibleIndices(overlay);
   const bool field = usesField(overlay);
 
   const float titleH = overlay.title.empty() ? 0.0f : static_cast<float>(text.lineHeight(TextStyle {FontFamily::Sans, true, false, type().small})) + 8.0f;
@@ -366,9 +385,11 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     if(index < 0) {
       const bool isConfirm = index == -1;
       const bool hot = contains(rect, mouseX_, mouseY_);
-      const SDL_Color face = isConfirm ? (overlay->items.empty() ? theme().warn : theme().warn) : theme().surface;
-      drawRoundedSurface(renderer, rect, isConfirm ? face : (hot ? theme().hoverBg : theme().surface),
-                         isConfirm ? face : theme().hairline, kRadiusSmall);
+      // Confirm wears the destructive colour: every Confirm overlay in the shell
+      // asks about a deletion, and a button that is about to delete something
+      // should not look like the one beside it that will not.
+      drawRoundedSurface(renderer, rect, isConfirm ? theme().warn : (hot ? theme().hoverBg : theme().surface),
+                         isConfirm ? theme().warn : theme().hairline, kRadiusSmall);
       const auto label = isConfirm ? overlay->confirmLabel : std::string("Cancel");
       const int labelW = text.width(label, bodyStyle);
       text.draw(label, rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f,
@@ -411,7 +432,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
 
   // A list taller than the panel says so, or the last visible row would read as
   // the end of the list.
-  const auto filtered = visibleIndices(*overlay);
+  const auto& filtered = visibleIndices(*overlay);
   if(overlay->kind == OverlayKind::List && !layout.itemRects.empty() &&
      filtered.size() > layout.itemRects.size()) {
     const Rect firstRow = layout.itemRects.front();

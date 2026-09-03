@@ -70,6 +70,21 @@ struct Overlay {
   float anchorX = 0.0f;
   float anchorY = 0.0f;
   float width = 340.0f;
+
+  // What the filter last answered, and for which query.
+  //
+  // Filtering is a fuzzy score against every item's label and detail, a
+  // stable_sort of what matched, and two vectors -- and it was run from scratch
+  // on every call. The layout calls it, the draw calls it again, and so does
+  // every arrow key, every wheel notch and every commit, so one frame of an open
+  // "Go to note" palette scored the whole library at least twice to address the
+  // twenty rows it can show. The query is the only thing it depends on that
+  // moves, and the items are fixed once the overlay is open, so the query is the
+  // key. Mutable because filtering is a query in the other sense too: asking
+  // which items match has not changed anything a caller can observe.
+  mutable std::vector<int> filterCache;
+  mutable std::string filterCacheQuery;
+  mutable bool filterCacheValid = false;
 };
 
 struct OverlayResult {
@@ -110,7 +125,7 @@ private:
   };
 
   Layout layoutFor(const Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const;
-  std::vector<int> visibleIndices(const Overlay& overlay) const;
+  const std::vector<int>& visibleIndices(const Overlay& overlay) const;
   std::optional<OverlayResult> commit();
   void moveHighlight(int delta);
   // A list longer than the panel scrolls to follow the highlight, so arrowing

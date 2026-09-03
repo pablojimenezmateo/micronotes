@@ -95,6 +95,17 @@
   X(RightPanelOutlineReused, "right_panel.outline_reused")                             \
   X(RightPanelLibraryBuilds, "right_panel.library_builds")                             \
   X(RightPanelLibraryReused, "right_panel.library_reused")                             \
+  /* The palette's filter: runs against calls served from the standing answer,  */    \
+  /* and items scored, which is the actual work. Filtering is a fuzzy score over */    \
+  /* every item plus a sort, and it used to run from scratch at every call site  */    \
+  /* -- the layout, the draw, each arrow key, each wheel notch -- so one frame   */    \
+  /* of an open "Go to note" scored the whole library at least twice. Read       */    \
+  /* items_scored against frame.presents: with a palette open and nothing being  */    \
+  /* typed it should stay flat, and it climbing with the frame count means the   */    \
+  /* query key has stopped discriminating.                                       */    \
+  X(OverlayFilterRuns, "overlay.filter_runs")                                          \
+  X(OverlayFilterReused, "overlay.filter_reused")                                      \
+  X(OverlayFilterItemsScored, "overlay.filter_items_scored")                           \
   /* Text the shell had to shorten to fit. Each call used to pop one byte at a   */    \
   /* time and re-measure the whole string, so a long title cost dozens of        */    \
   /* shaping passes; measures is what says whether that is still true.           */    \
