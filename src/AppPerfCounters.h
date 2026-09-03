@@ -157,6 +157,12 @@
   /* Fold predicate calls. Answered per block per update, and each answer that is */   \
   /* not the cheap early-out builds a fold key string.                            */   \
   X(LayoutFoldQueries, "layout.fold_queries")                                          \
+  /* Updates that resolved no folds at all, because the caller offered no fold    */   \
+  /* predicate and the standing resolution was already empty. A note with nothing */   \
+  /* collapsed -- which is most notes, most of the time -- then costs no fold     */   \
+  /* work on an edit rather than a per-block predicate call and a memcmp of the   */   \
+  /* result against itself. Read against update_calls.                            */   \
+  X(LayoutFoldResolutionsSkipped, "layout.fold_resolutions_skipped")                   \
   /* Inline markup work inside a relaid block: spans the inline scanner found,  */     \
   /* and content bytes given a per-byte attribute slot to hold their formatting. */    \
   /* attr_bytes is the one to watch -- it is a heap allocation and a zero fill    */   \

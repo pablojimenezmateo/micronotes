@@ -384,7 +384,7 @@ std::size_t DocumentLayout::lastRelaidBlocks() const {
   return lastRelaid_;
 }
 
-void DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
+bool DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
                                   const LayoutOptions& options,
                                   std::vector<std::uint8_t>* out) const {
   // Fold ranges come from the block structure, so they can only be resolved
@@ -392,7 +392,9 @@ void DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
   // blocks each head swallows.
   std::vector<std::uint8_t>& hidden = *out;
   hidden.assign(blocks.size(), 0);
-  for(std::size_t i = 0; options.folded && i < blocks.size(); ++i) {
+  if(!options.folded) return false;
+  bool any = false;
+  for(std::size_t i = 0; i < blocks.size(); ++i) {
     // A fold nested inside a collapsed one is already hidden, and costs
     // nothing to resolve again.
     if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
@@ -400,7 +402,9 @@ void DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
     if(!options.folded(blocks[i])) continue;
     const std::size_t end = foldEnd(blocks, i);
     for(std::size_t j = i + 1; j < end; ++j) hidden[j] = 1;
+    any = any || end > i + 1;
   }
+  return any;
 }
 
 // The first and last index at which two byte spans differ, or `{kNone, kNone}`
@@ -685,10 +689,16 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
     // describes this call too -- if nothing about the folds has moved. A stamped
     // caller says so directly; an unstamped one has to be asked block by block.
     const bool foldsStamped = options.foldRevision != 0 && options.foldRevision == foldRevision_;
+    // A caller offering no predicate is saying nothing is folded. If nothing
+    // was folded last time either, the resolution is the same all-zero array it
+    // already is -- so there is nothing to build and nothing to compare it to.
+    const bool foldsAbsent = !options.folded && !anyHidden_ && hidden_.size() == blocks_.size();
     std::pair<std::size_t, std::size_t> foldDiff {kNone, kNone};
-    if(!foldsStamped) {
+    if(foldsAbsent) {
+      perf::addCounter(perf::CounterId::LayoutFoldResolutionsSkipped);
+    } else if(!foldsStamped) {
       const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
-      resolveFolds(blocks_, options, &spareHidden_);
+      anyHidden_ = resolveFolds(blocks_, options, &spareHidden_);
       foldDiff = diffSpan(spareHidden_.data(), hidden_.data(),
                           std::min(spareHidden_.size(), hidden_.size()));
       if(spareHidden_.size() != hidden_.size()) foldDiff = {0, spareHidden_.size()};
@@ -758,16 +768,23 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
       rescan(window, previousBytes, &head, &tail);
     }
     perf::addCounter(perf::CounterId::LayoutBlocksScanned, blocks_.size());
-    {
+    // Same question on the edit path, where the block count moved: an all-zero
+    // resolution of the new length is still the same answer, so only the array
+    // has to be resized, and neither diff below can find anything in it.
+    const bool foldsAbsent = !options.folded && !anyHidden_;
+    if(foldsAbsent) {
+      perf::addCounter(perf::CounterId::LayoutFoldResolutionsSkipped);
+      spareHidden_.assign(blocks_.size(), 0);
+    } else {
       const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
-      resolveFolds(blocks_, options, &spareHidden_);
+      anyHidden_ = resolveFolds(blocks_, options, &spareHidden_);
     }
     const std::size_t count = blocks_.size();
     // The blocks between the two carried-over ends are the edit itself, and the
     // block either side of them can have changed which quote run it belongs to
     // -- that is the one flag decided by a neighbour rather than by the block.
     markDirty(head > 0 ? head - 1 : 0, std::min(count - tail, count - 1));
-    if(patchable) {
+    if(patchable && !foldsAbsent) {
       // The fold state has to be diffed across the edit's index shift: the
       // blocks before it kept their index, the ones after it moved by the change
       // in block count, and the ones between are being rebuilt anyway.

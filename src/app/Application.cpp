@@ -9,6 +9,7 @@
 #include "app/Ribbon.h"
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
+#include "app/Folds.h"
 #include "app/FramePolicy.h"
 #include "app/FrameTrace.h"
 #include "app/Screenshot.h"
@@ -1773,24 +1774,11 @@ static void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, 
   };
   ui.livePage.setHooks(std::move(hooks));
 
-  PageFolds folds;
-  const std::string noteId = ui.state.selection().noteId;
-  folds.collapsed = [&ui, noteId](const doc::SourceBlock& block) {
-    // Building a key means building a string, so a note with nothing folded
-    // never pays for one.
-    if(!ui.folds.anyFolded(noteId)) return false;
-    return ui.folds.folded(noteId, doc::foldKey(ui.editor.text(), block));
-  };
-  folds.expand = [&ui, noteId](const doc::SourceBlock& block) {
-    ui.folds.unfold(noteId, doc::foldKey(ui.editor.text(), block));
-  };
-  ui.livePage.setFolds(std::move(folds));
-  // What the layout's reuse check needs so it does not re-derive both from the
-  // document. +1 because zero means "cannot say"; the fold stamp mixes in the
-  // note, since switching notes changes what `collapsed` answers on its own.
-  const std::uint64_t foldStamp =
-      ui.folds.revision() * 1000003ull + std::hash<std::string> {}(noteId) + 1ull;
-  ui.livePage.setRevisions(ui.editor.revision() + 1ull, foldStamp);
+  auto folds = noteFolds(ui.folds, ui.editor, ui.state.selection().noteId);
+  ui.livePage.setFolds(std::move(folds.page));
+  // The source stamp is the editor's revision; +1 because zero means "cannot
+  // say" to the layout's reuse check.
+  ui.livePage.setRevisions(ui.editor.revision() + 1ull, folds.stamp);
   ui.livePage.setPointer(ui.mouseX, ui.mouseY);
   ui.livePage.setBlockSelection({ui.blockSelectActive, ui.blockSelectAnchor, ui.blockSelectFocus});
   ui.livePage.setDropOffset(ui.draggingBlock ? ui.blockDropOffset : std::nullopt);

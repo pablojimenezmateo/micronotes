@@ -336,7 +336,9 @@ private:
   // instead of allocated per keystroke. A byte rather than a `vector<bool>` bit
   // because the placement patch has to *diff* two generations of this to learn
   // which blocks a fold change moved, and a byte-wise diff is a `memcmp`.
-  void resolveFolds(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
+  // Returns whether anything came out hidden, which is the state that lets the
+  // next call skip the resolution altogether.
+  bool resolveFolds(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
                     std::vector<std::uint8_t>* out) const;
   std::size_t blockIndexFor(std::size_t offset) const;
 
@@ -377,6 +379,12 @@ private:
   std::vector<SourceBlock> blocks_;
   std::vector<Placed> placed_;
   std::vector<std::uint8_t> hidden_;
+  // Whether `hidden_` holds a single 1. A note with nothing folded -- which is
+  // most notes, most of the time -- can then have its fold resolution skipped
+  // outright rather than recomputed and compared against itself: an all-zero
+  // resolution of the right length is the same answer whatever the block list
+  // did, provided the caller is not offering a fold predicate at all.
+  bool anyHidden_ = false;
   // Prefix sum of visual lines: `lineStart_[i]` is how many rows the blocks
   // before `i` contribute, so `lineStart_.back()` is the document's row count
   // and a row maps back to its block by binary search. This was a materialised
