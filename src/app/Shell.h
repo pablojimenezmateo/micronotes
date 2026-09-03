@@ -96,13 +96,7 @@ inline const char* focusName(FocusArea focus) {
     case FocusArea::TagEditor: return "TagEditor";
     case FocusArea::RenameNote: return "RenameNote";
     case FocusArea::RenameFolder: return "RenameFolder";
-  // A note's icon, or a drawn mark when no emoji face is installed.
-void drawNoteIcon(SDL_Renderer* renderer, ui::TextRenderer& text, std::string_view icon, Rect box, SDL_Color color);
-
-// What the status bar calls the current pane mode.
-const char* paneModeName(ui::PaneMode mode);
-
-}
+  }
   return "Unknown";
 }
 
