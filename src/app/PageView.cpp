@@ -414,24 +414,6 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
       fill(renderer, toRect(rect, ox, oy), theme().selectionBg);
     }
   }
-  if(!findQuery.empty()) {
-    const perf::ScopeTimer findTimer("page.draw.find_highlight");
-    const std::string& source = document_.source();
-    // The whole note, every frame, for as long as the find bar is open.
-    perf::addCounter(perf::CounterId::PageFindScanBytes, source.size());
-    std::size_t at = source.find(findQuery);
-    while(at != std::string::npos) {
-      for(const auto& rect : document_.selectionRects(at, at + findQuery.size())) {
-        const Rect hit = toRect(rect, ox, oy);
-        fill(renderer, hit, theme().findBg);
-        stroke(renderer, hit, theme().findBorder);
-      }
-      at = source.find(findQuery, at + std::max<std::size_t>(1, findQuery.size()));
-    }
-  }
-
-  drawBlockDecorations(renderer, text);
-
   const auto& blocks = document_.blocks();
   // Only the blocks that reach the viewport. This used to walk the whole note
   // and test each block against the page, which made a draw cost the document
@@ -439,6 +421,16 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   // frame, on a 235 KB note. The counters below are what said so, and they stay
   // to keep saying so.
   const auto [firstBlock, lastBlock] = visibleBlocks();
+
+  if(!findQuery.empty()) {
+    const perf::ScopeTimer findTimer("page.draw.find_highlight");
+    drawFindHighlights(renderer, findQuery, firstBlock, lastBlock, ox, oy);
+  } else {
+    findMatchesValid_ = false;
+  }
+
+  drawBlockDecorations(renderer, text);
+
   perf::addCounter(perf::CounterId::PageBlocksVisited, lastBlock - firstBlock);
   std::size_t blocksDrawn = 0;
   std::size_t runsDrawn = 0;
@@ -553,6 +545,57 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   drawGutter(renderer, text);
   drawToolbar(renderer, text, selection);
   drawScrollbar(renderer, page_, scroll_, maxScroll());
+}
+
+// Highlighting a find query used to be two O(document) costs on every frame the
+// find bar was open: `std::string::find` over the whole note, and a
+// `selectionRects` call -- which measures text -- for every match in the file,
+// however far off screen it was. On a 235 KB note with a common word in it that
+// is the whole frame.
+//
+// Both are bounded here. The match list is a function of the buffer and the
+// query, so it is found once and stands until one of them moves; and only the
+// matches inside the band of blocks the window is showing get a rect built for
+// them, which is a pair of binary searches over a sorted list.
+void PageView::drawFindHighlights(SDL_Renderer* renderer, std::string_view findQuery,
+                                  std::size_t firstBlock, std::size_t lastBlock, float ox, float oy) {
+  const std::string& source = document_.source();
+  const std::size_t step = std::max<std::size_t>(1, findQuery.size());
+  // A caller with no revision to offer -- a test, or a surface that does not
+  // stamp its buffer -- gets the search every frame, exactly as `update` does.
+  const bool cached = findMatchesValid_ && sourceRevision_ != 0 &&
+                      findMatchRevision_ == sourceRevision_ && findMatchQuery_ == findQuery;
+  if(!cached) {
+    perf::addCounter(perf::CounterId::PageFindScanBytes, source.size());
+    findMatches_.clear();
+    for(std::size_t at = source.find(findQuery); at != std::string::npos;
+        at = source.find(findQuery, at + step)) {
+      findMatches_.push_back(at);
+    }
+    findMatchQuery_ = findQuery;
+    findMatchRevision_ = sourceRevision_;
+    findMatchesValid_ = true;
+  }
+  if(findMatches_.empty()) return;
+
+  const auto& blocks = document_.blocks();
+  if(firstBlock >= lastBlock || blocks.empty()) return;
+  // A match starting just before the first visible block can still reach into
+  // it, so the band opens one block early. It cannot reach further than that:
+  // a block boundary is a line boundary and a match is one line of source.
+  const std::size_t from = blocks[firstBlock > 0 ? firstBlock - 1 : 0].start;
+  const std::size_t to = blocks[std::min(lastBlock, blocks.size()) - 1].end;
+  const auto begin = std::lower_bound(findMatches_.begin(), findMatches_.end(), from);
+  const auto end = std::lower_bound(findMatches_.begin(), findMatches_.end(), to);
+  perf::addCounter(perf::CounterId::PageFindHighlightsDrawn,
+                   static_cast<std::uint64_t>(end - begin));
+  for(auto it = begin; it != end; ++it) {
+    for(const auto& rect : document_.selectionRects(*it, *it + findQuery.size())) {
+      const Rect hit = toRect(rect, ox, oy);
+      fill(renderer, hit, theme().findBg);
+      stroke(renderer, hit, theme().findBorder);
+    }
+  }
 }
 
 void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) {

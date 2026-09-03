@@ -178,6 +178,12 @@ private:
   std::pair<std::size_t, std::size_t> visibleBlocks() const;
   // Backgrounds and rules, drawn under the text of every visible block.
   void drawBlockDecorations(SDL_Renderer* renderer, ui::TextRenderer& text);
+  // The find query's matches, banded to the blocks on screen. Kept out of
+  // `draw` because the interesting part is what it does *not* do: it does not
+  // search the note unless the note or the query moved, and it does not build a
+  // rect for a match the window cannot show.
+  void drawFindHighlights(SDL_Renderer* renderer, std::string_view findQuery, std::size_t firstBlock,
+                          std::size_t lastBlock, float ox, float oy);
   // The language label and copy button, drawn over a code block's first line.
   void drawCodeChrome(SDL_Renderer* renderer, ui::TextRenderer& text);
   void drawFoldControls(SDL_Renderer* renderer);
@@ -206,6 +212,14 @@ private:
   PageFolds folds_;
   std::uint64_t sourceRevision_ = 0;
   std::uint64_t foldRevision_ = 0;
+  // Where the find query matches, found once and kept until the query or the
+  // buffer moves. Recomputing it per frame made an open find bar cost a pass
+  // over the note at frame rate; drawing all of it made the highlight cost the
+  // document rather than the window.
+  std::vector<std::size_t> findMatches_;
+  std::string findMatchQuery_;
+  std::uint64_t findMatchRevision_ = 0;
+  bool findMatchesValid_ = false;
   PageBlockSelection blockSelection_;
   std::optional<std::size_t> dropOffset_;
   float pointerX_ = -1.0f;

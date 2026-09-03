@@ -138,11 +138,15 @@ public:
 
   void draw(std::string_view value, float x, float y, SDL_Color color, const ui::TextStyle& style) {
     if(value.empty()) return;
-    const std::string text(value);
     x = std::round(x);
     y = std::round(y);
     if(fonts_.ready()) {
-      const CachedText* cached = texture(text, color, style);
+      // No `std::string` here. Every cache below this point is keyed on a hash
+      // of the bytes and takes a view, and the rasterizer takes a view too --
+      // so materialising one cost an allocation per drawn run per frame, on the
+      // path that runs for every word on screen, purely to be looked up and
+      // thrown away. Only the no-font fallback needs a terminator.
+      const CachedText* cached = texture(value, color, style);
       if(!cached) return;
       const float scale = fonts_.displayScale();
       SDL_FRect dst {x, y, static_cast<float>(cached->w) / scale, static_cast<float>(cached->h) / scale};
@@ -150,7 +154,7 @@ public:
       return;
     }
     SDL_SetRenderDrawColor(renderer_, color.r, color.g, color.b, color.a);
-    SDL_RenderDebugText(renderer_, x, y, text.c_str());
+    SDL_RenderDebugText(renderer_, x, y, std::string(value).c_str());
   }
 
   // Draws an emoji scaled to fit inside `box` and centred there. A colour emoji
@@ -161,7 +165,7 @@ public:
   bool drawIcon(std::string_view value, Rect box, SDL_Color color) {
     if(value.empty() || !fonts_.ready() || box.w <= 0.0f || box.h <= 0.0f) return false;
     if(!fonts_.hasIconFont()) return false;
-    const CachedText* cached = iconTexture(std::string(value), color);
+    const CachedText* cached = iconTexture(value, color);
     if(!cached || cached->w <= 0 || cached->h <= 0) return false;
     const float w = static_cast<float>(cached->w);
     const float h = static_cast<float>(cached->h);
@@ -215,7 +219,7 @@ private:
     };
   }
 
-  const CachedText* iconTexture(const std::string& text, SDL_Color color) {
+  const CachedText* iconTexture(std::string_view text, SDL_Color color) {
     if(const auto* hit = iconCache_.find(text, color, render::TextTextureCache::Style {})) return hit;
     SDL_Surface* surface = fonts_.renderIcon(text, color);
     if(!surface) return nullptr;
@@ -226,7 +230,7 @@ private:
     return iconCache_.insert(text, color, render::TextTextureCache::Style {}, entry);
   }
 
-  const CachedText* texture(const std::string& text, SDL_Color color, const ui::TextStyle& style) {
+  const CachedText* texture(std::string_view text, SDL_Color color, const ui::TextStyle& style) {
     const auto key = cacheStyle(style);
     if(const auto* hit = cache_.find(text, color, key)) return hit;
     perf::addCounter(perf::CounterId::RenderTextRasterizations);

@@ -193,8 +193,12 @@
   X(PageDecorationBlocksVisited, "page.decoration_blocks_visited")                     \
   X(PageCodeChromeBlocksVisited, "page.code_chrome_blocks_visited")                    \
   X(PageFoldControlBlocksVisited, "page.fold_control_blocks_visited")                  \
-  /* Bytes the find highlighter scans. It runs std::string::find over the whole    */  \
-  /* note on every frame a query is open, so this is document size times frame     */  \
-  /* rate -- and it is zero when nothing is being searched, which is why it needs  */  \
-  /* its own row rather than folding into the draw.                                */  \
-  X(PageFindScanBytes, "page.find_scan_bytes")
+  /* Bytes the find highlighter scans, and matches it draws. The scan used to run  */  \
+  /* over the whole note on every frame a query was open -- document size times    */  \
+  /* frame rate -- and then built selection rects for every match in the file,     */  \
+  /* including the ones nowhere near the window. Now the match list is found once  */  \
+  /* per (query, revision) and only the matches inside the visible band are drawn, */  \
+  /* so scan_bytes counts one pass per edit and highlights_drawn counts the window */  \
+  /* rather than the note. Both are zero when nothing is being searched.           */  \
+  X(PageFindScanBytes, "page.find_scan_bytes")                                         \
+  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")
