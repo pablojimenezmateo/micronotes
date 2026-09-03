@@ -420,6 +420,10 @@ private:
   // whitespace buffer is grown once and reused by every block after the first.
   // `mutable` because laying a block out is logically a const query.
   mutable std::vector<std::pair<std::size_t, float>> flowPending_;
+  // The source line spans of a fenced code block or a block dropped to raw.
+  // Same reason: one per such block, returned by value, was one allocation per
+  // such block.
+  mutable std::vector<std::pair<std::size_t, std::size_t>> sourceLines_;
   // The token groups a block is staged into before it is flowed. Same reason:
   // one per block, and the inner vectors keep their capacity between blocks, so
   // a document's worth of tokenizing grows its buffers once.

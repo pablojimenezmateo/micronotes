@@ -399,12 +399,20 @@ std::size_t scanBlocksFrom(std::string_view source, std::size_t from, std::size_
 void scanBlocksInto(std::string_view source, std::vector<SourceBlock>* out) {
   std::vector<SourceBlock>& blocks = *out;
   blocks.clear();
-  // Roughly one block per two lines of typical prose; a good enough guess to
-  // keep a full rescan from reallocating on every keystroke. `reserve` is a
-  // no-op once the vector has been round-tripped through a previous scan, which
-  // is the case that matters: prose runs nearer one block per 20 bytes than one
-  // per 48, so a cold vector still grows a couple of times.
-  blocks.reserve(source.size() / 48 + 8);
+  // A block spans at least one line, so the line count is an exact upper bound
+  // on how many there can be -- and counting newlines is one vectorised pass
+  // over bytes this scan is about to read anyway.
+  //
+  // The estimate that used to be here was `size / 48`, and prose runs nearer
+  // one block per 20 bytes, so a cold vector grew twice on the way to its real
+  // size: 4,166 -> 8,332 -> 16,664 entries at 88 bytes each, the last of those
+  // steps being the largest single allocation the whole application made. The
+  // bound is asked for only when the standing capacity is already too small,
+  // which on a rescan -- the case that matters, because it happens per
+  // keystroke -- it never is.
+  if(blocks.capacity() * 48 < source.size()) {
+    blocks.reserve(static_cast<std::size_t>(std::count(source.begin(), source.end(), '\n')) + 2);
+  }
   scanBlocksFrom(source, 0, 0, {}, &blocks);
 
   if(blocks.empty()) {

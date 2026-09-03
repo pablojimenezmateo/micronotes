@@ -303,8 +303,13 @@ void appendContentTokens(std::string_view source, std::size_t from, std::size_t 
   }
 }
 
-std::vector<std::pair<std::size_t, std::size_t>> sourceLines(std::string_view source, std::size_t from, std::size_t to) {
-  std::vector<std::pair<std::size_t, std::size_t>> lines;
+// Into a buffer the caller owns, for the same reason everything else on this
+// path is: a fenced code block or a block dropped to raw asked for one of these
+// per block, and a vector returned by value is an allocation per block.
+void sourceLinesInto(std::string_view source, std::size_t from, std::size_t to,
+                     std::vector<std::pair<std::size_t, std::size_t>>* out) {
+  std::vector<std::pair<std::size_t, std::size_t>>& lines = *out;
+  lines.clear();
   std::size_t start = from;
   while(start < to) {
     auto newline = source.find('\n', start);
@@ -314,7 +319,6 @@ std::vector<std::pair<std::size_t, std::size_t>> sourceLines(std::string_view so
     if(newline == to) break;
   }
   if(lines.empty()) lines.push_back({from, to});
-  return lines;
 }
 
 }
@@ -1196,7 +1200,8 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       addGroup().push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, false, -1));
     }
     bool firstLine = true;
-    for(const auto& [lineStart, lineEnd] : sourceLines(source, from, to)) {
+    sourceLinesInto(source, from, to, &sourceLines_);
+    for(const auto& [lineStart, lineEnd] : sourceLines_) {
       LineGroup& group = addGroup();
       if(fenced && !revealed && firstLine) {
         group.push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, true, -1));
@@ -1210,7 +1215,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       if(tail > lineEnd) group.push_back(makeToken(source, lineEnd, tail, base, TextRole::Code, false, true, -1));
     }
     if(fenced && !revealed && firstLine) {
-      // `sourceLines` always yields at least one line, so this is unreachable
+      // `sourceLinesInto` always yields at least one line, so this is unreachable
       // today; it is here so that the opening fence cannot be dropped if it ever
       // yields none.
       addGroup().push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, true, -1));
