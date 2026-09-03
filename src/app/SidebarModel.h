@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/Shell.h"
+#include "ui/Metrics.h"
 #include "ui/Rect.h"
 
 #include <cstddef>
@@ -26,14 +27,40 @@ namespace micronotes::app {
 
 // The tree is drawn as a flat list: one row height, one indent per level, and
 // the nesting carried entirely by that indent.
-inline constexpr float kSidebarRowHeight = 26.0f;
-inline constexpr float kSidebarTagHeight = 24.0f;
-inline constexpr float kSidebarLabelHeight = 34.0f;
 inline constexpr float kSidebarIndent = 13.0f;
-inline constexpr float kSidebarResultTitleHeight = 24.0f;
-inline constexpr float kSidebarSnippetHeight = 16.0f;
 
-float searchResultRowHeight(std::size_t matchLines);
+// Left to right inside a row: the gutter that holds a disclosure triangle or a
+// note's icon, then the label.
+//
+// One pair of numbers for the whole list. A section heading, a tag, a search
+// result and a tree row are four kinds of row in one column, and they used to
+// start their text at four different x -- 18, 20, 20 and 28 -- because each was
+// nudged into place on its own. Nothing in the list lined up with anything else.
+inline constexpr float kSidebarGutterX = ui::kSpace1;
+inline constexpr float kSidebarGutterWidth = 16.0f;
+inline constexpr float kSidebarLabelX = kSidebarGutterX + kSidebarGutterWidth + ui::kSpace1;
+
+// The sidebar's vertical rhythm.
+//
+// Every row holds a line of text, and text grows with the reader's text size
+// while chrome stays put -- so a row nailed to 26 pixels was a row that, at the
+// large size, drew its label into the row beneath it. The floors are what the
+// medium size already gave, so a reader who has not touched the setting sees
+// nothing move.
+//
+// Taken as line heights rather than as a renderer, so the model stays free of
+// the font: the draw measures, this decides, and both are testable apart.
+struct SidebarMetrics {
+  float row = 26.0f;
+  float tag = 24.0f;
+  float label = 34.0f;
+  float resultTitle = 24.0f;
+  float snippet = 16.0f;
+};
+
+SidebarMetrics sidebarMetrics(int uiLineHeight, int snippetLineHeight);
+
+float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metrics);
 
 // The width of a snippet line, in the font the rows draw it in.
 using SnippetMeasure = std::function<int(std::string_view)>;
@@ -50,7 +77,7 @@ const std::vector<library::SearchResult>& searchResults(UiRuntime& ui);
 // Measures nothing: the build is geometry, and the only text measurement the
 // sidebar does is trimming a search snippet to its column, which now happens per
 // drawn row through `fillSearchSnippets` below.
-void buildSidebarRows(UiRuntime& ui, ui::Rect rect);
+void buildSidebarRows(UiRuntime& ui, ui::Rect rect, const SidebarMetrics& metrics);
 
 // Trims row `index`'s matching lines to the column, once. Called by the draw for
 // the rows it is about to paint rather than by the build for all of them:

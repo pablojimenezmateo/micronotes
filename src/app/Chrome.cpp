@@ -126,7 +126,16 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   // holds every shortcut, can be searched, and is itself in the legend, so the
   // legend was three keys advertising the fourth. The counts that replace it
   // are the one thing about the open note that nothing else on screen says.
-  fill(renderer, {rect.x + 12, rect.y + 7, 6, 6}, ui.editor.dirty() ? theme().warn : theme().accentDim);
+  //
+  // The bar's own baseline, once. Every string on it is one line of UI text in
+  // a strip of fixed height, so where that line sits is arithmetic over the two
+  // -- and it was written out as `rect.y + 6` four times, which is the number
+  // the medium text size happens to want.
+  const ui::TextStyle style {};
+  const float baseline = ui::textTop(rect, text, style);
+  const float dot = 6.0f;
+  fill(renderer, {rect.x + ui::kSpace3, std::round(rect.y + (rect.h - dot) / 2.0f), dot, dot},
+       ui.editor.dirty() ? theme().warn : theme().accentDim);
 
   std::string left = ui.status;
   if(ui.focus == FocusArea::Search) left = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
@@ -134,22 +143,24 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   else if(ui.editor.dirty()) left = "Unsaved changes";
 
   // The right first, so the left knows how much room it was left with.
-  float right = rect.x + rect.w - 14.0f;
+  float right = rect.x + rect.w - ui::kSpace3;
   if(!ui.state.selection().noteId.empty()) {
     const BufferCounts counts = countBuffer(ui.editor.text(), ui.editor.revision());
     const std::string tally = plural(counts.words, "word") + "    " + plural(counts.characters, "character");
     const float width = static_cast<float>(text.width(tally));
-    text.draw(tally, right - width, rect.y + 6, theme().dim);
-    right -= width + 16.0f;
+    text.draw(tally, right - width, baseline, theme().dim);
+    right -= width + ui::kSpace4;
   }
   const std::string mode = paneModeName(ui.state.workspace().paneMode());
   const float modeWidth = static_cast<float>(text.width(mode));
-  text.draw(mode, right - modeWidth, rect.y + 6, theme().dim);
+  text.draw(mode, right - modeWidth, baseline, theme().dim);
   right -= modeWidth;
 
   if(left.empty()) return;
-  const float room = right - (rect.x + 28.0f) - 16.0f;
-  text.draw(ellipsizeToWidth(text, left, static_cast<int>(room), false, false), rect.x + 28, rect.y + 6,
+  // After the unsaved dot, with the same gap the dot has from the edge.
+  const float leftX = rect.x + ui::kSpace3 + dot + ui::kSpace2;
+  const float room = right - leftX - ui::kSpace4;
+  text.draw(ellipsizeToWidth(text, left, static_cast<int>(room), false, false), leftX, baseline,
             theme().muted);
 }
 

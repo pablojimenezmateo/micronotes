@@ -432,6 +432,10 @@ struct UiRuntime {
     std::vector<std::string> recents;
     float width = 0.0f;
     float height = 0.0f;
+    // The rhythm the rows were laid out at. Every height in the list derives
+    // from these two, so a change of text size has to rebuild rather than shift.
+    float rowHeight = 0.0f;
+    float snippetHeight = 0.0f;
     // Where the rows were placed, so a pure scroll shifts them instead of
     // rebuilding them.
     float originX = 0.0f;

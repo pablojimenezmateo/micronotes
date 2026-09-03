@@ -27,8 +27,22 @@ std::size_t countMatchLines(const library::SearchResult& result) {
   return lines;
 }
 
-float searchResultRowHeight(std::size_t matchLines) {
-  return kSidebarResultTitleHeight + static_cast<float>(matchLines) * kSidebarSnippetHeight + 4.0f;
+SidebarMetrics sidebarMetrics(int uiLineHeight, int snippetLineHeight) {
+  const float line = static_cast<float>(uiLineHeight);
+  const float small = static_cast<float>(snippetLineHeight);
+  SidebarMetrics metrics;
+  metrics.row = std::max(metrics.row, line + ui::kSpace2);
+  metrics.tag = std::max(metrics.tag, line + ui::kSpace1);
+  // A heading over a list wants the air above it that separates it from the
+  // list before, which is why it is the one row with a whole step of padding.
+  metrics.label = std::max(metrics.label, line + ui::kSpace4);
+  metrics.resultTitle = std::max(metrics.resultTitle, line + ui::kSpace1);
+  metrics.snippet = std::max(metrics.snippet, small + 2.0f);
+  return metrics;
+}
+
+float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metrics) {
+  return metrics.resultTitle + static_cast<float>(matchLines) * metrics.snippet + ui::kSpace1;
 }
 
 // The results the sidebar is listing, recomputed only when the question or the
@@ -54,7 +68,7 @@ namespace {
 // relativises a path and builds a map key for every note before it can place
 // the first row, and every row is a string, a path and a rect. Called through
 // buildSidebarRows(), which is what keeps it off the frame path.
-void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
+void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   ui.sidebarRows.clear();
   const float top = rect.y + 12.0f;
   float y = top - static_cast<float>(ui.sidebarScroll);
@@ -63,20 +77,22 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
     SidebarRow row;
     row.kind = SidebarRow::Kind::SectionLabel;
     row.label = std::move(label);
-    row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, kSidebarLabelHeight};
+    row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f, metrics.label};
     ui.sidebarRows.push_back(std::move(row));
-    y += kSidebarLabelHeight;
+    y += metrics.label;
   };
   const auto pushTreeRow = [&](ui::TreeRow tree) {
     SidebarRow row;
     row.kind = SidebarRow::Kind::Tree;
-    row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, kSidebarRowHeight};
+    row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f, metrics.row};
     if(tree.expandable) {
-      row.disclosure = {rect.x + 10.0f + static_cast<float>(tree.depth) * kSidebarIndent, y + 5.0f, 16.0f, 16.0f};
+      row.disclosure = {row.rect.x + kSidebarGutterX + static_cast<float>(tree.depth) * kSidebarIndent,
+                        y + (metrics.row - kSidebarGutterWidth) / 2.0f,
+                        kSidebarGutterWidth, kSidebarGutterWidth};
     }
     row.tree = std::move(tree);
     ui.sidebarRows.push_back(std::move(row));
-    y += kSidebarRowHeight;
+    y += metrics.row;
   };
 
   const auto& notes = ui.state.allNotes();
@@ -146,7 +162,8 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
       // line `fillSearchSnippets` will trim is a non-empty one, so the two
       // agree without either of them doing the other's work.
       row.matchLineCount = countMatchLines(result);
-      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, searchResultRowHeight(row.matchLineCount)};
+      row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f,
+                  searchResultRowHeight(row.matchLineCount, metrics)};
       y += row.rect.h;
       ui.sidebarRows.push_back(std::move(row));
     }
@@ -172,7 +189,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
     if(pushNoteShortcuts(ui.state.workspace().favorites, 8) == 0) {
       // Every favourite has been deleted since; the heading would be a lie.
       ui.sidebarRows.resize(before);
-      y -= kSidebarLabelHeight;
+      y -= metrics.label;
     }
   }
 
@@ -186,10 +203,10 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
     for(const auto& tag : tags) {
       SidebarRow row;
       row.kind = SidebarRow::Kind::Tag;
-      row.rect = {rect.x + 8.0f, y, rect.w - 16.0f, kSidebarTagHeight};
+      row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f, metrics.tag};
       row.tag = tag;
       ui.sidebarRows.push_back(std::move(row));
-      y += kSidebarTagHeight;
+      y += metrics.tag;
     }
   }
 
@@ -198,7 +215,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
     pushLabel("RECENT");
     if(pushNoteShortcuts(ui.state.workspace().recents, 5) == 0) {
       ui.sidebarRows.resize(before);
-      y -= kSidebarLabelHeight;
+      y -= metrics.label;
     }
   }
 
@@ -231,7 +248,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect) {
 // do, and both are an offset over a list already built. Rebuilding regardless
 // was ~0.7 ms of a ~1.0 ms frame on a 400-note library, which is most of the
 // frame spent re-deriving three dozen visible rows from four hundred notes.
-void buildSidebarRows(UiRuntime& ui, Rect rect) {
+void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   const auto& workspace = ui.state.workspace();
   const auto& previous = ui.sidebarRowsKey;
   const bool reusable = previous.valid &&
@@ -243,7 +260,11 @@ void buildSidebarRows(UiRuntime& ui, Rect rect) {
     previous.favorites == workspace.favorites &&
     previous.recents == workspace.recents &&
     previous.width == rect.w &&
-    previous.height == rect.h;
+    previous.height == rect.h &&
+    // Every row's height is derived from these, so a change of text size has to
+    // rebuild the list rather than shift a list laid out at the old rhythm.
+    previous.rowHeight == metrics.row &&
+    previous.snippetHeight == metrics.snippet;
 
   if(reusable) {
     // Clamp first: the scroll the rows are shifted by has to be the one they
@@ -267,7 +288,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect) {
     return;
   }
 
-  rebuildSidebarRows(ui, rect);
+  rebuildSidebarRows(ui, rect, metrics);
 
   auto& key = ui.sidebarRowsKey;
   key.valid = true;
@@ -280,6 +301,8 @@ void buildSidebarRows(UiRuntime& ui, Rect rect) {
   key.recents = workspace.recents;
   key.width = rect.w;
   key.height = rect.h;
+  key.rowHeight = metrics.row;
+  key.snippetHeight = metrics.snippet;
   key.originX = rect.x;
   key.originY = rect.y;
   // Read back rather than remembered: finish() clamps it.

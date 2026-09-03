@@ -77,14 +77,16 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
       ui::fillRounded(renderer, {slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h + ui::kRadiusMedium},
                       theme().editorBg, ui::kRadiusMedium);
     } else if(hot) {
-      ui::fillRounded(renderer, {slot.rect.x + 2.0f, slot.rect.y + 3.0f, slot.rect.w - 4.0f, slot.rect.h - 3.0f},
+      ui::fillRounded(renderer, {slot.rect.x + 2.0f, slot.rect.y + ui::kSpace1 - 1.0f,
+                                 slot.rect.w - 4.0f, slot.rect.h - ui::kSpace1 + 1.0f},
                       theme().hoverBg, ui::kRadiusSmall);
     }
 
-    const float textLeft = slot.rect.x + ui::kTabClosePadding + 4.0f;
-    const int room = static_cast<int>(slot.close.x - textLeft - 4.0f);
+    const float textLeft = slot.rect.x + ui::kTabClosePadding + ui::kSpace1;
+    const int room = static_cast<int>(slot.close.x - textLeft - ui::kSpace1);
     const auto shown = ui::ellipsizeToWidth(text, titles[slot.index], room, style);
-    text.draw(shown, textLeft, slot.rect.y + 7.0f, active ? theme().text : theme().muted, style);
+    text.draw(shown, textLeft, ui::textTop(slot.rect, text, style),
+              active ? theme().text : theme().muted, style);
     // A tab only says what it is when the title did not fit. Repeating a title
     // that is already legible is noise.
     if(shown != titles[slot.index]) ui.offerTooltip(slot.rect, titles[slot.index]);

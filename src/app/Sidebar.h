@@ -23,6 +23,16 @@ namespace micronotes::app {
 // sidebar, because filtering and browsing are the same question asked two ways
 // and they used to be in two panels either side of a divider.
 ui::Rect searchBoxRect(ui::Rect sidebar);
+// What sits inside the search box, laid out from the label's measured width so
+// the three parts cannot overlap at any text size. One geometry, read by the
+// paint and by the hit test.
+struct SearchBoxParts {
+  ui::Rect label;
+  ui::Rect field;
+  ui::Rect scope;
+};
+SearchBoxParts searchBoxParts(ui::Rect sidebar, const ui::TextRenderer& text);
+
 // The strip inside the search box that holds the text: after the "Find" label
 // and before the scope toggle.
 ui::Rect searchTextRect(ui::Rect sidebar, const ui::TextRenderer& text);
