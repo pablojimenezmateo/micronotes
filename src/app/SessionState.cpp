@@ -3,12 +3,16 @@
 #include "CoreAliases.h"
 
 #include "app/Notes.h"
+#include "core/attachments/AttachmentService.h"
 #include "app/Shell.h"
+#include "core/AppIdentity.h"
 #include "core/platform/DurableFile.h"
 #include "core/platform/PathUtils.h"
 
 #include <fstream>
+#include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 namespace micronotes::app {
@@ -52,8 +56,54 @@ void persistLibraryState(UiRuntime& ui) {
   }
 }
 
+void installWatcherWake(UiRuntime& ui) {
+  ui.watcher.setWake([] {
+    // The only job is to make the loop run once. It carries no payload -- what
+    // changed is read off the watcher on the main thread, where it can be acted
+    // on -- and SDL_PushEvent is the one part of SDL safe to call from a
+    // watcher's thread.
+    SDL_Event wake {};
+    wake.type = SDL_EVENT_USER;
+    SDL_PushEvent(&wake);
+  });
+}
+
+bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
+  if(source.empty()) return true;
+  if(!ui.state.hasLibrary()) {
+    std::cerr << "--attach requires --library\n";
+    return false;
+  }
+  ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
+  const auto selected = ui.state.readSelectedNote();
+  if(!selected) {
+    std::cerr << "--attach requires a selected note saved in UI state\n";
+    return false;
+  }
+  attachments::AttachmentService service;
+  try {
+    const auto link = service.attachFile(ui.state.libraryRoot(), selected->metadata.id, source);
+    ui.editor.setText(selected->body);
+    ui.editor.insert("\n" + link.markdown + "\n");
+    ui.state.saveSelectedNote(ui.editor.text());
+    std::cout << link.markdown << "\n";
+    return true;
+  } catch(const std::exception& error) {
+    std::cerr << "attach failed: " << error.what() << "\n";
+    return false;
+  }
+}
+
 bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   if(!ui.state.openOrCreateLibrary(root)) return false;
+  // The state directory is excluded: the sqlite index, its write-ahead log and
+  // every attachment live in there, so watching it would mean the app's own
+  // index writes arriving back as "the library changed".
+  //
+  // A tree that cannot be watched -- the per-user inotify limit, a filesystem
+  // that does not support it -- is not an error. The focus-gained refresh is
+  // still there, and it is what micronotes had before this.
+  ui.watcher.watch(ui.state.libraryRoot(), {microcore::kAppDotDir});
   ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
   ui.folds.load(foldStatePath(ui.state.libraryRoot()));
   std::ostringstream treeBuffer;

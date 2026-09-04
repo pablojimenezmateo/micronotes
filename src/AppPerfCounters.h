@@ -50,6 +50,15 @@
   /* with no sync daemon or second editor in play means micronotes has lost     */   \
   /* track of a file it wrote itself.                                            */   \
   X(AppStateSaveConflicts, "app_state.save_conflicts")                                 \
+  /* --- the library watcher ----------------------------------------------- */      \
+  /* Note files the watcher named and the app re-indexed, against the times it  */   \
+  /* could not name them and the whole library had to be re-read. A rescan is   */   \
+  /* the kernel's event queue overflowing, a watched directory being moved      */   \
+  /* away, or a tree bigger than the watch budget -- all real, all rare. If     */   \
+  /* rescans stop being rare the watcher has stopped paying for itself, because */   \
+  /* the point of naming paths is that one changed file costs one file's work.  */   \
+  X(WatcherPathsApplied, "watcher.paths_applied")                                     \
+  X(WatcherRescans, "watcher.rescans")                                                \
   /* --- crash recovery ----------------------------------------------------- */      \
   /* Recovery copies posted against recovery copies actually written. A post is  */    \
   /* a memcpy and a notify; a write is two `fsync` barriers, which measured      */    \

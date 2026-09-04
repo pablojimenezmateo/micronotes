@@ -89,6 +89,12 @@ public:
   struct FileRefresh {
     bool ok = false;
     bool listFieldsChanged = false;
+    // Whether any row was written at all. False when the file's stat still
+    // matches the row, which is the answer for every echo of micronotes' own
+    // save coming back through the watcher -- and what lets the caller skip
+    // bumping the library revision, and so skip rebuilding the view memos
+    // keyed on it, for a change that was not one.
+    bool rowsWritten = false;
   };
 
   // Re-indexes exactly one file: no tree walk, no whole-table read, no

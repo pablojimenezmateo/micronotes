@@ -531,6 +531,7 @@ LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path&
     if(!result.ok) db.exec("ROLLBACK;");
     // A row that went away is a row the note list was showing.
     result.listFieldsChanged = result.ok;
+    result.rowsWritten = result.ok;
     return result;
   }
 
@@ -569,6 +570,7 @@ LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path&
     return result;
   }
   result.listFieldsChanged = !hadRow || !sameListFields(before, row);
+  result.rowsWritten = true;
   return result;
 }
 

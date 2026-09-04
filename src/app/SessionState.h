@@ -41,4 +41,17 @@ void persistLibraryState(UiRuntime& ui);
 // launch.
 bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root);
 
+// Teaches the library watcher how to wake the event loop.
+//
+// Separate from `openLibraryRoot` because of an ordering that would otherwise
+// be invisible: the library opens before SDL is initialised, and the wake is an
+// `SDL_PushEvent`. Until this is called the wake is null, which costs nothing --
+// the watcher keeps collecting and the first pass through the loop drains it.
+void installWatcherWake(UiRuntime& ui);
+
+// `--attach <file>`: copies a file into the open note's attachments and appends
+// a link to it, then prints the markdown it wrote. A whole session on the
+// command line, so it lives beside the other two rather than in the shell.
+bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source);
+
 }

@@ -152,6 +152,7 @@ set(MICROCORE_SOURCES
   src/core/render/TextTextureCache.cpp
   src/core/persistence/SqliteDb.cpp
   src/core/platform/DefaultOpener.cpp
+  src/core/platform/DirectoryWatcher.cpp
   src/core/platform/DurableFile.cpp
   src/core/platform/PathUtils.cpp
   src/core/ui/ShellModel.cpp
@@ -278,6 +279,7 @@ add_executable(micronotes_tests
   tests/BlockScanTests.cpp
   tests/ClipGuardTests.cpp
   tests/ColorMathTests.cpp
+  tests/DirectoryWatcherTests.cpp
   tests/DurableFileTests.cpp
   tests/EditorViewerTests.cpp
   tests/EditsTests.cpp

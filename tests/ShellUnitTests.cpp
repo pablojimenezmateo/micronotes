@@ -8,9 +8,15 @@
 #include "doc/BlockScan.h"
 #include "ui/TextUtil.h"
 #include "app/SidebarModel.h"
+#include "app/Notes.h"
+#include "app/SessionState.h"
 #include "ui/Draw.h"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Nothing under src/app/ used to be reachable from a test: every file there was
@@ -297,4 +303,107 @@ MICRONOTES_TEST(shell_an_image_that_cannot_decode_never_moves_the_generation) {
   // And it answers with no size, so the layout reserves no box for it.
   MICRONOTES_REQUIRE(w == 0.0f);
   MICRONOTES_REQUIRE(h == 0.0f);
+}
+
+// The whole external-change path, end to end, through a real `UiRuntime`: a
+// real library, a real watcher, a real editor buffer, and a write that does not
+// go through micronotes.
+//
+// This is the behaviour the app was missing entirely. Editing a note in another
+// program left the copy on screen stale and the next autosave wrote it back
+// over the top; there was no watcher, and the focus-gained refresh updated the
+// index and never the buffer.
+MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-watch";
+  std::filesystem::remove_all(root);
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  micronotes::app::createNote(ui);
+  ui.editor.setText("mine\n");
+  MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
+  MICRONOTES_REQUIRE(ui.editor.text() == "mine\n");
+  const auto path = ui.state.openNote().path;
+  const auto noteId = ui.state.selection().noteId;
+  MICRONOTES_REQUIRE(ui.watcher.active());
+
+  // The app's own save is reported back by the watcher like any other write --
+  // nothing filters it out -- and it must come to nothing: the file matches
+  // what was written, so no reload, no re-index, and not even a bump of the
+  // library revision the view memos are keyed on. Echo suppression falls out
+  // of comparing the disk rather than remembering who wrote it.
+  ui.editor.setText("mine, edited\n");
+  MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
+  const auto revisionAfterSave = ui.state.revision();
+  for(int attempt = 0; attempt < 60; ++attempt) {
+    micronotes::app::applyWatchedChanges(ui);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  MICRONOTES_REQUIRE(ui.editor.text() == "mine, edited\n");
+  MICRONOTES_REQUIRE(!ui.editor.dirty());
+  MICRONOTES_REQUIRE(ui.state.revision() == revisionAfterSave);
+
+  // Now somebody else rewrites it.
+  {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << "---\nid: " << noteId << "\ntitle: Untitled\n---\n\nfrom another program\n";
+  }
+  const auto later = std::filesystem::last_write_time(path) + std::chrono::seconds(2);
+  std::filesystem::last_write_time(path, later);
+
+  bool applied = false;
+  for(int attempt = 0; attempt < 400 && !applied; ++attempt) {
+    applied = micronotes::app::applyWatchedChanges(ui);
+    if(!applied) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  MICRONOTES_REQUIRE(applied);
+  // A clean buffer took the new text, without waiting for a focus change.
+  MICRONOTES_REQUIRE(ui.editor.text() == "from another program\n");
+  MICRONOTES_REQUIRE(!ui.editor.dirty());
+  MICRONOTES_REQUIRE(ui.status.find("Reloaded") != std::string::npos);
+  // And the index followed, so search and the sidebar agree with the page.
+  ui.state.setSearch("another program");
+  MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
+
+  std::filesystem::remove_all(root);
+}
+
+// The other half of the rule: unsaved work is never replaced by what is on
+// disk. The save path is what resolves it, and it keeps both versions.
+MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-watch-dirty";
+  std::filesystem::remove_all(root);
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  micronotes::app::createNote(ui);
+  ui.editor.setText("mine\n");
+  MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
+  const auto path = ui.state.openNote().path;
+  const auto noteId = ui.state.selection().noteId;
+
+  // Unsaved work in the buffer, and a change on disk underneath it.
+  ui.editor.setText("my unsaved draft\n");
+  ui.editor.markDirty();
+  {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << "---\nid: " << noteId << "\ntitle: Untitled\n---\n\ntheirs\n";
+  }
+  std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) + std::chrono::seconds(2));
+
+  MICRONOTES_REQUIRE(!micronotes::app::reloadSelectedIfChangedOnDisk(ui));
+  MICRONOTES_REQUIRE(ui.editor.text() == "my unsaved draft\n");
+  MICRONOTES_REQUIRE(ui.editor.dirty());
+
+  // Saving keeps both: the buffer lands in the note, their text becomes a note
+  // of its own, and the status line names it so it can be found.
+  MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui, /*quiet=*/true));
+  MICRONOTES_REQUIRE(ui.status.find("was kept as") != std::string::npos);
+  MICRONOTES_REQUIRE(ui.state.allNotes().size() == 2);
+  ui.state.setSearch("theirs");
+  MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
+  ui.state.setSearch("my unsaved draft");
+  MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
+
+  std::filesystem::remove_all(root);
 }

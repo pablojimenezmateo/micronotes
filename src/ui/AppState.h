@@ -174,6 +174,11 @@ public:
   // are handed over instead of being read back out of it.
   bool refreshWrittenNoteFile(const std::filesystem::path& path,
                               const library::NoteMetadata& metadata, std::string_view body);
+  // Drops the memos derived from the note list -- the list itself, the folder
+  // counts, the tag list, the id map. For a caller that has re-indexed several
+  // files with `refreshNoteFile` and wants to pay for one rebuild rather than
+  // one per file.
+  void invalidateNoteList();
   // Forgets everything read about the open note and re-indexes its file, so the
   // next question about it goes back to the disk. For a note that changed
   // underneath the app: the record is a memo of a file that no longer says
@@ -206,10 +211,9 @@ private:
   // text when the caller wants it, so opening a note is one read rather than
   // one for the body and another for the front matter.
   const OpenNote& loadOpenNote(std::string* body) const;
-  // Drops the memos derived from the note list -- the list itself, the folder
-  // counts, the tag list, the id map. The note list's five fields changed; the
-  // library did not have to be re-walked to know it.
-  void invalidateNoteList();
+  // Records a single-file re-index: moves the revision when a row actually
+  // moved, and reports whether the note list has to be rebuilt.
+  bool applied(const library::LibraryIndex::FileRefresh& refresh);
 
   WorkspaceModel workspace_;
   UiSelection selection_;

@@ -131,6 +131,41 @@ void rescanLibraryAfterExternalChange(UiRuntime& ui) {
   reloadSelectedIfChangedOnDisk(ui);
 }
 
+bool applyWatchedChanges(UiRuntime& ui) {
+  if(!ui.state.hasLibrary()) return false;
+  const bool rescan = ui.watcher.takeRescanRequest();
+  const auto paths = ui.watcher.takeChanges();
+  if(rescan) {
+    // Drained first, above: the paths collected alongside a rescan request are
+    // covered by the rescan, and leaving them queued would spend a second pass
+    // re-indexing files the refresh has just read.
+    perf::addCounter(perf::CounterId::WatcherRescans);
+    rescanLibraryAfterExternalChange(ui);
+    return true;
+  }
+  if(paths.empty()) return false;
+
+  bool listChanged = false;
+  bool touchedAnything = false;
+  for(const auto& path : paths) {
+    // Only notes. A library holds whatever the user puts in it, and an image
+    // dropped next to a note is not a change to the library's contents.
+    if(path.extension() != ".md") continue;
+    perf::addCounter(perf::CounterId::WatcherPathsApplied);
+    listChanged = ui.state.refreshNoteFile(path) || listChanged;
+    touchedAnything = true;
+  }
+  if(!touchedAnything) return false;
+  if(listChanged) {
+    ui.state.invalidateNoteList();
+    invalidateWikiNotes(ui);
+  }
+  // Last, and only for the note on screen: the index is now right about every
+  // file that moved, and this is the one whose bytes a person is looking at.
+  reloadSelectedIfChangedOnDisk(ui);
+  return true;
+}
+
 void createNote(UiRuntime& ui) {
   if(!ui.state.hasLibrary()) {
     ui.status = "Start with --library <path> before creating notes";

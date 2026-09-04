@@ -726,32 +726,6 @@ static void performAction(UiRuntime& ui, UiAction action) {
   }
 }
 
-static bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
-  if(source.empty()) return true;
-  if(!ui.state.hasLibrary()) {
-    std::cerr << "--attach requires --library\n";
-    return false;
-  }
-  ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
-  const auto selected = ui.state.readSelectedNote();
-  if(!selected) {
-    std::cerr << "--attach requires a selected note saved in UI state\n";
-    return false;
-  }
-  attachments::AttachmentService service;
-  try {
-    const auto link = service.attachFile(ui.state.libraryRoot(), selected->metadata.id, source);
-    ui.editor.setText(selected->body);
-    ui.editor.insert("\n" + link.markdown + "\n");
-    ui.state.saveSelectedNote(ui.editor.text());
-    std::cout << link.markdown << "\n";
-    return true;
-  } catch(const std::exception& error) {
-    std::cerr << "attach failed: " << error.what() << "\n";
-    return false;
-  }
-}
-
 
 // One wheel notch scrolls three lines in the editor and roughly three lines'
 // worth of pixels in the viewer, matching the platform convention.
@@ -2484,6 +2458,7 @@ int run(ApplicationOptions options) {
   };
   applyPixelDensity();
   SDL_StartTextInput(window);
+  installWatcherWake(ui);
   TextRenderer text(renderer);
   float appliedScale = 0.0f;
   auto applyDisplayScale = [&]() {
@@ -2664,6 +2639,7 @@ int run(ApplicationOptions options) {
       } while(SDL_PollEvent(&event));
     }
     if(applyPendingWindowAction(window, ui, running)) needsDraw = true;
+    if(applyWatchedChanges(ui)) needsDraw = true;
 
     const Uint64 now = SDL_GetTicks();
     if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty() &&

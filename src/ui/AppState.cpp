@@ -525,20 +525,28 @@ bool AppState::refreshLibrary() {
 
 bool AppState::refreshNoteFile(const std::filesystem::path& path) {
   if(!library_) return false;
-  // The revision moves whether or not the note list did. It is what every view
-  // memo is keyed on, and the things derived from a note's *body* -- its
-  // backlinks, the search results it appears in -- change on a save that
-  // touches none of the five fields the list is built from.
-  ++revision_;
-  return index_.refreshFile(path).listFieldsChanged;
+  return applied(index_.refreshFile(path));
 }
 
 bool AppState::refreshWrittenNoteFile(const std::filesystem::path& path,
                                       const library::NoteMetadata& metadata,
                                       std::string_view body) {
   if(!library_) return false;
-  ++revision_;
-  return index_.refreshWrittenFile(path, metadata, body).listFieldsChanged;
+  return applied(index_.refreshWrittenFile(path, metadata, body));
+}
+
+bool AppState::applied(const library::LibraryIndex::FileRefresh& refresh) {
+  // The revision moves whether or not the *note list* did, because it is what
+  // every view memo is keyed on and the things derived from a note's body --
+  // its backlinks, the search results it appears in -- change on a save that
+  // touches none of the five fields the list is built from.
+  //
+  // But only when a row actually moved. A file whose stat still matches its row
+  // is every echo of micronotes' own save arriving back through the watcher,
+  // and bumping the revision for one of those would rebuild the sidebar, the
+  // header and the backlinks panel to show exactly what they were showing.
+  if(refresh.rowsWritten) ++revision_;
+  return refresh.listFieldsChanged;
 }
 
 bool AppState::reloadSelectedNote() {

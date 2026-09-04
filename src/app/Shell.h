@@ -7,6 +7,7 @@
 #include "core/editor/SoftWrap.h"
 #include "core/editor/TextField.h"
 #include "core/markdown/MarkdownParser.h"
+#include "core/platform/DirectoryWatcher.h"
 #include "doc/BlockScan.h"
 #include "library/Library.h"
 #include "ui/AppState.h"
@@ -273,6 +274,11 @@ enum class WindowAction {
 
 struct UiRuntime {
   ui::AppState state;
+  // Watches the library tree, so a change made outside micronotes is noticed
+  // when it happens rather than the next time the window regains focus. Idle
+  // cost is nothing: one inotify descriptor and a thread asleep in `poll`. See
+  // `platform::DirectoryWatcher`.
+  platform::DirectoryWatcher watcher;
   editor::MarkdownEditor editor;
   markdown::MarkdownParser parser;
   PageView livePage;

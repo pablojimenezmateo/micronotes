@@ -50,6 +50,23 @@ bool reloadSelectedIfChangedOnDisk(UiRuntime& ui);
 // with and the next autosave wrote them back over whatever had arrived.
 void rescanLibraryAfterExternalChange(UiRuntime& ui);
 
+// Acts on whatever the library watcher has collected, and reports whether
+// anything moved (so the caller knows to draw).
+//
+// Named paths are re-indexed one by one, which is why the watcher bothers to
+// report them: on a library of any size, re-reading everything because one file
+// changed is the difference between a keystroke and a stutter. A rescan request
+// -- the kernel's queue overflowed, a directory was moved away, the tree is
+// larger than the watch budget -- falls back to the full refresh, because those
+// are the cases where the list of paths is no longer the list of what changed.
+//
+// micronotes' own writes arrive here too; nothing filters them out and nothing
+// needs to. A re-index of a file whose stat still matches its row does no work,
+// and a reload of a note whose signature still agrees does not happen. The
+// echo suppression falls out of comparing what is on disk instead of keeping
+// track of who wrote it.
+bool applyWatchedChanges(UiRuntime& ui);
+
 void createNote(UiRuntime& ui);
 void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder);
 
