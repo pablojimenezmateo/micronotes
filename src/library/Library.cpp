@@ -73,14 +73,22 @@ static std::filesystem::path trashIndex(const std::filesystem::path& root) {
   return root / ".micronotes" / "trash" / "index";
 }
 
-static std::string uniqueTrashName(const std::filesystem::path& files, const std::filesystem::path& original) {
+// A free name inside the trash for `original`. `reserved` holds the names
+// already handed out in this batch but not yet on disk, which the filesystem
+// check alone cannot see -- a folder delete files the folder and every
+// attachment directory under it before a single one of them has moved.
+static std::string uniqueTrashName(const std::filesystem::path& files,
+                                   const std::filesystem::path& original,
+                                   const std::vector<std::string>& reserved) {
   const auto stem = original.stem().string();
   const auto ext = original.extension().string();
+  const auto taken = [&](const std::string& candidate) {
+    return std::filesystem::exists(files / candidate) ||
+           std::find(reserved.begin(), reserved.end(), candidate) != reserved.end();
+  };
   std::string candidate = stem + ext;
   int suffix = 2;
-  while(std::filesystem::exists(files / candidate)) {
-    candidate = stem + "-" + std::to_string(suffix++) + ext;
-  }
+  while(taken(candidate)) candidate = stem + "-" + std::to_string(suffix++) + ext;
   return candidate;
 }
 
@@ -101,14 +109,13 @@ static std::string escapeField(std::string value) {
   return value;
 }
 
-// Moves `path` into the trash and returns the name it was filed under, or an
-// empty string when there was nothing to move.
-static std::string moveIntoTrash(const std::filesystem::path& root, const std::filesystem::path& path) {
-  if(path.empty() || !std::filesystem::exists(path)) return {};
-  const auto files = trashFiles(root);
-  std::filesystem::create_directories(files);
-  const auto name = uniqueTrashName(files, path);
-  const auto target = files / name;
+// Moves `path` into `files/name`. The name is reserved separately, because the
+// index entry naming it has to be on disk *before* the file moves -- see
+// `appendTrashEntries`.
+static bool moveIntoTrashAs(const std::filesystem::path& root, const std::filesystem::path& path,
+                            const std::string& name) {
+  if(name.empty() || path.empty() || !std::filesystem::exists(path)) return false;
+  const auto target = trashFiles(root) / name;
   std::error_code ec;
   std::filesystem::rename(path, target, ec);
   if(ec) {
@@ -120,20 +127,41 @@ static std::string moveIntoTrash(const std::filesystem::path& root, const std::f
       std::filesystem::copy_file(path, target, ec);
       std::filesystem::remove(path, ec);
     }
-    if(ec) return {};
+    if(ec) return false;
   }
-  return name;
+  return true;
 }
 
-static void appendTrashEntry(const std::filesystem::path& root, const TrashEntry& entry) {
-  std::filesystem::create_directories(trashIndex(root).parent_path());
-  std::ofstream out(trashIndex(root), std::ios::app);
-  out << escapeField(entry.name) << '\t'
-      << escapeField(entry.originalRelative) << '\t'
-      << escapeField(entry.title) << '\t'
-      << escapeField(entry.deletedAt) << '\t'
-      << escapeField(entry.attachmentName) << '\t'
-      << escapeField(entry.attachmentOriginalRelative) << '\n';
+static std::string trashEntryLine(const TrashEntry& entry) {
+  return escapeField(entry.name) + '\t' + escapeField(entry.originalRelative) + '\t' +
+         escapeField(entry.title) + '\t' + escapeField(entry.deletedAt) + '\t' +
+         escapeField(entry.attachmentName) + '\t' +
+         escapeField(entry.attachmentOriginalRelative) + '\n';
+}
+
+// Adds `entries` to the trash index, durably, in one write.
+//
+// This was an `ofstream` in append mode with no flush and no fsync, and the
+// index is the *only* record of where a deleted note came from. An append a
+// crash loses leaves the file sitting in `trash/files` with nothing naming it:
+// `trashEntries()` cannot list it, so the person who deleted it cannot get it
+// back from inside the app, and the note is gone as far as they can tell.
+//
+// A read-modify-write of the whole file instead. It is a line per deletion and
+// deletions are rare, so that is affordable -- and it is what makes the
+// ordering below possible, which is the part that actually matters.
+static bool appendTrashEntries(const std::filesystem::path& root,
+                               const std::vector<TrashEntry>& entries) {
+  if(entries.empty()) return true;
+  std::string index;
+  if(std::ifstream in(trashIndex(root)); in) {
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    index = buffer.str();
+  }
+  if(!index.empty() && index.back() != '\n') index.push_back('\n');
+  for(const auto& entry : entries) index += trashEntryLine(entry);
+  return platform::writeFileDurably(trashIndex(root), index);
 }
 
 static std::vector<std::string> splitFields(const std::string& line) {
@@ -225,15 +253,25 @@ std::string Library::preserveExternalVersion(const std::filesystem::path& path) 
   return target.filename().string();
 }
 
-bool Library::updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const {
-  auto note = loadNote(path);
-  note.metadata.tags = tags;
-  return saveNote(path, note.metadata, note.body);
-}
-
 std::filesystem::path Library::createFolder(const std::filesystem::path& relativeFolder) const {
   const auto target = platform::normalizeInsideRoot(root_, root_ / relativeFolder);
   std::filesystem::create_directories(target);
+  return target;
+}
+
+std::filesystem::path Library::saveNoteAs(const std::filesystem::path& path,
+                                          const NoteMetadata& metadata,
+                                          std::string_view body) const {
+  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto target = uniqueMarkdownPath(
+    platform::normalizeInsideRoot(root_, safePath.parent_path() /
+                                           (platform::sanitizeFileStem(metadata.title) + ".md")),
+    safePath);
+  if(!saveNote(target, metadata, body)) return {};
+  if(target != safePath) {
+    std::error_code error;
+    std::filesystem::remove(safePath, error);
+  }
   return target;
 }
 
@@ -241,10 +279,8 @@ std::filesystem::path Library::renameNote(const std::filesystem::path& path, con
   const auto safePath = platform::normalizeInsideRoot(root_, path);
   auto note = loadNote(safePath);
   note.metadata.title = newTitle;
-  const auto target = uniqueMarkdownPath(platform::normalizeInsideRoot(root_, safePath.parent_path() / (platform::sanitizeFileStem(newTitle) + ".md")), safePath);
-  if(!saveNote(target, note.metadata, note.body)) return safePath;
-  if(target != safePath) std::filesystem::remove(safePath);
-  return target;
+  const auto target = saveNoteAs(safePath, note.metadata, note.body);
+  return target.empty() ? safePath : target;
 }
 
 std::filesystem::path Library::moveNote(const std::filesystem::path& path, const std::filesystem::path& relativeFolder) const {
@@ -271,46 +307,81 @@ void Library::deleteFolder(const std::filesystem::path& relativeFolder) const {
   if(safePath == root_) return;
   // The whole folder goes as one entry, so restoring it brings back everything
   // that was inside. Attachments live outside it and are filed alongside.
+  if(!std::filesystem::exists(safePath)) return;
   std::vector<std::filesystem::path> attachmentDirs;
   for(const auto& path : noteFiles()) {
     const auto relative = path.lexically_relative(safePath);
     if(relative.empty() || relative.native().starts_with("..")) continue;
     const auto metadata = loadNoteMetadata(path);
-    if(!metadata.id.empty()) attachmentDirs.push_back(root_ / ".micronotes" / "attachments" / metadata.id);
+    if(metadata.id.empty()) continue;
+    const auto dir = root_ / ".micronotes" / "attachments" / metadata.id;
+    if(std::filesystem::exists(dir)) attachmentDirs.push_back(dir);
   }
+
+  const auto files = trashFiles(root_);
+  std::filesystem::create_directories(files);
+  const auto deletedAt = timestampNow();
+  std::vector<std::string> reserved;
+  std::vector<TrashEntry> entries;
+
   TrashEntry entry;
-  entry.name = moveIntoTrash(root_, safePath);
-  if(entry.name.empty()) return;
+  entry.name = uniqueTrashName(files, safePath, reserved);
+  reserved.push_back(entry.name);
   entry.originalRelative = safePath.lexically_relative(root_);
   entry.title = safePath.filename().string();
-  entry.deletedAt = timestampNow();
-  appendTrashEntry(root_, entry);
+  entry.deletedAt = deletedAt;
+  entries.push_back(entry);
   for(const auto& attachmentDir : attachmentDirs) {
     TrashEntry attachment;
-    attachment.name = moveIntoTrash(root_, attachmentDir);
-    if(attachment.name.empty()) continue;
+    attachment.name = uniqueTrashName(files, attachmentDir, reserved);
+    reserved.push_back(attachment.name);
     attachment.originalRelative = attachmentDir.lexically_relative(root_);
-    attachment.deletedAt = entry.deletedAt;
-    appendTrashEntry(root_, attachment);
+    attachment.deletedAt = deletedAt;
+    entries.push_back(std::move(attachment));
+  }
+
+  // One durable write for the folder and every attachment directory under it,
+  // rather than one per entry. A folder of a hundred notes used to be a hundred
+  // appends; it is now a hundred lines in a single write -- and, for the reason
+  // `deleteNote` gives, the write comes first.
+  if(!appendTrashEntries(root_, entries)) return;
+  if(!moveIntoTrashAs(root_, safePath, entries.front().name)) return;
+  for(std::size_t i = 0; i < attachmentDirs.size(); ++i) {
+    moveIntoTrashAs(root_, attachmentDirs[i], entries[i + 1].name);
   }
 }
 
 void Library::deleteNote(const std::filesystem::path& path) const {
   const auto safePath = platform::normalizeInsideRoot(root_, path);
+  if(!std::filesystem::exists(safePath)) return;
   const auto metadata = loadNoteMetadata(safePath);
   const auto attachmentDir = metadata.id.empty() ? std::filesystem::path {}
                                                  : root_ / ".micronotes" / "attachments" / metadata.id;
+  const auto files = trashFiles(root_);
+  std::filesystem::create_directories(files);
+
+  std::vector<std::string> reserved;
   TrashEntry entry;
   entry.originalRelative = safePath.lexically_relative(root_);
   entry.title = metadata.title.empty() ? safePath.stem().string() : metadata.title;
   entry.deletedAt = timestampNow();
-  entry.name = moveIntoTrash(root_, safePath);
-  if(entry.name.empty()) return;
-  if(!attachmentDir.empty() && std::filesystem::exists(attachmentDir)) {
-    entry.attachmentName = moveIntoTrash(root_, attachmentDir);
+  entry.name = uniqueTrashName(files, safePath, reserved);
+  reserved.push_back(entry.name);
+  const bool hasAttachments = !attachmentDir.empty() && std::filesystem::exists(attachmentDir);
+  if(hasAttachments) {
+    entry.attachmentName = uniqueTrashName(files, attachmentDir, reserved);
     entry.attachmentOriginalRelative = attachmentDir.lexically_relative(root_);
   }
-  appendTrashEntry(root_, entry);
+
+  // The index entry lands *before* the file moves, and this ordering is the
+  // whole point. A crash after the move and before the index left a note in the
+  // trash that nothing named and nobody could restore. A crash the other way
+  // round leaves an index line for a file that never arrived -- and
+  // `trashEntries()` already skips an entry whose file is not there, so it is
+  // history rather than a broken offer.
+  if(!appendTrashEntries(root_, {entry})) return;
+  if(!moveIntoTrashAs(root_, safePath, entry.name)) return;
+  if(hasAttachments) moveIntoTrashAs(root_, attachmentDir, entry.attachmentName);
 }
 
 std::vector<TrashEntry> Library::trashEntries() const {

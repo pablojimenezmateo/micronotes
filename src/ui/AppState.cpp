@@ -349,8 +349,13 @@ bool AppState::renameSelectedNote(const std::string& title) {
   auto metadata = note->metadata;
   metadata.title = uniqueTitle(*library_, title, note->item.folder, note->item.path);
   const auto source = note->item.path;
-  const auto target = library_->renameNote(source, metadata.title);
-  if(!library_->saveNote(target, metadata, note->body)) return false;
+  // One write. This used to call `renameNote`, which read the note back off the
+  // disk, patched the title it had just been given, and wrote it -- and then
+  // wrote the whole note a second time with the metadata here. Four fsync
+  // barriers and a redundant whole-file read for one rename, and two writes
+  // with no stated rule about which of them won.
+  const auto target = library_->saveNoteAs(source, metadata, note->body);
+  if(target.empty()) return false;
   selection_.noteId = metadata.id;
   // The file moved, so the record's path did too.
   openNote_->noteId = metadata.id;

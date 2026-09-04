@@ -141,6 +141,10 @@ MICRONOTES_TEST(library_rejects_paths_outside_root) {
   std::filesystem::remove_all(root);
 }
 
+// Tags round-trip through the front matter, and through the one write that
+// changes a header without touching the body. This used to go through
+// `Library::updateTags`, which nothing in the app called: `AppState` writes the
+// header itself, so the test was the only user of a second way to do it.
 MICRONOTES_TEST(library_persists_tag_updates) {
   const auto root = std::filesystem::temp_directory_path() / "micronotes-tags-test";
   std::filesystem::remove_all(root);
@@ -149,12 +153,16 @@ MICRONOTES_TEST(library_persists_tag_updates) {
   metadata.id = "tag-note";
   metadata.title = "Tagged";
   const auto path = library.createNote(metadata, "body");
-  library.updateTags(path, {"fast", "local"});
+
+  metadata.tags = {"fast", "local"};
+  MICRONOTES_REQUIRE(library.saveNote(path, metadata, library.loadNote(path).body));
   MICRONOTES_REQUIRE(library.loadNoteMetadata(path).tags.size() == 2);
-  library.updateTags(path, {"local"});
+  metadata.tags = {"local"};
+  MICRONOTES_REQUIRE(library.saveNote(path, metadata, library.loadNote(path).body));
   const auto updated = library.loadNoteMetadata(path);
   MICRONOTES_REQUIRE(updated.tags.size() == 1);
   MICRONOTES_REQUIRE(updated.tags[0] == "local");
+  MICRONOTES_REQUIRE(library.loadNote(path).body == "body");
   std::filesystem::remove_all(root);
 }
 
@@ -485,4 +493,80 @@ MICRONOTES_TEST(metadata_title_heading_length_measures_only_what_it_claims) {
   MICRONOTES_REQUIRE(titleHeadingLength("# A #\n", "A") == 0);
   MICRONOTES_REQUIRE(titleHeadingLength("A\n=\n", "A") == 0);
   MICRONOTES_REQUIRE(titleHeadingLength("Text\n\n# A\n", "A") == 0);
+}
+
+// The trash index is the only record of where a deleted note came from, so it
+// has to reach the disk before the file moves.
+//
+// The old order was the other way round and the append was an unflushed
+// `ofstream`: a crash in between left the note sitting in `trash/files` with
+// nothing naming it, so `trashEntries()` could not list it and the person who
+// deleted it had no way back to it from inside the app.
+MICRONOTES_TEST(library_writes_the_trash_index_before_it_moves_anything) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-order";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "ordered";
+  metadata.title = "Ordered";
+  const auto path = library.createNote(metadata, "body");
+  library.deleteNote(path);
+
+  const auto index = root / ".micronotes" / "trash" / "index";
+  MICRONOTES_REQUIRE(std::filesystem::exists(index));
+  const auto entries = library.trashEntries();
+  MICRONOTES_REQUIRE(entries.size() == 1);
+  MICRONOTES_REQUIRE(entries.front().title == "Ordered");
+
+  // The half-completed state a crash between the two steps would leave: the
+  // index line is there and the file is not. It reads as history rather than as
+  // an offer that fails when taken.
+  std::filesystem::remove(root / ".micronotes" / "trash" / "files" / entries.front().name);
+  MICRONOTES_REQUIRE(library.trashEntries().empty());
+  MICRONOTES_REQUIRE(!library.restoreFromTrash(entries.front().name));
+
+  std::filesystem::remove_all(root);
+}
+
+// A folder delete files the folder and one entry per attachment directory under
+// it. They are one durable write now, and they must not collide: nothing has
+// moved yet when the names are handed out, so the filesystem check alone cannot
+// tell that a name is already spoken for.
+MICRONOTES_TEST(library_reserves_distinct_trash_names_within_one_folder_delete) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-batch";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  library.createFolder("work");
+
+  // Three notes in the folder, each with an attachment directory. The
+  // directories are named by note id, so they are already distinct -- what has
+  // to hold is that every reserved name is distinct and every file arrives.
+  for(int i = 0; i < 3; ++i) {
+    micronotes::library::NoteMetadata metadata;
+    metadata.id = "batch-" + std::to_string(i);
+    metadata.title = "Batch " + std::to_string(i);
+    const auto path = library.createNote(metadata, "body");
+    library.moveNote(path, "work");
+    const auto attachments = root / ".micronotes" / "attachments" / metadata.id;
+    std::filesystem::create_directories(attachments);
+    std::ofstream(attachments / "file.png") << "png";
+  }
+
+  library.deleteFolder("work");
+  // The folder plus three attachment directories, each under its own name.
+  MICRONOTES_REQUIRE(trashFileCount(root) == 4);
+  const auto entries = library.trashEntries();
+  // Only the folder is offered; the attachment directories are filed so the
+  // restore can find them, not so a person can pick one.
+  MICRONOTES_REQUIRE(entries.size() == 1);
+  MICRONOTES_REQUIRE(entries.front().title == "work");
+
+  MICRONOTES_REQUIRE(library.restoreFromTrash(entries.front().name));
+  MICRONOTES_REQUIRE(library.noteFiles().size() == 3);
+  for(int i = 0; i < 3; ++i) {
+    const auto id = "batch-" + std::to_string(i);
+    MICRONOTES_REQUIRE(std::filesystem::exists(root / ".micronotes" / "attachments" / id / "file.png"));
+  }
+
+  std::filesystem::remove_all(root);
 }

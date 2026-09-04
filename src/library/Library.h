@@ -59,8 +59,20 @@ public:
   // so an inherited id would make the copy and the note fight over which of
   // them the library lists.
   std::string preserveExternalVersion(const std::filesystem::path& path) const;
-  bool updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const;
   std::filesystem::path createFolder(const std::filesystem::path& relativeFolder) const;
+  // Writes the note under the file name `metadata.title` implies, and removes
+  // the file it came from when that name changed. Returns where it landed, or
+  // an empty path when the write failed.
+  //
+  // One durable write. `renameSelectedNote` used to go through `renameNote`,
+  // which read the note, patched its title and wrote it -- and then wrote the
+  // whole note *again* with the metadata it actually wanted. Two atomic writes,
+  // four fsync barriers and a redundant read of the whole file, for one rename,
+  // with a real ambiguity about which of the two writes won.
+  std::filesystem::path saveNoteAs(const std::filesystem::path& path,
+                                   const NoteMetadata& metadata, std::string_view body) const;
+  // The same, for a caller that is not already holding the note: reads it, puts
+  // `newTitle` in its front matter, and writes it under the matching name.
   std::filesystem::path renameNote(const std::filesystem::path& path, const std::string& newTitle) const;
   std::filesystem::path moveNote(const std::filesystem::path& path, const std::filesystem::path& relativeFolder) const;
   std::filesystem::path renameFolder(const std::filesystem::path& relativeFolder, const std::filesystem::path& newRelativeFolder) const;
