@@ -104,14 +104,23 @@ tools/session-compare.sh main     # the same, through a REAL headless session:
 ```
 
 **The harness draws nothing.** It has a font lane -- real faces, real shaping,
-through the same `app::documentMetrics` the live surface lays out with -- but no
+through the same `app::documentMetrics` the live surface lays out with -- and a
+persistence lane that goes through `AppState`'s real writes to disk, but no
 window, no textures and no present, and nothing in it goes through `src/app/`'s
-key handling, its shell surfaces or `AppState`'s writes to disk. So for anything
-above the document layout a real session *is* the instrument, not a nicety. The
-fifth pass in `docs/performance.md` found 1.1 ms of `fsync` on every keystroke
-and a right-hand panel costing more per frame than the note; the seventh found
-a note's pictures being re-resolved on disk once per layout. No harness lane
-could see any of them.
+key handling or its shell surfaces. So for anything above that a real session
+*is* the instrument, not a nicety. The fifth pass in `docs/performance.md` found
+1.1 ms of `fsync` on every keystroke and a right-hand panel costing more per
+frame than the note; the seventh found a note's pictures being re-resolved on
+disk once per layout. No harness lane could see any of them.
+
+**A lane the harness does not have is a budget nothing enforces.** The eighth
+pass is the cautionary one: every budget in the file was a layout or a paint, so
+autosave -- which runs once a second while somebody is typing -- had grown a
+whole-library tree walk and three whole-file reads, at 18.7 ms and 39,350
+allocations a save, with the suite green throughout. Writing the lane *first*,
+before touching the code, is what made that pass arithmetic rather than opinion.
+The persistence lane is wall-clock, deliberately: a durable write is two `fsync`
+barriers, and on process CPU time an 18 ms save reads as 60 us of work.
 
 Capture the pixels before and after as well: a paint or layout optimisation that
 cannot be observed is safe, and `cmp` of two screenshots is the cheapest proof
@@ -165,6 +174,12 @@ when the counters went in it turned out to be 70% of every frame.
   change. Commit it separately from the work that uncovered it.
 - Keep deterministic logic out of SDL event glue and paint code. Thin
   orchestration layers are easier to test.
+- **Never write a note's file without checking what is there.** `AppState`
+  carries a `platform::FileSignature` per open note and `saveSelectedNote`
+  compares it before writing; a path that skips that comparison can destroy an
+  edit made in another program. If two versions of a note exist and cannot be
+  merged, both end up in the library -- micronotes does not choose. See
+  `docs/library-format.md`, "Changes Made Outside micronotes".
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
   only at a durable polymorphic boundary.
 - Avoid hidden coupling through mutable global state. The perf tables are the

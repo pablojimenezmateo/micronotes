@@ -14,16 +14,23 @@ library/
     ui.state
     tree.state
     folds.state
+    recovery/<note-id>.body
     trash/files/<name>
     trash/index
 ```
 
 Everything under `.micronotes/` is view state or a rebuildable cache, except
-`trash/`, which holds deleted notes and notebooks until they are restored or
-removed by hand. `ui.state` carries the appearance settings - theme, text size,
-page width - along with the pane widths, the selection, the favorites and the
-recents; `tree.state` which notebooks the sidebar has open; `folds.state` which
-sections each note has collapsed. None of it is ever written into a note.
+`trash/` and `recovery/`. `trash/` holds deleted notes and notebooks until they
+are restored or removed by hand; `recovery/` holds the buffer being edited,
+rewritten on every keystroke, so that a crash between two characters does not
+lose the second one. A recovery file is retired the moment the note it belongs
+to is saved, so one being present at startup means the last session did not end
+cleanly -- and micronotes offers it back rather than the older text on disk.
+
+`ui.state` carries the appearance settings - theme, text size, page width -
+along with the pane widths, the selection, the favorites and the recents;
+`tree.state` which notebooks the sidebar has open; `folds.state` which sections
+each note has collapsed. None of it is ever written into a note.
 
 `ui.state` is `key=value`, one per line, and unknown keys are ignored, so a file
 written by a newer version still opens. `text_size` is `small`, `medium` or
@@ -34,6 +41,36 @@ be typeset differently - which is the point on a machine where one of them is
 read on an external monitor.
 
 The SQLite database is a rebuildable index/cache. If it is deleted, micronotes rebuilds it from Markdown files and metadata.
+
+## Changes Made Outside micronotes
+
+The Markdown files are the source of truth, which means anything else may write
+them: another editor, a `git checkout`, a sync daemon. micronotes watches the
+library tree and notices within a frame, without needing the window to be
+touched.
+
+What happens next depends on whether the note on screen has unsaved work in it:
+
+- **Nothing unsaved.** The note is reloaded from the file, and the sidebar, the
+  search index and the backlinks follow. The reader's place in the note is kept
+  rather than reset to the top.
+- **Unsaved work.** The buffer is left exactly as it is -- an external change
+  never overwrites something you have typed. The next save then keeps *both*
+  versions: the buffer is written to the note, and the text that had appeared on
+  disk becomes a note of its own beside it, called
+  `<name> (external change <timestamp>).md`. It is an ordinary note, with its
+  own id, listed in the sidebar and searchable, so the two can be read side by
+  side and merged by hand. The status line names the file it was kept as.
+- **The file was deleted.** The buffer is the only copy left, so it is kept and
+  the next save writes the file back.
+
+A note whose front matter `id` changes on disk is followed rather than lost: it
+is the same file, so the selection, its tab and the favorites re-point at the
+new id.
+
+The one thing micronotes never does is choose for you between two versions of a
+note. If a change cannot be merged automatically, both copies end up in the
+library.
 
 ## Note Metadata
 
@@ -107,6 +144,36 @@ Attachments are copied into `.micronotes/attachments/<note-id>/`. Image attachme
 
 Managed attachment paths must resolve inside the library root.
 
+## Durability
+
+Every write micronotes makes to a library is atomic and durable: the bytes go to
+a temp file beside the target, are `fsync`ed, and the temp is renamed over the
+target, whose directory is then `fsync`ed as well. A crash leaves either the
+previous file or the whole new one, never a half-written one.
+
+The replaced file's properties survive the swap, which a plain rename would
+destroy along with its inode:
+
+- **A symlinked note stays a symlink.** The link is followed and its target is
+  written, including a link whose target does not exist yet.
+- **Its mode and owner are carried over.** A note kept at `0600` stays `0600`
+  rather than coming back at whatever the umask says. The staging file is
+  `0600` while it is being written, so a half-written note is never readable by
+  anyone the finished one would not be.
+
+Staging files are named `.<name>.microcore-write.<pid>.<n>`: hidden, distinctive
+enough to recognise as debris a year later, and unique per process and per call,
+so two writers of one file degrade to last-writer-wins rather than truncating
+each other. The library walk skips them by name.
+
+Deleting a note writes its trash-index entry *before* moving the file. The index
+is the only record of where a deleted note came from, so the failure mode has to
+be an index line naming a file that never arrived -- which reads as history and
+is skipped -- rather than a file in the trash that nothing names and nobody can
+restore.
+
 ## Performance Notes
 
-Search uses the SQLite index/FTS path when available. Full library scans are reserved for explicit refresh/rebuild paths, not for every search query.
+Search uses the SQLite index/FTS path when available. Full library scans are
+reserved for explicit refresh/rebuild paths, not for every search query -- and
+not for saving, which re-indexes only the file it wrote.

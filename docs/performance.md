@@ -2345,3 +2345,160 @@ layouts — the sweep is better, and the two answers are not in tension.
 `peak_rss` on both fixtures is marginally *lower* than before, because
 re-parsing and re-decoding churn more than holding the results does.
 
+
+## The eighth pass: the save nobody had measured
+
+The fifth pass found 1.1 ms of `fsync` on every keystroke by looking for what
+the instruments were not pointed at. This pass is the same question asked again,
+one layer up, and the answer was larger: **the harness had no lane for saving at
+all.** Every budget in `tools/PerfMain.cpp` was a layout or a paint, so the
+autosave -- which runs 1.2 s after the last keystroke and again every second
+while typing continues -- could grow a whole-library tree walk and a whole-file
+read and the whole suite would stay green.
+
+It had. Writing the lane first, before touching a line of the save path, is what
+made the rest of the pass arithmetic instead of opinion:
+
+```
+save.autosave_note   18,713 us median   59,020 us worst   39,350 allocs   5,872 KB
+save.durable_write_200kb  1,363 us median                       26 allocs      2.5 KB
+```
+
+One autosave of a 200 KB note in the existing 1,000-note fixture cost **eighteen
+milliseconds and thirty-nine thousand allocations**, against 1.4 ms for the
+durable write of the same bytes. Seventeen of those milliseconds were overhead
+around the write, once a second, against a 2 ms frame budget.
+
+The lane is wall-clock rather than `CLOCK_PROCESS_CPUTIME_ID` like every
+scenario above it, and that is not a lapse: a durable write is two `fsync`
+barriers, and a barrier is time the process spends *blocked* rather than
+running. On CPU time the same save reads as about 60 us of work, which is a
+precise measurement of the wrong thing. The allocation counts beside the medians
+stay the machine-independent half, and on this pass they carried the argument.
+
+### Resolved: a save rescanned the whole library to discover what it had written
+
+`saveSelectedNote` ended in `refreshLibrary()`: a recursive walk of the tree, a
+stat per note, a read of every row in the SQLite index to compare against, and
+then every memo the note list had built -- the list, the folder counts, the tag
+list, the id map -- thrown away and rebuilt on next use.
+
+`refreshChangedFiles` exists to *discover* what changed and it earns its cost
+when nobody can say. A save can: it knows the one path it just wrote, and it is
+still holding the bytes. `LibraryIndex::refreshFile` re-indexes a named file --
+a stat, and only if the stat moved, one read and one transaction --  and
+`refreshWrittenFile` skips even the read, taking the front matter and body from
+the caller. An index on `notes(path)` (schema 4) is what makes the by-path
+lookup a lookup rather than a scan of the table per save.
+
+The other half was `FileRefresh::listFieldsChanged`. The note list is built from
+five fields: id, path, title, tags, icon. An ordinary save moves none of them --
+it moves the body -- so the sidebar, the folder counts and the tag list do not
+have to be rebuilt at all. The library revision still moves, because backlinks
+and search results *do* change with a body; but `rowsWritten` keeps even that
+from moving when a refresh finds nothing changed, which is what the watcher's
+echo of the app's own write looks like.
+
+### Resolved: three separate readers re-read the open note on every save
+
+`AppState::selectedNote()` opened the note, read all of it, parsed its front
+matter and handed back a copy of the body -- and it was how everything asked
+about the open note. The page header wanted its title. The right-hand panel
+wanted its tags, for a row of chips. The save itself wanted its `id`. All three
+memoised on the library revision, and the library revision moved on every save.
+
+So a 200 KB note was read and parsed three times per autosave, to recover facts
+that had not changed and that the app had just written. `AppState::OpenNote` is
+the record: front matter, path, and the file's signature, read once per note.
+`app_state.open_note_reads` is the counter that keeps it honest -- two for a
+whole harness run, where it used to be three per save.
+
+### The result
+
+Interleaved through `tools/perf-compare.py`, counters first because they are
+exact:
+
+| counter | before | after |
+|---|---:|---:|
+| `library.index_files_scanned` | 22,020 | 5,003 |
+| `library.directory_entries_visited` | 22,086 | 5,018 |
+| `library.note_rows_selected` | 18,018 | 2,002 |
+| `library.index_refresh_calls` | 22 | 5 |
+| `app_state.open_note_reads` | 3 per save | 2 per run |
+
+and the lane, per autosave, over the three commits that got there:
+
+| | start | one file, not the library | no copy of the note |
+|---|---:|---:|---:|
+| `save.autosave_note` | 18,713 us | 4,386 us | **3,627 us** |
+| allocations | 39,350 | 62 | **61** |
+| allocated | 5,872 KB | 205 KB | **4.6 KB** |
+| largest allocation | 256 KB | 256 KB | **0.3 KB** |
+
+The last column is the one that says the shape is now right: **a save allocates
+no copy of the note at all.** The 205 KB was the body being moved into the
+index's row struct and then copied again inside sqlite, because every column was
+bound `SQLITE_TRANSIENT`. It is lent instead -- `SQLITE_STATIC` over the save's
+own buffer, which outlives the transaction.
+
+`save.durable_write_200kb` is 1,141 us on this filesystem and did not move. A
+save is now 3.2 barrier-pairs' worth of work where it was 13.8.
+
+### What the numbers could not say
+
+Three of the findings in this pass were not performance findings, and no
+instrument would ever have reported them. They came out of reading the save path
+closely enough to make it fast:
+
+- **Nothing checked what it was overwriting.** A note edited in another program,
+  delivered by a sync daemon or replaced by a `git checkout` was destroyed by
+  the next autosave. Worse than destroyed: the save re-read the *changed* file
+  for its front matter and wrote the stale buffer under it, so the external body
+  was gone and its header was not.
+- **`loadSelectedIntoEditor` never consulted the recovery store,** and it is the
+  *startup* path -- the one case crash recovery exists for. The two hundred lines
+  of durable-write machinery the fifth pass built worked only if you happened to
+  click the note's name again after restarting.
+- **The first save of a note another tool wrote made it vanish.** Such a note is
+  filed under an id derived from its path; the save gave it a permanent one and
+  left the selection, its tab and the favorites pointing at the id it no longer
+  had.
+
+The lesson is the fifth pass's, one turn further round: the instruments answer
+the questions they were aimed at. `docs/tech-debt.md` TD-16 and TD-17 are what
+this pass found and chose not to pay.
+
+### The watcher, and why it is not a timer
+
+"A file changed on disk should be reloaded" was answered on window focus first,
+because that is where the app already refreshed. It covers coming back from
+another editor and nothing else: a `git pull` in a terminal on the next monitor,
+or a sync daemon delivering a change, happens while the window is sitting there
+with focus.
+
+The cheap answer would have been a one-second `stat` of the open file -- ten
+lines, and *worse on the priority order this project is built on*. A timer means
+waking a sleeping process once a second, forever, to be told nothing happened.
+`platform::DirectoryWatcher` is one inotify descriptor, a watch per directory,
+and a thread asleep in `poll`; it costs nothing at all until something changes.
+Measured on a real session, reading `/proc/<pid>/stat`:
+
+```
+cpu ticks after 3s idle:                   user=5 sys=2
+cpu ticks after the external change:       user=7 sys=2
+cpu ticks after 3s more idle:              user=7 sys=2
+```
+
+Zero while idle, two ticks to notice and repaint, zero again. `cmp` of the
+framebuffer before and after says the window drew the new text with no input and
+no focus change.
+
+Two things about it took a real session to get right. The mask is
+`IN_CLOSE_WRITE | IN_MOVED_TO`, not `IN_MODIFY`: every careful writer -- this
+app included -- saves by writing a temp and renaming it into place, so an atomic
+save arrives as a *move* and never as a write at all. And the app's own writes
+come back through the watcher with nothing filtering them out, because nothing
+needs to: a re-index whose stat matches its row writes no rows, and a reload
+whose signature agrees does not happen. Comparing the disk is what makes echo
+suppression free, where remembering who wrote what would have been a second
+piece of state to get wrong.
