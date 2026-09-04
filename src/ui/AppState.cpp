@@ -445,6 +445,10 @@ bool AppState::deleteSelectedNote() {
   if(open.noteId.empty()) return false;
   const auto path = open.path;
   library_->deleteNote(path);
+  // The recovery copy goes with it. Nothing will ever ask about this id again,
+  // and a `.body` file left behind under it is an offer to restore a draft of a
+  // note that no longer exists.
+  recovery_.clear(open.noteId);
   openNote_.reset();
   // A deleted note must not be left open in a tab pointing at nothing; closing
   // it also chooses what to show next.

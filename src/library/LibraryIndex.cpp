@@ -35,6 +35,19 @@ static void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
   sqlite3_bind_text(stmt, index, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT);
 }
 
+// Binds without handing sqlite a copy to keep. The caller guarantees the bytes
+// outlive the step, which is what the one caller does: a note's body is the
+// largest thing in the row by three orders of magnitude, and SQLITE_TRANSIENT
+// meant sqlite copied the whole note -- twice, once for the row and once for
+// the fts entry -- on every save.
+static void bindTextBorrowed(sqlite3_stmt* stmt, int index, std::string_view value) {
+  // An empty view's `data()` may be null, and sqlite reads a null pointer as
+  // SQL NULL rather than as an empty string -- which every column here is
+  // declared NOT NULL against. A note with an empty body is an ordinary note.
+  sqlite3_bind_text(stmt, index, value.empty() ? "" : value.data(),
+                    static_cast<int>(value.size()), SQLITE_STATIC);
+}
+
 static std::string columnText(sqlite3_stmt* stmt, int index) {
   const auto* text = sqlite3_column_text(stmt, index);
   return text ? reinterpret_cast<const char*>(text) : std::string();
@@ -206,6 +219,16 @@ void recordLinks(sqlite3_stmt* stmt, const std::string& noteId, std::string_view
 }
 
 // One note as every table here holds it.
+//
+// The body is either ours or the caller's, and `body()` says which without a
+// copy either way. A save already holds the bytes it wrote and they outlive the
+// transaction, so handing sqlite a view of them saves two copies of a whole
+// note per save: one into this row, and one more inside sqlite.
+//
+// `body()` rather than a `string_view` member, which is what the first attempt
+// used and what made the search tests fail: a row is *move-assigned* into place
+// by both refreshes, and a view of our own `owned` string dangles the moment
+// that string moves. Deriving it on read cannot get that wrong.
 struct NoteRow {
   std::string id;
   std::string relative;   // library-relative, generic form; the `path` column
@@ -214,7 +237,20 @@ struct NoteRow {
   std::string icon;
   long long mtime = 0;
   long long size = 0;
-  std::string body;
+  // Exactly one of these carries the body, and `lends` says which.
+  std::string owned;      // the read path's own copy
+  std::string_view lent;  // the write path's view of the caller's buffer
+  bool lends = false;
+
+  std::string_view body() const { return lends ? lent : std::string_view(owned); }
+  void ownBody(std::string text) {
+    owned = std::move(text);
+    lends = false;
+  }
+  void lendBody(std::string_view text) {
+    lent = text;
+    lends = true;
+  }
 };
 
 // The five fields the note list is built from. Deliberately not the body and
@@ -251,7 +287,7 @@ static NoteRow readNoteRow(const Library& library, const std::filesystem::path& 
                            std::string relative, long long mtime, long long size) {
   auto note = library.loadNote(path);
   NoteRow row = noteRowFrom(note.metadata, path, std::move(relative), mtime, size);
-  row.body = std::move(note.body);
+  row.ownBody(std::move(note.body));
   return row;
 }
 
@@ -298,7 +334,7 @@ public:
     sqlite3_bind_int64(upsert_, 5, static_cast<sqlite3_int64>(row.size));
     bindText(upsert_, 6, row.tags);
     bindText(upsert_, 7, row.icon);
-    bindText(upsert_, 8, row.body);
+    bindTextBorrowed(upsert_, 8, row.body());
     if(sqlite3_step(upsert_) != SQLITE_DONE) return false;
 
     sqlite3_int64 rowId = 0;
@@ -319,7 +355,7 @@ public:
     sqlite3_reset(insertFts_);
     sqlite3_bind_int64(insertFts_, 1, rowId);
     bindText(insertFts_, 2, row.title);
-    bindText(insertFts_, 3, row.body);
+    bindTextBorrowed(insertFts_, 3, row.body());
     bindText(insertFts_, 4, row.relative);
     if(sqlite3_step(insertFts_) != SQLITE_DONE) return false;
 
@@ -332,7 +368,7 @@ public:
       if(sqlite3_step(deleteLinks_) != SQLITE_DONE) return false;
     }
     perf::ScopeTimer linkTimer("library_index.record_links");
-    recordLinks(insertLink_, row.id, row.body);
+    recordLinks(insertLink_, row.id, row.body());
     return true;
   }
 
@@ -547,9 +583,10 @@ LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path&
   if(written) {
     row = noteRowFrom(*written->metadata, absolutePath, relative,
                       static_cast<long long>(disk.mtimeNanos), static_cast<long long>(disk.size));
-    // The one copy of the body this path makes, and it is the copy sqlite needs
-    // anyway. Nothing is read and nothing is parsed.
-    row.body = written->body;
+    // A view of the caller's bytes. Nothing is read, nothing is parsed, and
+    // nothing is copied: the body reaches sqlite straight from the buffer the
+    // save wrote, which outlives the transaction below.
+    row.lendBody(written->body);
   } else {
     perf::addCounter(perf::CounterId::LibraryIndexFilesReread);
     perf::ScopeTimer readTimer("library_index.refresh_file.read");
