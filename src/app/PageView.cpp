@@ -537,7 +537,9 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         }
         // A callout's head line is its name, so it is drawn in the kind's own
         // colour rather than in the muted ink the rest of a quote takes.
-        if(layout.calloutTitle && run.role == doc::TextRole::Body) ink = ui::calloutStyle(block.info).accent;
+        if(layout.calloutTitle && run.role == doc::TextRole::Body) {
+          ink = ui::calloutStyle(block.info(document_.source())).accent;
+        }
         text.draw(run.text, x, lineY, ink, style);
         if(run.style.strike) {
           hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);
@@ -612,7 +614,7 @@ void PageView::drawFindHighlights(SDL_Renderer* renderer, std::string_view findQ
   // it, so the band opens one block early. It cannot reach further than that:
   // a block boundary is a line boundary and a match is one line of source.
   const std::size_t from = blocks[firstBlock > 0 ? firstBlock - 1 : 0].start;
-  const std::size_t to = blocks[std::min(lastBlock, blocks.size()) - 1].end;
+  const std::size_t to = blocks[std::min(lastBlock, blocks.size()) - 1].end();
   const auto begin = std::lower_bound(findMatches_.begin(), findMatches_.end(), from);
   const auto end = std::lower_bound(findMatches_.begin(), findMatches_.end(), to);
   perf::addCounter(perf::CounterId::PageFindHighlightsDrawn,
@@ -674,7 +676,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
       continue;
     }
 
-    const ui::CalloutStyle style = ui::calloutStyle(block.info);
+    const ui::CalloutStyle style = ui::calloutStyle(block.info(document_.source()));
     const Rect callout {left, top, columnWidth_ - layout.indent, height + 2.0f};
     // No rule down the left edge. The tint is already the whole shape, and a
     // bar beside it makes the box read as a quote wearing a colour rather than
@@ -703,7 +705,8 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     ui::TextStyle label;
     label.size = ui::type().body;
     label.strong = true;
-    text.draw(ui::calloutLabel(block.info), ox + layout.textLeft, lineY, style.accent, label);
+    text.draw(ui::calloutLabel(block.info(document_.source())), ox + layout.textLeft, lineY,
+              style.accent, label);
   }
 }
 
@@ -742,8 +745,9 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
       text.draw(copy, button.x + 7.0f, button.y + 3.0f, hot ? theme().text : theme().muted, label);
     }
 
-    if(block.info.empty()) continue;
-    text.draw(block.info, button.x - static_cast<float>(text.width(block.info, label)) - 10.0f, y + 3.0f,
+    if(!block.hasInfo()) continue;
+    const std::string_view info = block.info(document_.source());
+    text.draw(info, button.x - static_cast<float>(text.width(info, label)) - 10.0f, y + 3.0f,
               theme().dim, label);
   }
 }

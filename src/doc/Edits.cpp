@@ -33,9 +33,7 @@ public:
       trailing_ = SourceBlock {};
       trailing_.kind = BlockKind::Blank;
       trailing_.start = source.size();
-      trailing_.end = source.size();
-      trailing_.contentStart = source.size();
-      trailing_.contentEnd = source.size();
+      trailing_.length = 0;
     }
   }
 
@@ -87,7 +85,7 @@ Context contextAt(std::string_view source, std::size_t caret, BlockSpan lent) {
 
 std::size_t leadingWhitespace(std::string_view source, const SourceBlock& block) {
   std::size_t i = block.start;
-  while(i < block.end && (source[i] == ' ' || source[i] == '\t')) ++i;
+  while(i < block.end() && (source[i] == ' ' || source[i] == '\t')) ++i;
   return i - block.start;
 }
 
@@ -133,16 +131,16 @@ struct Separator {
 
 Separator separatorFor(const BlockList& blocks, std::size_t first, std::size_t last) {
   Separator separator;
-  separator.start = separator.end = blocks[last].end;
+  separator.start = separator.end = blocks[last].end();
   const auto blankRun = [&blocks](std::size_t i) {
     // The synthetic last-line block has no width, so it separates nothing.
-    return blocks[i].kind == BlockKind::Blank && blocks[i].end > blocks[i].start;
+    return blocks[i].kind == BlockKind::Blank && blocks[i].end() > blocks[i].start;
   };
   std::size_t after = last;
   while(after + 1 < blocks.size() && blankRun(after + 1)) ++after;
   if(after > last) {
-    separator.start = blocks[last].end;
-    separator.end = blocks[after].end;
+    separator.start = blocks[last].end();
+    separator.end = blocks[after].end();
     return separator;
   }
   std::size_t before = first;
@@ -165,7 +163,7 @@ Range rangeAt(std::string_view source, std::size_t from, std::size_t to, BlockSp
   range.last = range.blocks.indexAt(source, to);
   if(range.last < range.first) std::swap(range.first, range.last);
   range.start = range.blocks[range.first].start;
-  range.end = range.blocks[range.last].end;
+  range.end = range.blocks[range.last].end();
   range.valid = range.end > range.start;
   return range;
 }
@@ -207,7 +205,7 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
   // alert. Comparing the markers covers both without a case for each.
   if(block.kind == kind && kind != BlockKind::Heading && kind != BlockKind::Callout) return edit;
   if(block.kind == kind &&
-     source.substr(block.start, block.contentStart - block.start) ==
+     source.substr(block.start, block.contentStart() - block.start) ==
          blockMarker(kind, level, block.listDepth, block.ordinal, block.checked)) {
     return edit;
   }
@@ -215,7 +213,7 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
   if(kind == BlockKind::Divider) {
     edit.valid = true;
     edit.start = block.start;
-    edit.end = block.end;
+    edit.end = block.end();
     edit.text = "---\n";
     edit.cursor = block.start + edit.text.size();
     return edit;
@@ -223,14 +221,14 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
 
   // The content a fence wraps is the block body; every other kind keeps its
   // payload where the scanner marked it.
-  const std::size_t contentStart = block.contentStart;
-  const std::size_t contentEnd = std::max(contentStart, block.contentEnd);
+  const std::size_t contentStart = block.contentStart();
+  const std::size_t contentEnd = std::max(contentStart, block.contentEnd());
   std::string content(source.substr(contentStart, contentEnd - contentStart));
 
   if(kind == BlockKind::Code) {
     edit.valid = true;
     edit.start = block.start;
-    edit.end = block.end;
+    edit.end = block.end();
     std::string body = content;
     if(!body.empty() && body.back() != '\n') body.push_back('\n');
     edit.text = "```\n" + body + "```\n";
@@ -247,7 +245,7 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
   if(block.kind == BlockKind::Code) {
     // Un-fencing: the body survives verbatim, the new marker leads its first line.
     edit.start = block.start;
-    edit.end = block.end;
+    edit.end = block.end();
     edit.text = marker + content;
     edit.cursor = shiftedCaret(std::min(std::max(caret, contentStart), contentEnd), contentStart,
                                block.start + marker.size());
@@ -266,7 +264,7 @@ Edit toggleTodo(std::string_view source, std::size_t caret, BlockSpan blocks) {
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind == BlockKind::Todo) {
     // Walk back from the content to the "[" the scanner already validated.
-    std::size_t state = block.contentStart;
+    std::size_t state = block.contentStart();
     while(state > block.start && source[state - 1] != '[') --state;
     if(state == block.start || state >= source.size()) return edit;
     edit.valid = true;
@@ -278,10 +276,10 @@ Edit toggleTodo(std::string_view source, std::size_t caret, BlockSpan blocks) {
   }
   if(block.kind == BlockKind::Bullet) {
     edit.valid = true;
-    edit.start = block.contentStart;
-    edit.end = block.contentStart;
+    edit.start = block.contentStart();
+    edit.end = block.contentStart();
     edit.text = "[ ] ";
-    edit.cursor = caret >= block.contentStart ? caret + edit.text.size() : caret;
+    edit.cursor = caret >= block.contentStart() ? caret + edit.text.size() : caret;
     return edit;
   }
   return turnInto(source, caret, BlockKind::Todo, 1, blocks);
@@ -337,7 +335,7 @@ Edit moveGroup(std::string_view source, const BlockList& blocks, std::size_t fir
                std::size_t last, std::size_t dest, std::size_t caret, bool selects) {
   Edit edit;
   const std::size_t gs = blocks[first].start;
-  const std::size_t ge = blocks[last].end;
+  const std::size_t ge = blocks[last].end();
   if(ge <= gs) return edit;
 
   const Separator run = separatorFor(blocks, first, last);
@@ -409,7 +407,7 @@ Edit moveBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCa
     std::size_t j = range.last;
     while(j + 1 < partition.size() && partition[j + 1].kind == BlockKind::Blank) ++j;
     if(j + 1 >= partition.size()) return edit;
-    destination = partition[j + 1].end;
+    destination = partition[j + 1].end();
   }
   return moveGroup(source, partition, range.first, range.last, destination,
                    std::min(fromCaret, toCaret), fromCaret != toCaret);
@@ -499,7 +497,7 @@ Edit turnBlocksInto(std::string_view source, std::size_t fromCaret, std::size_t 
   bool changed = false;
   for(const auto& block : chunkBlocks) {
     if(block.kind == BlockKind::Blank) continue;
-    const Edit one = turnInto(chunk, block.contentStart, kind, level, chunkBlocks);
+    const Edit one = turnInto(chunk, block.contentStart(), kind, level, chunkBlocks);
     if(!one.valid) continue;
     // Disjoint and in order, per the argument above. A rewrite that reached
     // back into bytes already copied would mean two blocks claiming the same
@@ -629,9 +627,9 @@ Edit continueList(std::string_view source, std::size_t caret, BlockSpan blocks) 
   const bool list = isListKind(block.kind);
   const bool quote = block.kind == BlockKind::Quote || block.kind == BlockKind::Callout;
   if(!list && !quote) return edit;
-  if(caret < block.contentStart) return edit;
+  if(caret < block.contentStart()) return edit;
 
-  if(block.contentEnd <= block.contentStart) {
+  if(block.contentEnd() <= block.contentStart()) {
     // Enter on an empty item leaves the list instead of adding another.
     if(list && block.listDepth > 0) return outdent(source, caret, blocks);
     // Dropping the marker alone is not enough to get out: "- one\ntext" and
@@ -640,7 +638,7 @@ Edit continueList(std::string_view source, std::size_t caret, BlockSpan blocks) 
     // what actually ends the block.
     edit.valid = true;
     edit.start = block.start;
-    edit.end = block.contentStart;
+    edit.end = block.contentStart();
     edit.text = "\n";
     edit.cursor = block.start + 1;
     return edit;
@@ -660,7 +658,7 @@ Edit closeFence(std::string_view source, std::size_t caret, BlockSpan blocks) {
   const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind != BlockKind::Code) return edit;
-  if(block.contentEnd != block.end) return edit;  // a closing fence is already there
+  if(block.contentEnd() != block.end()) return edit;  // a closing fence is already there
   if(caret > lineEndFrom(source, block.start)) return edit;
 
   std::size_t i = block.start;
@@ -682,7 +680,7 @@ Edit outdentOrUnwrap(std::string_view source, std::size_t caret, BlockSpan block
   Edit edit;
   const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
-  if(caret != block.contentStart || block.contentStart <= block.start) return edit;
+  if(caret != block.contentStart() || block.contentStart() <= block.start) return edit;
   switch(block.kind) {
     case BlockKind::Complex:
     case BlockKind::Code:
@@ -695,7 +693,7 @@ Edit outdentOrUnwrap(std::string_view source, std::size_t caret, BlockSpan block
   if(isListKind(block.kind) && block.listDepth > 0) return outdent(source, caret, blocks);
   edit.valid = true;
   edit.start = block.start;
-  edit.end = block.contentStart;
+  edit.end = block.contentStart();
   edit.cursor = block.start;
   return edit;
 }
@@ -708,7 +706,7 @@ Edit applyMarkdownShortcut(std::string_view source, std::size_t caret, BlockSpan
   const Context context = contextAt(source, caret, blocks);
   const SourceBlock& block = context.blocks[context.index];
   if(block.kind == BlockKind::Code || block.kind == BlockKind::Complex) return edit;
-  const std::size_t from = block.contentStart;
+  const std::size_t from = block.contentStart();
   if(caret <= from || caret > source.size()) return edit;
 
   const std::string_view typed = source.substr(from, caret - from);

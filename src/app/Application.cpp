@@ -292,8 +292,8 @@ static void toggleFoldAt(UiRuntime& ui, std::size_t caret) {
   // blocks it actually hides count: the caret further down the note stays put.
   const std::size_t end = doc::foldEnd(blocks, index);
   const std::size_t caretNow = ui.editor.cursor();
-  if(folded && caretNow >= blocks[index].end && caretNow < blocks[end - 1].end) {
-    ui.editor.moveCursor(blocks[index].contentEnd);
+  if(folded && caretNow >= blocks[index].end() && caretNow < blocks[end - 1].end()) {
+    ui.editor.moveCursor(blocks[index].contentEnd());
     ui.editor.clearSelection();
   }
   ui.status = folded ? "Folded" : "Unfolded";
@@ -1370,7 +1370,7 @@ static void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
   const EditorBlocks blocks(ui);
   const auto& first = blocks[doc::blockIndexAt(blocks, std::min(from, source.size()))];
   const auto& last = blocks[doc::blockIndexAt(blocks, std::min(to, source.size()))];
-  std::string moved = source.substr(first.start, last.end - first.start);
+  std::string moved = source.substr(first.start, last.end() - first.start);
   while(!moved.empty() && moved.back() == '\n') moved.pop_back();
   if(moved.empty()) {
     ui.status = "Nothing to move";
@@ -1720,7 +1720,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
       const auto [from, to] = blockSelectionCarets(ui);
       const EditorBlocks blocks(ui);
       const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
-      const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end;
+      const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end();
       ui.status = setClipboardText(std::string_view(ui.editor.text()).substr(start, end - start))
                     ? "Copied block" : "Copy failed: " + std::string(SDL_GetError());
     } else if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
@@ -1876,7 +1876,7 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     } else if(key == SDLK_RETURN || key == SDLK_KP_ENTER) {
       // Enter puts the caret back into the first selected block's text.
       const EditorBlocks blocks(ui);
-      const auto content = blocks[doc::blockIndexAt(blocks, blockSelectionCarets(ui).first)].contentStart;
+      const auto content = blocks[doc::blockIndexAt(blocks, blockSelectionCarets(ui).first)].contentStart();
       ui.clearBlockSelection();
       ui.editor.moveCursor(content);
       ui.revealEditorCursor = true;
@@ -2297,7 +2297,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         const auto& blocks = ui.livePage.document().blocks();
         const auto& block = blocks[doc::blockIndexAt(blocks, *blockStart)];
         const std::string_view source = ui.editor.text();
-        const std::string body {source.substr(block.contentStart, block.contentEnd - block.contentStart)};
+        const std::string body {source.substr(block.contentStart(), block.contentEnd() - block.contentStart())};
         ui.status = setClipboardText(body) ? "Copied code" : "Clipboard unavailable";
         return;
       }

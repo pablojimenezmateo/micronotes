@@ -207,15 +207,23 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
 
     SourceBlock block;
     block.start = line.start;
-    block.end = line.next;
-    block.contentStart = bodyStart;
-    block.contentEnd = line.end;
     block.listDepth = depthFromIndent(columns);
+    // Tracked as absolutes while the scan decides what this block is, and
+    // packed into the block on the way out of whichever branch decided it. The
+    // block holds them relative to `start`, so writing them straight in would
+    // be a subtraction per decision rather than one per block -- and the scan
+    // is the whole cost of a block transform on a note nobody has lent a
+    // partition for.
+    std::size_t blockEnd = line.next;
+    std::size_t payloadStart = bodyStart;
+    std::size_t payloadEnd = line.end;
 
     if(isBlank(text)) {
       block.kind = BlockKind::Blank;
-      block.contentStart = line.start;
-      block.contentEnd = line.start;
+      payloadStart = line.start;
+      payloadEnd = line.start;
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
@@ -233,9 +241,11 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
         scan = inner.next;
         if(!isBlank(innerText)) lastContentEnd = scan;
       }
-      block.end = lastContentEnd;
-      block.contentStart = line.start;
-      block.contentEnd = lastContentEnd > line.start && source[lastContentEnd - 1] == '\n' ? lastContentEnd - 1 : lastContentEnd;
+      blockEnd = lastContentEnd;
+      payloadStart = line.start;
+      payloadEnd = lastContentEnd > line.start && source[lastContentEnd - 1] == '\n' ? lastContentEnd - 1 : lastContentEnd;
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
@@ -246,11 +256,12 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       std::string_view info = source.substr(fence.infoStart, line.end - fence.infoStart);
       while(!info.empty() && (info.front() == ' ' || info.front() == '\t')) info.remove_prefix(1);
       while(!info.empty() && (info.back() == ' ' || info.back() == '\t' || info.back() == '\r')) info.remove_suffix(1);
-      block.info = std::string(info);
-      block.contentStart = line.next;
+      block.setInfo(static_cast<std::size_t>(info.data() - source.data()),
+                    static_cast<std::size_t>(info.data() - source.data()) + info.size());
+      payloadStart = line.next;
       std::size_t scan = line.next;
       std::size_t contentEnd = line.next;
-      std::size_t blockEnd = line.next;
+      blockEnd = line.next;
       while(scan < source.size()) {
         const Line inner = lineAt(source, scan);
         const std::string_view innerText = textOf(source, inner);
@@ -268,8 +279,9 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
         contentEnd = scan;
         blockEnd = scan;
       }
-      block.contentEnd = std::max(block.contentStart, contentEnd);
-      block.end = blockEnd;
+      payloadEnd = std::max(payloadStart, contentEnd);
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
@@ -294,17 +306,21 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
         if(isBlank(textOf(source, inner))) break;
         scan = inner.next;
       }
-      block.end = scan;
-      block.contentStart = line.start;
-      block.contentEnd = scan > line.start && source[scan - 1] == '\n' ? scan - 1 : scan;
+      blockEnd = scan;
+      payloadStart = line.start;
+      payloadEnd = scan > line.start && source[scan - 1] == '\n' ? scan - 1 : scan;
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
     if(columns < 4 && isDivider(body)) {
       block.kind = BlockKind::Divider;
       // The whole line is marker; there is nothing to type into.
-      block.contentStart = line.end;
-      block.contentEnd = line.end;
+      payloadStart = line.end;
+      payloadEnd = line.end;
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
@@ -313,10 +329,12 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       while(hashes < body.size() && body[hashes] == '#') ++hashes;
       if(hashes <= 6 && (hashes == body.size() || body[hashes] == ' ')) {
         block.kind = BlockKind::Heading;
-        block.level = static_cast<int>(hashes);
+        block.level = static_cast<std::uint8_t>(hashes);
         std::size_t after = hashes;
         while(after < body.size() && body[after] == ' ') ++after;
-        block.contentStart = bodyStart + after;
+        payloadStart = bodyStart + after;
+        block.setEnd(blockEnd);
+        block.setContent(payloadStart, payloadEnd);
         return block;
       }
     }
@@ -325,18 +343,20 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       std::size_t after = 1;
       while(after < body.size() && (body[after] == ' ' || body[after] == '\t')) ++after;
       block.kind = BlockKind::Quote;
-      block.contentStart = bodyStart + after;
+      payloadStart = bodyStart + after;
       const std::string_view rest = body.substr(after);
       if(rest.size() > 3 && rest[0] == '[' && rest[1] == '!') {
         const auto close = rest.find(']');
         if(close != std::string_view::npos) {
           block.kind = BlockKind::Callout;
-          block.info = std::string(rest.substr(2, close - 2));
+          block.setInfo(bodyStart + after + 2, bodyStart + after + close);
           std::size_t contentAfter = after + close + 1;
           while(contentAfter < body.size() && body[contentAfter] == ' ') ++contentAfter;
-          block.contentStart = bodyStart + contentAfter;
+          payloadStart = bodyStart + contentAfter;
         }
       }
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
@@ -345,7 +365,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       block.ordered = marker.ordered;
       block.ordinal = marker.ordinal;
       block.checked = marker.checked;
-      block.contentStart = std::min(marker.contentStart, line.end);
+      payloadStart = std::min(marker.contentStart, line.end);
       // An item owns the lines that continue its text, on the same terms as a
       // paragraph: everything up to a blank line or to something that starts a
       // block of its own, which a nested item does. Without this a hand-wrapped
@@ -359,14 +379,16 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
         contentEnd = inner.end;
         scan = inner.next;
       }
-      block.contentEnd = contentEnd;
-      block.end = scan;
+      payloadEnd = contentEnd;
+      blockEnd = scan;
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
       return block;
     }
 
     // A paragraph absorbs following lines until something else starts.
     block.kind = BlockKind::Paragraph;
-    block.contentStart = line.start;
+    payloadStart = line.start;
     std::size_t scan = line.next;
     std::size_t contentEnd = line.end;
     while(scan < source.size()) {
@@ -375,8 +397,10 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       contentEnd = inner.end;
       scan = inner.next;
     }
-    block.contentEnd = contentEnd;
-    block.end = scan;
+    payloadEnd = contentEnd;
+    blockEnd = scan;
+    block.setEnd(blockEnd);
+    block.setContent(payloadStart, payloadEnd);
     return block;
   }
 }
@@ -390,7 +414,7 @@ std::size_t scanBlocksFrom(std::string_view source, std::size_t from, std::size_
     out->push_back(scanOneBlock(source, pos));
     // Every branch of the scan sets `end` to where it consumed up to, so the
     // block itself says where the next one starts.
-    pos = out->back().end;
+    pos = out->back().end();
     if(pos < source.size() && source.size() - pos <= tailBytes && resume && resume(pos)) break;
   }
   return pos;

@@ -316,7 +316,7 @@ MICRONOTES_TEST(layout_gives_complex_blocks_one_caret_position) {
   MICRONOTES_REQUIRE(layout.layout(table).complex);
   MICRONOTES_REQUIRE(layout.layout(table).height >= 90.0f);
   const auto& block = layout.blocks()[table];
-  for(std::size_t offset = block.start; offset < block.end; ++offset) {
+  for(std::size_t offset = block.start; offset < block.end(); ++offset) {
     MICRONOTES_REQUIRE(layout.offsetAt(400.0f, layout.blockTop(table) + 1.0f) == block.start);
   }
 

@@ -95,7 +95,7 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect re
     const auto index = doc::blockIndexAt(blocks, std::min(*raw, ui.editor.text().size()));
     const auto& block = blocks[index];
     const auto cursor = ui.editor.cursor();
-    if(cursor < block.start || cursor >= block.end) {
+    if(cursor < block.start || cursor >= block.end()) {
       ui.livePage.setRawOffset(std::nullopt);
       ui.livePage.layout(text, ui.editor.text(), cursor, rect);
     }

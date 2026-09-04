@@ -554,7 +554,7 @@ void DocumentLayout::rescan(const EditWindow& window, std::size_t previousBytes,
   // A list to splice into has to exist, and has to have described the buffer the
   // window was measured against. `blocks_` always partitions the source it was
   // scanned from, so where the last block ends is the whole test.
-  if(blocks_.empty() || blocks_.back().end != previousBytes) {
+  if(blocks_.empty() || blocks_.back().end() != previousBytes) {
     scanBlocksInto(source_, &blocks_);
     return;
   }
@@ -623,17 +623,13 @@ void DocumentLayout::rescan(const EditWindow& window, std::size_t previousBytes,
   }
   std::move(scanned_.begin(), scanned_.end(), blocks_.begin() + carried);
   // The tail's blocks keep everything except where in the buffer they sit, and
-  // that moved by exactly the number of bytes the edit added or removed. Four
-  // integer adds per block, against a hash of every byte and a map probe each if
-  // they were re-derived instead.
+  // that moved by exactly the number of bytes the edit added or removed. One
+  // integer add per block -- a block's length and its payload are held from its
+  // own start, so moving the block moves all four offsets at once -- against a
+  // hash of every byte and a map probe each if they were re-derived instead.
   for(std::size_t i = carried + middle; i < count; ++i) {
     SourceBlock& block = blocks_[i];
     block.start = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.start) + byteShift);
-    block.end = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.end) + byteShift);
-    block.contentStart =
-      static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.contentStart) + byteShift);
-    block.contentEnd =
-      static_cast<std::size_t>(static_cast<std::ptrdiff_t>(block.contentEnd) + byteShift);
   }
 
   perf::addCounter(perf::CounterId::LayoutBlocksRescanned, middle);
@@ -694,7 +690,7 @@ DocumentLayout::Flags DocumentLayout::flagsFor(std::size_t index, std::size_t ca
   flags.raw = index == rawBlock;
   flags.first = index == 0;
   // A buffer ending in a newline has one more (empty) line to put a caret on.
-  flags.trailingLine = index + 1 == blocks_.size() && block.end == source_.size() &&
+  flags.trailingLine = index + 1 == blocks_.size() && block.end() == source_.size() &&
                        !source_.empty() && source_.back() == '\n';
   flags.hidden = hidden_[index] != 0;
   flags.groupFirst = startsQuoteRun(blocks_, index);
@@ -706,9 +702,9 @@ const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& 
                                                 std::uint64_t geometry, std::uint64_t* key,
                                                 Tally* tally) {
   const SourceBlock& block = blocks_[index];
-  tally->keyBytes += block.end - block.start;
+  tally->keyBytes += block.end() - block.start;
   std::uint64_t hash =
-    hashBytes(geometry, source_.data() + block.start, block.end - block.start);
+    hashBytes(geometry, source_.data() + block.start, block.end() - block.start);
   hash = hashValue(hash, block.kind);
   hash = hashValue(hash, block.level);
   hash = hashValue(hash, block.listDepth);
@@ -1176,7 +1172,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
 
   switch(block.kind) {
     case BlockKind::Heading:
-      base.size = type.heading[std::clamp(block.level, 1, 6) - 1];
+      base.size = type.heading[std::clamp<int>(block.level, 1, 6) - 1];
       base.strong = true;
       if(!flags.first) padTop = options_.headingSpaceAbove;
       break;
@@ -1201,7 +1197,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       // The head of a callout run is its title. It gets no extra height: the
       // `> [!KIND]` line already occupies one, and reserving a band above it
       // as well would leave the box with a blank row over its own name.
-      if(block.kind == BlockKind::Callout && flags.groupFirst && !block.info.empty() && !revealed && !raw) {
+      if(block.kind == BlockKind::Callout && flags.groupFirst && block.hasInfo() && !revealed && !raw) {
         out.calloutTitle = true;
         base.strong = true;
       }
@@ -1238,7 +1234,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     line.height = lineHeight;
     line.runBegin = static_cast<std::uint32_t>(out.runs.size());
     TextRun& run = out.runs.emplace_back();
-    run.srcStart = block.end - block.start;
+    run.srcStart = block.end() - block.start;
     run.srcEnd = run.srcStart;
     run.rect = {out.textLeft, 0.0f, 0.0f, lineHeight};
     run.style = base;
@@ -1267,7 +1263,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     line.runBegin = static_cast<std::uint32_t>(out.runs.size());
     TextRun& run = out.runs.emplace_back();
     run.srcStart = 0;
-    run.srcEnd = block.end - block.start;
+    run.srcEnd = block.end() - block.start;
     run.rect = {out.textLeft, 0.0f, 0.0f, line.height};
     run.style = base;
     run.role = TextRole::Body;
@@ -1295,20 +1291,20 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
 
   if(raw || block.kind == BlockKind::Code) {
     const bool fenced = block.kind == BlockKind::Code && !raw;
-    const std::size_t from = fenced ? block.contentStart : block.start;
-    const std::size_t to = fenced ? block.contentEnd : block.end;
+    const std::size_t from = fenced ? block.contentStart() : block.start;
+    const std::size_t to = fenced ? block.contentEnd() : block.end();
     // Revealed, the opening fence is a line of its own; hidden, it rides in
     // front of the first line of code. Deciding that before the loop rather than
     // splicing it in afterwards is what lets the groups be filled in order.
     if(fenced && revealed) {
-      addGroup().push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, false, -1));
+      addGroup().push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, false, -1));
     }
     bool firstLine = true;
     sourceLinesInto(source, from, to, &sourceLines_);
     for(const auto& [lineStart, lineEnd] : sourceLines_) {
       LineGroup& group = addGroup();
       if(fenced && !revealed && firstLine) {
-        group.push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, true, -1));
+        group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, true, -1));
       }
       firstLine = false;
       if(lineEnd > lineStart) {
@@ -1322,29 +1318,29 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       // `sourceLinesInto` always yields at least one line, so this is unreachable
       // today; it is here so that the opening fence cannot be dropped if it ever
       // yields none.
-      addGroup().push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, true, -1));
+      addGroup().push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, true, -1));
     }
-    if(fenced && block.end > block.contentEnd) {
-      Token closing = makeToken(source, block.contentEnd, block.end, markerStyle, TextRole::Marker, true, !revealed, -1);
+    if(fenced && block.end() > block.contentEnd()) {
+      Token closing = makeToken(source, block.contentEnd(), block.end(), markerStyle, TextRole::Marker, true, !revealed, -1);
       if(revealed) addGroup().push_back(std::move(closing));
       else groups[groupCount - 1].push_back(std::move(closing));
     }
   } else {
     LineGroup& group = addGroup();
-    if(block.contentStart > block.start) {
-      group.push_back(makeToken(source, block.start, block.contentStart, markerStyle, TextRole::Marker, true, !revealed, -1));
+    if(block.contentStart() > block.start) {
+      group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, !revealed, -1));
     }
-    if(block.contentEnd > block.contentStart) {
+    if(block.contentEnd() > block.contentStart()) {
       const perf::ScopeTimer inlineTimer("layout.block.inline_attrs");
-      const std::size_t span = block.contentEnd - block.contentStart;
+      const std::size_t span = block.contentEnd() - block.contentStart();
       const auto& inlines =
-        scanInlinesInto(source.substr(block.contentStart, span), block.contentStart,
+        scanInlinesInto(source.substr(block.contentStart(), span), block.contentStart(),
                         &inlineScratch_);
       perf::addCounter(perf::CounterId::LayoutInlineSpans, inlines.size());
       if(inlines.empty()) {
         // Nothing marked up, so there is nothing an attribute table could say.
         perf::addCounter(perf::CounterId::LayoutPlainBlocks);
-        appendPlainTokens(source, block.contentStart, block.contentEnd, base, group);
+        appendPlainTokens(source, block.contentStart(), block.contentEnd(), base, group);
       } else {
         perf::addCounter(perf::CounterId::LayoutAttrBytes, span);
         // Reassigned rather than reallocated, same as the scan's own buffers:
@@ -1355,8 +1351,8 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
           // A template rather than a `std::function`: this is called per byte of
           // the span, and through a type-erased call it could not be inlined.
           const auto apply = [&](std::size_t from, std::size_t to, auto&& fn) {
-            for(std::size_t i = std::max(from, block.contentStart); i < std::min(to, block.contentEnd); ++i) {
-              fn(attrs[i - block.contentStart]);
+            for(std::size_t i = std::max(from, block.contentStart()); i < std::min(to, block.contentEnd()); ++i) {
+              fn(attrs[i - block.contentStart()]);
             }
           };
           apply(inlineSpan.openStart, inlineSpan.openEnd, [](Attr& a) { a.marker = true; });
@@ -1405,13 +1401,13 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
         }
         {
           const perf::ScopeTimer tokenTimer("layout.block.content_tokens");
-          appendContentTokens(source, block.contentStart, block.contentEnd, attrs, base, type.mono, revealed, group);
+          appendContentTokens(source, block.contentStart(), block.contentEnd(), attrs, base, type.mono, revealed, group);
         }
       }
     }
-    if(block.end > block.contentEnd) {
+    if(block.end() > block.contentEnd()) {
       // The trailing newline is always zero width: it must never push the line.
-      group.push_back(makeToken(source, block.contentEnd, block.end, markerStyle, TextRole::Marker, true, true, -1));
+      group.push_back(makeToken(source, block.contentEnd(), block.end(), markerStyle, TextRole::Marker, true, true, -1));
     }
   }
 
@@ -1420,7 +1416,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
   // glyph advance, and being wrong only costs the doubling this avoids.
   {
     const std::size_t contentBytes =
-      block.contentEnd > block.contentStart ? block.contentEnd - block.contentStart : 0;
+      block.contentEnd() > block.contentStart() ? block.contentEnd() - block.contentStart() : 0;
     const float inkWidth = static_cast<float>(contentBytes) * base.size * 0.5f;
     out.lines.reserve(static_cast<std::size_t>(inkWidth / std::max(1.0f, available)) + 1);
     // And exactly how many runs, which is not an estimate: the flow emits one
@@ -1544,7 +1540,7 @@ std::size_t DocumentLayout::offsetAt(float x, float y) const {
     if(!chosen || x >= run.rect.x) chosen = &run;
   }
   if(!chosen) {
-    const std::size_t content = block.contentStart - block.start;
+    const std::size_t content = block.contentStart() - block.start;
     for(const auto& run : runs) {
       if(run.srcStart >= content) return block.start + run.srcStart;
     }

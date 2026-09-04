@@ -152,8 +152,8 @@ std::string retargetWikiLinks(std::string_view source, std::string_view from, st
   doc::InlineScratch scratch;
   doc::scanBlocksInto(source, &blocks);
   for(const auto& block : blocks) {
-    const auto content = source.substr(block.contentStart, block.contentEnd - block.contentStart);
-    for(const auto& span : doc::scanInlinesInto(content, block.contentStart, &scratch)) {
+    const auto content = source.substr(block.contentStart(), block.contentEnd() - block.contentStart());
+    for(const auto& span : doc::scanInlinesInto(content, block.contentStart(), &scratch)) {
       if(span.kind != doc::SpanKind::WikiLink) continue;
       const auto target = splitWikiTarget(span.target);
       if(target.note != from) continue;
@@ -183,8 +183,8 @@ std::vector<WikiReference> wikiReferences(std::string_view source) {
   doc::InlineScratch scratch;
   doc::scanBlocksInto(source, &blocks);
   for(const auto& block : blocks) {
-    const auto content = source.substr(block.contentStart, block.contentEnd - block.contentStart);
-    for(const auto& span : doc::scanInlinesInto(content, block.contentStart, &scratch)) {
+    const auto content = source.substr(block.contentStart(), block.contentEnd() - block.contentStart());
+    for(const auto& span : doc::scanInlinesInto(content, block.contentStart(), &scratch)) {
       if(span.kind != doc::SpanKind::WikiLink) continue;
       // The line the link is on, so a backlink can show why it is there.
       const auto lineStart = source.rfind('\n', span.start);

@@ -173,7 +173,7 @@ MICRONOTES_TEST(edits_leave_the_list_on_an_empty_item) {
   const auto exit = micronotes::doc::continueList(flat, 8);
   MICRONOTES_REQUIRE(applied(flat, exit) == "- one\n\n\n");
   MICRONOTES_REQUIRE(exit.cursor == 7);
-  MICRONOTES_REQUIRE(micronotes::doc::scanBlocks(applied(flat, exit))[0].end == 6);
+  MICRONOTES_REQUIRE(micronotes::doc::scanBlocks(applied(flat, exit))[0].end() == 6);
 
   // A quote ends the same way, and for the same reason.
   const std::string quote = "> a\n> \n";
@@ -336,7 +336,7 @@ MICRONOTES_TEST(edits_turn_a_range_into_what_turning_each_block_would) {
         bool changed = false;
         for(std::size_t i = chunkBlocks.size(); i-- > 0;) {
           if(chunkBlocks[i].kind == BlockKind::Blank) continue;
-          const Edit one = micronotes::doc::turnInto(chunk, chunkBlocks[i].contentStart, kind, 2);
+          const Edit one = micronotes::doc::turnInto(chunk, chunkBlocks[i].contentStart(), kind, 2);
           if(!one.valid) continue;
           chunk.replace(one.start, one.end - one.start, one.text);
           changed = true;

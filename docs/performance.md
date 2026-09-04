@@ -1319,8 +1319,10 @@ any more:
   run against `layout.source_bytes_copied`'s 2,459,143.
 - **The source memmove**, `layout.source_bytes_moved`, averaging 29 KB an edit
   over the run. A flat buffer has no way around dragging its tail.
-- **The block tail's offsets**, four integer adds per block after the splice
-  point. On an edit near the top that is every block in the note.
+- **The block tail's `start`**, one integer add per block after the splice
+  point. On an edit near the top that is every block in the note. It was four
+  adds until `SourceBlock` started holding its payload relative to its own
+  start.
 - **`resolveFolds`**, but only for a note that has a fold in it. One with none
   skips the resolution entirely -- `layout.fold_resolutions_skipped` is 482 of
   634 updates -- and `layout.update.resolve_folds` is down from 513 calls to 31.
@@ -1334,10 +1336,11 @@ they replaced were 337. Three of them are named as open items below.
 
 ### Open: an edit still touches every block below it
 
-`layout.blocks_shifted` reads 451,230 over the run and the block tail's offset
+`layout.blocks_shifted` reads 451,230 over the run and the block tail's `start`
 shift is the same shape: an edit near the top of a note updates a position on
 every block under it, even though nothing about those blocks changed except where
-they sit.
+they sit. (The block half is one integer add per block now rather than four --
+see `SourceBlock` below -- so what is left of this is the placement's.)
 
 Both are the same design decision -- positions are *materialised*, as an absolute
 `top` per block and an absolute row index per block -- and the alternative is to
@@ -1384,32 +1387,70 @@ splice point is provably unchanged, because `hidden[j]` for `j` under the head
 of the edit depends only on blocks in `[0, j]`. That is half the incremental
 resolution for free, and it is the half an edit at the bottom of a note wants.
 
-### Open: `SourceBlock` is 88 bytes and holds a `std::string`
+### Resolved: `SourceBlock` was 88 bytes and held a `std::string`
 
-This used to be about the *walks* over the block list, and those are gone. What
-it is about now is the two places an edit still moves the array around:
+This stopped being about *walks* over the block list several passes ago. What it
+was still about was the two places an edit moves the array around:
 
-- **A block-count change memmoves the tail of it.** `newline.split_and_join` is
-  92 us against `type.middle`'s 23, and the difference is almost exactly the
+- **A block-count change memmoves the tail of it.** `newline.split_and_join` was
+  92 us against `type.middle`'s 23, and the difference was almost exactly the
   memmove: 9,612 blocks at 88 bytes is 846 KB, plus the four parallel placement
-  arrays sliding with it, so about 1.2 MB of memmove for one pressed Return.
-- **Every edit shifts the tail's offsets**, and there are four `std::size_t` of
-  them per block -- `start`, `end`, `contentStart`, `contentEnd`.
+  arrays sliding with it, for one pressed Return.
+- **Every edit shifted the tail's offsets**, and there were four `std::size_t`
+  of them per block -- `start`, `end`, `contentStart`, `contentEnd`.
 
-Both halve if the struct halves. As a `start` plus a 32-bit length and two 32-bit
-content offsets *relative to the block* it would be nearer 40 bytes, and the
-offset shift would touch one field per block instead of four -- which is also
-the form `sameBlockShape` used to compare them in, before the splice made that
-comparison unnecessary. `info` -- the fence language or the callout kind -- is an
-owned `std::string` that is empty for almost every block, and it wants to be an
-offset pair for the same reason: as a `string_view` it dangles when a short
-source is swapped between buffers, because the small-string optimisation puts the
-bytes inside the string object.
+The block is 40 bytes now and everything but `start` is held relative to it:
 
-Held off because it changes every reader of `contentStart` and `contentEnd`
-across the layout and the renderer, and the payoff is now tens of microseconds
-against a 2 ms budget rather than the hundreds it would have been before the
-walks went.
+```
+std::size_t   start          // absolute, and the only field that is
+std::uint32_t length
+std::uint32_t contentBegin, contentLength     // from start
+std::uint16_t infoBegin, infoLength           // from start
+std::int32_t  ordinal
+std::int16_t  listDepth
+std::uint8_t  level;  BlockKind kind;  bool ordered, checked
+```
+
+`end()`, `contentStart()` and `contentEnd()` are one add each, and the offset
+shift after a splice is **one** add per block instead of four, because moving a
+block moves its payload with it by construction. `info` -- the fence language or
+the callout kind, empty for almost every block -- is a span of the source rather
+than an owned string, which is also what stops it dangling: the small-string
+optimisation puts a short one's bytes *inside* the string object, so a
+`string_view` into a source buffer that gets swapped out is a use-after-free
+waiting for a long enough fence language. Sixteen bits are enough for its
+offsets because both constructs live on the block's first line.
+
+| 200 KB note | before | after |
+|---|---:|---:|
+| `newline.split_and_join` | 104 us | 44 us |
+| `type.near_top` | 44 us | 21 us |
+| `type.middle` | 26 us | 15 us |
+| `layout.keystroke_relayout_median` | 17 us | 14 us |
+| `layout.update.scan_blocks` (over the run) | 5.80 ms | 4.92 ms |
+| `open.cold_layout` allocated | 9,123 KB | 8,673 KB |
+| largest single allocation | 826 KB | 375 KB |
+
+No counter moved: the two sides did exactly the same work, which is what says
+the 38% off a pressed Return is bytes not moved rather than work not done.
+
+**Two things cost more, and both were measured rather than assumed.** Packing
+means the scanner has to subtract, so `scanOneBlock` writes `length` and the
+content span as differences from `start`. Doing that at every branch of the
+scan -- the scanner decides a block's payload in up to three places -- was 20%
+on the un-lent block transforms; tracking the offsets as absolutes and packing
+once, on the way out, brings it back to 2-8%, which is the un-lent path paying
+a subtraction per block for the memmove every other path saves. The lent
+transforms, which are what the app actually runs, did not move at all.
+
+The other was **bitfields**, and they are worth writing down because they looked
+free. Packing `level`, `ordered` and `checked` into four bits and two flags also
+reaches 40 bytes -- and cost 25% on the scan (137 us to 170 us on a
+minimum-of-sixty bench), because every write to one is a read-modify-write of
+the byte the others live in. Sixteen-bit info offsets reach the same 40 bytes
+with plain fields and plain stores.
+
+`peak_rss` is 29.8 MB against 30.0.
 
 ### Open: the staging tokens are built only to be thrown away
 

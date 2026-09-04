@@ -15,9 +15,9 @@ std::vector<OutlineEntry> outlineOf(std::string_view source) {
   for(const auto& block : doc::scanBlocks(source)) {
     if(block.kind != doc::BlockKind::Heading) continue;
     OutlineEntry entry;
-    entry.level = std::clamp(block.level, 1, 6);
-    entry.offset = block.contentStart;
-    entry.text = std::string(source.substr(block.contentStart, block.contentEnd - block.contentStart));
+    entry.level = std::clamp<int>(block.level, 1, 6);
+    entry.offset = block.contentStart();
+    entry.text = std::string(source.substr(block.contentStart(), block.contentEnd() - block.contentStart()));
     // A closing run of hashes is decoration in ATX headings and is not part of
     // the title.
     while(!entry.text.empty() && (entry.text.back() == '#' || entry.text.back() == ' ')) {

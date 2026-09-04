@@ -131,7 +131,7 @@ namespace {
 std::string_view complexSource(UiRuntime& ui, const doc::SourceBlock& block) {
   const std::string_view source = ui.editor.text();
   const std::size_t start = std::min(block.start, source.size());
-  const std::size_t end = std::min(block.end, source.size());
+  const std::size_t end = std::min(block.end(), source.size());
   return source.substr(start, end - start);
 }
 

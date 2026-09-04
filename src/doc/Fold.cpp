@@ -75,8 +75,8 @@ std::string foldKey(std::string_view source, const SourceBlock& block) {
 
   // Whitespace-collapsed so the key can never carry the separators the fold
   // file is written with.
-  const std::size_t from = std::min(block.contentStart, source.size());
-  const std::size_t to = std::min(block.contentEnd, source.size());
+  const std::size_t from = std::min(block.contentStart(), source.size());
+  const std::size_t to = std::min(block.contentEnd(), source.size());
   bool pendingSpace = false;
   for(std::size_t i = from; i < to && key.size() < 140; ++i) {
     const unsigned char c = static_cast<unsigned char>(source[i]);
