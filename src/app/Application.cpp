@@ -5,6 +5,7 @@
 #include "app/Notes.h"
 #include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
+#include "app/PageChrome.h"
 #include "app/PageHeader.h"
 #include "app/LivePage.h"
 #include "app/ReadingPage.h"
@@ -84,8 +85,6 @@
 #include <tuple>
 #include <vector>
 
-#include <sys/types.h>
-#include <unistd.h>
 
 namespace micronotes::app {
 namespace {
@@ -754,20 +753,6 @@ static bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
   }
 }
 
-static bool spawnDetached(const std::vector<std::string>& command) {
-  if(command.empty()) return false;
-  const pid_t pid = fork();
-  if(pid < 0) return false;
-  if(pid == 0) {
-    std::vector<char*> argv;
-    argv.reserve(command.size() + 1);
-    for(const auto& part : command) argv.push_back(const_cast<char*>(part.c_str()));
-    argv.push_back(nullptr);
-    execvp(argv[0], argv.data());
-    _exit(127);
-  }
-  return true;
-}
 
 // One wheel notch scrolls three lines in the editor and roughly three lines'
 // worth of pixels in the viewer, matching the platform convention.
@@ -941,6 +926,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
     if(scrollbarHit(page, ui.readingPage.scroll(), ui.readingPage.maxScroll(), x, y)) {
       return CursorKind::Pointer;
     }
+    if(ui.readingPage.copyButtonAt(x, y)) return CursorKind::Pointer;
     for(const auto& link : ui.linkRegions) {
       if(contains(link.rect, x, y)) return CursorKind::Pointer;
     }
@@ -2178,56 +2164,24 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     return;
   }
   if(contains(layout.content, x, y)) {
-    // The live surface's own chrome sits above the text, so a link underneath it
-    // must not swallow the click.
-    const bool overLiveChrome = ui.state.workspace().paneMode() == ui::PaneMode::Live &&
-                                (ui.livePage.gutterAt(x, y).has_value() || !ui.livePage.toolbarAt(x, y).empty() ||
-                                 ui.livePage.foldAt(x, y).has_value() || ui.livePage.copyButtonAt(x, y).has_value());
-    if(ui.state.workspace().paneMode() != ui::PaneMode::Editor && !overLiveChrome) {
-      for(const auto& link : ui.linkRegions) {
-        if(contains(link.rect, x, y)) {
-          const auto target = link.target;
-          if(link.wiki) {
-            openWikiLink(ui, target);
-            return;
-          }
-          const auto hash = target.find('#');
-          const auto filePart = hash == std::string::npos ? target : target.substr(0, hash);
-          const auto anchorPart = hash == std::string::npos ? std::string() : target.substr(hash + 1);
-          if(filePart.empty() && !anchorPart.empty()) {
-            if(jumpToAnchor(ui, anchorPart)) {
-              ui.status = "Jumped to " + anchorPart;
-            } else {
-              ui.status = "Anchor not found: " + anchorPart;
-            }
-            return;
-          }
-          if(isRemoteTarget(target)) {
-            ui.status = spawnDetached({"xdg-open", target}) ? "Opened " + target : "Open failed";
-            return;
-          }
-          if(!anchorPart.empty()) {
-            auto note = ui.state.selectedNote();
-            const auto sameNote = filePart.empty() || (note && (note->item.path.filename() == std::filesystem::path(filePart).filename()));
-            if(sameNote && jumpToAnchor(ui, anchorPart)) {
-              ui.status = "Jumped to " + anchorPart;
-              return;
-            }
-          }
-          if(ui.state.hasLibrary()) {
-            attachments::AttachmentService service;
-            try {
-              const auto command = service.openCommand(ui.state.libraryRoot(), filePart.empty() ? target : filePart);
-              ui.status = spawnDetached(command) ? "Opened " + std::filesystem::path(filePart.empty() ? target : filePart).filename().string() : "Open failed";
-            } catch(const std::exception&) {
-              ui.status = "Unsafe or unavailable link path";
-            }
-            return;
-          }
-          ui.status = "No library for local link";
-          return;
-        }
+    // A page's own chrome sits above its text, so a link underneath it must not
+    // swallow the click. Copying is the one piece of it a read-only page still
+    // carries, so it is asked of whichever page is showing the note.
+    const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
+    const bool overLiveChrome = live && (ui.livePage.gutterAt(x, y).has_value() ||
+                                         !ui.livePage.toolbarAt(x, y).empty() ||
+                                         ui.livePage.foldAt(x, y).has_value() ||
+                                         ui.livePage.copyButtonAt(x, y).has_value());
+    if(ui.state.workspace().paneMode() != ui::PaneMode::Editor) {
+      const PageView& page = live ? ui.livePage : ui.readingPage;
+      if(const auto code = codeUnderCopyButton(page, ui.editor.text(), x, y)) {
+        ui.status = setClipboardText(*code) ? "Copied code" : "Clipboard unavailable";
+        return;
       }
+    }
+    if(ui.state.workspace().paneMode() != ui::PaneMode::Editor && !overLiveChrome &&
+       followLinkAt(ui, x, y)) {
+      return;
     }
     if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
       ui.focus = FocusArea::Editor;
@@ -2259,14 +2213,6 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       // they act, and leave the caret and the selection where they were.
       if(const auto fold = ui.livePage.foldAt(x, y)) {
         toggleFoldAt(ui, fold->blockStart);
-        return;
-      }
-      if(const auto blockStart = ui.livePage.copyButtonAt(x, y)) {
-        const auto& blocks = ui.livePage.document().blocks();
-        const auto& block = blocks[doc::blockIndexAt(blocks, *blockStart)];
-        const std::string_view source = ui.editor.text();
-        const std::string body {source.substr(block.contentStart(), block.contentEnd() - block.contentStart())};
-        ui.status = setClipboardText(body) ? "Copied code" : "Clipboard unavailable";
         return;
       }
       if(const auto hit = ui.livePage.gutterAt(x, y)) {

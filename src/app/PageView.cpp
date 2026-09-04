@@ -557,7 +557,9 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         // A generous hit area: the drawn box is deliberately small.
         const Rect hit {box.x - 4.0f, box.y - 4.0f, box.w + 8.0f, box.h + 8.0f};
         checkboxes_.push_back({hit, block.start});
-        const bool hot = ui::contains(hit, pointerX_, pointerY_);
+        // No hover state on a page nobody can type into: a box that lights up
+        // and then does nothing is worse than one that never invited the click.
+        const bool hot = !readOnly_ && ui::contains(hit, pointerX_, pointerY_);
         if(block.checked) {
           fillRounded(renderer, box, theme().accent, ui::kRadiusSmall);
           const SDL_Color tick = theme().onAccent;
@@ -656,7 +658,10 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   drawCodeChrome(renderer, text);
   if(!readOnly_) drawDropIndicator(renderer);
   }
-  drawFoldControls(renderer);
+  // Folds are an editing affordance: a reading pane has none, and drawing a
+  // disclosure control under the pointer that toggles nothing is an invitation
+  // to a click that does not happen.
+  if(!readOnly_) drawFoldControls(renderer);
   // The three things an editable surface adds. Nothing else about the two
   // surfaces differs, which is why the reading pane is this page rather than a
   // second renderer for the same Markdown.

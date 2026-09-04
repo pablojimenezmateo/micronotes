@@ -225,6 +225,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/MarkdownBlocks.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
+  src/app/PageChrome.cpp
   src/app/PageHeader.cpp
   src/app/PageImages.cpp
   src/app/PageView.cpp
