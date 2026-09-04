@@ -233,10 +233,10 @@ anything: it is the run where the scheduler stayed out of the way.
 
 ### Running a real session without a screen
 
-The harness cannot see the font path (below), and for a long time that meant
-the numbers that matter most -- first paint, and anything downstream of glyph
-measurement -- could only be had by opening the app and watching it. They can
-be had headlessly:
+The harness measures shaping now (see "the harness could not see the font
+path" below), but it draws nothing: no window, no textures, no present. For
+first paint as the user sees it -- rasterizing, the shell surfaces, the panels
+-- a real session is still the instrument. It can be had headlessly:
 
 ```bash
 Xvfb :97 -screen 0 1600x1000x24 &
@@ -253,8 +253,9 @@ real faces.
 
 `tools/session-compare.sh <baseline-ref>` is the two-sided form of this, and is
 what to reach for when comparing a change against a commit: it builds both,
-alternates the runs, `cmp`s the pixels and diffs the counters. See "the harness
-cannot see the font path" below for why interleaving rather than averaging.
+alternates the runs, `cmp`s the pixels and diffs the counters. Interleaving
+rather than averaging, because the run-to-run spread on a real renderer is
+wider than a real regression.
 
 It is also the **rendering regression check**. A layout optimisation is only
 safe if it cannot be observed, and the cheapest proof of that is the pixels:
@@ -1425,51 +1426,60 @@ its own or rides in front of the first line of code. Filling the groups in order
 `appendContentTokens` and `appendPlainTokens` inside out to push into `Flow`
 rather than into a vector.
 
-### Open: the harness cannot see the font path
+### Resolved: the harness could not see the font path
 
-Every budget in `tools/PerfMain.cpp` measures against `stubMetrics()`, a
+Every budget in `tools/PerfMain.cpp` measured against `stubMetrics()`, a
 fixed-advance stand-in, because the core library has no fonts in it. That is the
 right call for a core-level benchmark and it is also why the largest cost in the
-app -- 120 ms of glyph shaping to open a note -- was invisible to `run-checks.sh
-perf` and only showed up in a real session. Until there is a harness lane that
-runs the real renderer, **a layout change has to be measured with a session, not
-with the fixture**.
+app -- glyph shaping to open a note -- was invisible to `run-checks.sh perf` for
+four passes and only showed up in a real session.
 
-The allocation counters narrow this: allocator traffic in the layout is the same
-whether the metrics are real or stubbed, so the churn half of a layout change is
-now measurable in the fixture and reproducible under load. The CPU clock narrows
-it further, in that a fixture timing is now trustworthy enough to compare at all.
-The shaping half still is not, and it is still the largest number left in the
-app: first paint is `Metrics::measure` being a font rather than a
-multiplication.
+The obstacle was never the measurement. It was that `micronotes_perf` linked
+`micronotes_core`, and everything that knows about a font -- `ui::Fonts`,
+`ui::Draw`, `PageView` -- was compiled into the executable instead of into a
+library. Splitting `micronotes_shell` out (the same change that made `src/app/`
+testable) removed it: the harness links the shell, constructs a real
+`ui::TextRenderer` against a null SDL renderer -- measurement needs SDL_ttf, not
+a window -- and lays the note out through `app::documentMetrics`, which is the
+same measure and line height `PageView` uses, at the same type scale.
 
-**The session is now cheap enough to be the answer, and it is a script.**
-`tools/session-compare.sh <ref>` builds the named commit in a worktree, builds
-the working tree, and runs both through the same headless session **alternated**
--- baseline, working, baseline, working -- because the run-to-run spread on a
-real renderer is wider than a real regression. It prints the `shell.content`
-self time per round, `cmp`s the screenshots, and diffs the counters, which are
-deterministic and so are the half of the output that is signal rather than
-spread:
+**The fixture had to change with it, and that is the part worth reading.** The
+200 KB note the other lanes share is written by a loop, so it repeats a few
+thousand distinct words several thousand times. A cold open of it through a real
+face is **99.2% measure-cache hits** and 6.4 ms -- barely above the stub's 5.9 --
+so pointing the existing fixture at a real font would have produced a lane that
+looks like it measures shaping and does not. `uniqueWordMarkdown` writes prose
+whose every word is different, and each pass gets its own note, because the
+measure cache belongs to the renderer and outlives the layout: run one note four
+times and only the first pass shapes anything.
 
-```bash
-tools/session-compare.sh main                       # every pane, three rounds
-tools/session-compare.sh HEAD~3 --panes reading --rounds 2 \
-  --library ~/notes --select "Some Note"
-```
+| 200 KB, one cold open | median | `render.text_measure_calls` | hits |
+|---|---:|---:|---:|
+| stub metrics | 5.9 ms | -- | -- |
+| real face, repeated words | 6.4 ms | 72,090 | 99.2% |
+| real face, every word different | 65 ms | 62,510 | 53.2% |
 
-That closes the actionable half of this entry: a change above the document
-layout can now be measured, and its pixels checked, in one command. What is
-still open is the *fixture*: `tools/PerfMain.cpp`'s budgets remain stubbed, so
-`run-checks.sh perf` still cannot see a shaping regression and a layout change
-still has to be taken to a session before it is believed.
+Ten times the cost for the same number of measurements. The 53% that hit are the
+*spaces* -- one token per gap, always `" "`, always cached -- so the miss column
+is one shaping pass per word and nothing else.
+
+That is the number the harness could not see: **opening a 200 KB note of
+ordinary prose is 65 ms of glyph shaping inside the layout alone**, on an idle
+machine. It also moves more with the machine than anything else here -- the same
+binary measured 200 ms while a parallel build was running, on CPU time, which is
+why `kFontShapingBudgetMicros` is six times the observed figure and the counters
+beside it are what a change is actually judged on.
+
+What is still not in the lane is a *draw*: no window, no textures, no present.
+It says what shaping and measuring cost and nothing about rasterizing. For that,
+`tools/session-compare.sh` remains the instrument.
 
 `src/ui/TextMeasureCache.{h,cpp}` is the answer on the app side, and a real
-session now says so: over a 185 KB note it reports 63,449 measure calls against
-62,473 hits -- **98.5%**, 976 misses. The shaping is not the cost any more. What
-first paint costs now is the run building around it: `layout.block.flow` is
-7.3 ms of a 10.3 ms first paint, and the measure calls inside it are a hash and
-a probe rather than a face.
+session says so: over a 185 KB note it reports 63,449 measure calls against
+62,473 hits -- **98.5%**, 976 misses -- because a real note *is* repetitive.
+The shaping is not the cost once the note is open. What first paint costs is the
+run building around it: `layout.block.flow` is 7.3 ms of a 10.3 ms first paint,
+and the measure calls inside it are a hash and a probe rather than a face.
 
 Two things were tried against that 27 ns per measure and did **not** move it, so
 that the next reader does not spend the afternoon again. Removing the two

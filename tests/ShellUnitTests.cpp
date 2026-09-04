@@ -122,3 +122,4 @@ MICRONOTES_TEST(shell_sidebar_metrics_never_fall_below_the_medium_size) {
   MICRONOTES_REQUIRE(searchResultRowHeight(3, large) >
                      searchResultRowHeight(1, large));
 }
+

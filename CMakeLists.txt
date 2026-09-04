@@ -322,7 +322,7 @@ add_test(
 if(MICRONOTES_PERF_HARNESS_BUILD)
   add_executable(micronotes_perf tools/PerfMain.cpp)
   target_include_directories(micronotes_perf PRIVATE src)
-  target_link_libraries(micronotes_perf PRIVATE micronotes_core)
+  target_link_libraries(micronotes_perf PRIVATE micronotes_shell)
 endif()
 
 foreach(target micronotes_core micronotes_shell micronotes micronotes_tests)

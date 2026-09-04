@@ -15,6 +15,25 @@
 
 namespace micronotes::app {
 
+// The measure and the line height the live surface lays a note out with, taken
+// from a real font. `measureComplex` is left unset: only a caller that owns the
+// md4c render model can answer it.
+//
+// Public because the perf harness needs exactly these. Every budget in
+// `tools/PerfMain.cpp` used to run against a fixed-advance stand-in, so the
+// largest cost in the app -- glyph shaping to open a note -- was invisible to
+// `run-checks.sh perf` and only showed up in a real session.
+//
+// The renderer is captured by pointer and must outlive the metrics, which for
+// the one in the app means the process.
+doc::Metrics documentMetrics(ui::TextRenderer& text);
+
+// The type scale the live surface lays out at: the reader's body and mono
+// sizes, the six heading sizes, and the leading ratio. Public for the same
+// reason `documentMetrics` is -- a harness measuring the real font path has to
+// measure it at the sizes the app uses.
+doc::TypeMetrics documentTypeMetrics();
+
 // The two things the live surface cannot do itself: measure and draw a block
 // the scanner deliberately does not model. Supplied by the application, which
 // owns the md4c render model.

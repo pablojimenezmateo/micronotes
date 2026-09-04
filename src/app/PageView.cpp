@@ -50,6 +50,33 @@ ui::TextStyle toTextStyle(const doc::RunStyle& style) {
   return out;
 }
 
+}
+
+doc::TypeMetrics documentTypeMetrics() {
+  doc::TypeMetrics metrics;
+  metrics.body = ui::type().body;
+  metrics.mono = ui::type().mono;
+  for(int level = 1; level <= 6; ++level) metrics.heading[level - 1] = ui::headingSize(level);
+  metrics.lineHeightRatio = ui::type().lineHeightRatio;
+  return metrics;
+}
+
+doc::Metrics documentMetrics(ui::TextRenderer& text) {
+  doc::Metrics metrics;
+  ui::TextRenderer* renderer = &text;
+  metrics.measure = [renderer](std::string_view value, const doc::RunStyle& style) {
+    return static_cast<float>(renderer->width(value, toTextStyle(style)));
+  };
+  metrics.lineHeight = [renderer](const doc::RunStyle& style) {
+    const float ratio = style.size >= ui::type().h3 ? 1.25f : ui::type().lineHeightRatio;
+    const float fromRatio = std::round((style.size > 0.0f ? style.size : ui::type().body) * ratio);
+    return std::max(static_cast<float>(renderer->lineHeight(toTextStyle(style))), fromRatio);
+  };
+  return metrics;
+}
+
+namespace {
+
 // Hand-drawn: the vendored UI face carries no disclosure glyph, and a missing
 // glyph in the gutter would read as a rendering bug.
 SDL_Color colorFor(doc::TextRole role) {
@@ -71,15 +98,6 @@ SDL_Color colorFor(doc::TextRole role, doc::BlockKind kind) {
   const bool quoted = kind == doc::BlockKind::Quote || kind == doc::BlockKind::Callout;
   if(quoted && role == doc::TextRole::Body) return theme().muted;
   return colorFor(role);
-}
-
-doc::TypeMetrics typeMetrics() {
-  doc::TypeMetrics metrics;
-  metrics.body = ui::type().body;
-  metrics.mono = ui::type().mono;
-  for(int level = 1; level <= 6; ++level) metrics.heading[level - 1] = ui::headingSize(level);
-  metrics.lineHeightRatio = ui::type().lineHeightRatio;
-  return metrics;
 }
 
 Rect toRect(const doc::Rect& rect, float originX, float originY) {
@@ -177,19 +195,14 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   contentTop_ = page_.y + kContentTopPadding + headerHeight_;
 
   // Installing metrics drops every cached block layout, so it happens only when
-  // the faces actually change, not once a frame.
-  text_ = &text;
-  if(std::abs(text.displayScale() - metricsScale_) > 0.001f) {
+  // the faces actually change, not once a frame...
+  // ...and the renderer it measures through, which the metrics hold by pointer.
+  // A different one at the same scale would otherwise keep measuring through
+  // the old one.
+  if(text_ != &text || std::abs(text.displayScale() - metricsScale_) > 0.001f) {
+    text_ = &text;
     metricsScale_ = text.displayScale();
-    doc::Metrics metrics;
-    metrics.measure = [this](std::string_view value, const doc::RunStyle& style) {
-      return static_cast<float>(text_->width(value, toTextStyle(style)));
-    };
-    metrics.lineHeight = [this](const doc::RunStyle& style) {
-      const float ratio = style.size >= ui::type().h3 ? 1.25f : ui::type().lineHeightRatio;
-      const float fromRatio = std::round((style.size > 0.0f ? style.size : ui::type().body) * ratio);
-      return std::max(static_cast<float>(text_->lineHeight(toTextStyle(style))), fromRatio);
-    };
+    doc::Metrics metrics = documentMetrics(text);
     metrics.measureComplex = [this](const doc::SourceBlock& block, float width) {
       return hooks_.measureComplex ? hooks_.measureComplex(block, width) : 0.0f;
     };
@@ -199,7 +212,7 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   doc::LayoutOptions options;
   options.width = columnWidth_;
   options.fontScale = text.displayScale();
-  options.type = typeMetrics();
+  options.type = documentTypeMetrics();
   options.caretOffset = caret;
   options.rawOffset = rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone;
   options.folded = foldsActive_ ? folds_.collapsed : nullptr;
