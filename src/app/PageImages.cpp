@@ -2,32 +2,62 @@
 
 #include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
+#include "core/perf/PerformanceCounters.h"
 #include "ui/TextUtil.h"
 
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
 namespace micronotes::app {
 namespace {
 
-// The texture behind an image link, or nothing when there is not one: a remote
-// target, a path outside the library, or a file the build cannot decode.
-// `ImageCache` answers a repeat ask out of its map, which is what makes this
-// cheap enough to call from a measure.
-SDL_Texture* imageTexture(ui::ImageCache& images, const UiRuntime& ui, std::string_view target,
-                          float& width, float& height) {
-  if(ui::isRemoteTarget(target) || !ui.state.hasLibrary()) return nullptr;
-  try {
-    attachments::AttachmentService service;
-    const auto path = service.resolveManaged(ui.state.libraryRoot(), std::string(target));
-    if(!service.isSupportedImage(path)) return nullptr;
-    return images.load(path, width, height);
-  } catch(const std::exception&) {
-    return nullptr;
+// Where an image target lands on disk, or an empty path when it lands nowhere
+// drawable: a remote target, a path outside the library, a file the build
+// cannot decode.
+//
+// Memoised on the runtime, because resolving one canonicalises the library root
+// and the candidate -- a `stat` per path component, twice -- and this is asked
+// per picture per relaid block. A note of 200 pictures paid about 3,200
+// syscalls for its first layout.
+const std::filesystem::path& resolvedImagePath(UiRuntime& ui, std::string_view target) {
+  static const std::filesystem::path kNone;
+  if(!ui.state.hasLibrary()) return kNone;
+  const auto& root = ui.state.libraryRoot();
+  if(ui.imagePathRoot != root) {
+    ui.imagePaths.clear();
+    ui.imagePathRoot = root;
   }
+  if(const auto found = ui.imagePaths.find(target); found != ui.imagePaths.end()) {
+    perf::addCounter(perf::CounterId::ImagePathsReused);
+    return found->second;
+  }
+  perf::addCounter(perf::CounterId::ImagePathsResolved);
+  std::filesystem::path path;
+  if(!ui::isRemoteTarget(target)) {
+    try {
+      attachments::AttachmentService service;
+      auto managed = service.resolveManaged(root, std::string(target));
+      if(service.isSupportedImage(managed)) path = std::move(managed);
+    } catch(const std::exception&) {
+      path.clear();
+    }
+  }
+  return ui.imagePaths.emplace(std::string(target), std::move(path)).first->second;
+}
+
+// The texture behind an image link, or nothing when there is not one.
+// `ImageCache` answers a repeat ask out of its own map, keyed by the resolved
+// path -- so between the two of them a picture already on screen costs two map
+// probes rather than a walk of the filesystem.
+SDL_Texture* imageTexture(ui::ImageCache& images, UiRuntime& ui, std::string_view target,
+                          float& width, float& height) {
+  const auto& path = resolvedImagePath(ui, target);
+  if(path.empty()) return nullptr;
+  return images.load(path, width, height);
 }
 
 // Fitted to the column, to a sane maximum width, and to a share of the page --

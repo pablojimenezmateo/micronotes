@@ -286,6 +286,14 @@ struct UiRuntime {
   // `std::less<>` rather than the default, so finding a parse does not first
   // allocate a copy of the bytes to look it up by.
   std::map<std::string, markdown::Document, std::less<>> complexCache;
+  // Image targets resolved to files on disk, or to nothing when the target
+  // names no drawable file. Memoised because resolving one canonicalises both
+  // the library root and the candidate -- a `stat` per path component of each,
+  // twice -- and the layout asks per picture per relaid block: a note of 200
+  // pictures spent about 3,200 syscalls being laid out, which was 47 ms of its
+  // first frame. Dropped when the library root moves under it.
+  std::map<std::string, std::filesystem::path, std::less<>> imagePaths;
+  std::filesystem::path imagePathRoot;
   std::string cachedEditorRowsSource;
   int cachedEditorRowsWidth = -1;
   std::vector<editor::SoftWrapRow> cachedEditorRows;

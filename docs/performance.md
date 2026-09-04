@@ -2234,3 +2234,48 @@ going to delete -- and it would have fixed the *speed* half while leaving every
 drawing decision still made twice. The six divergences the sixth pass found were
 all in the half a cache would not have touched.
 
+### Resolved: the layout walked the filesystem once per picture per relaid block
+
+Found by pointing the new instrument at the new feature: a 200-picture note,
+`MICRONOTES_TRACE_FRAMES` off, counters on.
+
+```
+page.layout           70.4 ms over 60 frames, max 46.9 ms
+shell.content         83.1 ms over 60 frames, max 49.8 ms
+layout.images_measured   400
+```
+
+A 47 ms first frame -- three dropped frames to open a note -- for a layout whose
+text is 14 KB. `Metrics::measureImage` asks the shell where a target lands on
+disk, and the shell answered with `AttachmentService::resolveManaged`, which is
+`platform::normalizeInsideRoot`, which is `std::filesystem::weakly_canonical` of
+the library root **and** of the candidate: a `stat` per path component of each,
+twice, per picture, per relaid block. Two hundred pictures is about 3,200
+syscalls to lay a note out, and a resize pays it again.
+
+`ImageCache` was already memoising the expensive-looking half -- decoding and
+uploading the texture, which for a note showing one file two hundred times
+happens once. The cheap-looking half was the cost.
+
+The resolution is memoised on the runtime now, keyed by the target as written
+and dropped when the library root moves:
+
+| 200 pictures, 60 frames | before | after |
+|---|---:|---:|
+| `page.layout` (inclusive) | 70.4 ms | 2.5 ms |
+| worst frame | 46.9 ms | 1.9 ms |
+| `shell.content` | 83.1 ms | 4.7 ms |
+| `image.paths_resolved` | -- | 1 |
+| `image.paths_reused` | -- | 579 |
+
+**Twenty-five times, and the frame that matters by a factor of twenty-five as
+well.** `image.paths_resolved` should be the number of distinct targets in a
+note and nothing like the number of times they are laid out; it is the counter
+to watch if the resolution ever moves back inside the loop.
+
+The general lesson is the third pass's, again: the counter is what said this was
+wrong. `page.layout`'s *timing* on the second frame is 0.04 ms and every budget
+in the file was green -- it was `layout.images_measured` reading 400 for a note
+with 200 pictures in it, against a `page.layout` max of 47 ms, that did not add
+up.
+

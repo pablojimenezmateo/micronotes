@@ -267,6 +267,13 @@
   /* relaid block, so on an idle frame it should be zero: a note full of       */      \
   /* photographs that measures them every frame is measuring the disk.         */      \
   X(LayoutImagesMeasured, "layout.images_measured")                                    \
+  /* Image targets turned into a file on disk, and the times that answer came   */     \
+  /* out of the memo instead. Resolving one canonicalises the library root and  */     \
+  /* the candidate -- a stat per path component, twice -- so on a note full of  */     \
+  /* pictures `resolved` should be the number of distinct targets in it and     */     \
+  /* nothing like the number of times they are laid out.                        */     \
+  X(ImagePathsResolved, "image.paths_resolved")                                        \
+  X(ImagePathsReused, "image.paths_reused")                                            \
   /* Tokens a block is staged into before it is flowed into runs. Read against  */     \
   /* the `layout.block.stage` timer: the staging vector exists only to be read   */    \
   /* once, in order, by one consumer, so this is the size of the buffer a        */    \
