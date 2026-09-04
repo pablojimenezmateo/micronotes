@@ -274,6 +274,20 @@
   /* nothing like the number of times they are laid out.                        */     \
   X(ImagePathsResolved, "image.paths_resolved")                                        \
   X(ImagePathsReused, "image.paths_reused")                                            \
+  /* The texture behind a picture: decoded, served from the cache, or dropped    */    \
+  /* to stay inside the byte budget. `loaded` should be the number of distinct   */    \
+  /* pictures a session has shown; if it tracks the frame count instead, the     */    \
+  /* budget is thrashing and every eviction is a decode away from being one.     */    \
+  X(ImageTexturesLoaded, "image.textures_loaded")                                      \
+  X(ImageTextureCacheHits, "image.texture_cache_hits")                                 \
+  X(ImageTexturesEvicted, "image.textures_evicted")                                    \
+  /* The md4c parse of a block the live scanner does not model: served from the */     \
+  /* cache, dropped by a sweep, and how often a sweep ran. Read `reused` against */     \
+  /* `markdown.parse_calls` -- a note whose tables are re-parsed on every        */    \
+  /* relayout has a cache that is being defeated rather than one that is small.  */    \
+  X(ComplexParsesReused, "complex.parses_reused")                                      \
+  X(ComplexParsesEvicted, "complex.parses_evicted")                                    \
+  X(ComplexCacheSweeps, "complex.cache_sweeps")                                        \
   /* Tokens a block is staged into before it is flowed into runs. Read against  */     \
   /* the `layout.block.stage` timer: the staging vector exists only to be read   */    \
   /* once, in order, by one consumer, so this is the size of the buffer a        */    \

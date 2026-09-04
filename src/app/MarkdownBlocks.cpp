@@ -1,10 +1,12 @@
 #include "app/MarkdownBlocks.h"
 
+#include "core/perf/PerformanceCounters.h"
 #include "ui/Theme.h"
 #include "ui/TextUtil.h"
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 #include <string_view>
 
 namespace micronotes::app {
@@ -192,11 +194,14 @@ markdown::Document parseComplex(UiRuntime& ui, std::string_view source) {
 const markdown::Document& complexDocument(UiRuntime& ui, const doc::SourceBlock& block) {
   const std::string_view key = complexSource(ui, block);
   auto found = ui.complexCache.find(key);
-  if(found == ui.complexCache.end()) {
-    if(ui.complexCache.size() > 64) ui.complexCache.clear();
-    found = ui.complexCache.emplace(std::string(key), parseComplex(ui, key)).first;
+  if(found != ui.complexCache.end()) {
+    perf::addCounter(perf::CounterId::ComplexParsesReused);
+    return found->second;
   }
-  return found->second;
+  // No eviction here: what is dead is decided by the note, not by how many
+  // entries happen to have accumulated, and the note is not in scope from
+  // inside a layout pass. `sweepComplexCache` answers it once a frame.
+  return ui.complexCache.emplace(std::string(key), parseComplex(ui, key)).first->second;
 }
 
 // md4c renders a few constructs (a lone footnote definition, say) to nothing at
@@ -213,6 +218,37 @@ std::vector<std::string> complexSourceLines(UiRuntime& ui, const doc::SourceBloc
   return ui::splitLines(complexSource(ui, block));
 }
 
+}
+
+// Room for the parses an edit is part-way through replacing, so a keystroke
+// inside a table does not sweep the note on every character. The layout's block
+// cache keeps 256 for the same reason; a parse is heavier than a block layout,
+// so this keeps fewer.
+constexpr std::size_t kComplexSpare = 32;
+
+void sweepComplexCache(UiRuntime& ui, doc::BlockSpan blocks, std::string_view source) {
+  if(ui.complexCache.size() <= ui.complexCacheLive + kComplexSpare) return;
+  perf::addCounter(perf::CounterId::ComplexCacheSweeps);
+  std::vector<std::string_view> live;
+  for(const auto& block : blocks) {
+    if(block.kind != doc::BlockKind::Complex) continue;
+    const std::size_t start = std::min(block.start, source.size());
+    const std::size_t end = std::min(block.end(), source.size());
+    live.push_back(source.substr(start, end - start));
+  }
+  // Two identical tables are one entry, so the live *count* has to be of
+  // distinct keys or the next sweep fires a block early, every frame.
+  std::sort(live.begin(), live.end());
+  live.erase(std::unique(live.begin(), live.end()), live.end());
+  for(auto it = ui.complexCache.begin(); it != ui.complexCache.end();) {
+    if(std::binary_search(live.begin(), live.end(), std::string_view(it->first))) {
+      ++it;
+    } else {
+      perf::addCounter(perf::CounterId::ComplexParsesEvicted);
+      it = ui.complexCache.erase(it);
+    }
+  }
+  ui.complexCacheLive = live.size();
 }
 
 float measureComplexBlock(TextRenderer& text, UiRuntime& ui, const doc::SourceBlock& block, float width) {

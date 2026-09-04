@@ -1,8 +1,11 @@
 #include "TestSupport.h"
 
 #include "app/InlineText.h"
+#include "app/MarkdownBlocks.h"
 #include "app/PageView.h"
 #include "app/Shell.h"
+#include "core/perf/PerformanceCounters.h"
+#include "doc/BlockScan.h"
 #include "ui/TextUtil.h"
 #include "app/SidebarModel.h"
 #include "ui/Draw.h"
@@ -204,4 +207,94 @@ MICRONOTES_TEST(shell_a_read_only_page_never_reveals_a_blocks_markers) {
   if(editable < 0.0f) return;
   MICRONOTES_REQUIRE(editable > 0.0f);
   MICRONOTES_REQUIRE(markerInk(true) == 0.0f);
+}
+
+// The md4c parse of a block the live scanner does not model used to be cached
+// behind `if(size() > 64) clear()`, so a note with more tables than that made
+// room by throwing away the parses it was in the middle of using: a hit rate of
+// exactly zero, and every relayout re-parsed the note. The sweep keeps what the
+// note still contains instead, so the cap is the note.
+MICRONOTES_TEST(shell_complex_parses_survive_a_note_bigger_than_any_cap) {
+  std::string source = "# Tables\n\n";
+  for(int i = 0; i < 120; ++i) {
+    source += "Paragraph " + std::to_string(i) + ".\n\n| Left " + std::to_string(i) +
+              " | Right |\n|:--|--:|\n| a" + std::to_string(i) + " | b |\n\n";
+  }
+  micronotes::app::UiRuntime ui;
+  ui.editor.setText(source);
+  micronotes::ui::TextRenderer text(nullptr);
+  const auto blocks = micronotes::doc::scanBlocks(source);
+  std::size_t complexBlocks = 0;
+  for(const auto& block : blocks) {
+    if(block.kind == micronotes::doc::BlockKind::Complex) ++complexBlocks;
+  }
+  MICRONOTES_REQUIRE(complexBlocks == 120);
+
+  using microcore::perf::CounterId;
+  const auto layOutEveryComplexBlock = [&] {
+    const auto before = microcore::perf::captureCounters();
+    for(const auto& block : blocks) {
+      if(block.kind != micronotes::doc::BlockKind::Complex) continue;
+      (void)micronotes::app::measureComplexBlock(text, ui, block, 600.0f);
+    }
+    micronotes::app::sweepComplexCache(ui, blocks, source);
+    const auto after = microcore::perf::captureCounters();
+    return after[static_cast<std::size_t>(CounterId::MarkdownParseCalls)] -
+           before[static_cast<std::size_t>(CounterId::MarkdownParseCalls)];
+  };
+
+  // The first pass has to parse every one of them; no pass after it parses any.
+  MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 120);
+  MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 0);
+  MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 0);
+  MICRONOTES_REQUIRE(ui.complexCache.size() == 120);
+}
+
+// And the other half: a parse the note no longer contains does not stay
+// forever. Opening a second note is the case that matters, because otherwise
+// the cache grows with everything a session has ever looked at.
+MICRONOTES_TEST(shell_complex_parses_go_when_the_note_does) {
+  const auto tableNote = [](const char* tag, int count) {
+    std::string out = "# Tables\n\n";
+    for(int i = 0; i < count; ++i) {
+      out += std::string("| ") + tag + " " + std::to_string(i) + " | Right |\n|:--|--:|\n| a | b |\n\n";
+    }
+    return out;
+  };
+  micronotes::app::UiRuntime ui;
+  micronotes::ui::TextRenderer text(nullptr);
+  const auto layOut = [&](const std::string& source) {
+    ui.editor.setText(source);
+    const auto blocks = micronotes::doc::scanBlocks(source);
+    for(const auto& block : blocks) {
+      if(block.kind != micronotes::doc::BlockKind::Complex) continue;
+      (void)micronotes::app::measureComplexBlock(text, ui, block, 600.0f);
+    }
+    micronotes::app::sweepComplexCache(ui, blocks, source);
+  };
+  layOut(tableNote("first", 100));
+  MICRONOTES_REQUIRE(ui.complexCache.size() == 100);
+  layOut(tableNote("second", 100));
+  // The first note's hundred are gone rather than accumulated.
+  MICRONOTES_REQUIRE(ui.complexCache.size() == 100);
+}
+
+// An image cache miss must not be able to move `generation()`, because every
+// surface holding a laid-out note keys on it: a picture whose size is already
+// known, or was never knowable, has to leave the layout alone. A null renderer
+// makes every decode fail, which is the "never knowable" half -- the other half
+// needs a window, and is measured in a session instead.
+MICRONOTES_TEST(shell_an_image_that_cannot_decode_never_moves_the_generation) {
+  micronotes::ui::ImageCache images(nullptr);
+  const std::uint64_t before = images.generation();
+  float w = -1.0f;
+  float h = -1.0f;
+  for(int attempt = 0; attempt < 8; ++attempt) {
+    MICRONOTES_REQUIRE(images.load("/nonexistent/no-such-picture.png", w, h) == nullptr);
+  }
+  MICRONOTES_REQUIRE(images.generation() == before);
+  MICRONOTES_REQUIRE(images.residentBytes() == 0);
+  // And it answers with no size, so the layout reserves no box for it.
+  MICRONOTES_REQUIRE(w == 0.0f);
+  MICRONOTES_REQUIRE(h == 0.0f);
 }

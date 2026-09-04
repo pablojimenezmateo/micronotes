@@ -286,6 +286,10 @@ struct UiRuntime {
   // `std::less<>` rather than the default, so finding a parse does not first
   // allocate a copy of the bytes to look it up by.
   std::map<std::string, markdown::Document, std::less<>> complexCache;
+  // How many distinct `Complex` blocks the last sweep found in the note. The
+  // cache is allowed to run this far past it before the next sweep, which is
+  // what makes "is a sweep due" one comparison rather than a walk of the note.
+  std::size_t complexCacheLive = 0;
   // Image targets resolved to files on disk, or to nothing when the target
   // names no drawable file. Memoised because resolving one canonicalises both
   // the library root and the candidate -- a `stat` per path component of each,

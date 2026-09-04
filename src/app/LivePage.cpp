@@ -109,6 +109,11 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
     }
   }
 
+  // What the note no longer contains, dropped: the parse cache mirrors this
+  // page's `Complex` blocks, and this is the only place that knows which they
+  // are. One comparison on a frame that laid out nothing new.
+  sweepComplexCache(ui, ui.livePage.document().blocks(), ui.editor.text());
+
   if(ui.revealEditorCursor) {
     ui.livePage.revealCaret(ui.editor.cursor());
     ui.revealEditorCursor = false;

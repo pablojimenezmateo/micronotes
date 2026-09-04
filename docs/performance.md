@@ -2279,3 +2279,69 @@ in the file was green -- it was `layout.images_measured` reading 400 for a note
 with 200 pictures in it, against a `page.layout` max of 47 ms, that did not add
 up.
 
+### Resolved: two caches made room by throwing away what they were using
+
+TD-15 said both were "bounded, and that is why it is an entry rather than a
+fix". Measuring them said otherwise, twice.
+
+**The md4c parse cache had a hit rate of zero above 64 blocks.** It was
+`if(size() > 64) clear()`, and a relayout touches every `Complex` block in the
+note — so a note with 120 tables filled the cache, cleared it at 64, refilled
+it, and cleared it again, every pass:
+
+```
+PROBE complex blocks=120  first=120  second=120  third=120
+```
+
+Three full passes over the same unchanged note, 120 md4c parses each. The cap
+was not too small; it was the wrong shape. A relayout's working set *is* the
+note, so any cap below the note's own size is not a cache.
+
+Its live set is enumerable — the `Complex` blocks of the buffer on screen — so
+it gets the rule `doc::DocumentLayout` already uses for the block layouts it
+mirrors: keep one generation of the document, sweep when the cache runs past it.
+`sweepComplexCache` runs once a frame and costs one comparison until the cache
+has grown past what the last sweep found live. The same probe now reads
+`120 / 0 / 0`, and opening a second note drops the first note's hundred rather
+than accumulating them.
+
+**The image cache re-laid out the whole document, every frame, above 512
+pictures.** `clear()` moves `generation()`, and `generation()` is an input to
+every block layout holding an image — so filling the cache cleared it, which
+invalidated the note, which re-measured every picture, which filled it again:
+
+| 600 distinct pictures, 60 frames | before | after |
+|---|---:|---:|
+| `layout.blocks_relaid` | 72,180 | 2,406 |
+| `layout.images_measured` | 36,000 | 1,200 |
+| `page.layout` (inclusive) | 1,031 ms | 112 ms |
+
+72,180 is the 1,203-block note laid out sixty times: **once per frame, for
+ever**, at 17 ms a frame. Not a slope — a cliff at 512 pictures.
+
+Two changes, and the first is the one that matters. An image's **size** is what
+the layout reserves a box from, and a file decodes to the same size every time —
+so the size is learned once and kept, and evicting a texture leaves it behind.
+`generation()` now moves when a size becomes *newly* known and at no other
+moment, which is what makes eviction cost a decode instead of a relayout. A note
+whose pictures do not fit shows it:
+
+```
+image.textures_loaded 49   image.textures_evicted 33   layout.blocks_relaid 102
+```
+
+Thirty-three evictions and the note is still laid out twice, not thirty-five
+times.
+
+The second is the budget: **bytes, not entries**. The 512-entry cap meant 69 MB
+for a note of 240x140 diagrams and 24 GB for one of phone photographs — the same
+number standing for two things four orders of magnitude apart, because it counted
+the wrong thing. It is 192 MB of texture now, evicted least-recently-used, which
+is the policy `render::TextTextureCache` already settled on for the same reason:
+where a cache's live set cannot be enumerated from where it is asked, recency is
+the best available guess. Where it *can* be — the parse cache above, the block
+layouts — the sweep is better, and the two answers are not in tension.
+
+`peak_rss` on both fixtures is marginally *lower* than before, because
+re-parsing and re-decoding churn more than holding the results does.
+

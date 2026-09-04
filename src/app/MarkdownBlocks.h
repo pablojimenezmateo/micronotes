@@ -41,6 +41,22 @@ float tableHeight(ui::TextRenderer& text, const markdown::Block& block, float wi
 void drawTable(SDL_Renderer* renderer, ui::TextRenderer& text, std::vector<LinkRegion>& links,
                const markdown::Block& block, ui::Rect rect);
 
+// Drops every cached parse the note no longer contains, and nothing else.
+//
+// The parse cache is keyed on a block's own source, so its live set is exactly
+// the `Complex` blocks of the buffer on screen. That is the rule
+// `doc::DocumentLayout` uses for the block layouts these mirror -- keep one
+// generation of the document, sweep when the cache runs past it -- and unlike
+// an LRU it cannot be defeated by a note bigger than the cap: the cap *is* the
+// note. The 64-entry version this replaced made room by clearing itself, so a
+// note with 65 tables re-parsed all of them on every relayout, for a hit rate
+// of exactly zero.
+//
+// Called once a frame, and costs one comparison on the frames where the cache
+// has not grown past what the last sweep found live -- which is all of them,
+// apart from a note opening or an edit that adds a table.
+void sweepComplexCache(UiRuntime& ui, doc::BlockSpan blocks, std::string_view source);
+
 // A block the live scanner does not model, parsed on its own and rendered
 // through the md4c path so that tables and raw HTML look the same everywhere.
 // The parse is cached against the block's own source text.

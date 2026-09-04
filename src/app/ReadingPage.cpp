@@ -70,6 +70,11 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
   ui.readingPage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.readingPage.layout(text, ui.editor.text(), 0, rect);
 
+  // What the note no longer contains, dropped: the parse cache mirrors this
+  // page's `Complex` blocks, and this is the only place that knows which they
+  // are. One comparison on a frame that laid out nothing new.
+  sweepComplexCache(ui, ui.readingPage.document().blocks(), ui.editor.text());
+
   ui.readingPage.draw(renderer, text, 0, PageSelection {}, ui.focus == FocusArea::Viewer,
                       ui.find.text());
   {
