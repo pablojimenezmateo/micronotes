@@ -53,3 +53,31 @@ live surface reveals a block's markers under the caret and drops a `Complex`
 block to raw source when you click into it. If it is not, the file deletes; if
 it is, it is meant to be a different engine, and the debt is only the geometry
 it duplicates -- which `ui::pageRectIn` and `ui::pageColumnIn` already hold.
+
+## TD-15 — two caches still flush everything to make room for one entry
+
+`src/app/MarkdownBlocks.cpp` (`complexCache`, at 64 entries) and
+`src/ui/Draw.h` (`ImageCache`, at 512).
+
+Both are `if(size() > limit) clear();`. This tree already has a position on that
+shape and a test asserting it —
+`text_texture_cache_evicts_least_recently_used_not_everything` — because the
+glyph cache used to do exactly this, and a full flush discards precisely the
+entries about to be reused, since it cannot tell which those are.
+
+**What it costs today.** Bounded, and that is why it is an entry rather than a
+fix. A cold open of a note with 120 tables makes 124 md4c parses — one per
+block plus a handful, because the flush happens after the last block that will
+be laid out. What it costs is the *next* pass over the same note: a resize
+relays every block, so a note with more than 64 tables, footnote definitions or
+raw-HTML blocks re-parses its way through each width step, and a note with more
+than 512 distinct images re-decodes and re-uploads its textures. Neither is a
+note anybody has yet complained about.
+
+**Why it is still here.** The right fix is not an LRU — it is the one
+`doc::Layout` already uses for the block layouts these mirror: sweep against the
+keys the current frame actually asked for, so what survives is what is live
+rather than what is recent. That means both caches learning which entries the
+layout is holding, which is a channel neither has. An LRU is the cheap version
+and would be a second eviction policy in a codebase that has argued itself into
+one.

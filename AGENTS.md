@@ -40,6 +40,13 @@ Two invariants hold inside `src/core/`:
 App-only code stays outside: `src/library/` (note library), `src/ui/AppState`,
 `src/app/`.
 
+Three targets are built from it. `micronotes_core` is everything above;
+`micronotes_shell` is every surface that draws (`src/app/`, plus the four
+`src/ui/` files they draw through); `micronotes` is `main.cpp` and a link line.
+The test binary and the perf harness both link the **shell**, so a pane, a model
+or a policy under `src/app/` is ordinary testable code -- it was not, until
+recently, and the workarounds that left are still visible.
+
 ## Development Workflow
 
 ```bash
@@ -96,12 +103,15 @@ tools/session-compare.sh main     # the same, through a REAL headless session:
                                   # interleaved runs, pixel cmp, counter diff
 ```
 
-**The harness stops at `doc::` and `library::`.** Nothing in it goes through
-`src/app/`'s key handling, its shell surfaces or `AppState`'s writes to disk --
-so for anything above the document layout a real session *is* the instrument,
-not a nicety. The fifth pass in `docs/performance.md` found 1.1 ms of `fsync` on
-every keystroke and a right-hand panel costing more per frame than the note,
-neither of which any harness lane could see.
+**The harness draws nothing.** It has a font lane -- real faces, real shaping,
+through the same `app::documentMetrics` the live surface lays out with -- but no
+window, no textures and no present, and nothing in it goes through `src/app/`'s
+key handling, its shell surfaces or `AppState`'s writes to disk. So for anything
+above the document layout a real session *is* the instrument, not a nicety. The
+fifth pass in `docs/performance.md` found 1.1 ms of `fsync` on every keystroke
+and a right-hand panel costing more per frame than the note; the seventh found
+a note's pictures being re-resolved on disk once per layout. No harness lane
+could see any of them.
 
 Capture the pixels before and after as well: a paint or layout optimisation that
 cannot be observed is safe, and `cmp` of two screenshots is the cheapest proof
@@ -159,7 +169,7 @@ when the counters went in it turned out to be 70% of every frame.
   only at a durable polymorphic boundary.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
-- `src/app/Application.cpp` is a 2,800-line catch-all doing layout, input,
+- `src/app/Application.cpp` is a 2,700-line catch-all doing layout, input,
   rendering, and persistence. Do not grow it: `ArchitectureTests` holds it to a
   line budget that only ever goes down. New behaviour wants a named unit under
   `src/`, not another function in that file.
