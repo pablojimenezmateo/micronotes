@@ -284,9 +284,9 @@ hot path is where it belongs. Write the counter for *what the work was*
 alongside it; the timing says how long, and only the counter says whether it
 should have happened at all.
 
-`src/AppPerfCounters.h` is what keeps `src/core/perf/PerformanceCounters.h`
-byte-identical between micronotes and microagenda -- the core header includes it
-and concatenates the app list onto its own.
+`src/AppPerfCounters.h` is what keeps `src/core/perf/PerformanceCounters.h` free
+of app-specific rows -- the core header includes it and concatenates the app
+list onto its own.
 
 ## Current findings
 

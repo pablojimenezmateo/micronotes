@@ -11,8 +11,9 @@
 
 namespace micronotes::ui {
 
-// How a note is being looked at. Genuinely shared with microagenda, so it stays
-// in the vendored core; everything below is a notes-app idea and does not.
+// How a note is being looked at. An editing-surface idea rather than a
+// notes-app one, so it lives in the core; everything below is a notes-app idea
+// and does not.
 using microcore::ui::PaneMode;
 
 // What the right-hand panel is showing. All three are views of the open note
@@ -31,13 +32,10 @@ RightPanelView rightPanelViewFromName(std::string_view name);
 // and what the reader keeps to hand.
 //
 // This deliberately does not extend microcore::ui::ShellModel, even though the
-// two widths started there. That struct is vendored byte-for-byte into
-// microagenda and hash-checked by a ctest, so every edit to it is a four-step
-// dance across two repositories and a stale copy fails the whole suite rather
-// than one test. Panels, and the tabs and splits that follow, are things a
-// notes app has and an agenda does not; microagenda would inherit code it never
-// calls. PaneMode is the one piece that really is shared, so that is the one
-// piece still imported.
+// two widths started there. Panels, and the tabs and splits that follow, are
+// notes-app furniture: putting them in the core would mean the app-agnostic
+// layer describing an arrangement only this app has. PaneMode is the one piece
+// that genuinely is not app-specific, so that is the one piece imported.
 struct WorkspaceModel {
   // The notes open in the editor area, and which of them is showing. Never
   // empty is not an invariant worth having: a window with nothing open is a

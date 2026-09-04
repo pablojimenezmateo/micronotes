@@ -131,9 +131,10 @@ add_library(md4c_html STATIC third_party/md4c/src/md4c-html.c third_party/md4c/s
 target_include_directories(md4c_html PUBLIC third_party/md4c/src)
 target_link_libraries(md4c_html PUBLIC md4c)
 
-# Vendored shared core. Byte-identical to microagenda's src/core; see
-# tools/sync-core.sh. micronotes is the canonical copy: change it here, then
-# run tools/sync-core.sh to push the change and refresh both manifests.
+# The app-agnostic core: markdown, editing, viewing, persistence, perf and the
+# platform helpers. It names no application -- `ArchitectureTests` enforces that
+# -- and reaches the app's identity through the one macro below, which is what
+# keeps it a separable layer rather than another folder of app code.
 set(MICROCORE_SOURCES
   src/core/attachments/AttachmentService.cpp
   src/core/editor/MarkdownEditor.cpp
@@ -312,15 +313,6 @@ target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(micronotes_tests PRIVATE micronotes_shell)
 add_test(NAME micronotes_tests COMMAND micronotes_tests)
-
-# src/core is a vendored copy shared with microagenda. Editing it without
-# running tools/sync-core.sh leaves the two apps silently diverging, so make
-# that a test failure rather than something you discover months later.
-add_test(
-  NAME micronotes_core_manifest
-  COMMAND "${CMAKE_SOURCE_DIR}/tools/sync-core.sh" --check
-  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-)
 
 if(MICRONOTES_PERF_HARNESS_BUILD)
   add_executable(micronotes_perf tools/PerfMain.cpp)

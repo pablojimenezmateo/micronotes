@@ -8,37 +8,37 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-- `src/core/` is **vendored and shared with `microagenda`**. Read the rule below before touching it.
+- `src/core/` is the app-agnostic layer. Read the rule below before touching it.
 - Build with `cmake`, test with `ctest`, and prefer `tools/run-checks.sh` so output lands in a readable log.
 - Performance work is measured, not guessed: `docs/performance.md` explains the three instruments and the harness.
 
-## The Vendored Core Rule
+## The Core Rule
 
-`src/core/` is a byte-identical copy shared with `microagenda`. It holds the
-markdown parser, editor, viewer, perf counters and scope tracer, sqlite wrapper,
-path helpers, attachment service, and pane model.
+`src/core/` is the app-agnostic layer. It holds the markdown parser, editor,
+viewer, perf counters and scope tracer, sqlite wrapper, path helpers, durable
+file writes, attachment service, and pane model.
 
-**micronotes is canonical.** Make core changes here, then push them:
-
-```bash
-tools/sync-core.sh --push ../microagenda
-```
-
-and commit *both* repositories. `micronotes_core_manifest` (a ctest test) hashes
-`src/core/` against `src/core/CORE.sha256` and fails if the two drift, so an
-un-synced edit breaks the suite rather than diverging quietly.
-
-Two invariants hold inside `src/core/`:
+Two invariants hold inside it:
 
 - It must not name a specific app. The one seam is `src/core/AppIdentity.h`,
-  which reads `MICROCORE_APP_NAME` from the host `CMakeLists.txt`.
-  `ArchitectureTests` enforces this.
-- It lives in `namespace microcore`. `src/CoreAliases.h` aliases the subsystems
-  into `namespace micronotes`, so app code still writes `platform::`, `perf::`,
-  `markdown::` unqualified.
+  which reads `MICROCORE_APP_NAME` from `CMakeLists.txt`; every derived path is
+  a compile-time constant off that macro. `ArchitectureTests` fails the build on
+  a `micronotes` spelled out anywhere else under `src/core/`, because "agnostic"
+  decays the moment it stops being checked.
+- It lives in `namespace microcore`, which is what makes the layer a layer: a
+  core header cannot reach app code without saying `micronotes::` out loud.
+  `src/CoreAliases.h` aliases the subsystems into `namespace micronotes`, so app
+  code still writes `platform::`, `perf::`, `markdown::` unqualified.
 
 App-only code stays outside: `src/library/` (note library), `src/ui/AppState`,
 `src/app/`.
+
+**`src/core/` used to be a byte-identical vendored copy shared with a sibling
+repo, kept in step by `tools/sync-core.sh` and a `CORE.sha256` manifest that a
+ctest checked.** That is gone. The sibling never adopted the layout, so the
+manifest was policing a copy that did not exist while adding a four-step dance
+to every core edit. Do not reintroduce it: if a second app ever wants this code,
+make it a library with a version, not a hashed copy.
 
 Three targets are built from it. `micronotes_core` is everything above;
 `micronotes_shell` is every surface that draws (`src/app/`, plus the four

@@ -1,8 +1,8 @@
 #pragma once
 
-// The only thing in src/core/ that differs between the applications that vendor
-// it. Everything else here is byte-identical across micronotes and microagenda
-// and is checked as such by tools/sync-core.sh --check.
+// The one place in src/core/ that knows which application it was compiled into.
+// Everything else there names no app at all, and `ArchitectureTests` fails the
+// build if that stops being true.
 //
 // The host application defines MICROCORE_APP_NAME from CMake. Keeping it a
 // macro rather than a runtime string means the derived paths below stay
@@ -15,11 +15,12 @@
 
 namespace microcore {
 
-// "micronotes" / "microagenda". Used for the XDG config, cache, and data dirs.
+// The application's own name -- "micronotes" here. Used for the XDG config,
+// cache, and data dirs.
 inline constexpr const char* kAppName = MICROCORE_APP_NAME;
 
-// ".micronotes" / ".microagenda": the per-library state directory that lives
-// inside whatever root the user opened.
+// ".micronotes": the per-library state directory that lives inside whatever
+// root the user opened.
 inline constexpr const char* kAppDotDir = "." MICROCORE_APP_NAME;
 
 // ".micronotes/attachments/" -- the prefix that marks a link target as pointing

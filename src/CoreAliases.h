@@ -1,10 +1,10 @@
 #pragma once
 
-// The shared core lives in namespace microcore so that micronotes and
-// microagenda can vendor byte-identical copies of src/core (see
-// tools/sync-core.sh). App code, however, reads better saying platform::,
-// perf::, markdown:: than microcore::platform:: on every line -- and those
-// unqualified names already resolved that way before the core was split out.
+// The core lives in namespace microcore, which is what makes the layer a layer:
+// a core header cannot reach app code without saying `micronotes::` out loud.
+// App code, however, reads better saying platform::, perf::, markdown:: than
+// microcore::platform:: on every line -- and those unqualified names already
+// resolved that way before the core was split out.
 //
 // Aliasing the core subsystems into namespace micronotes keeps that spelling
 // working: unqualified lookup from micronotes::library, micronotes::ui, and

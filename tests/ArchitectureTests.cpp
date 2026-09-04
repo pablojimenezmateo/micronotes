@@ -120,15 +120,17 @@ MICRONOTES_TEST(architecture_perf_counter_names_cover_every_id) {
   }
 }
 
-// src/core is vendored into microagenda byte-for-byte, so it must not name the
-// app it happens to be compiled into. AppIdentity.h is the one seam, and it
-// carries the name as a macro the host CMakeLists supplies.
+// src/core is the app-agnostic layer, and "agnostic" has to be checked or it
+// decays: one `.micronotes` spelled out in a path helper and the boundary is
+// gone. AppIdentity.h is the single seam, and it carries the name as a macro
+// the host CMakeLists supplies so the derived paths stay compile-time
+// constants.
 MICRONOTES_TEST(architecture_core_does_not_hardcode_the_app_name) {
   std::string offenders;
   for(const auto& path : sourceFiles(repoRoot() / "src/core")) {
     if(path.filename() == "AppIdentity.h") continue;
     const std::string text = readText(path);
-    if(text.find("micronotes") != std::string::npos || text.find("microagenda") != std::string::npos) {
+    if(text.find("micronotes") != std::string::npos) {
       if(!offenders.empty()) offenders += ", ";
       offenders += path.filename().string();
     }
@@ -136,8 +138,7 @@ MICRONOTES_TEST(architecture_core_does_not_hardcode_the_app_name) {
   micronotes::tests::require(
     offenders.empty(),
     "src/core names a specific app: " + offenders +
-    " -- use kAppName / kAppDotDir from core/AppIdentity.h so the vendored copy "
-    "in microagenda stays byte-identical");
+    " -- use kAppName / kAppDotDir from core/AppIdentity.h");
 }
 
 // --- core/render ------------------------------------------------------------
