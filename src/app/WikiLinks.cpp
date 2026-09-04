@@ -128,7 +128,7 @@ bool jumpToAnchor(UiRuntime& ui, std::string_view anchor) {
     ui.livePage.setScroll(*found);
     ui.focus = FocusArea::Editor;
   } else {
-    ui.viewerScroll = *found;
+    ui.readingPage.setScroll(*found);
     ui.focus = FocusArea::Viewer;
   }
   return true;

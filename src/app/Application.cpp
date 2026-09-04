@@ -922,20 +922,11 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
     return contains(ui.livePage.pageRect(), x, y) ? CursorKind::Text : CursorKind::Default;
   }
 
-  Rect editorRect = layout.content;
-  Rect viewerRect = layout.content;
-  bool hasEditor = false;
-  bool hasViewer = false;
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
-    hasEditor = true;
-  } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
-    hasViewer = true;
-  } else {
-    hasEditor = true;
-    hasViewer = true;
-    editorRect.w = layout.content.w / 2.0f;
-    viewerRect = {layout.content.x + editorRect.w, layout.content.y, layout.content.w - editorRect.w, layout.content.h};
-  }
+  const ContentPanes panes = contentPanes(ui, layout.content);
+  const Rect editorRect = panes.editor;
+  const Rect viewerRect = panes.viewer;
+  const bool hasEditor = panes.hasEditor;
+  const bool hasViewer = panes.hasViewer;
 
   if(hasEditor && contains(editorRect, x, y)) {
     const Rect writing = editorWritingRect(editorRect);
@@ -947,7 +938,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 
   if(hasViewer && contains(viewerRect, x, y)) {
     const Rect page = ui::pageRectIn(viewerRect);
-    if(scrollbarHit(page, ui.viewerScroll, ui.viewerMaxScroll, x, y)) {
+    if(scrollbarHit(page, ui.readingPage.scroll(), ui.readingPage.maxScroll(), x, y)) {
       return CursorKind::Pointer;
     }
     for(const auto& link : ui.linkRegions) {
@@ -2071,21 +2062,9 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
 
   if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode() != ui::PaneMode::Live) {
-    Rect editorRect = layout.content;
-    Rect viewerRect = layout.content;
-    bool hasEditor = false;
-    bool hasViewer = false;
-    if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
-      hasEditor = true;
-    } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
-      hasViewer = true;
-    } else {
-      hasEditor = true;
-      hasViewer = true;
-      editorRect.w = layout.content.w / 2.0f;
-      viewerRect = {layout.content.x + editorRect.w, layout.content.y, layout.content.w - editorRect.w, layout.content.h};
-    }
-    if(hasEditor) {
+    const ContentPanes panes = contentPanes(ui, layout.content);
+    if(panes.hasEditor) {
+      const Rect editorRect = panes.editor;
       const Rect writing = editorWritingRect(editorRect);
       const int maxScroll = editorMaxScroll(text, ui, editorRect);
       const auto thumb = scrollbarThumb(writing, ui.editorScroll, maxScroll);
@@ -2097,10 +2076,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         return;
       }
     }
-    if(hasViewer) {
-      const Rect page = ui::pageRectIn(viewerRect);
-      const int maxScroll = ui.viewerMaxScroll;
-      const auto thumb = scrollbarThumb(page, ui.viewerScroll, maxScroll);
+    if(panes.hasViewer) {
+      const Rect page = ui::pageRectIn(panes.viewer);
+      const int maxScroll = ui.readingPage.maxScroll();
+      const auto thumb = scrollbarThumb(page, ui.readingPage.scroll(), maxScroll);
       if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
         ui.scrollDragTarget = ScrollDragTarget::Viewer;
         ui.scrollDragOffsetY = y - thumb.y;
@@ -2707,13 +2686,9 @@ int run(ApplicationOptions options) {
             ui.editorScroll = scrollFromThumbY(writing, event.motion.y, ui.scrollDragOffsetY, maxScroll);
             ui.revealEditorCursor = false;
           } else if(ui.scrollDragTarget == ScrollDragTarget::Viewer) {
-            Rect viewerRect = layout.content;
-            if(ui.state.workspace().paneMode() == ui::PaneMode::Split) {
-              const float split = layout.content.w / 2.0f;
-              viewerRect = {layout.content.x + split, layout.content.y, layout.content.w - split, layout.content.h};
-            }
-            const Rect page = ui::pageRectIn(viewerRect);
-            ui.viewerScroll = scrollFromThumbY(page, event.motion.y, ui.scrollDragOffsetY, ui.viewerMaxScroll);
+            const Rect page = ui::pageRectIn(contentPanes(ui, layout.content).viewer);
+            ui.readingPage.setScroll(scrollFromThumbY(page, event.motion.y, ui.scrollDragOffsetY,
+                                                      ui.readingPage.maxScroll()));
           }
         } else if(ui.draggingNote || ui.draggingFolder) {
           const ShellLayout layout = shellLayout(ui, width, height);

@@ -15,15 +15,7 @@ namespace {
 using ui::Rect;
 using ui::contains;
 
-// The editor and the reading pane, side by side in split and each filling the
-// content column on its own. Returned together because "which pane is the
-// pointer in" is the same question for the wheel as it is for the cursor.
-struct ContentPanes {
-  Rect editor;
-  Rect viewer;
-  bool hasEditor = false;
-  bool hasViewer = false;
-};
+}
 
 ContentPanes contentPanes(const UiRuntime& ui, Rect content) {
   ContentPanes panes {content, content, false, false};
@@ -44,8 +36,6 @@ ContentPanes contentPanes(const UiRuntime& ui, Rect content) {
   panes.editor.w = content.w / 2.0f;
   panes.viewer = {content.x + panes.editor.w, content.y, content.w - panes.editor.w, content.h};
   return panes;
-}
-
 }
 
 void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width, int height) {
@@ -90,8 +80,11 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
     (contains(panes.editor, ui.mouseX, ui.mouseY) || (single && ui.focus == FocusArea::Editor));
 
   if(wheelViewer) {
-    ui.viewerScroll = std::clamp(ui.viewerScroll + ui.viewerWheel.take(notches, kViewerScrollPixelsPerNotch),
-                                 0, ui.viewerMaxScroll);
+    // The page owns its scroll and clamps it to what it last laid out, so the
+    // wheel adds and the page decides -- rather than the runtime keeping a
+    // second copy of both numbers and clamping them against each other.
+    ui.readingPage.setScroll(ui.readingPage.scroll() +
+                             ui.viewerWheel.take(notches, kViewerScrollPixelsPerNotch));
     return;
   }
   if(wheelEditor) {

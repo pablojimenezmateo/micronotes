@@ -17,6 +17,20 @@
 // read to the end of.
 namespace micronotes::app {
 
+// The editor and the reading pane, side by side in split and each filling the
+// content column on its own. Returned together because "which pane is this
+// point in" is the same question for the wheel, for the cursor shape, for a
+// scrollbar hit and for a scrollbar drag -- four places that each worked the
+// split out for themselves, in four spellings.
+struct ContentPanes {
+  ui::Rect editor;
+  ui::Rect viewer;
+  bool hasEditor = false;
+  bool hasViewer = false;
+};
+
+ContentPanes contentPanes(const UiRuntime& ui, ui::Rect content);
+
 // Applies one wheel event. `notches` is SDL's `wheel.y`, positive when the
 // content should move down.
 void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width, int height);

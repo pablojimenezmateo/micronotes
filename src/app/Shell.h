@@ -305,11 +305,6 @@ struct UiRuntime {
   int editorScroll = 0;
   // Rows the raw editor last had room for, so PageUp/PageDown match the view.
   int editorVisibleRows = 20;
-  int viewerScroll = 0;
-  // How far the reading pane can be scrolled, as its last draw measured it. The
-  // hit test, the wheel and the scrollbar drag all read it rather than measuring
-  // the document again -- the same arrangement `PageView::maxScroll()` has.
-  int viewerMaxScroll = 0;
   // One per scrolling surface. See WheelAccumulator.
   WheelAccumulator editorWheel;
   WheelAccumulator viewerWheel;

@@ -69,11 +69,6 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
   // of its scrolling space rather than a banner the note passes under.
   ui.readingPage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.readingPage.layout(text, ui.editor.text(), 0, rect);
-  // The scroll is the application's, because the wheel and the scrollbar drag
-  // reach it before any pane does; the page clamps it to what it just laid out.
-  ui.readingPage.setScroll(ui.viewerScroll);
-  ui.viewerScroll = ui.readingPage.scroll();
-  ui.viewerMaxScroll = ui.readingPage.maxScroll();
 
   ui.readingPage.draw(renderer, text, 0, PageSelection {}, ui.focus == FocusArea::Viewer,
                       ui.find.text());

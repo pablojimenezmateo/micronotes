@@ -8,6 +8,20 @@
 
 namespace micronotes::app {
 
+namespace {
+
+// A note opens at the top of itself, in whichever pane is showing it. The
+// reading pane reset its scroll here and the live page did not, so opening a
+// note after scrolling in another one landed you at the top in one pane and
+// part-way down in the other -- the two are the same renderer, and this is the
+// last piece of state that did not know it.
+void resetPageScroll(UiRuntime& ui) {
+  ui.livePage.setScroll(0);
+  ui.readingPage.setScroll(0);
+}
+
+}
+
 void selectNoteAt(UiRuntime& ui, int index) {
   auto notes = ui.state.currentNotes();
   if(notes.empty()) return;
@@ -21,7 +35,7 @@ void selectNoteAt(UiRuntime& ui, int index) {
     ui.editor.setText(recovered ? *recovered : note->body);
     if(recovered && *recovered != note->body) ui.editor.markDirty();
     ui.editorScroll = 0;
-    ui.viewerScroll = 0;
+    resetPageScroll(ui);
     ui.revealEditorCursor = false;
     ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
     ui.state.noteOpened(note->metadata.id);
@@ -43,7 +57,7 @@ void selectNoteById(UiRuntime& ui, const std::string& noteId) {
     ui.editor.setText(recovered ? *recovered : note->body);
     if(recovered && *recovered != note->body) ui.editor.markDirty();
     ui.editorScroll = 0;
-    ui.viewerScroll = 0;
+    resetPageScroll(ui);
     ui.revealEditorCursor = false;
     ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
     ui.state.noteOpened(note->metadata.id);
@@ -76,7 +90,7 @@ void createNote(UiRuntime& ui) {
     ui.loadedNoteId = created->id;
     ui.editor.setText("");
     ui.editorScroll = 0;
-    ui.viewerScroll = 0;
+    resetPageScroll(ui);
     ui.revealEditorCursor = true;
     ui.focus = FocusArea::Editor;
     ui.status = "Created " + created->title;

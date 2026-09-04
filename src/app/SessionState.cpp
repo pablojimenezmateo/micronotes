@@ -73,7 +73,8 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   ui.editor.markSaved();
   ui.sidebarScroll = 0;
   ui.editorScroll = 0;
-  ui.viewerScroll = 0;
+  ui.livePage.setScroll(0);
+  ui.readingPage.setScroll(0);
   loadSelectedIntoEditor(ui);
   if(ui.state.selection().noteId.empty()) selectNoteAt(ui, 0);
   return true;
