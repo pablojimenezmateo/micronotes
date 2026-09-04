@@ -209,24 +209,29 @@ target_compile_definitions(micronotes_core PUBLIC
   MICRONOTES_HAS_SDL3_TTF=$<BOOL:${MICRONOTES_SDL3_TTF_TARGET}>
 )
 
-add_executable(micronotes
-  src/app/main.cpp
+# The shell: every surface that draws, plus the fonts, the draw helpers and the
+# overlay stack they draw through. A library rather than a pile of sources
+# inside the executable so that the test binary can link it too -- panes,
+# models and policies under src/app/ used to be reachable only from `main`,
+# which is why the sidebar's row search had to be pushed into src/ui/ to be
+# testable at all.
+set(MICRONOTES_SHELL_SOURCES
   src/app/Application.cpp
-  src/app/InlineText.cpp
-  src/app/LivePage.cpp
-  src/app/PageHeader.cpp
-  src/app/PageView.cpp
-  src/app/Screenshot.cpp
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
   src/app/Folds.cpp
+  src/app/InlineText.cpp
+  src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
+  src/app/PageHeader.cpp
+  src/app/PageView.cpp
   src/app/RawPane.cpp
   src/app/ReadingPane.cpp
   src/app/Ribbon.cpp
   src/app/RightPanel.cpp
+  src/app/Screenshot.cpp
   src/app/Scroll.cpp
   src/app/SessionState.cpp
   src/app/SettingsDialog.cpp
@@ -240,18 +245,23 @@ add_executable(micronotes
   src/ui/Overlay.cpp
   src/ui/TextMeasureCache.cpp
 )
-target_include_directories(micronotes PRIVATE src)
+
+add_library(micronotes_shell STATIC ${MICRONOTES_SHELL_SOURCES})
+target_include_directories(micronotes_shell PUBLIC src)
 # Lets a build-tree run find the vendored faces without an install step.
-target_compile_definitions(micronotes PRIVATE
+target_compile_definitions(micronotes_shell PUBLIC
   MICRONOTES_SOURCE_FONT_DIR="${CMAKE_SOURCE_DIR}/third_party/fonts"
 )
-target_link_libraries(micronotes PRIVATE micronotes_core ${MICRONOTES_SDL3_TARGET})
+target_link_libraries(micronotes_shell PUBLIC micronotes_core ${MICRONOTES_SDL3_TARGET})
 if(NOT MICRONOTES_SDL3_IMAGE_TARGET STREQUAL "")
-  target_link_libraries(micronotes PRIVATE ${MICRONOTES_SDL3_IMAGE_TARGET})
+  target_link_libraries(micronotes_shell PUBLIC ${MICRONOTES_SDL3_IMAGE_TARGET})
 endif()
 if(NOT MICRONOTES_SDL3_TTF_TARGET STREQUAL "")
-  target_link_libraries(micronotes PRIVATE ${MICRONOTES_SDL3_TTF_TARGET})
+  target_link_libraries(micronotes_shell PUBLIC ${MICRONOTES_SDL3_TTF_TARGET})
 endif()
+
+add_executable(micronotes src/app/main.cpp)
+target_link_libraries(micronotes PRIVATE micronotes_shell)
 
 add_executable(micronotes_tests
   tests/TestMain.cpp
@@ -283,6 +293,7 @@ add_executable(micronotes_tests
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/ShellLayoutTests.cpp
+  tests/ShellUnitTests.cpp
   tests/SidebarRowsTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp
@@ -296,7 +307,7 @@ add_executable(micronotes_tests
 )
 target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-target_link_libraries(micronotes_tests PRIVATE micronotes_core)
+target_link_libraries(micronotes_tests PRIVATE micronotes_shell)
 add_test(NAME micronotes_tests COMMAND micronotes_tests)
 
 # src/core is a vendored copy shared with microagenda. Editing it without
@@ -314,7 +325,7 @@ if(MICRONOTES_PERF_HARNESS_BUILD)
   target_link_libraries(micronotes_perf PRIVATE micronotes_core)
 endif()
 
-foreach(target micronotes_core micronotes micronotes_tests)
+foreach(target micronotes_core micronotes_shell micronotes micronotes_tests)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
     if(MICRONOTES_WARNINGS_AS_ERRORS)

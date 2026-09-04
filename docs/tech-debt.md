@@ -102,35 +102,6 @@ can answer. Then the reading pane becomes `PageView` with the caret, the gutter
 and the toolbar off, all three of which are already conditional on focus or
 hover, and the file deletes.
 
-## TD-11 — nothing under `src/app/` can be tested
-
-`CMakeLists.txt`.
-
-`micronotes_tests` links `micronotes_core`, which is `src/core`, `src/doc`,
-`src/library` and most of `src/ui`. Everything under `src/app/` is compiled only
-into the `micronotes` executable, so no test can reach it.
-
-**What it costs today.** `src/app/` holds `PageView` (883 lines), the sidebar
-model, the reading pane, the tab strip, the frame policy and `Application.cpp`
-itself — and none of it has a unit test. The consequences show up as
-workarounds: `sidebarRowRange` is a four-line adapter over `ui::rowBand` in
-`src/ui/` purely so the search behind it could be tested at all, and the
-reading pane's correctness is checked by comparing screenshots because there is
-no way to call it. Both are the right shape for other reasons; neither should
-have been *forced*.
-
-**Why it is still here.** `src/app/Shell.h` pulls in SDL3, `PageView.h`,
-`ui/Draw.h` and `ui/Overlay.h`, so moving a file to the tested library moves
-that world with it — and `UiRuntime` holds an `AppState` by value, which a test
-would have to be able to construct.
-
-**What the fix is.** Two steps, and the first is worth doing alone: add the
-`src/app/` files whose only dependency is data (`SidebarModel.cpp`,
-`FramePolicy.cpp`, `Scroll.cpp`, `Tabs`-shaped things) to the library, and see
-what actually fails to link. The second is separating `UiRuntime` from the
-drawing headers, which is the same decomposition `Application.cpp`'s line budget
-is already pushing.
-
 ## TD-12 — the reading pane measures every word it draws, every frame
 
 `src/app/InlineText.cpp`, `drawInlineRuns`.
