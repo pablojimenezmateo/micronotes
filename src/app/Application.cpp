@@ -2168,10 +2168,9 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     // swallow the click. Copying is the one piece of it a read-only page still
     // carries, so it is asked of whichever page is showing the note.
     const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
-    const bool overLiveChrome = live && (ui.livePage.gutterAt(x, y).has_value() ||
-                                         !ui.livePage.toolbarAt(x, y).empty() ||
-                                         ui.livePage.foldAt(x, y).has_value() ||
-                                         ui.livePage.copyButtonAt(x, y).has_value());
+    const bool overLiveChrome =
+      live && (ui.livePage.gutterAt(x, y).has_value() || !ui.livePage.toolbarAt(x, y).empty() ||
+               ui.livePage.foldAt(x, y).has_value() || ui.livePage.copyButtonAt(x, y).has_value());
     if(ui.state.workspace().paneMode() != ui::PaneMode::Editor) {
       const PageView& page = live ? ui.livePage : ui.readingPage;
       if(const auto code = codeUnderCopyButton(page, ui.editor.text(), x, y)) {
@@ -2209,8 +2208,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
         else if(action == "turn") openTurnIntoMenu(ui, x, y);
         return;
       }
-      // The disclosure control and the code block's copy button are chrome:
-      // they act, and leave the caret and the selection where they were.
+      // The disclosure control is chrome: it acts and leaves the caret and the
+      // selection alone. So is the copy button, handled above for both panes.
       if(const auto fold = ui.livePage.foldAt(x, y)) {
         toggleFoldAt(ui, fold->blockStart);
         return;
