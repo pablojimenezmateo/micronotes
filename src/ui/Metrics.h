@@ -37,10 +37,9 @@ inline constexpr float kWindowFrameThickness = 6.0f;
 // shell where nothing lines up: `small` is for controls the size of a row --
 // chips, checkboxes, the search field; `medium` is for blocks inside the page
 // -- callouts, code, properties; `large` is for things that float over it.
-// The mark in a callout's gutter: a dot the size and inset of which are read by
-// the live surface and by the reading pane, which draw the same callout. Both
-// had `7.0f` and `+ 6.0f` written out inline, in two files, which is two chances
-// for a callout to look like a different shape depending on which pane it is in.
+// The mark in a callout's gutter. Both surfaces are the same renderer now, so
+// this has one reader -- but it stays named, because `7.0f` and `+ 6.0f` written
+// out inline is how it came to be two shapes in two files in the first place.
 inline constexpr float kCalloutMarkSize = 7.0f;
 inline constexpr float kCalloutMarkInset = 6.0f;
 
@@ -154,17 +153,12 @@ inline constexpr float kScrollbarMinThumbRatio = 0.08f;
 // The page -- the writing surface itself -- inside the pane that holds it, and
 // the measure of the text column on it.
 //
-// One set of numbers, because three surfaces draw a page into a pane -- the
-// live editing page, the reading pane and the raw pane -- and the inset was
-// written out **seven** times: once each in `PageView` and `ReadingPane`, twice
-// in `RawPane`, and four times inline in `Application.cpp`'s hit tests. Two of
+// One set of numbers, because the surfaces that draw a page into a pane -- the
+// page itself, in either mode, and the raw pane -- had the inset written out
+// **seven** times: once each in `PageView` and the reading pane, twice in
+// `RawPane`, and four times inline in `Application.cpp`'s hit tests. Two of
 // those spellings were `h - kPagePad * 3.5` and `h - 28`, which are the same
 // number for as long as nobody changes the padding.
-//
-// The column floors differed as well (120 on the live page, 80 in the reading
-// pane). Neither is reachable today -- `kMinContentWidth` keeps the page well
-// above the width where either would bind -- so this is a divergence waiting
-// for a narrower minimum rather than one on screen now.
 inline constexpr float kPagePad = 8.0f;
 // Taken off the bottom on top of `kPagePad`, so the page stops clear of the
 // status bar rather than running under it.

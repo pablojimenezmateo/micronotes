@@ -51,6 +51,12 @@ enum class TextRole {
   WikiLink,
   WikiLinkUnresolved,
   Code,
+  // The alt text of `![alt](target)`. A role of its own because the picture is
+  // drawn under the block now: an underlined accent-coloured line above every
+  // image reads as a stray link, where the same words muted read as the caption
+  // they are. Still a link -- a remote image has nothing but its alt text to be
+  // reached by -- just not one shouting about it.
+  ImageAlt,
   Muted
 };
 
@@ -123,6 +129,23 @@ struct VisualLine {
   }
 };
 
+// The box an image takes once it has been fitted to the column and to the page.
+// A zero one means the target names nothing drawable, which is a placeholder
+// line rather than a picture.
+struct ImageBox {
+  float width = 0.0f;
+  float height = 0.0f;
+};
+
+// One picture under a block, in the block's own space. `![alt](target)` is an
+// inline as far as the scanner is concerned -- the alt text is a link-styled run
+// like any other -- and the picture goes below the paragraph that named it,
+// which is where every Markdown reader puts it.
+struct BlockImage {
+  std::string target;
+  Rect rect;
+};
+
 // Cached by content and geometry, so two identical blocks share one layout.
 // Its position in the document lives alongside it, not inside it.
 struct BlockLayout {
@@ -144,6 +167,9 @@ struct BlockLayout {
   // Every line's runs, in line order, so `lines[i]` owns `[runBegin, runEnd)`.
   std::vector<TextRun> runs;
   std::vector<std::string> links;
+  // Empty for almost every block, so it costs a pointer triple and no
+  // allocation for the ones with no picture in them.
+  std::vector<BlockImage> images;
 
   // The runs of one of this block's lines. The line must be one of `lines`;
   // nothing else can address this array.
@@ -164,6 +190,11 @@ struct Metrics {
   std::function<float(const RunStyle&)> lineHeight;
   // Height of a block the scanner does not model, rendered through md4c.
   std::function<float(const SourceBlock&, float width)> measureComplex;
+  // The box `![alt](target)` takes, fitted to the column and to `maxHeight`.
+  // The layout has a buffer, not a texture cache, so it asks -- exactly as it
+  // asks about folds and wikilinks. Unset means the note draws no pictures,
+  // which is what a layout with no renderer behind it should do.
+  std::function<ImageBox(std::string_view target, float column, float maxHeight)> measureImage;
 };
 
 struct LayoutOptions {
@@ -194,6 +225,16 @@ struct LayoutOptions {
   // folds. Unset means "assume it does", which is what a layout with no library
   // behind it should draw.
   std::function<bool(std::string_view)> wikiLinkResolves;
+  // The tallest a picture may be drawn. Part of the geometry, because a shorter
+  // window makes a shorter image and so a shorter block: a note is not meant to
+  // be one photograph you have to scroll past.
+  float imageMaxHeight = 0.0f;
+  // Moves whenever `Metrics::measureImage` could answer differently for a
+  // target it has already been asked about -- a texture that has finished
+  // loading changes the height of the block showing it. Same contract as
+  // `wikiLinkRevision`, and for the same reason: it is the one input to a
+  // block's layout that is not in the block's own bytes.
+  std::uint64_t imageRevision = 0;
 
   // Identity stamps. Both are optional, and both exist because the reuse check
   // otherwise has to *prove* that nothing moved -- which costs a pass over the
@@ -454,6 +495,9 @@ private:
   bool resolveFoldsAfter(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
                          std::size_t carried, std::vector<std::uint8_t>* out) const;
   std::size_t blockIndexFor(std::size_t offset) const;
+  // The images of a block that has some, laid out down the column from `top`;
+  // returns where the block's ink now ends.
+  float placeImages(BlockLayout& out, float top) const;
 
   // The flags block `index` is keyed and laid out under. They depend on the
   // block, on its neighbours' kinds, on the fold state and on where the caret
@@ -537,10 +581,10 @@ private:
   // whitespace buffer is grown once and reused by every block after the first.
   // `mutable` because laying a block out is logically a const query.
   mutable std::vector<std::pair<std::size_t, float>> flowPending_;
-  // Scratch for the same flow's unbreakable clusters (TD-13): the widths of a
-  // run of consecutive non-space tokens, held so the break decision can be made
-  // once for the run rather than once per token. Borrowed for the same reason
-  // the whitespace buffer is.
+  // Scratch for the same flow's unbreakable clusters: the widths of a run of
+  // consecutive non-space tokens, held so the break decision can be made once
+  // for the run rather than once per token. Borrowed for the same reason the
+  // whitespace buffer is.
   mutable std::vector<float> flowCluster_;
   // The source line spans of a fenced code block or a block dropped to raw.
   // Same reason: one per such block, returned by value, was one allocation per

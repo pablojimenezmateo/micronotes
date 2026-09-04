@@ -303,47 +303,4 @@ float drawInlineRuns(SDL_Renderer* renderer, TextRenderer& text, std::vector<Lin
   return cursorY;
 }
 
-std::vector<std::string> wrapText(TextRenderer& text, std::string_view value, int maxWidth, bool heading, bool mono) {
-  std::vector<std::string> out;
-  if(maxWidth <= 0) {
-    out.emplace_back(value);
-    return out;
-  }
-  std::istringstream logicalLines {std::string(value)};
-  std::string logicalLine;
-  while(std::getline(logicalLines, logicalLine)) {
-    if(logicalLine.empty()) {
-      out.emplace_back();
-      continue;
-    }
-    std::string line;
-    std::istringstream words {logicalLine};
-    std::string word;
-    while(words >> word) {
-      const std::string candidate = line.empty() ? word : line + " " + word;
-      if(!line.empty() && text.width(candidate, heading, mono) > maxWidth) {
-        out.push_back(line);
-        line = word;
-        // A word too long for the measure is broken across lines. By bisection
-        // over code point boundaries, because the two obvious ways to write this
-        // are both wrong: shortening a byte at a time costs a shaping pass per
-        // byte, and a byte is not a character, so a cut can land inside a UTF-8
-        // sequence and hand the renderer something that is not text.
-        while(text.width(line, heading, mono) > maxWidth) {
-          const std::size_t cut = ui::breakToFit(
-            line, maxWidth,
-            [&](std::string_view part) { return text.width(part, heading, mono); });
-          if(cut == 0 || cut >= line.size()) break;
-          out.push_back(line.substr(0, cut));
-          line.erase(0, cut);
-        }
-      } else {
-        line = candidate;
-      }
-    }
-    out.push_back(line);
-  }
-  if(out.empty()) out.emplace_back();
-  return out;
-}
 }

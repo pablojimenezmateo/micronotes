@@ -263,6 +263,10 @@
   /* layout.blocks is what the resumption is worth on a note that does have a    */    \
   /* fold in it -- the case fold_resolutions_skipped cannot help.                */    \
   X(LayoutFoldBlocksResolved, "layout.fold_blocks_resolved")                           \
+  /* Images whose box the layout asked the renderer for. One per picture per   */      \
+  /* relaid block, so on an idle frame it should be zero: a note full of       */      \
+  /* photographs that measures them every frame is measuring the disk.         */      \
+  X(LayoutImagesMeasured, "layout.images_measured")                                    \
   /* Inline markup work inside a relaid block: spans the inline scanner found,  */     \
   /* and content bytes given a per-byte attribute slot to hold their formatting. */    \
   /* attr_bytes is the one to watch -- it is a heap allocation and a zero fill    */   \
@@ -307,15 +311,4 @@
   /* so scan_bytes counts one pass per edit and highlights_drawn counts the window */  \
   /* rather than the note. Both are zero when nothing is being searched.           */  \
   X(PageFindScanBytes, "page.find_scan_bytes")                                         \
-  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")                             \
-  /* --- reading pane ---------------------------------------------------------- */    \
-  /* The reading pane renders the note through md4c, and it used to do so with   */    \
-  /* no cache of any kind: one walk of the whole document to measure it and a    */    \
-  /* second to draw it, on every frame. layout_builds against layout_reused is   */    \
-  /* the memo working -- builds should track the typing rate and reused should    */    \
-  /* track the frame count -- and blocks_measured against blocks_drawn is the     */    \
-  /* other half: a build costs the note, a frame costs the window.               */    \
-  X(ViewerLayoutBuilds, "viewer.layout_builds")                                        \
-  X(ViewerLayoutReused, "viewer.layout_reused")                                        \
-  X(ViewerBlocksMeasured, "viewer.blocks_measured")                                    \
-  X(ViewerBlocksDrawn, "viewer.blocks_drawn")
+  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")

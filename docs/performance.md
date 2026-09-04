@@ -1782,10 +1782,10 @@ callout label's case -- each of which is a scroll extent or a box that does not
 match the text in it. Two parallel walks of the same blocks is a shape that
 cannot be checked; one walk cannot drift from itself.
 
-The pane is `src/app/ReadingPane.cpp` now, which is 247 lines out of
-`Application.cpp`. What is *not* resolved is that it is still a second renderer
-for the same Markdown -- see `docs/tech-debt.md` TD-9, which records what the
-merge into `PageView` actually needs.
+The pane became `src/app/ReadingPane.cpp`, 247 lines out of `Application.cpp`.
+What was *not* resolved was that it was still a second renderer for the same
+Markdown; the seventh pass below is the merge into `PageView`, and the file is
+gone.
 
 ## The fifth pass: what the three instruments could not see
 
@@ -2074,11 +2074,12 @@ Tables are in it too, because measuring a table measures every cell in it. And
 deterministic counter unchanged -- which is the proof that what came out was
 duplicate work rather than work.
 
-**What is left is the draw itself,** and it is filed as TD-12: `drawInlineRuns`
+**What is left is the draw itself,** and it was filed as TD-12: `drawInlineRuns`
 measures each word as it places it, because the reading pane has no equivalent
 of `doc::Layout`'s per-block run cache. The remaining 11,674 are 99.1% cache
 hits, so they are hash-and-probe rather than shaping, and the pane makes its
-budget comfortably. The fix is TD-9, not a second cache.
+budget comfortably. The fix is TD-9, not a second cache -- and the seventh pass
+below is TD-9.
 
 ### Why the harness could not have found this
 
@@ -2094,3 +2095,94 @@ it: when you add code to a hot path, add the counter as well as the timer,
 because a timing says how long the work took and only a counter says whether it
 should have happened at all. The same rule caught the scroll relayout that was
 70% of every frame while passing every budget.
+
+## The seventh pass: one renderer instead of two
+
+The sixth pass ended by filing the reading pane's remaining cost as TD-12 and
+saying "the fix is TD-9, not a second cache". This is TD-9.
+
+### Resolved: the reading pane was a second renderer for the same Markdown
+
+`src/app/ReadingPane.cpp` parsed the open note through md4c a second time and
+drew it with its own geometry: its own indent step, its own quote gutter, its
+own callout box, its own task checkbox, its own code block, its own table, its
+own image scaling. Every typographic decision had to be made twice, and a
+screenshot of one note against the live surface had already found six places
+where the two had drifted.
+
+It is `PageView` now, with three flags off. `setReadOnly(true)` withdraws the
+caret, the hover gutter and the selection toolbar -- all three of which were
+already conditional on focus or on the pointer -- and tells the layout there is
+no caret, which is what keeps a block's markers hidden. Nothing else about the
+two panes differs.
+
+**The measurement that says so is a `cmp`.** The same note, the same window, in
+each pane:
+
+```
+$ cmp show-live.png show-viewer.png
+differing row bands: [(1078, 1091)]
+```
+
+Fourteen rows, and they are the status bar: `Live` against `Reading`. Every
+other pixel of the page is identical, which is a stronger statement than any
+list of fixed divergences could be -- and it is now a regression test anyone can
+run in two commands.
+
+The three things the merge had to *gain* before it could happen, because the
+reading pane could do them and the live surface could not:
+
+* **Images.** `doc::Layout` reserves a box under the block that named the
+  picture (`BlockLayout::images`), measured through a `Metrics::measureImage`
+  hook the way `measureComplex` already worked for tables -- so the page asks
+  for a box the way it asks whether a wikilink resolves, and every position
+  query below that block is right without a second pass. The alt text became a
+  role of its own, `TextRole::ImageAlt`: an underlined accent-coloured line
+  above every picture reads as a stray link, the same words muted read as the
+  caption they are. `layout.images_measured` is the counter; on an idle frame it
+  is zero.
+* **Anchors.** `PageView::anchorScroll` builds the note's heading and footnote
+  anchors from the block partition it already has, once per buffer. The reading
+  pane kept this in a private map, which is why the *live* surface could not
+  follow an in-note `[#heading]` link at all.
+* **Footnotes**, and this one turned out to be a bug in both panes. md4c drops a
+  footnote definition that nothing refers to, and a `Complex` block is parsed on
+  its own -- so a definition came back empty and fell through to the raw-source
+  fallback. Both surfaces showed the author's `[^label]: ...` in grey monospace.
+  Parsing it behind a synthetic reference to its own label is what makes md4c
+  keep it. And `doc::InlineScan` learned `[^label]` as a link to `#fn-label`, so
+  a reference in the middle of a sentence is now clickable on both surfaces
+  where it used to be four literal characters on one of them.
+
+### What the second renderer cost
+
+A real headless session, 60 frames, the 7.2 KB elements fixture, reading pane,
+interleaved against the commit before the merge:
+
+| | before | after |
+|---|---:|---:|
+| `render.text_measure_calls` | 32,579 | 3,728 |
+| `markdown.parse_bytes` | 7,262 | 981 |
+| `markdown.blocks_produced` | 112 | 7 |
+| `shell.content` self, 60 frames | 22.0-50.4 ms | 1.4-2.2 ms |
+
+**Eight and a half times fewer text measurements, and fifteen to twenty-five
+times less time.** The measure calls are TD-12 answered: the pane draws
+`doc::Layout`'s cached runs -- position, width and style, already decided --
+instead of walking every word of every visible block and measuring it to place
+it. The parse figures are the other half: md4c now sees only the blocks the
+scanner hands it (nine of them, cached by their own bytes) rather than the whole
+note on every buffer change.
+
+`page.runs_drawn` is 27,720 over the run in both panes, and `layout.*` is
+identical between them, because they are the same code.
+
+### Why this was a merge rather than a cache
+
+TD-12's own entry named the alternative: give the reading pane a per-block run
+cache of its own, keyed on (block, textWidth, fontScale). That is most of what
+`doc::Layout` already is, built a second time inside the file the merge was
+going to delete -- and it would have fixed the *speed* half while leaving every
+drawing decision still made twice. The six divergences the sixth pass found were
+all in the half a cache would not have touched.
+

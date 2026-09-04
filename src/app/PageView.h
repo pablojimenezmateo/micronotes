@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -43,6 +44,11 @@ struct PageViewHooks {
   // Whether a `[[target]]` names a note that exists. The page has a buffer, not
   // a library, so it asks; unset means "assume it does".
   std::function<bool(std::string_view)> wikiLinkResolves;
+  // The two halves of a picture. The page has a buffer, not a texture cache, so
+  // it asks for the box and hands the drawing back. Leaving both unset is what
+  // a surface that does not want pictures does.
+  std::function<doc::ImageBox(std::string_view target, float column, float maxHeight)> measureImage;
+  std::function<void(std::string_view target, ui::Rect)> drawImage;
 };
 
 struct PageLink {
@@ -132,6 +138,16 @@ public:
   // depends on that is not in them, so without it a link that starts or stops
   // resolving keeps its old colour until the block is edited.
   void setWikiLinkRevision(std::uint64_t revision);
+  // The same for pictures: a stamp that moves whenever `measureImage` could
+  // answer differently, which is what a texture finishing its load does.
+  void setImageRevision(std::uint64_t revision);
+
+  // Reading rather than editing. The caret, the hover gutter and the selection
+  // toolbar are the whole of what an editable surface adds, and all three are
+  // already conditional on focus or on the pointer -- so the reading pane is
+  // this page with them turned off, rather than a second renderer for the same
+  // Markdown. Markers stay hidden whatever the caret says.
+  void setReadOnly(bool readOnly);
 
   // Lays the note out for this frame. `rect` is the whole content pane.
   void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
@@ -195,6 +211,12 @@ public:
   std::size_t rowRelative(std::size_t offset, int deltaRows) const;
   std::size_t rowsPerPage() const;
 
+  // Where an in-note `[#heading]` link or a footnote reference lands, as a
+  // scroll offset, or nothing when the note has no anchor by that name. Built
+  // once per buffer: the note's headings and its footnote definitions, keyed by
+  // the slug `ui::headingAnchor` makes of them.
+  std::optional<int> anchorScroll(std::string_view anchor) const;
+
   void revealCaret(std::size_t offset);
   int scroll() const;
   void setScroll(int value);
@@ -240,6 +262,7 @@ private:
   void drawGutter(SDL_Renderer* renderer, ui::TextRenderer& text);
   void drawDropIndicator(SDL_Renderer* renderer);
   void drawToolbar(SDL_Renderer* renderer, ui::TextRenderer& text, const PageSelection& selection);
+  void buildAnchors() const;
 
   doc::DocumentLayout document_;
   PageViewHooks hooks_;
@@ -263,6 +286,8 @@ private:
   bool wired_ = false;
   bool foldsActive_ = false;
   std::uint64_t wikiLinkRevision_ = 0;
+  std::uint64_t imageRevision_ = 0;
+  bool readOnly_ = false;
   std::uint64_t sourceRevision_ = 0;
   std::uint64_t foldRevision_ = 0;
   doc::LayoutOptions::EditedSpan editedSpan_;
@@ -271,6 +296,12 @@ private:
   // over the note at frame rate; drawing all of it made the highlight cost the
   // document rather than the window.
   std::vector<std::size_t> findMatches_;
+  // The note's anchors, keyed by slug. `mutable` because resolving one is
+  // logically a query; rebuilt when the buffer's stamp moves, and every frame
+  // for a caller that offers no stamp -- the same contract the find cache has.
+  mutable std::map<std::string, float, std::less<>> anchors_;
+  mutable std::uint64_t anchorRevision_ = 0;
+  mutable bool anchorsValid_ = false;
   // Scratch for the selection and find-highlight rects. A member because both
   // are per-frame calls and a vector returned by value is an allocation and a
   // free on every one of them -- for the find highlighter, one per match on

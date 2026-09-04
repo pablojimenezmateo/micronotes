@@ -226,9 +226,10 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Notes.cpp
   src/app/Options.cpp
   src/app/PageHeader.cpp
+  src/app/PageImages.cpp
   src/app/PageView.cpp
   src/app/RawPane.cpp
-  src/app/ReadingPane.cpp
+  src/app/ReadingPage.cpp
   src/app/Ribbon.cpp
   src/app/RightPanel.cpp
   src/app/Screenshot.cpp

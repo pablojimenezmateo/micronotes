@@ -7,7 +7,7 @@
 #include "app/MarkdownBlocks.h"
 #include "app/PageHeader.h"
 #include "app/LivePage.h"
-#include "app/ReadingPane.h"
+#include "app/ReadingPage.h"
 #include "app/SessionState.h"
 #include "app/Ribbon.h"
 #include "app/Scroll.h"
@@ -1024,16 +1024,16 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     const perf::ScopeTimer timer("shell.content");
     const Rect content = layout.content;
     if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
-      drawLive(renderer, text, ui, content);
+      drawLive(renderer, text, images, ui, content);
     } else if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
       drawEditor(renderer, text, ui, content);
     } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
-      drawReadingPane(renderer, text, images, ui, content);
+      drawReading(renderer, text, images, ui, content);
     } else {
       const float split = content.w / 2.0f;
       drawEditor(renderer, text, ui, {content.x, content.y, split, content.h});
       fill(renderer, {content.x + split, content.y, 1, content.h}, theme().hairline);
-      drawReadingPane(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
+      drawReading(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
     }
   }
   {
@@ -2216,12 +2216,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
           const auto filePart = hash == std::string::npos ? target : target.substr(0, hash);
           const auto anchorPart = hash == std::string::npos ? std::string() : target.substr(hash + 1);
           if(filePart.empty() && !anchorPart.empty()) {
-            const auto anchor = anchorFor(anchorPart);
-            auto found = ui.viewerLayout.anchors.find(anchor);
-            if(found == ui.viewerLayout.anchors.end()) found = ui.viewerLayout.anchors.find(anchorPart);
-            if(found != ui.viewerLayout.anchors.end()) {
-              ui.viewerScroll = std::max(0, found->second);
-              ui.focus = FocusArea::Viewer;
+            if(jumpToAnchor(ui, anchorPart)) {
               ui.status = "Jumped to " + anchorPart;
             } else {
               ui.status = "Anchor not found: " + anchorPart;
@@ -2235,15 +2230,9 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
           if(!anchorPart.empty()) {
             auto note = ui.state.selectedNote();
             const auto sameNote = filePart.empty() || (note && (note->item.path.filename() == std::filesystem::path(filePart).filename()));
-            if(sameNote) {
-              const auto anchor = anchorFor(anchorPart);
-              auto found = ui.viewerLayout.anchors.find(anchor);
-              if(found != ui.viewerLayout.anchors.end()) {
-                ui.viewerScroll = std::max(0, found->second);
-                ui.focus = FocusArea::Viewer;
-                ui.status = "Jumped to " + anchorPart;
-                return;
-              }
+            if(sameNote && jumpToAnchor(ui, anchorPart)) {
+              ui.status = "Jumped to " + anchorPart;
+              return;
             }
           }
           if(ui.state.hasLibrary()) {

@@ -2,13 +2,18 @@
 
 This file is both documentation for micronotes' Markdown rendering scope and a
 manual regression fixture. Open it as a note and check each section below in
-both renderers, because there are two and they are built differently:
+both panes, which are one renderer:
 
 - **Live** (`Ctrl+1`), where the formatting is drawn around a caret you can put
   anywhere. Its scanner owns the simple blocks and hands tables, raw HTML,
-  footnote definitions and indented code to the reading view's renderer, drawn
-  read-only until you click into one.
-- **Reading** (`Ctrl+3`), the md4c rendering, which owns everything.
+  footnote definitions and indented code to md4c, drawn read-only until you
+  click into one.
+- **Reading** (`Ctrl+3`), the same page with the caret, the hover gutter and the
+  selection toolbar turned off.
+
+The two are meant to be **pixel-identical** for a note nobody is editing, and
+that is the cheapest regression test this file has: screenshot each and `cmp`
+them. Anything that differs outside the status bar is a bug in one of them.
 
 In each: the content wraps without overflow, scrolls, and links stay clickable.
 In the live surface, additionally: a block's syntax markers appear only while

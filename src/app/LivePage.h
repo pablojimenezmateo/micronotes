@@ -14,6 +14,7 @@
 // predicates, and the per-frame view state.
 namespace micronotes::app {
 
-void drawLive(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
+void drawLive(SDL_Renderer* renderer, ui::TextRenderer& text, ui::ImageCache& images,
+              UiRuntime& ui, ui::Rect rect);
 
 }

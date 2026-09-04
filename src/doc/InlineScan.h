@@ -21,6 +21,11 @@ enum class SpanKind {
   WikiLink,
   Image,
   Autolink,
+  // `[^label]`, pointing at the `[^label]: ...` definition further down the
+  // note. The definition itself is a block the scanner hands to md4c; this is
+  // the reference in the middle of a sentence, and it is a link whose target is
+  // the anchor the page records for that definition.
+  FootnoteRef,
   Escape
 };
 

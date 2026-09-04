@@ -142,12 +142,59 @@ std::string_view complexSource(UiRuntime& ui, const doc::SourceBlock& block) {
 // every call, which is twice per such block per frame -- once to measure it and
 // once to draw it -- so a note with a table in view allocated and freed a copy
 // of that table's source sixty times a second to find a parse it already had.
+// Where a footnote definition's body starts, measured from the block's left
+// edge: clear of the `[label]` drawn in the gutter beside it.
+constexpr float kFootnoteLabelGap = 12.0f;
+
+// The gutter label a footnote definition draws, and how wide it is. Empty for
+// every other kind of block, which is what the zero width says.
+float footnoteLabelWidth(TextRenderer& text, const markdown::Block& block) {
+  if(block.type != markdown::BlockType::Footnote) return 0.0f;
+  const auto label = "[" + (block.footnoteLabel.empty() ? std::string("*") : block.footnoteLabel) + "]";
+  return static_cast<float>(text.width(label)) + kFootnoteLabelGap;
+}
+
+// The label of `[^label]: ...`, or empty when the block is not a footnote
+// definition.
+std::string_view footnoteLabelOf(std::string_view source) {
+  if(source.size() < 4 || source[0] != '[' || source[1] != '^') return {};
+  const auto close = source.find("]:");
+  if(close == std::string_view::npos || close <= 2) return {};
+  const auto label = source.substr(2, close - 2);
+  return label.find('\n') == std::string_view::npos ? label : std::string_view {};
+}
+
+// md4c drops a footnote definition that nothing refers to, and a `Complex` block
+// is parsed on its own -- so a definition parsed by itself came back empty and
+// fell through to the raw-source fallback below. Both surfaces showed the
+// author's `[^label]: ...` in grey monospace instead of a footnote.
+//
+// Parsing it behind a synthetic reference to its own label is what makes md4c
+// keep it. The reference's own paragraph is then dropped, which is why the
+// result starts at the first `Footnote` block rather than at the first block.
+markdown::Document parseComplex(UiRuntime& ui, std::string_view source) {
+  const auto label = footnoteLabelOf(source);
+  if(label.empty()) return ui.parser.parse(source);
+  std::string withReference;
+  withReference.reserve(source.size() + label.size() + 6);
+  withReference += "[^";
+  withReference += label;
+  withReference += "]\n\n";
+  withReference += source;
+  auto document = ui.parser.parse(withReference);
+  auto first = document.blocks.begin();
+  while(first != document.blocks.end() && first->type != markdown::BlockType::Footnote) ++first;
+  if(first == document.blocks.end()) return ui.parser.parse(source);
+  document.blocks.erase(document.blocks.begin(), first);
+  return document;
+}
+
 const markdown::Document& complexDocument(UiRuntime& ui, const doc::SourceBlock& block) {
   const std::string_view key = complexSource(ui, block);
   auto found = ui.complexCache.find(key);
   if(found == ui.complexCache.end()) {
     if(ui.complexCache.size() > 64) ui.complexCache.clear();
-    found = ui.complexCache.emplace(std::string(key), ui.parser.parse(key)).first;
+    found = ui.complexCache.emplace(std::string(key), parseComplex(ui, key)).first;
   }
   return found->second;
 }
@@ -185,7 +232,8 @@ float measureComplexBlock(TextRenderer& text, UiRuntime& ui, const doc::SourceBl
     } else {
       const auto runs = inlineRuns(item, theme().text);
       const auto style = blockTextStyle(item);
-      height += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(width), style.size) * blockLineStep(text, item)) + 6.0f;
+      const float indent = footnoteLabelWidth(text, item);
+      height += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(width - indent), style.size) * blockLineStep(text, item)) + 6.0f;
     }
   }
   return height + 10.0f;
@@ -217,9 +265,17 @@ void drawComplexBlock(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
       const auto runs = inlineRuns(item, theme().text);
       const auto style = blockTextStyle(item);
       const int step = blockLineStep(text, item);
+      // A footnote definition wears its own label in the gutter, so a reader
+      // scanning the bottom of a note can tell which reference each body
+      // belongs to without counting.
+      const float indent = footnoteLabelWidth(text, item);
+      if(indent > 0.0f) {
+        const auto label = item.footnoteLabel.empty() ? std::string("*") : item.footnoteLabel;
+        text.draw("[" + label + "]", rect.x, y, theme().accent);
+      }
       // Where the draw left off, rather than a second full inline layout of it.
-      y = drawInlineRuns(renderer, text, &ui.linkRegions, runs, rect.x, y,
-                         static_cast<int>(rect.w), step, style.size) +
+      y = drawInlineRuns(renderer, text, &ui.linkRegions, runs, rect.x + indent, y,
+                         static_cast<int>(rect.w - indent), step, style.size) +
           static_cast<float>(step) + 6.0f;
     }
   }

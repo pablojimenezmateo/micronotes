@@ -1,11 +1,27 @@
 #include "ui/TextUtil.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <set>
 #include <sstream>
 
 namespace micronotes::ui {
+
+std::string headingAnchor(std::string_view value) {
+  std::string out;
+  bool pendingDash = false;
+  for(const unsigned char c : value) {
+    if(std::isalnum(c)) {
+      if(pendingDash && !out.empty()) out.push_back('-');
+      out.push_back(static_cast<char>(std::tolower(c)));
+      pendingDash = false;
+    } else if(!out.empty()) {
+      pendingDash = true;
+    }
+  }
+  return out;
+}
 
 std::string displayPath(const std::filesystem::path& path) {
   const auto text = path.generic_string();

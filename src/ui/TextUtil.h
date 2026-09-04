@@ -15,6 +15,12 @@ namespace micronotes::ui {
 
 std::vector<std::string> splitLines(std::string_view text);
 
+// A heading's slug, as an in-note `[#link]` spells it: lowercase, and every run
+// of non-alphanumerics between words becomes one dash. Shared by the surface
+// that records the anchors and the click that resolves one, because the two
+// have to agree exactly or the jump silently does nothing.
+std::string headingAnchor(std::string_view value);
+
 // Truncates to `limit` characters, spending three of them on the ellipsis.
 std::string ellipsize(std::string text, std::size_t limit);
 

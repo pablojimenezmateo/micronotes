@@ -649,6 +649,96 @@ MICRONOTES_TEST(layout_a_fold_resolution_resumes_at_the_edit) {
                                " of " + std::to_string(blocks) + " blocks");
 }
 
+// `![alt](target)` is an inline as far as the scanner is concerned, and the
+// picture goes under the paragraph that named it. The layout has a buffer, not
+// a texture cache, so it asks for the box -- exactly as it asks whether a
+// wikilink resolves -- and reserves the height it is given, which is what lets
+// every position query below that block already be right.
+MICRONOTES_TEST(layout_reserves_room_under_a_block_for_its_images) {
+  const std::string source = "Some prose.\n\n![a picture](pic.png)\n\nMore prose.\n";
+  const auto build = [&source](bool withImages) {
+    DocumentLayout layout;
+    auto metrics = stubMetrics();
+    if(withImages) {
+      metrics.measureImage = [](std::string_view target, float column, float maxHeight) {
+        micronotes::doc::ImageBox box;
+        if(target != "pic.png") return box;
+        box.width = std::min(column, 200.0f);
+        box.height = std::min(maxHeight, 120.0f);
+        return box;
+      };
+    }
+    layout.setMetrics(std::move(metrics));
+    LayoutOptions options;
+    options.width = 600.0f;
+    options.imageMaxHeight = 400.0f;
+    layout.update(source, options);
+    return layout;
+  };
+  const auto without = build(false);
+  const auto with = build(true);
+  // The block holding the image is the only one that grew, and it grew by the
+  // picture plus the air either side of it.
+  MICRONOTES_REQUIRE(with.blockCount() == without.blockCount());
+  std::size_t imageBlock = DocumentLayout::kNone;
+  for(std::size_t i = 0; i < with.blockCount(); ++i) {
+    if(with.layout(i).images.empty()) {
+      micronotes::tests::require(std::abs(with.layout(i).height - without.layout(i).height) < 0.001f,
+                                 "a block with no image changed height");
+      continue;
+    }
+    imageBlock = i;
+    MICRONOTES_REQUIRE(with.layout(i).images.size() == 1);
+    const auto& image = with.layout(i).images.front();
+    MICRONOTES_REQUIRE(image.target == "pic.png");
+    MICRONOTES_REQUIRE(image.rect.h == 120.0f);
+    MICRONOTES_REQUIRE(image.rect.w == 200.0f);
+    MICRONOTES_REQUIRE(with.layout(i).height > without.layout(i).height + 120.0f);
+  }
+  MICRONOTES_REQUIRE(imageBlock != DocumentLayout::kNone);
+  // And everything under it moved down by exactly that much, which is the half
+  // a picture drawn over the following blocks would have got wrong.
+  const float grew = with.layout(imageBlock).height - without.layout(imageBlock).height;
+  for(std::size_t i = imageBlock + 1; i < with.blockCount(); ++i) {
+    micronotes::tests::require(std::abs(with.blockTop(i) - without.blockTop(i) - grew) < 0.001f,
+                               "a block under the image did not move with it");
+  }
+}
+
+// The picture's box is part of the geometry, so a note that has one has to be
+// laid out again when the window that decides its height changes -- and a
+// texture that has finished loading has to be able to say so.
+MICRONOTES_TEST(layout_relays_a_block_when_its_image_could_answer_differently) {
+  const std::string source = "![a picture](pic.png)\n";
+  float height = 100.0f;
+  DocumentLayout layout;
+  auto metrics = stubMetrics();
+  metrics.measureImage = [&height](std::string_view, float column, float) {
+    micronotes::doc::ImageBox box;
+    box.width = std::min(column, 200.0f);
+    box.height = height;
+    return box;
+  };
+  layout.setMetrics(std::move(metrics));
+  LayoutOptions options;
+  options.width = 600.0f;
+  options.imageMaxHeight = 400.0f;
+  options.sourceRevision = 1;
+  options.imageRevision = 1;
+  layout.update(source, options);
+  const float before = layout.layout(0).height;
+
+  // The same stamp and the same bytes: the standing layout stands, whatever the
+  // hook would answer now.
+  height = 300.0f;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.layout(0).height == before);
+
+  options.imageRevision = 2;
+  layout.update(source, options);
+  MICRONOTES_REQUIRE(layout.layout(0).height == before + 200.0f);
+}
+
 // A stamp that moves has to invalidate, or a collapsed heading stays open and
 // the screen is simply wrong.
 MICRONOTES_TEST(layout_a_moved_fold_stamp_re_resolves_the_folds) {
@@ -1436,8 +1526,8 @@ MICRONOTES_TEST(layout_runs_are_ordered_within_a_block) {
   }
 }
 
-// TD-13: the tokenizer splits at every change of inline attribute as well as
-// at every space, so `*soft*,` is two tokens with nothing between them. The
+// The tokenizer splits at every change of inline attribute as well as at every
+// space, so `*soft*,` is two tokens with nothing between them. The
 // wrap used to treat every token as a break opportunity, which put a lone comma
 // at the head of a line whenever the measure fell there. A line may now only
 // begin where the source has whitespace -- checked over a paragraph built so

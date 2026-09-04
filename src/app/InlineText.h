@@ -70,9 +70,4 @@ float drawInlineRuns(SDL_Renderer* renderer, ui::TextRenderer& text, std::vector
                      const std::vector<InlineRun>& runs, float x, float y, int maxWidth, int lineStep,
                      float size);
 
-// Hard-wraps plain text to a width, breaking an overlong word rather than
-// letting it run off the column.
-std::vector<std::string> wrapText(ui::TextRenderer& text, std::string_view value, int maxWidth,
-                                  bool heading = false, bool mono = false);
-
 }

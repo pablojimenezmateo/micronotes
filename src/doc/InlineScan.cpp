@@ -254,6 +254,47 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
     i = close + 2;
   }
 
+  // Pass 2b: footnote references. Before links, because `[^a]` is a bracket
+  // pair a later pass would otherwise have to know to leave alone -- and after
+  // wikilinks, because `[[^a]]` is a note called `^a`.
+  //
+  // The definition it points at is a block of its own, handed to md4c; this is
+  // the `[^a]` in the middle of a sentence, and what it needs from the layout
+  // is to be a link to the anchor the page records for that definition.
+  for(std::size_t i = 0; i + 3 < text.size();) {
+    if(masked[i] || text[i] != '[' || text[i + 1] != '^' || masked[i + 1]) {
+      ++i;
+      continue;
+    }
+    std::size_t close = i + 2;
+    while(close < text.size() && text[close] != ']' && text[close] != '[' && text[close] != '\n' &&
+          !masked[close]) {
+      ++close;
+    }
+    // Empty, unterminated, or `[^a](b)` -- which is a link whose label happens
+    // to start with a caret, and pass 3's business.
+    if(close >= text.size() || text[close] != ']' || close == i + 2 ||
+       (close + 1 < text.size() && (text[close + 1] == '(' || text[close + 1] == ':'))) {
+      ++i;
+      continue;
+    }
+    SourceSpan span;
+    span.kind = SpanKind::FootnoteRef;
+    span.start = i;
+    span.end = close + 1;
+    span.openStart = i;
+    span.openEnd = i + 2;
+    span.contentStart = i + 2;
+    span.contentEnd = close;
+    span.closeStart = close;
+    span.closeEnd = close + 1;
+    span.target = "#fn-" + std::string(text.substr(i + 2, close - i - 2));
+    add(std::move(span));
+    mask(span.openStart, span.openEnd);
+    mask(span.closeStart, span.closeEnd);
+    i = close + 1;
+  }
+
   // Pass 3: links and images. Only their markers are masked, so emphasis inside
   // a link label still matches.
   for(std::size_t i = 0; i < text.size();) {

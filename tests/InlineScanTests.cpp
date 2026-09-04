@@ -273,3 +273,36 @@ MICRONOTES_TEST(inline_scan_rejects_only_text_that_can_hold_no_span) {
   MICRONOTES_REQUIRE(find(scanInlines("a **s** b"), SpanKind::Strong) != nullptr);
   MICRONOTES_REQUIRE(find(scanInlines("a ~~g~~ b"), SpanKind::Strike) != nullptr);
 }
+
+// A footnote reference is a link to the definition further down the note. The
+// live scanner had no notion of one, so `[^first]` was drawn as the four
+// literal characters it is spelled with -- while the reading pane, which parsed
+// the whole note through md4c, drew it as `[1]` and made it clickable. One of
+// the two renderers had to learn it, and it is this one.
+MICRONOTES_TEST(inline_scan_reads_a_footnote_reference_as_a_link) {
+  const auto spans = scanInlines("see the note[^first] here");
+  int refs = 0;
+  for(const auto& span : spans) {
+    if(span.kind != SpanKind::FootnoteRef) continue;
+    ++refs;
+    MICRONOTES_REQUIRE(span.start == 12);
+    MICRONOTES_REQUIRE(span.end == 20);
+    MICRONOTES_REQUIRE(span.contentStart == 14);
+    MICRONOTES_REQUIRE(span.contentEnd == 19);
+    MICRONOTES_REQUIRE(span.target == "#fn-first");
+  }
+  MICRONOTES_REQUIRE(refs == 1);
+}
+
+// The three shapes that are not one. A definition never reaches this scan -- it
+// is a block of its own -- but `[^a]:` is checked anyway, because the cost of
+// being wrong is a link nobody can follow drawn over the author's own text.
+MICRONOTES_TEST(inline_scan_leaves_a_bracket_that_is_not_a_footnote_alone) {
+  for(const std::string_view text : {"a [^](b) c", "a [^first](target.md) c", "a [^] c",
+                                     "a [^unterminated c", "a [^a]: definition"}) {
+    for(const auto& span : scanInlines(text)) {
+      micronotes::tests::require(span.kind != SpanKind::FootnoteRef,
+                                 "read a footnote reference out of: " + std::string(text));
+    }
+  }
+}

@@ -276,19 +276,16 @@ struct UiRuntime {
   editor::MarkdownEditor editor;
   markdown::MarkdownParser parser;
   PageView livePage;
+  // The reading pane is the same renderer with the caret, the gutter and the
+  // toolbar off. A second instance rather than the same one because the two
+  // panes lay the note out at different widths -- in split view, at the same
+  // time -- and one block cache serving both would be swept on every frame.
+  PageView readingPage;
   // md4c documents for the blocks the live surface hands off, keyed by source.
   // Keyed by the block's own source text, and looked up through a view --
   // `std::less<>` rather than the default, so finding a parse does not first
   // allocate a copy of the bytes to look it up by.
   std::map<std::string, markdown::Document, std::less<>> complexCache;
-  // The reading pane's md4c parse, and the buffer revision it was taken at.
-  // Keyed on the revision rather than on the bytes: comparing the cached source
-  // to the live one is a `memcmp` of the whole note, and the reading pane asked
-  // for the parse once a frame -- so an idle frame over a 240 KB note compared
-  // 240 KB to find out that nothing had changed.
-  std::string cachedMarkdownSource;
-  std::optional<markdown::Document> cachedMarkdownDocument;
-  std::uint64_t cachedMarkdownRevision = 0;
   std::string cachedEditorRowsSource;
   int cachedEditorRowsWidth = -1;
   std::vector<editor::SoftWrapRow> cachedEditorRows;
@@ -302,55 +299,6 @@ struct UiRuntime {
   editor::TextField folderRename;
   std::string status;
   std::vector<LinkRegion> linkRegions;
-  // The reading pane's block geometry, memoised.
-  //
-  // Laying that pane out is a walk of the whole document that measures every
-  // block's inline runs: 94-96% of a `shell.content` that ran 23-65 ms per
-  // frame on a 371 KB note, and paid again on every frame -- including the ones
-  // a hover caused. It is a pure function of the parsed note and the geometry,
-  // so it is derived once per (note, geometry) and the draw reads block tops
-  // out of it, which is what lets the draw cost the viewport.
-  //
-  // It also makes the measure and the draw agree by construction. They used to
-  // be two parallel walks of the same blocks, and they disagreed in three
-  // places -- an Html block's bottom spacing, an image's rounding, a callout's
-  // label -- so a note carrying raw HTML scrolled past its own end.
-  struct ViewerLayout {
-    bool valid = false;
-    std::size_t blocks = 0;
-    std::uint64_t sourceRevision = 0;
-    std::uint64_t imageGeneration = 0;
-    // A wikilink is drawn in one of two colours depending on whether the note
-    // it names exists yet, and creating that note does not touch the buffer --
-    // so the library's answer is an input to this layout like the buffer is.
-    std::uint64_t wikiRevision = 0;
-    float contentWidth = 0.0f;
-    float pageHeight = 0.0f;
-    float fontScale = 0.0f;
-    float bodySize = 0.0f;
-    // Block `i` occupies [top[i], top[i + 1]) of the note's scrolling space, so
-    // there is one entry more than there are blocks and the last of them is the
-    // content height.
-    std::vector<float> top;
-    // The height of block `i`'s own body -- its wrapped text, or its table --
-    // without the spacing that follows it or any image under it.
-    //
-    // Recorded rather than recomputed. The draw needed this number for the
-    // quote rule, the callout box and its own advance, and it got it by
-    // re-wrapping the block: `measureInlineLines` walks every word and
-    // measures each one, per visible block, per frame. On a 675-byte note that
-    // was 350 text measurements a frame against the live surface's 54, and it
-    // is the whole reason the reading pane cost five times what the live page
-    // did to show the same thing. A table's height is here for the same reason
-    // -- measuring one measures every cell in it.
-    std::vector<float> bodyHeight;
-    // The number an ordered item draws. Per block, because it counts up a run
-    // of siblings and a draw that starts at the first *visible* block cannot
-    // count from the top of the note.
-    std::vector<int> ordinal;
-    std::map<std::string, int> anchors;
-  };
-  ViewerLayout viewerLayout;
   std::vector<ButtonRegion> buttonRegions;
   int noteCursor = 0;
   int folderCursor = 0;

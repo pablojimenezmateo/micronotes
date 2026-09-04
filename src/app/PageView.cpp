@@ -9,6 +9,7 @@
 #include "ui/Metrics.h"
 #include "ui/Settings.h"
 #include "ui/ShellLayout.h"
+#include "ui/TextUtil.h"
 #include "ui/Theme.h"
 
 #include <algorithm>
@@ -85,6 +86,7 @@ SDL_Color colorFor(doc::TextRole role) {
     case doc::TextRole::Link:
     case doc::TextRole::WikiLink: return theme().accent;
     case doc::TextRole::WikiLinkUnresolved: return theme().linkPending;
+    case doc::TextRole::ImageAlt: return theme().muted;
     case doc::TextRole::Muted: return theme().muted;
     case doc::TextRole::Code: return theme().text;
     case doc::TextRole::Body: break;
@@ -122,6 +124,14 @@ bool PageView::wired() const {
 
 void PageView::setWikiLinkRevision(std::uint64_t revision) {
   wikiLinkRevision_ = revision;
+}
+
+void PageView::setImageRevision(std::uint64_t revision) {
+  imageRevision_ = revision;
+}
+
+void PageView::setReadOnly(bool readOnly) {
+  readOnly_ = readOnly;
 }
 
 void PageView::setFoldsActive(bool active) {
@@ -206,6 +216,9 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
     metrics.measureComplex = [this](const doc::SourceBlock& block, float width) {
       return hooks_.measureComplex ? hooks_.measureComplex(block, width) : 0.0f;
     };
+    metrics.measureImage = [this](std::string_view target, float column, float maxHeight) {
+      return hooks_.measureImage ? hooks_.measureImage(target, column, maxHeight) : doc::ImageBox {};
+    };
     document_.setMetrics(std::move(metrics));
   }
 
@@ -213,11 +226,18 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.width = columnWidth_;
   options.fontScale = text.displayScale();
   options.type = documentTypeMetrics();
-  options.caretOffset = caret;
-  options.rawOffset = rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone;
+  // A read-only page never reveals a block's markers, so it has no caret as far
+  // as the layout is concerned: that is the whole of what "reading" means to it.
+  options.caretOffset = readOnly_ ? doc::DocumentLayout::kNone : caret;
+  options.rawOffset = readOnly_ ? doc::DocumentLayout::kNone
+                                : (rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone);
   options.folded = foldsActive_ ? folds_.collapsed : nullptr;
   options.wikiLinkResolves = hooks_.wikiLinkResolves;
   options.wikiLinkRevision = wikiLinkRevision_;
+  // A picture is fitted to the column and to a share of the page, so a note is
+  // not one photograph the reader has to scroll past.
+  options.imageMaxHeight = page_.h * 0.55f;
+  options.imageRevision = imageRevision_;
   options.sourceRevision = sourceRevision_;
   options.foldRevision = foldRevision_;
   options.editedSpan = editedSpan_;
@@ -261,6 +281,56 @@ Rect PageView::headerRect() const {
   // the scrolling space, so this rect walks off the top of the page as the note
   // is scrolled -- exactly as the first paragraph does.
   return {columnLeft_, originY() - headerHeight_, columnWidth_, headerHeight_};
+}
+
+// The anchors an in-note link can land on: every heading, by the slug
+// `ui::headingAnchor` makes of its text, and every footnote definition, by its
+// own label and by its ordinal. Built from the block partition rather than from
+// a second parse of the note -- which is what the reading pane used to do, in a
+// walk it made once a frame.
+//
+// A footnote definition is a `Complex` block as far as the scanner is
+// concerned, so its label is read off the front of its own source: `[^label]:`.
+void PageView::buildAnchors() const {
+  anchors_.clear();
+  anchorsValid_ = true;
+  anchorRevision_ = sourceRevision_;
+  const std::string& source = document_.source();
+  const auto& blocks = document_.blocks();
+  int footnote = 1;
+  for(std::size_t i = 0; i < blocks.size(); ++i) {
+    const auto& block = blocks[i];
+    if(block.kind == doc::BlockKind::Heading) {
+      std::string_view text(source);
+      text = text.substr(block.contentStart(), block.contentEnd() - block.contentStart());
+      // A closing run of hashes is decoration in an ATX heading, not title.
+      while(!text.empty() && (text.back() == '#' || text.back() == ' ')) text.remove_suffix(1);
+      auto anchor = ui::headingAnchor(text);
+      if(anchor.empty()) continue;
+      anchors_.emplace(std::move(anchor), document_.blockTop(i));
+      continue;
+    }
+    if(block.kind != doc::BlockKind::Complex) continue;
+    std::string_view body(source);
+    body = body.substr(block.start, block.end() - block.start);
+    if(body.size() < 4 || body[0] != '[' || body[1] != '^') continue;
+    const auto close = body.find("]:");
+    if(close == std::string_view::npos) continue;
+    const auto label = body.substr(2, close - 2);
+    if(label.empty()) continue;
+    const float top = document_.blockTop(i);
+    anchors_.emplace("fn-" + std::string(label), top);
+    anchors_.emplace("fn-" + std::to_string(footnote++), top);
+  }
+}
+
+std::optional<int> PageView::anchorScroll(std::string_view anchor) const {
+  if(!anchorsValid_ || sourceRevision_ == 0 || anchorRevision_ != sourceRevision_) buildAnchors();
+  const auto found = anchors_.find(anchor);
+  if(found == anchors_.end()) return std::nullopt;
+  // The header is part of the scrolling space above the first block, so a jump
+  // has to clear it as well as the blocks above the target.
+  return std::max(0, static_cast<int>(std::lround(headerHeight_ + found->second)));
 }
 
 void PageView::revealCaret(std::size_t offset) {
@@ -545,13 +615,28 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
           hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);
         }
         if(run.linkIndex >= 0 && run.linkIndex < static_cast<int>(layout.links.size())) {
-          hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accentDim);
+          // No rule under an image's caption: the picture below it is the
+          // affordance, and an underline there reads as a stray link.
+          if(run.role != doc::TextRole::ImageAlt) {
+            hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accentDim);
+          }
           const bool wiki = run.role == doc::TextRole::WikiLink ||
                             run.role == doc::TextRole::WikiLinkUnresolved;
           links_.push_back({{x, lineY, run.rect.w, line.height},
                             layout.links[static_cast<std::size_t>(run.linkIndex)], wiki});
         }
       }
+    }
+
+    // The pictures under the block. Their boxes were reserved by the layout, so
+    // this is a blit at a rect that is already right rather than a second
+    // measure of the same file.
+    for(const auto& image : layout.images) {
+      if(image.rect.w <= 0.0f || image.rect.h <= 0.0f) continue;
+      const Rect box {ox + image.rect.x, top + image.rect.y, image.rect.w, image.rect.h};
+      if(box.y + box.h < viewTop || box.y > viewBottom) continue;
+      if(hooks_.drawImage) hooks_.drawImage(image.target, box);
+      links_.push_back({box, image.target, false});
     }
   }
   perf::addCounter(perf::CounterId::PageBlocksDrawn, blocksDrawn);
@@ -561,7 +646,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     frame->addRuns(runsDrawn);
   }
 
-  if(focused && !blockSelection_.active) {
+  if(focused && !readOnly_ && !blockSelection_.active) {
     const auto rect = document_.caretRect(caret);
     const Rect caretRect = toRect(rect, ox, oy);
     if(caretRect.y + caretRect.h >= viewTop && caretRect.y <= viewBottom) {
@@ -569,11 +654,16 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     }
   }
   drawCodeChrome(renderer, text);
-  drawDropIndicator(renderer);
+  if(!readOnly_) drawDropIndicator(renderer);
   }
   drawFoldControls(renderer);
-  drawGutter(renderer, text);
-  drawToolbar(renderer, text, selection);
+  // The three things an editable surface adds. Nothing else about the two
+  // surfaces differs, which is why the reading pane is this page rather than a
+  // second renderer for the same Markdown.
+  if(!readOnly_) {
+    drawGutter(renderer, text);
+    drawToolbar(renderer, text, selection);
+  }
   ui::drawVerticalScrollbar(renderer, page_, scroll_, maxScroll());
 }
 

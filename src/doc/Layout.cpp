@@ -64,6 +64,10 @@ std::string displayText(std::string_view source) {
 
 using LineGroup = std::vector<Token>;
 
+// Air above and below a picture, so it does not sit on the paragraph that named
+// it or on the one after.
+constexpr float kImageGap = 8.0f;
+
 Token makeToken(std::string_view source, std::size_t start, std::size_t end, const RunStyle& style, TextRole role, bool marker, bool hidden, int link) {
   Token token;
   token.start = start;
@@ -164,7 +168,7 @@ private:
   // `*emphasis*, code` is the tokens `emphasis` and `, code` with nothing
   // between them; breaking there would leave a comma as the first character of
   // a line. The break decision therefore belongs to the cluster as a whole, and
-  // that is why the widths are buffered before it is taken (TD-13).
+  // that is why the widths are buffered before it is taken.
   void placeCluster() {
     if(cluster_.empty()) return;
     const float column = right_ - textLeft_;
@@ -791,6 +795,8 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
                 "TypeMetrics is hashed as raw bytes and must have no padding");
   geometry = hashBytes(geometry, &options.type, sizeof(options.type));
   geometry = hashValue(geometry, options.wikiLinkRevision);
+  geometry = hashValue(geometry, options.imageMaxHeight);
+  geometry = hashValue(geometry, options.imageRevision);
 
   // Identical bytes mean an identical partition, so `blocks_` still describes
   // this source and the fold state can be resolved against it directly. That is
@@ -1417,8 +1423,21 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
                 a.role = TextRole::Code;
               });
               break;
+            case SpanKind::Image: {
+              // The alt text becomes the picture's caption -- it is also all a
+              // reader gets when the file cannot be drawn -- and the picture
+              // itself is reserved under the block, below.
+              out.images.push_back({inlineSpan.target, Rect {}});
+              out.links.push_back(inlineSpan.target);
+              const int link = static_cast<int>(out.links.size()) - 1;
+              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
+                a.link = link;
+                a.role = TextRole::ImageAlt;
+              });
+              break;
+            }
             case SpanKind::Link:
-            case SpanKind::Image:
+            case SpanKind::FootnoteRef:
             case SpanKind::Autolink: {
               out.links.push_back(inlineSpan.target);
               const int link = static_cast<int>(out.links.size()) - 1;
@@ -1472,14 +1491,42 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     out.runs.reserve(tokens);
   }
 
-  const perf::ScopeTimer flowTimer("layout.block.flow");
-  Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
-            !raw && block.kind != BlockKind::Code, padTop, out, flowPending_, flowCluster_);
-  flow.run(groups, groupCount);
-  float bottom = flow.bottom();
+  float bottom = 0.0f;
+  {
+    const perf::ScopeTimer flowTimer("layout.block.flow");
+    Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
+              !raw && block.kind != BlockKind::Code, padTop, out, flowPending_, flowCluster_);
+    flow.run(groups, groupCount);
+    bottom = flow.bottom();
+  }
   if(trailingLine) bottom = appendTrailingLine(bottom);
+  // The pictures the block named, under its text and in source order. Reserved
+  // here rather than drawn over the following blocks, so the note scrolls past
+  // an image the same way it scrolls past a paragraph and every position query
+  // below this block is already right.
+  if(!out.images.empty()) bottom = placeImages(out, bottom);
   out.height = bottom + padBottom;
   return out;
+}
+
+// The images of a block that has some, laid out down the column from `top`.
+// Split out because a block with none -- which is almost every block -- should
+// not pay a branch inside a loop for it.
+float DocumentLayout::placeImages(BlockLayout& out, float top) const {
+  const float column = std::max(40.0f, options_.width - out.indent);
+  for(auto& image : out.images) {
+    perf::addCounter(perf::CounterId::LayoutImagesMeasured);
+    const ImageBox box = metrics_.measureImage
+                           ? metrics_.measureImage(image.target, column, options_.imageMaxHeight)
+                           : ImageBox {};
+    if(box.width <= 0.0f || box.height <= 0.0f) {
+      image.rect = {out.indent, top, 0.0f, 0.0f};
+      continue;
+    }
+    image.rect = {out.indent, top + kImageGap, box.width, box.height};
+    top = image.rect.y + box.height + kImageGap;
+  }
+  return top;
 }
 
 const BlockLayout* DocumentLayout::layoutForOffset(std::size_t offset, std::size_t* blockIndex) const {

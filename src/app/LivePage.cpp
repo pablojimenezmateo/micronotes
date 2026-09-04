@@ -3,6 +3,7 @@
 #include "app/Folds.h"
 #include "app/MarkdownBlocks.h"
 #include "app/PageHeader.h"
+#include "app/PageImages.h"
 #include "app/PageView.h"
 #include "app/WikiLinks.h"
 #include "core/perf/Perf.h"
@@ -36,7 +37,8 @@ namespace {
 //
 // The renderer, the text renderer and the runtime are created once in `run()`
 // and outlive every frame, which is the lifetime these references need.
-void wireLivePage(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui) {
+void wireLivePage(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images,
+                  UiRuntime& ui) {
   PageViewHooks hooks;
   hooks.measureComplex = [&text, &ui](const doc::SourceBlock& block, float width) {
     return measureComplexBlock(text, ui, block, width);
@@ -49,15 +51,21 @@ void wireLivePage(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui) {
   hooks.drawComplex = [renderer, &text, &ui](const doc::SourceBlock& block, Rect area) {
     drawComplexBlock(renderer, text, ui, block, area);
   };
+  // The same pictures the reading pane draws, fitted the same way. A note that
+  // shows an image in one pane and its alt text in the other is exactly the
+  // divergence merging the two renderers was for.
+  wirePageImages(hooks, renderer, images, ui);
   ui.livePage.setHooks(std::move(hooks));
   ui.livePage.setFolds(livePageFolds(ui));
 }
 
 }
 
-void drawLive(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  if(!ui.livePage.wired()) wireLivePage(renderer, text, ui);
+void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images, UiRuntime& ui,
+              Rect rect) {
+  if(!ui.livePage.wired()) wireLivePage(renderer, text, images, ui);
   ui.livePage.setWikiLinkRevision(ui.wikiNotesRevision);
+  ui.livePage.setImageRevision(pageImageRevision(images));
   // Whether this note has anything collapsed is per-frame state, not a
   // closure: the layout skips resolving folds entirely when it is told there is
   // no predicate to ask, and that has to stay true for a note with no folds in

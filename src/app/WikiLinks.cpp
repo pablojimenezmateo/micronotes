@@ -4,6 +4,7 @@
 #include "app/Shell.h"
 
 #include "ui/Outline.h"
+#include "ui/TextUtil.h"
 #include "ui/WikiLink.h"
 
 #include <filesystem>
@@ -113,6 +114,24 @@ void commitWikiMenu(UiRuntime& ui, const std::string& title, const std::string& 
   ui.markEdited();
   ui.revealEditorCursor = true;
   invalidateWikiNotes(ui);
+}
+
+
+bool jumpToAnchor(UiRuntime& ui, std::string_view anchor) {
+  const auto slug = ui::headingAnchor(anchor);
+  const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
+  PageView& page = live ? ui.livePage : ui.readingPage;
+  auto found = page.anchorScroll(slug);
+  if(!found) found = page.anchorScroll(anchor);
+  if(!found) return false;
+  if(live) {
+    ui.livePage.setScroll(*found);
+    ui.focus = FocusArea::Editor;
+  } else {
+    ui.viewerScroll = *found;
+    ui.focus = FocusArea::Viewer;
+  }
+  return true;
 }
 
 }

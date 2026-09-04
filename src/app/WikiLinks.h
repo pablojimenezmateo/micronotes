@@ -21,6 +21,14 @@ void invalidateWikiNotes(UiRuntime& ui);
 // Follows a `[[target]]`, creating the note when there is not one yet.
 void openWikiLink(UiRuntime& ui, std::string_view target);
 
+// Follows an in-note `[#heading]` link or a footnote reference: scrolls the
+// surface showing the note to the anchor, and says whether it found one.
+//
+// Whichever surface -- the live page and the reading page are the same renderer
+// now, so both can answer. The reading pane used to own a private anchor map,
+// which is why the live surface could not follow one of these at all.
+bool jumpToAnchor(UiRuntime& ui, std::string_view anchor);
+
 // The picker offered by the second `[` of a `[[`. `wikiStart` is the first one.
 void openWikiMenu(UiRuntime& ui, std::size_t wikiStart);
 
