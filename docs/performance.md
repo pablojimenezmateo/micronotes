@@ -1323,9 +1323,11 @@ any more:
   point. On an edit near the top that is every block in the note. It was four
   adds until `SourceBlock` started holding its payload relative to its own
   start.
-- **`resolveFolds`**, but only for a note that has a fold in it. One with none
-  skips the resolution entirely -- `layout.fold_resolutions_skipped` is 482 of
-  634 updates -- and `layout.update.resolve_folds` is down from 513 calls to 31.
+- **`resolveFolds`**, but only for a note that has a fold in it, and then only
+  from the fold spanning the edit downwards. One with none skips the resolution
+  entirely -- `layout.fold_resolutions_skipped` is 519 of the harness's
+  updates -- and one with a fold resolves `layout.fold_blocks_resolved` blocks
+  rather than `layout.blocks`.
 - **The placement's delta pass**, `layout.blocks_shifted`, when the edit changed
   its block's height or line count: one float add and one integer add per block
   below it. Zero when it did not, which is most keystrokes.
@@ -1355,7 +1357,7 @@ The measurement that would justify it is `layout.blocks_shifted` per update
 against `layout.blocks`: today it is 1,812 against 9,612 on average, and a
 keystroke that does not rewrap its own block moves nothing at all.
 
-### Open: `resolveFolds` is still O(blocks) on every edit *that has a fold in it*
+### Resolved: `resolveFolds` was O(blocks) on every edit *that has a fold in it*
 
 Every edit used to re-resolve the fold state over the whole block list -- a
 `foldableKind` test per block and a predicate call per foldable one -- and then
@@ -1364,28 +1366,51 @@ which blocks a fold change moved. It ran on every edit whether or not anything
 in the note was collapsed, which for most notes most of the time is a walk of
 the document to produce the all-zero array it was already holding.
 
-Half of that is gone. A caller that offers **no predicate at all** is saying
+Half of that went first. A caller that offers **no predicate at all** is saying
 something stronger than a predicate that always answers false, and the layout
 acts on it: if nothing was hidden last time either, an all-zero resolution of
 the right length is the answer already in hand. `Application` leaves
 `PageFolds::collapsed` unset for a note with no folds, and
-`layout.fold_resolutions_skipped` reads 482 of 634 updates in the harness and
-60 of 60 frames in a real session. `layout.update.resolve_folds` went from 513
-calls to 31.
+`layout.fold_resolutions_skipped` reads 519 of the harness's updates.
 
-What remains open is the note that *does* have a fold in it, where the
-resolution is still O(blocks) per edit. Making that incremental is not hard to
-state and is fiddly to get right: `hidden` at block `i` depends on the fold
-heads at or before `i` and on how far each one reaches, so an edit invalidates
-the resolution from the nearest enclosing head onwards, not from the edit. The
-splice already knows which blocks changed; what it does not have is the
-enclosing head, and `foldEnd` is the function that would have to be run
-backwards.
+The other half is the note that *does* have a fold in it, and it is a
+resumption rather than an incremental structure:
 
-Worth noting for whoever picks it up: the fold state of the blocks *before* the
-splice point is provably unchanged, because `hidden[j]` for `j` under the head
-of the edit depends only on blocks in `[0, j]`. That is half the incremental
-resolution for free, and it is the half an edit at the bottom of a note wants.
+> `hidden[j]` depends only on blocks `[0, j]`. A fold reaching `j` has to have
+> covered every block between its head and `j`, and the scan that decides how
+> far a head reaches stops at the first block that breaks it -- so it never
+> looks past `j` to answer for `j`.
+
+So everything before an edit keeps the answer it had, back to the head of
+whatever fold spans the seam. `resolveFoldsAfter` walks back from the carried
+prefix over the hidden run to that head -- one byte scan of the run, not of the
+note -- copies the head of the previous resolution forward, and re-resolves from
+there. An edit at the bottom of a folded note walks the blocks after the fold it
+sits in; an edit at the top still walks the note, which is the case that cannot
+be resumed.
+
+| harness run | before | after |
+|---|---:|---:|
+| `layout.fold_queries` | 95,948 | 76,640 |
+| `layout.update.resolve_folds` | 3.27 ms | 2.87 ms |
+| `layout.keystroke_relayout_folded_median` | 115 us | 71 us |
+
+`layout.fold_blocks_resolved` is the counter that says how much of a note a
+resolution actually walked; read it against `layout.blocks`. The harness's
+folded scenario collapses the *first* heading and types in the middle, which is
+about the least this can save -- a real note with a collapsed section above the
+cursor saves the whole of it.
+
+Two details worth keeping. The array is `resize` + `memcpy` of the head +
+`memset` of the tail rather than `assign` + `memcpy`, because `assign` memsets
+the whole thing and then has the head written over it -- three linear passes
+where one will do, and doing it the wrong way round measured *slower* than the
+per-block walk it replaced. And `anyHidden_` is carried forward rather than
+recomputed, because asking whether anything in the carried head is hidden is
+exactly the scan this avoids: carrying it can only leave the flag set when
+nothing is hidden any more, and the one thing that reads it also requires the
+caller to have withdrawn its predicate, at which point the resolution is a full
+one and answers exactly.
 
 ### Resolved: `SourceBlock` was 88 bytes and held a `std::string`
 

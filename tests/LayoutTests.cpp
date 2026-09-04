@@ -592,6 +592,63 @@ MICRONOTES_TEST(layout_stamped_reuse_asks_the_fold_predicate_nothing) {
   MICRONOTES_REQUIRE(asked == 0);
 }
 
+// A note that *does* have a fold in it cannot skip the resolution, and the
+// resolution used to be O(blocks) on every edit. It resumes at the seam now:
+// `hidden[j]` depends only on blocks `[0, j]`, so an edit at the bottom leaves
+// everything above the fold that spans the seam already answered.
+MICRONOTES_TEST(layout_a_fold_resolution_resumes_at_the_edit) {
+  std::string source = manyBlocks(400);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 700.0f;
+  options.sourceRevision = 1;
+  options.foldRevision = 1;
+  // The first heading in the note, collapsed, so the resolution has real work
+  // in it and cannot take the "nothing is folded" early-out.
+  std::size_t firstHeading = DocumentLayout::kNone;
+  options.folded = [&firstHeading](const micronotes::doc::SourceBlock& block) {
+    return block.kind == BlockKind::Heading && block.start == firstHeading;
+  };
+  {
+    const auto blocks = micronotes::doc::scanBlocks(source);
+    for(const auto& block : blocks) {
+      if(block.kind != BlockKind::Heading) continue;
+      firstHeading = block.start;
+      break;
+    }
+  }
+  MICRONOTES_REQUIRE(firstHeading != DocumentLayout::kNone);
+  layout.update(source, options);
+  const std::size_t blocks = layout.blockCount();
+  MICRONOTES_REQUIRE(blocks > 100);
+
+  using microcore::perf::CounterId;
+  const auto resolvedBy = [&](std::size_t at) {
+    const auto before = microcore::perf::captureCounters();
+    source.insert(at, 1, 'x');
+    options.sourceRevision += 1;
+    options.caretOffset = at;
+    layout.update(source, options);
+    const auto after = microcore::perf::captureCounters();
+    return after[static_cast<std::size_t>(CounterId::LayoutFoldBlocksResolved)] -
+           before[static_cast<std::size_t>(CounterId::LayoutFoldBlocksResolved)];
+  };
+
+  // An edit at the very end walks only what follows the fold that spans the
+  // seam, which here is nothing above the last few blocks.
+  const std::uint64_t atEnd = resolvedBy(source.size());
+  micronotes::tests::require(atEnd < blocks / 4,
+                             "an edit at the end resolved " + std::to_string(atEnd) +
+                               " of " + std::to_string(blocks) + " blocks");
+  // And one at the top still walks the note, which is the case that cannot be
+  // resumed and is written down as such.
+  const std::uint64_t atTop = resolvedBy(0);
+  micronotes::tests::require(atTop >= blocks - 4,
+                             "an edit at the top resolved only " + std::to_string(atTop) +
+                               " of " + std::to_string(blocks) + " blocks");
+}
+
 // A stamp that moves has to invalidate, or a collapsed heading stays open and
 // the screen is simply wrong.
 MICRONOTES_TEST(layout_a_moved_fold_stamp_re_resolves_the_folds) {

@@ -444,10 +444,52 @@ bool DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
   std::vector<std::uint8_t>& hidden = *out;
   hidden.assign(blocks.size(), 0);
   if(!options.folded) return false;
+  perf::addCounter(perf::CounterId::LayoutFoldBlocksResolved, blocks.size());
   bool any = false;
   for(std::size_t i = 0; i < blocks.size(); ++i) {
     // A fold nested inside a collapsed one is already hidden, and costs
     // nothing to resolve again.
+    if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
+    perf::addCounter(perf::CounterId::LayoutFoldQueries);
+    if(!options.folded(blocks[i])) continue;
+    const std::size_t end = foldEnd(blocks, i);
+    for(std::size_t j = i + 1; j < end; ++j) hidden[j] = 1;
+    any = any || end > i + 1;
+  }
+  return any;
+}
+
+bool DocumentLayout::resolveFoldsAfter(const std::vector<SourceBlock>& blocks,
+                                       const LayoutOptions& options, std::size_t carried,
+                                       std::vector<std::uint8_t>* out) const {
+  std::vector<std::uint8_t>& hidden = *out;
+  if(!options.folded || carried == 0 || hidden_.size() < carried) {
+    return resolveFolds(blocks, options, out);
+  }
+  // Back to the last carried block nothing hides. If the block before the edit
+  // is hidden, the walk crosses the run to reach the head that hides it -- that
+  // head's reach is exactly what the edit can have changed. If it is not, the
+  // block before the edit could still *be* a head reaching into it, so the walk
+  // steps back one anyway.
+  std::size_t from = carried;
+  while(from > 0 && hidden_[from - 1] != 0) --from;
+  if(from > 0) --from;
+
+  // One pass over the array rather than three: the carried head is copied and
+  // only the tail is cleared, where `assign` would memset the whole thing and
+  // then have the head written over it.
+  hidden.resize(blocks.size());
+  if(from > 0) std::memcpy(hidden.data(), hidden_.data(), from);
+  std::memset(hidden.data() + from, 0, blocks.size() - from);
+  // Whether anything in the carried head is hidden is not asked -- that would
+  // be a scan of it, which is the pass this exists to avoid. Carrying the
+  // previous answer forward can only leave `anyHidden_` set when nothing is
+  // hidden any more, and the one thing that reads it (`foldsAbsent`) also
+  // requires the caller to have withdrawn its predicate -- at which point the
+  // resolution is a full one and answers exactly.
+  bool any = anyHidden_;
+  perf::addCounter(perf::CounterId::LayoutFoldBlocksResolved, blocks.size() - from);
+  for(std::size_t i = from; i < blocks.size(); ++i) {
     if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
     perf::addCounter(perf::CounterId::LayoutFoldQueries);
     if(!options.folded(blocks[i])) continue;
@@ -881,7 +923,9 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
       spareHidden_.assign(blocks_.size(), 0);
     } else {
       const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
-      anyHidden_ = resolveFolds(blocks_, options, &spareHidden_);
+      // Resumed at the seam rather than restarted at the top: an edit at the
+      // bottom of a folded note re-resolves the blocks after it, not the note.
+      anyHidden_ = resolveFoldsAfter(blocks_, options, patchable ? head : 0, &spareHidden_);
     }
     const std::size_t count = blocks_.size();
     // The blocks between the two carried-over ends are the edit itself, and the

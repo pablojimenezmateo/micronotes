@@ -23,7 +23,6 @@ Not repeated here. Each is a `### Open:` section with its own numbers:
 - an edit still touches every block below it (materialised positions vs. a
   Fenwick tree) — written down as the thing to reach for *if the shift shows
   up*, not as a fix waiting to happen
-- `resolveFolds` is still O(blocks) on every edit *that has a fold in it*
 - the staging tokens are built only to be thrown away
 - the cache sweep frees what the next relayout is about to allocate
   (unmeasured, and it undoes a decision that file already justified: measure

@@ -258,6 +258,11 @@
   /* work on an edit rather than a per-block predicate call and a memcmp of the   */   \
   /* result against itself. Read against update_calls.                            */   \
   X(LayoutFoldResolutionsSkipped, "layout.fold_resolutions_skipped")                   \
+  /* Blocks a resolution actually walked. The resolution resumes at the seam of  */    \
+  /* an edit rather than restarting at the top of the note, so this against      */    \
+  /* layout.blocks is what the resumption is worth on a note that does have a    */    \
+  /* fold in it -- the case fold_resolutions_skipped cannot help.                */    \
+  X(LayoutFoldBlocksResolved, "layout.fold_blocks_resolved")                           \
   /* Inline markup work inside a relaid block: spans the inline scanner found,  */     \
   /* and content bytes given a per-byte attribute slot to hold their formatting. */    \
   /* attr_bytes is the one to watch -- it is a heap allocation and a zero fill    */   \

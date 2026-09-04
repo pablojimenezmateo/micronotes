@@ -438,6 +438,21 @@ private:
   // next call skip the resolution altogether.
   bool resolveFolds(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
                     std::vector<std::uint8_t>* out) const;
+  // The same resolution, resumed rather than restarted, for an edit that
+  // carried `carried` blocks through unchanged at the front of the document.
+  //
+  // `hidden[j]` depends only on blocks `[0, j]`: a fold reaching `j` has to
+  // have covered every block between its head and `j`, and the scan that
+  // decides how far a head reaches stops at the first block that breaks it, so
+  // it never looks past `j` to answer for `j`. Everything before the edit
+  // therefore keeps the answer it had -- back to the head of whatever fold was
+  // open across the seam, which is where the resumed walk starts.
+  //
+  // `hidden_` is the previous generation and is read here; the result goes into
+  // `out`, which is the spare. Falls back to a full resolution when the two are
+  // not comparable, which is what `carried == 0` means.
+  bool resolveFoldsAfter(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
+                         std::size_t carried, std::vector<std::uint8_t>* out) const;
   std::size_t blockIndexFor(std::size_t offset) const;
 
   // The flags block `index` is keyed and laid out under. They depend on the
