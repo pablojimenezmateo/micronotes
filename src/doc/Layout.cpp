@@ -82,10 +82,11 @@ class Flow {
 public:
   Flow(const Metrics& metrics, std::size_t base, float textLeft, float width, float lineHeight,
        bool wrap, float top, BlockLayout& out,
-       std::vector<std::pair<std::size_t, float>>& pending)
-      : metrics_(metrics), base_(base), textLeft_(textLeft), right_(textLeft + width), lineHeight_(lineHeight), wrap_(wrap), y_(top), pending_(pending), out_(out) {
+       std::vector<std::pair<std::size_t, float>>& pending, std::vector<float>& cluster)
+      : metrics_(metrics), base_(base), textLeft_(textLeft), right_(textLeft + width), lineHeight_(lineHeight), wrap_(wrap), y_(top), pending_(pending), cluster_(cluster), out_(out) {
     penX_ = textLeft_;
     pending_.clear();
+    cluster_.clear();
     lineFirstRun_ = static_cast<std::uint32_t>(out_.runs.size());
   }
 
@@ -101,15 +102,12 @@ public:
     for(std::size_t g = 0; g < count; ++g) {
       LineGroup& group = groups[g];
       group_ = &group;
-      for(auto& token : group) {
-        if(token.hidden || token.text.empty()) {
-          // Flush first: a zero-width run must sit after the spaces that
-          // precede it, or the offset it anchors lands inside them.
-          flushPending();
-          emit(token, 0.0f);
-          continue;
-        }
+      for(std::size_t i = 0; i < group.size(); ++i) {
+        Token& token = group[i];
         if(token.space) {
+          // A space ends the cluster that was accumulating, and is the only
+          // place a line may break.
+          placeCluster();
           // Measured once, here. It used to be measured twice for every word
           // that followed it -- once to decide whether the line fits and once
           // again inside the flush that emits it -- and roughly half a
@@ -117,24 +115,21 @@ public:
           // By index into the group being walked, which is also where it will be
           // emitted from: a held-back space used to be deep-copied -- string and
           // all -- into this queue, for roughly half the tokens in a document.
-          pending_.push_back({static_cast<std::size_t>(&token - group.data()),
-                              metrics_.measure(token.text, token.style)});
+          pending_.push_back({i, metrics_.measure(token.text, token.style)});
           pendingWidth_ += pending_.back().second;
           continue;
         }
-        const float width = metrics_.measure(token.text, token.style);
-        if(wrap_ && penX_ > textLeft_ && penX_ + pendingWidth_ + width > right_) {
-          flushPending();
-          pushLine();
-        } else {
-          flushPending();
-        }
-        if(wrap_ && width > right_ - textLeft_ && penX_ <= textLeft_) {
-          splitWord(token);
-          continue;
-        }
-        emit(token, width);
+        // Everything else joins the cluster being built. A hidden marker and an
+        // empty run measure zero and still take their place in it, so the
+        // offsets they anchor stay with the word they belong to.
+        const float width = token.hidden || token.text.empty()
+                              ? 0.0f
+                              : metrics_.measure(token.text, token.style);
+        if(cluster_.empty()) clusterBegin_ = i;
+        cluster_.push_back(width);
+        clusterWidth_ += width;
       }
+      placeCluster();
       flushPending();
       pushLine();
     }
@@ -162,6 +157,45 @@ private:
     for(const auto& [index, width] : pending_) emit((*group_)[index], width);
     pending_.clear();
     pendingWidth_ = 0.0f;
+  }
+
+  // A cluster is a maximal run of consecutive non-space tokens. The tokenizer
+  // splits at every change of inline attribute as well as at every space, so
+  // `*emphasis*, code` is the tokens `emphasis` and `, code` with nothing
+  // between them; breaking there would leave a comma as the first character of
+  // a line. The break decision therefore belongs to the cluster as a whole, and
+  // that is why the widths are buffered before it is taken (TD-13).
+  void placeCluster() {
+    if(cluster_.empty()) return;
+    const float column = right_ - textLeft_;
+    const bool breakBefore =
+      wrap_ && penX_ > textLeft_ && penX_ + pendingWidth_ + clusterWidth_ > right_;
+    // Flush first: the held-back spaces belong to the line the cluster is
+    // leaving, and a zero-width run must sit after the spaces that precede it
+    // or the offset it anchors lands inside them.
+    flushPending();
+    if(breakBefore) pushLine();
+    if(wrap_ && clusterWidth_ > column) {
+      // Wider than any line can be, so it has to break inside itself after
+      // all -- between its tokens where it can, and mid-word where even one
+      // token does not fit.
+      for(std::size_t k = 0; k < cluster_.size(); ++k) {
+        Token& token = (*group_)[clusterBegin_ + k];
+        const float width = cluster_[k];
+        if(penX_ > textLeft_ && penX_ + width > right_) pushLine();
+        if(width > column && penX_ <= textLeft_) {
+          splitWord(token);
+          continue;
+        }
+        emit(token, width);
+      }
+    } else {
+      for(std::size_t k = 0; k < cluster_.size(); ++k) {
+        emit((*group_)[clusterBegin_ + k], cluster_[k]);
+      }
+    }
+    cluster_.clear();
+    clusterWidth_ = 0.0f;
   }
 
   void pushLine() {
@@ -219,6 +253,13 @@ private:
   // it was measured at. Borrowed from the layout, so it is allocated once for a
   // document rather than once for each of its blocks.
   std::vector<std::pair<std::size_t, float>>& pending_;
+  // The unbreakable cluster being accumulated: the widths of a run of
+  // consecutive non-space tokens, which are contiguous in the group and so need
+  // only their first index recorded. Borrowed from the layout for the same
+  // reason `pending_` is.
+  std::vector<float>& cluster_;
+  std::size_t clusterBegin_ = 0;
+  float clusterWidth_ = 0.0f;
   LineGroup* group_ = nullptr;
   float pendingWidth_ = 0.0f;
   BlockLayout& out_;
@@ -1393,7 +1434,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
 
   const perf::ScopeTimer flowTimer("layout.block.flow");
   Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
-            !raw && block.kind != BlockKind::Code, padTop, out, flowPending_);
+            !raw && block.kind != BlockKind::Code, padTop, out, flowPending_, flowCluster_);
   flow.run(groups, groupCount);
   float bottom = flow.bottom();
   if(trailingLine) bottom = appendTrailingLine(bottom);

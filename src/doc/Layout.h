@@ -522,6 +522,11 @@ private:
   // whitespace buffer is grown once and reused by every block after the first.
   // `mutable` because laying a block out is logically a const query.
   mutable std::vector<std::pair<std::size_t, float>> flowPending_;
+  // Scratch for the same flow's unbreakable clusters (TD-13): the widths of a
+  // run of consecutive non-space tokens, held so the break decision can be made
+  // once for the run rather than once per token. Borrowed for the same reason
+  // the whitespace buffer is.
+  mutable std::vector<float> flowCluster_;
   // The source line spans of a fenced code block or a block dropped to raw.
   // Same reason: one per such block, returned by value, was one allocation per
   // such block.

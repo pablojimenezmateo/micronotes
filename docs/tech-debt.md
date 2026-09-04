@@ -159,41 +159,6 @@ wants deleted.
 **What the fix is.** TD-9. Until then the ceiling is what it is, and the
 measurements are cheap enough that the pane makes its frame budget.
 
-## TD-13 — a wrapped line can begin with a comma
-
-`src/doc/Layout.cpp`, `LineFlow::run`.
-
-The live surface's tokenizer splits a block's text at every change of inline
-attribute as well as at every space, and the wrap loop treats **every**
-non-space token as a break opportunity. So `*emphasis*, code` is the tokens
-`emphasis` (italic) and `, code` (body) with no space between them, and a line
-can be broken between them — leaving a comma as the first character of the next
-line.
-
-**What it costs today.** Visible in any note where inline markup abuts
-punctuation, which is most of them: `**bold**, ` and `` `code`. `` and
-`*ital*)` are all ordinary writing. It reads as a rendering fault rather than a
-line break, which is worse than it sounds: a reader who sees it assumes the
-note is corrupt. The reading pane does not have it, because its tokenizer
-(`app::layoutWords`) splits only on whitespace — so this is also a live/reading
-divergence, and one that TD-9's merge would move rather than fix.
-
-**Why it is still here.** The fix is a change to the shape of the loop, not a
-condition inside it. A run of consecutive non-space tokens is one unbreakable
-cluster, so the break decision has to be made once for the cluster rather than
-once per token — which means buffering the cluster's tokens and widths before
-deciding, in the hottest loop in the application, alongside `splitWord` (which
-would then have to split the cluster's *first overflowing* token) and the
-hidden zero-width tokens whose emission order anchors every source offset.
-Requiring "breakable before" without buffering is not a fix: a glued token
-would overflow the column instead, which is worse.
-
-**What the fix is.** Buffer a cluster in `LineFlow::run` the way `pending_`
-already buffers a run of spaces, measure it once, and wrap on its total. The
-`pending_`/`flushPending` pair is the pattern to follow; note that it holds
-indices into the group rather than copies, for the reason its own comment
-gives, and a cluster buffer has to do the same.
-
 ## TD-14 — three panes still lay their own text out three ways
 
 `src/app/PageView.cpp`, `src/app/ReadingPane.cpp`, `src/app/RawPane.cpp`.
@@ -205,9 +170,9 @@ token flow, `app::layoutWords`'s word wrap, and `RawPane`'s own soft wrap over
 `editor::WrappedLines`.
 
 **What it costs today.** Every typographic decision is three decisions. The
-line-leading difference in TD-9 and the wrap difference in TD-13 are both
-instances of it, and both were found by comparing screenshots rather than by
-anything failing.
+line-leading difference in TD-9 is an instance of it, and so was the wrap
+difference that was TD-13 -- which had to be fixed in `doc::Layout` alone,
+because the reading pane's own tokenizer never had it.
 
 **Why it is still here.** TD-9 is the first two thirds of it and is a project
 in itself. `RawPane`'s own header says it is "kept apart so that replacing it

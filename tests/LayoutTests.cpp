@@ -1379,6 +1379,64 @@ MICRONOTES_TEST(layout_runs_are_ordered_within_a_block) {
   }
 }
 
+// TD-13: the tokenizer splits at every change of inline attribute as well as
+// at every space, so `*soft*,` is two tokens with nothing between them. The
+// wrap used to treat every token as a break opportunity, which put a lone comma
+// at the head of a line whenever the measure fell there. A line may now only
+// begin where the source has whitespace -- checked over a paragraph built so
+// that every kind of inline markup abuts punctuation, and at several measures
+// so the break falls in a different place in each.
+MICRONOTES_TEST(layout_never_breaks_a_line_inside_a_word) {
+  const std::string source =
+    "Prose where **bold**, *soft*, `code`. and [link](a.md); and ~~gone~~! all\n"
+    "abut punctuation, said again so the wrap has somewhere to fall: **bold**,\n"
+    "*soft*, `code`. and [link](a.md); and ~~gone~~! once more for luck.\n";
+  for(const bool reveal : {false, true}) {
+    for(const float width : {200.0f, 260.0f, 317.0f, 480.0f}) {
+      DocumentLayout layout;
+      layout.setMetrics(stubMetrics());
+      LayoutOptions options;
+      options.width = width;
+      options.revealAll = reveal;
+      layout.update(source, options);
+      for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+        const std::size_t base = layout.blocks()[i].start;
+        const auto& block = layout.layout(i);
+        for(std::size_t l = 1; l < block.lines.size(); ++l) {
+          const auto runs = block.runsOf(block.lines[l]);
+          if(runs.empty()) continue;
+          const std::size_t at = base + runs.front().srcStart;
+          micronotes::tests::require(at == 0 || isSpace(source[at - 1]),
+                                     "line " + std::to_string(l) + " of block " +
+                                         std::to_string(i) + " begins mid-word at offset " +
+                                         std::to_string(at) + " (width " +
+                                         std::to_string(width) + ")");
+        }
+      }
+    }
+  }
+}
+
+// The other half of the same decision: a cluster that cannot fit on a line of
+// its own still has to break, rather than run off the right edge.
+MICRONOTES_TEST(layout_breaks_a_cluster_too_wide_for_any_line) {
+  const std::string source = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa**bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb**\n";
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 120.0f;
+  options.revealAll = true;
+  layout.update(source, options);
+  const auto& block = layout.layout(0);
+  MICRONOTES_REQUIRE(block.lines.size() > 1);
+  for(const auto& line : block.lines) {
+    float right = block.textLeft;
+    for(const auto& run : block.runsOf(line)) right = run.rect.x + run.rect.w;
+    micronotes::tests::require(right <= block.textLeft + options.width + 0.5f,
+                               "a line overflowed the column: " + std::to_string(right));
+  }
+}
+
 // The caret is drawn once per frame, and its block used to be walked row by row
 // -- 7.1 us for a caret at the end of a 4,000-line fence, which is one block.
 // Both the run and its owning line are found by partition point now, so the
