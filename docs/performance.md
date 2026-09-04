@@ -1477,20 +1477,49 @@ with plain fields and plain stores.
 
 `peak_rss` is 29.8 MB against 30.0.
 
-### Open: the staging tokens are built only to be thrown away
+### Measured and declined: the staging tokens are built only to be thrown away
 
 `layoutBlock` tokenizes a block into a `Token` vector and then flows that vector
-into runs. The tokens are read once, in order, by exactly one consumer -- and
-`Flow` needs no lookahead beyond the whitespace it already holds back. So the
-staging vector could go entirely, and with it a share of the ~1.13 KB per block
-that a cold open still allocates -- which is now the largest allocation figure
-left in the layout, at 10,889 KB for a note whose text is a fifth of a megabyte.
+into runs. The tokens are read once, in order, by exactly one consumer, and
+`Flow` needs no lookahead beyond the whitespace and the unbreakable cluster it
+already holds back -- so the staging vector could go entirely, and the tokens
+could be pushed into `Flow` as they are made.
 
-The obstacle is the fenced-code path, whose opening marker is either a line of
-its own or rides in front of the first line of code. Filling the groups in order
-(done, above) is the half of that which streaming needs; the rest is turning
-`appendContentTokens` and `appendPlainTokens` inside out to push into `Flow`
-rather than into a vector.
+**What it would save, measured.** A `layout.block.stage` timer wrapped around
+the whole of the staging -- `layout.block.content_tokens` covers only the
+marked-up path, which is one block in five, so it was never the number to weigh
+this against:
+
+| over one harness run | self ms | of `layout.block`'s 615 ms |
+|---|---:|---:|
+| `layout.block.stage` (inclusive) | 112.1 | 18% |
+| ...of which `layout.block.inline_attrs` | 50.3 | the inline scan; survives |
+| ...of which `layout.block.content_tokens` | 33.7 | the tokenizer; survives |
+| ...of which staging itself | 28.1 | 4.6% |
+| `layout.block.flow` | 475.9 | 77% |
+
+Streaming removes the 28.1 ms of group bookkeeping and a share of the flow's
+walk over those groups. It does not remove the inline scan, and it does not
+remove the tokenizer -- a streaming tokenizer still builds each `Token`, it just
+hands it over instead of filing it. **The ceiling is around 5%**, and it is paid
+for with three things:
+
+* `out.runs.reserve(tokens)` stops being exact. The flow emits one run per
+  staged token, so the reserve is currently a count rather than an estimate;
+  without the staging there is nothing to count, and the runs vector goes back
+  to doubling its way there. That is an allocation regression traded for a CPU
+  saving.
+* the fenced-code path, whose opening marker is either a line of its own or
+  rides in front of the first line of code, has to be turned inside out.
+* `Flow`'s pending-space and cluster buffers stop being *indices* into a group
+  and have to hold the tokens themselves, which is where the `Token`s' strings
+  then live.
+
+`layout.tokens_staged` is 2,446,091 over a run and is the counter to re-read if
+the shape of the tokenizer changes. Written down with its number rather than
+left as an open item: at 5% against an exact reserve it is not worth the
+restructuring today, and the next reader should not have to measure it again to
+find that out.
 
 ### Resolved: the harness could not see the font path
 
@@ -1655,26 +1684,45 @@ rather than per-frame behaviour:
 `drawLive` itself moved to `src/app/LivePage.cpp` with the wiring, which is 70
 lines out of `Application.cpp`.
 
-### Open (unmeasured): the cache sweep frees what the next relayout is about to allocate
+### Tried and rejected: pooling what the cache sweep frees
 
-`layout.update.evict_cache` is 14.3 ms over nine sweeps, and a sweep is almost
-entirely `free`: two vectors per evicted block, plus any run string long enough
-to escape the small-string optimisation. A resize then immediately allocates the
-same shapes back, because every key changed with the geometry.
+`layout.update.evict_cache` is around 20 ms over nine sweeps, and a sweep is
+almost entirely `free`: four vectors per evicted block, plus any run string long
+enough to escape the small-string optimisation. A resize then immediately
+allocates the same shapes back, because every key changed with the geometry.
 
 The obvious answer is a pool: the sweep moves each evicted `BlockLayout` onto a
-free list instead of destroying it, and `layoutBlock` takes one and clears its
+free list instead of destroying it, and the relayout takes one and clears its
 vectors -- which keeps their capacity -- instead of building from empty. It
-would turn the sweep's frees and the relayout's allocations into a move each.
+turns the sweep's frees and the relayout's allocations into a move each.
 
-Written down rather than done, and explicitly **not measured**, because the
-pool's bound is the hard part and it undoes a decision this file already
-justified. The cache ceiling is one generation of the document on purpose: three
-generations cost 55.1 MB of peak RSS against 28.7 MB and bought nothing. A pool
-large enough to cover a resize's sweep is a second generation again, in capacity
-if not in content; a pool small enough not to be would cover about a fifth of
-one. Anyone picking this up should measure `peak_rss` first and
-`resize.width_step` second, in that order.
+**It was built, measured against no pool over four interleaved rounds, and
+thrown away.** Two bounds were tried: `kSpareEntries` (256, the same spare the
+cache itself allows) and one whole generation of the document.
+
+| `resize.width_step`, minimum of 4 | no pool | 256 | one generation |
+|---|---:|---:|---:|
+| median | 8,613 us | 8,581 us | **11,108 us** |
+| allocations | 25,241 | 24,877 | 17,020 |
+| bytes | 6,750 KB | 6,635 KB | 3,590 KB |
+| `layout.update.evict_cache` | 19.6 ms | 20.4 ms | 16.4 ms |
+| `peak_rss` | 31.0 MB | 31.0 MB | **48.8 MB** |
+
+The generation-sized pool does everything it was supposed to -- a third fewer
+allocations, half the bytes, three milliseconds off the sweep -- and is **31%
+slower**, in every round, while costing 18 MB of peak RSS. Recycling a
+`BlockLayout` is two moves of four vectors plus a `clear()` that runs a
+destructor for every `TextRun` in it, where dropping the whole layout frees the
+run array in one go; the recycled capacities are then the wrong size for the
+next block and grow anyway; and holding a document's worth of layouts alive
+across the relayout is a working set the sweep was removing on purpose. The
+bounded version is a wash on every column, which is the same answer with less
+of it: it covered 2,048 of 48,228 evictions.
+
+So the sweep stays a sweep. The entry that used to sit here said "measure
+`peak_rss` first and `resize.width_step` second, in that order" -- that was the
+right instruction and this is the answer: the memory is real and the speed is
+negative.
 
 ### Resolved: the cold scan's block vector grew twice, and the second growth was the app's largest allocation
 

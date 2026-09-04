@@ -18,15 +18,18 @@ turned out to be fine is a register nobody reads.
 
 ## TD-6 — performance debt tracked in `docs/performance.md`
 
-Not repeated here. Each is a `### Open:` section with its own numbers:
+Not repeated here. Two things are left, and both are *decisions with numbers*
+rather than work waiting to be done — which is why they are listed here rather
+than left as open sections somebody has to re-measure to act on:
 
-- an edit still touches every block below it (materialised positions vs. a
-  Fenwick tree) — written down as the thing to reach for *if the shift shows
-  up*, not as a fix waiting to happen
-- the staging tokens are built only to be thrown away
-- the cache sweep frees what the next relayout is about to allocate
-  (unmeasured, and it undoes a decision that file already justified: measure
-  `peak_rss` before touching it)
+- **an edit still touches every block below it** (materialised positions vs. a
+  Fenwick tree). The thing to reach for *if the shift ever shows up*: today
+  `layout.blocks_shifted` is 1,812 against `layout.blocks`' 9,612 on average,
+  and the query side — which a tree makes O(log n) — is the one on the render
+  path.
+- **the staging tokens are built only to be thrown away**. Measured at a 5%
+  ceiling, paid for with `out.runs.reserve` ceasing to be exact. The section in
+  `docs/performance.md` carries the breakdown.
 
 ## TD-14 — the raw pane still lays its own text out
 

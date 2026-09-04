@@ -267,6 +267,11 @@
   /* relaid block, so on an idle frame it should be zero: a note full of       */      \
   /* photographs that measures them every frame is measuring the disk.         */      \
   X(LayoutImagesMeasured, "layout.images_measured")                                    \
+  /* Tokens a block is staged into before it is flowed into runs. Read against  */     \
+  /* the `layout.block.stage` timer: the staging vector exists only to be read   */    \
+  /* once, in order, by one consumer, so this is the size of the buffer a        */    \
+  /* streaming tokenizer would not build.                                        */    \
+  X(LayoutTokensStaged, "layout.tokens_staged")                                        \
   /* Inline markup work inside a relaid block: spans the inline scanner found,  */     \
   /* and content bytes given a per-byte attribute slot to hold their formatting. */    \
   /* attr_bytes is the one to watch -- it is a heap allocation and a zero fill    */   \

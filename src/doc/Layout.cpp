@@ -68,6 +68,11 @@ using LineGroup = std::vector<Token>;
 // it or on the one after.
 constexpr float kImageGap = 8.0f;
 
+// How far past one generation of the document the block cache is allowed to
+// run before it is swept. Named because the number is a judgement -- see the
+// sweep for what a bigger one was measured to cost.
+constexpr std::size_t kSpareEntries = 256;
+
 Token makeToken(std::string_view source, std::size_t start, std::size_t end, const RunStyle& style, TextRole role, bool marker, bool hidden, int link) {
   Token token;
   token.start = start;
@@ -1174,9 +1179,10 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   // in total instead of 11, and no frame over 11 ms. Total work up, spike down,
   // and the spike is the part anyone sees.
   //
-  // The spare 256 is what keeps an undo of a keystroke hitting: an edit adds
-  // about one key, so a sweep runs at most every 257 of them.
-  if(cache_.size() > blocks_.size() + 256) {
+  // The spare `kSpareEntries` is what keeps an undo of a keystroke hitting: an
+  // edit adds about one key, so a sweep runs at most every `kSpareEntries + 1`
+  // of them.
+  if(cache_.size() > blocks_.size() + kSpareEntries) {
     const perf::ScopeTimer evictTimer("layout.update.evict_cache");
     perf::addCounter(perf::CounterId::LayoutCacheSweeps);
     liveSorted_ = liveKeys_;
@@ -1488,6 +1494,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     // one case the doubling is right for.
     std::size_t tokens = trailingLine ? 1 : 0;
     for(std::size_t g = 0; g < groupCount; ++g) tokens += groups[g].size();
+    perf::addCounter(perf::CounterId::LayoutTokensStaged, tokens);
     out.runs.reserve(tokens);
   }
 
