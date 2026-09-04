@@ -372,11 +372,11 @@ static void insertAttachmentMarkdown(UiRuntime& ui, const attachments::Attachmen
 
 static bool attachPathToEditor(UiRuntime& ui, const std::filesystem::path& source) {
   if(!ensureSelectedNote(ui)) return false;
-  auto selected = ui.state.selectedNote();
-  if(!selected) return false;
+  const auto& selected = ui.state.openNote();
+  if(selected.noteId.empty()) return false;
   attachments::AttachmentService service;
   try {
-    const auto link = service.attachFile(ui.state.libraryRoot(), selected->metadata.id, source);
+    const auto link = service.attachFile(ui.state.libraryRoot(), selected.metadata.id, source);
     insertAttachmentMarkdown(ui, link);
     ui.status = "Attached " + source.filename().string();
     return true;
@@ -408,15 +408,15 @@ static bool pasteClipboardImage(UiRuntime& ui) {
     return true;
   }
 
-  auto selected = ui.state.selectedNote();
-  if(!selected) {
+  const auto& selected = ui.state.openNote();
+  if(selected.noteId.empty()) {
     SDL_free(data);
     return false;
   }
 
   attachments::AttachmentService service;
   try {
-    const auto link = service.attachBytes(ui.state.libraryRoot(), selected->metadata.id, fileNameForMime(mime), data, size);
+    const auto link = service.attachBytes(ui.state.libraryRoot(), selected.metadata.id, fileNameForMime(mime), data, size);
     SDL_free(data);
     insertAttachmentMarkdown(ui, link);
     ui.status = "Pasted image attachment";
@@ -528,16 +528,16 @@ static bool pastePrimarySelectionIntoInput(UiRuntime& ui) {
 
 static void beginTagEdit(UiRuntime& ui) {
   if(ui.editor.dirty() && !saveCurrent(ui)) return;
-  auto note = ui.state.selectedNote();
-  if(!note) {
+  const auto& note = ui.state.openNote();
+  if(note.noteId.empty()) {
     ui.status = "Select a note before editing tags";
     return;
   }
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "tags";
-  overlay.title = "Tags for \"" + note->item.title + "\"";
-  overlay.value.beginWith(joinTags(note->metadata.tags));
+  overlay.title = "Tags for \"" + std::string(ui.state.selectedTitle()) + "\"";
+  overlay.value.beginWith(joinTags(note.metadata.tags));
   overlay.placeholder = "space separated";
   overlay.hint = "Enter to save, Esc to cancel";
   ui.overlays.open(std::move(overlay));
@@ -553,8 +553,7 @@ static void saveTags(UiRuntime& ui) {
 }
 
 static void beginRename(UiRuntime& ui) {
-  auto note = ui.state.selectedNote();
-  if(!note) {
+  if(ui.state.openNote().noteId.empty()) {
     ui.status = "Select a note before renaming";
     return;
   }
@@ -563,7 +562,7 @@ static void beginRename(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "rename-note";
   overlay.title = "Rename note";
-  overlay.value.beginWith(note->metadata.title.empty() ? note->item.title : note->metadata.title);
+  overlay.value.beginWith(std::string(ui.state.selectedTitle()));
   overlay.placeholder = "Note title";
   overlay.hint = "Enter to save, Esc to cancel";
   ui.overlays.open(std::move(overlay));
@@ -734,7 +733,7 @@ static bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
     return false;
   }
   ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
-  auto selected = ui.state.selectedNote();
+  const auto selected = ui.state.readSelectedNote();
   if(!selected) {
     std::cerr << "--attach requires a selected note saved in UI state\n";
     return false;
@@ -1225,8 +1224,8 @@ static void openTrashPalette(UiRuntime& ui) {
 }
 
 static void openIconPrompt(UiRuntime& ui) {
-  const auto note = ui.state.selectedNote();
-  if(!note) {
+  const auto& note = ui.state.openNote();
+  if(note.noteId.empty()) {
     ui.status = "No note selected";
     return;
   }
@@ -1234,7 +1233,7 @@ static void openIconPrompt(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "note-icon";
   overlay.title = "Note icon";
-  overlay.value.beginWith(note->metadata.icon);
+  overlay.value.beginWith(note.metadata.icon);
   overlay.placeholder = "One emoji";
   overlay.hint = "Enter save   Esc cancel   empty removes the icon";
   ui.overlays.open(std::move(overlay));
@@ -1438,15 +1437,15 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
 }
 
 static void openDeleteNoteConfirm(UiRuntime& ui) {
-  auto note = ui.state.selectedNote();
-  if(!note) {
+  const auto& note = ui.state.openNote();
+  if(note.noteId.empty()) {
     ui.status = "Select a note before deleting";
     return;
   }
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::Confirm;
   overlay.id = "delete-note";
-  overlay.title = "Delete \"" + note->item.title + "\"?";
+  overlay.title = "Delete \"" + std::string(ui.state.selectedTitle()) + "\"?";
   overlay.hint = "This cannot be undone.";
   overlay.confirmLabel = "Delete";
   overlay.width = 380.0f;
@@ -2655,12 +2654,7 @@ int run(ApplicationOptions options) {
                 event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
         applyDisplayScale();
       } else if(event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
-        // Only when there is nothing unsaved: reloading under a dirty buffer
-        // would put the note back to what is on disk.
-        if(ui.state.hasLibrary() && !ui.editor.dirty()) {
-          invalidateWikiNotes(ui);
-          ui.state.refreshLibrary();
-        }
+        rescanLibraryAfterExternalChange(ui);
       }
         // A held key or a fast trackpad refills the queue as fast as it
         // empties, and draining it whole starves the paint: the window stops

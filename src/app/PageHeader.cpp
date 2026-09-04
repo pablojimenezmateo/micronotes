@@ -65,10 +65,14 @@ const UiRuntime& refreshedHeader(UiRuntime& ui) {
   ui.headerTitle.clear();
   ui.headerProperties.clear();
   if(noteId.empty() || !ui.state.hasLibrary()) return ui;
-  const auto note = ui.state.selectedNote();
-  if(!note) return ui;
-  ui.headerTitle = note->metadata.title.empty() ? note->item.title : note->metadata.title;
-  ui.headerProperties = ui::notePropertiesOf(note->metadata);
+  // From the open-note record, which costs nothing. This used to be
+  // `selectedNote()`: a read and a front-matter parse of the whole note, keyed
+  // on the library revision -- which moves on every save. Drawing the note's
+  // name re-read the note once a second while somebody was typing into it.
+  const auto& note = ui.state.openNote();
+  if(note.noteId.empty()) return ui;
+  ui.headerTitle = ui.state.selectedTitle();
+  ui.headerProperties = ui::notePropertiesOf(note.metadata);
   return ui;
 }
 

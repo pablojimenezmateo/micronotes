@@ -69,10 +69,10 @@ bool followLinkAt(UiRuntime& ui, float x, float y) {
     // `note.md#heading` pointing at the note already open is a jump, not an
     // open: the file is on screen and scrolling to it is what was meant.
     if(!anchorPart.empty()) {
-      const auto note = ui.state.selectedNote();
+      const auto& note = ui.state.openNote();
       const bool sameNote = filePart.empty() ||
-                            (note && note->item.path.filename() ==
-                                       std::filesystem::path(filePart).filename());
+                            (!note.noteId.empty() && note.path.filename() ==
+                                                       std::filesystem::path(filePart).filename());
       if(sameNote && jumpToAnchor(ui, anchorPart)) {
         ui.status = "Jumped to " + anchorPart;
         return true;

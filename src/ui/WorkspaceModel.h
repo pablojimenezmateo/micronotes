@@ -76,6 +76,13 @@ struct WorkspaceModel {
   // that is already open is switched to rather than opened twice.
   void openNote(const std::string& noteId, bool inNewTab);
 
+  // Re-points every tab showing `from` at `to`. A note's id changes exactly
+  // once in its life: the first time micronotes saves a file that arrived
+  // without front matter, it stops being filed under an id derived from its
+  // path and gets a permanent one. Without this the tab still names the old id
+  // and the note vanishes out from under the person editing it.
+  void renameNote(std::string_view from, const std::string& to);
+
   // Closes a tab and picks the next one to show: the tab to the right, or the
   // one to the left when the closed tab was last, which is what every editor
   // does and what keeps a run of closes moving in one direction.

@@ -6,6 +6,7 @@
 
 #include "library/Metadata.h"
 #include "core/perf/Perf.h"
+#include "core/perf/PerformanceCounters.h"
 #include "core/platform/PathUtils.h"
 #include "core/platform/DurableFile.h"
 
@@ -40,6 +41,8 @@ bool AppState::openOrCreateLibrary(const std::filesystem::path& root) {
   library_.emplace(root);
   library_->ensureLayout();
   ++revision_;
+  // The previous library's open note is not this one's.
+  openNote_.reset();
   // After `ensureLayout`, so the recovery directory's parent exists, and before
   // the index opens, so no edit can be posted against the previous root.
   recovery_.setRoot(library_->root());
@@ -155,16 +158,58 @@ std::vector<library::SearchResult> AppState::currentSearchResults() const {
   return index_.search(selection_.search, selection_.searchScope);
 }
 
-std::optional<LoadedNote> AppState::selectedNote() const {
-  if(!library_) return std::nullopt;
-  const auto item = findNote(selection_.noteId);
+const OpenNote& AppState::loadOpenNote(std::string* body) const {
+  static const OpenNote kNone;
+  if(!library_ || selection_.noteId.empty()) return kNone;
+  // A hit only when the selection still names the note this was read for. The
+  // library revision deliberately does not come into it: a save bumps the
+  // revision, and re-reading the note micronotes has just written is exactly
+  // the read this exists to avoid.
+  if(openNote_ && openNote_->noteId == selection_.noteId && !body) return *openNote_;
+  const library::NoteListItem* item = noteById(selection_.noteId);
+  if(!item) return kNone;
+  auto note = library_->loadNote(item->path);
+  if(body) *body = note.body;
+  OpenNote open;
+  open.noteId = selection_.noteId;
+  open.path = item->path;
+  open.metadata = std::move(note.metadata);
+  // Sampled after the read, not before. Between the two the file could change,
+  // and a signature from before the read would claim agreement with bytes that
+  // are no longer there -- which is the one direction that loses data.
+  open.disk = platform::statFile(item->path);
+  openNote_ = std::move(open);
+  perf::addCounter(perf::CounterId::AppStateOpenNoteReads);
+  return *openNote_;
+}
+
+const OpenNote& AppState::openNote() const {
+  return loadOpenNote(nullptr);
+}
+
+std::optional<LoadedNote> AppState::readSelectedNote() const {
+  std::string body;
+  const OpenNote& open = loadOpenNote(&body);
+  if(open.noteId.empty()) return std::nullopt;
+  const library::NoteListItem* item = noteById(open.noteId);
   if(!item) return std::nullopt;
-  const auto note = library_->loadNote(item->path);
-  return LoadedNote {
-    *item,
-    note.metadata,
-    note.body,
-  };
+  return LoadedNote {*item, open.metadata, std::move(body)};
+}
+
+std::string_view AppState::selectedTitle() const {
+  const library::NoteListItem* item = noteById(selection_.noteId);
+  return item ? std::string_view(item->title) : std::string_view();
+}
+
+DiskState AppState::selectedNoteDiskState() const {
+  const OpenNote& open = openNote();
+  // Nothing open, or a note whose file was already absent when it was read:
+  // there is no baseline to disagree with.
+  if(open.noteId.empty() || !open.disk.exists) return DiskState::Agrees;
+  const auto now = platform::statFile(open.path);
+  if(now.error) return DiskState::Unknown;
+  if(!now.exists) return DiskState::Vanished;
+  return now.sameContentAs(open.disk) ? DiskState::Agrees : DiskState::Changed;
 }
 
 std::optional<library::NoteListItem> AppState::findNote(std::string_view noteId) const {
@@ -183,6 +228,7 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
   metadata.title = uniqueTitle(*library_, title, folder);
   auto path = library_->createNote(metadata, body);
   if(!folder.empty()) path = library_->moveNote(path, folder);
+  openNote_.reset();
   refreshLibrary();
   selection_.folder = folder;
   selection_.tag.clear();
@@ -194,19 +240,91 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
                                 path.lexically_relative(library_->root()).parent_path()};
 }
 
-bool AppState::saveSelectedNote(std::string_view body) {
-  if(!library_) return false;
-  auto note = selectedNote();
-  if(!note) return false;
+SaveResult AppState::saveSelectedNote(std::string_view body) {
+  perf::ScopeTimer timer("app_state.save_selected_note");
+  SaveResult result;
+  if(!library_) return result;
+  const OpenNote& open = openNote();
+  if(open.noteId.empty()) return result;
+  const auto path = open.path;
+
+  // Has anything else rewritten the file since it was read? One stat, and the
+  // difference between a save and a silent overwrite of somebody's `git
+  // checkout`. `Vanished` is not a conflict: the buffer is the only copy left,
+  // and writing it back is the whole point.
+  if(selectedNoteDiskState() != DiskState::Agrees && platform::statFile(path).exists) {
+    perf::addCounter(perf::CounterId::AppStateSaveConflicts);
+    result.conflictCopy = library_->preserveExternalVersion(path);
+    // Could not put it somewhere safe, so it does not get destroyed either. The
+    // buffer is still queued in the recovery store, so refusing loses nothing.
+    if(result.conflictCopy.empty()) return result;
+  }
+
+  library::NoteMetadata metadata = open.metadata;
   // Adopt a note that arrived without front matter: the first save micronotes
   // performs gives it a permanent id so its identity survives a later move.
-  if(note->metadata.id.empty()) {
-    note->metadata.id = library::generateNoteId();
-    if(note->metadata.title.empty()) note->metadata.title = note->item.title;
+  const bool adoptedId = metadata.id.empty();
+  if(adoptedId) {
+    metadata.id = library::generateNoteId();
+    if(metadata.title.empty()) {
+      const library::NoteListItem* item = noteById(open.noteId);
+      metadata.title = item ? item->title : path.stem().string();
+    }
   }
-  if(!library_->saveNote(note->item.path, note->metadata, body)) return false;
+  if(!library_->saveNote(path, metadata, body)) return result;
+  result.ok = true;
+
+  // The record is now the truth about the file that was just written, so
+  // nothing has to go back to the disk to find out what its front matter says.
+  openNote_->metadata = std::move(metadata);
+  openNote_->disk = platform::statFile(path);
+
   clearSelectedNoteRecovery();
-  return refreshLibrary();
+
+  // A save knows which file it wrote *and* what it wrote into it, so
+  // re-indexing that one file is a stat and one transaction -- no walk, no
+  // whole-table read, and not even a read of the note. Discovering the same
+  // thing by rescanning the library was most of what a save cost.
+  bool listChanged = refreshWrittenNoteFile(path, openNote_->metadata, body);
+  if(!result.conflictCopy.empty()) {
+    // The rescued version is a note now, so it has to be indexed as one -- a
+    // note the user cannot find in the sidebar is a note they will not find at
+    // all, whatever the status line said. This one is read rather than handed
+    // over: `preserveExternalVersion` wrote somebody else's bytes, not ours.
+    refreshNoteFile(path.parent_path() / result.conflictCopy);
+    listChanged = true;
+  }
+
+  if(adoptedId) {
+    // The note's identity changed with its front matter: it was filed under an
+    // id derived from its path and now carries a permanent one. Everything
+    // pointing at the old id -- the selection, its tab, the favorites, the
+    // recents -- has to follow, or the note the user is looking at disappears
+    // out from under them on the first save.
+    const std::string previous = std::move(openNote_->noteId);
+    const std::string& adopted = openNote_->metadata.id;
+    // The recovery copy filed under the old id was already retired by the
+    // `clearSelectedNoteRecovery` above, which ran while the selection still
+    // named it -- so nothing is left behind under a name nothing answers to.
+    workspace_.renameNote(previous, adopted);
+    std::replace(workspace_.favorites.begin(), workspace_.favorites.end(), previous, adopted);
+    std::replace(workspace_.recents.begin(), workspace_.recents.end(), previous, adopted);
+    selection_.noteId = adopted;
+    openNote_->noteId = adopted;
+  }
+  if(listChanged || adoptedId) invalidateNoteList();
+  return result;
+}
+
+bool AppState::saveSelectedNoteHeader(const library::NoteMetadata& metadata) {
+  const auto note = readSelectedNote();
+  if(!note) return false;
+  if(!library_->saveNote(note->item.path, metadata, note->body)) return false;
+  openNote_->metadata = metadata;
+  openNote_->disk = platform::statFile(note->item.path);
+  refreshWrittenNoteFile(note->item.path, metadata, note->body);
+  invalidateNoteList();
+  return true;
 }
 
 bool AppState::saveSelectedNoteRecovery(std::string_view body) const {
@@ -226,23 +344,33 @@ std::optional<std::string> AppState::selectedRecoveryBody() const {
 
 bool AppState::renameSelectedNote(const std::string& title) {
   if(!library_ || title.empty()) return false;
-  auto note = selectedNote();
+  auto note = readSelectedNote();
   if(!note) return false;
   auto metadata = note->metadata;
   metadata.title = uniqueTitle(*library_, title, note->item.folder, note->item.path);
-  const auto target = library_->renameNote(note->item.path, metadata.title);
+  const auto source = note->item.path;
+  const auto target = library_->renameNote(source, metadata.title);
   if(!library_->saveNote(target, metadata, note->body)) return false;
   selection_.noteId = metadata.id;
-  return refreshLibrary();
+  // The file moved, so the record's path did too.
+  openNote_->noteId = metadata.id;
+  openNote_->path = target;
+  openNote_->metadata = std::move(metadata);
+  openNote_->disk = platform::statFile(target);
+  // Both ends of the move: the row under the old name has to go, and the row
+  // under the new one has to appear.
+  if(target != source) refreshNoteFile(source);
+  refreshNoteFile(target);
+  invalidateNoteList();
+  return true;
 }
 
 bool AppState::setSelectedNoteIcon(const std::string& icon) {
   if(!library_) return false;
-  auto note = selectedNote();
-  if(!note) return false;
-  note->metadata.icon = icon;
-  if(!library_->saveNote(note->item.path, note->metadata, note->body)) return false;
-  return refreshLibrary();
+  library::NoteMetadata metadata = openNote().metadata;
+  if(openNote().noteId.empty()) return false;
+  metadata.icon = icon;
+  return saveSelectedNoteHeader(metadata);
 }
 
 bool AppState::appendToNote(std::string_view noteId, std::string_view text) {
@@ -258,7 +386,11 @@ bool AppState::appendToNote(std::string_view noteId, std::string_view text) {
   body += text;
   body += "\n";
   if(!library_->saveNote(item->path, note.metadata, body)) return false;
-  return refreshLibrary();
+  // The target is not the open note, so nothing cached here describes it -- and
+  // appending to a body changes nothing the note list shows.
+  const auto path = item->path;
+  refreshNoteFile(path);
+  return true;
 }
 
 bool AppState::createFolder(const std::filesystem::path& folder) {
@@ -304,9 +436,11 @@ bool AppState::deleteSelectedFolder() {
 
 bool AppState::deleteSelectedNote() {
   if(!library_) return false;
-  auto note = selectedNote();
-  if(!note) return false;
-  library_->deleteNote(note->item.path);
+  const OpenNote& open = openNote();
+  if(open.noteId.empty()) return false;
+  const auto path = open.path;
+  library_->deleteNote(path);
+  openNote_.reset();
   // A deleted note must not be left open in a tab pointing at nothing; closing
   // it also chooses what to show next.
   if(const auto tab = workspace_.findTab(selection_.noteId); tab != std::string::npos) {
@@ -314,29 +448,36 @@ bool AppState::deleteSelectedNote() {
   } else {
     selection_.noteId.clear();
   }
-  return refreshLibrary();
+  // The file is gone rather than changed, which `refreshFile` handles: it drops
+  // the rows a path no longer backs.
+  refreshNoteFile(path);
+  invalidateNoteList();
+  return true;
 }
 
 bool AppState::moveSelectedNoteToFolder(const std::filesystem::path& folder) {
   if(!library_) return false;
-  auto note = selectedNote();
-  if(!note) return false;
-  const auto target = library_->moveNote(note->item.path, folder);
+  const OpenNote& open = openNote();
+  if(open.noteId.empty()) return false;
+  const auto noteId = open.metadata.id;
+  library_->moveNote(open.path, folder);
   selection_.folder = folder;
   selection_.tag.clear();
   selection_.search.clear();
-  selection_.noteId = note->metadata.id;
-  (void)target;
+  if(!noteId.empty()) selection_.noteId = noteId;
+  // The full walk, not `refreshNoteFile`: the move may have created the folder,
+  // and the sidebar tree is drawn from the directories the walk reports --
+  // including the empty ones, which no list of notes can name.
+  openNote_.reset();
   return refreshLibrary();
 }
 
 bool AppState::updateSelectedTags(const std::vector<std::string>& tags) {
   if(!library_) return false;
-  auto note = selectedNote();
-  if(!note) return false;
-  note->metadata.tags = tags;
-  if(!library_->saveNote(note->item.path, note->metadata, note->body)) return false;
-  return refreshLibrary();
+  library::NoteMetadata metadata = openNote().metadata;
+  if(openNote().noteId.empty()) return false;
+  metadata.tags = tags;
+  return saveSelectedNoteHeader(metadata);
 }
 
 bool AppState::favorite(std::string_view noteId) const {
@@ -380,6 +521,55 @@ bool AppState::refreshLibrary() {
   // note list reads the index, so the index has to have seen the change first.
   organization_.emplace(*library_, index_);
   return ok;
+}
+
+bool AppState::refreshNoteFile(const std::filesystem::path& path) {
+  if(!library_) return false;
+  // The revision moves whether or not the note list did. It is what every view
+  // memo is keyed on, and the things derived from a note's *body* -- its
+  // backlinks, the search results it appears in -- change on a save that
+  // touches none of the five fields the list is built from.
+  ++revision_;
+  return index_.refreshFile(path).listFieldsChanged;
+}
+
+bool AppState::refreshWrittenNoteFile(const std::filesystem::path& path,
+                                      const library::NoteMetadata& metadata,
+                                      std::string_view body) {
+  if(!library_) return false;
+  ++revision_;
+  return index_.refreshWrittenFile(path, metadata, body).listFieldsChanged;
+}
+
+bool AppState::reloadSelectedNote() {
+  const OpenNote& open = openNote();
+  if(open.noteId.empty()) return false;
+  const auto path = open.path;
+  const auto previous = open.noteId;
+  openNote_.reset();
+  if(refreshNoteFile(path)) invalidateNoteList();
+  if(noteById(previous)) return true;
+  // The row moved out from under the selection, which happens when what changed
+  // on disk was the front matter's `id`. The file is the same file, so the note
+  // it now answers to is found by path and everything pointing at the old id
+  // follows it.
+  for(const auto& note : allNotes()) {
+    if(note.path != path) continue;
+    workspace_.renameNote(previous, note.id);
+    std::replace(workspace_.favorites.begin(), workspace_.favorites.end(), previous, note.id);
+    std::replace(workspace_.recents.begin(), workspace_.recents.end(), previous, note.id);
+    selection_.noteId = note.id;
+    return true;
+  }
+  return true;
+}
+
+void AppState::invalidateNoteList() {
+  if(!library_) return;
+  // Re-emplaced rather than asked to forget: the memos are the whole of its
+  // state, so a fresh one is the cheapest possible invalidation and there is no
+  // second code path holding a half-cleared service.
+  organization_.emplace(*library_, index_);
 }
 
 std::uint64_t AppState::revision() const {

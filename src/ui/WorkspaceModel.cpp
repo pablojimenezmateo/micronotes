@@ -69,6 +69,13 @@ void WorkspaceModel::openNote(const std::string& noteId, bool inNewTab) {
   if(tabs.size() == 1) activeTab = 0;
 }
 
+void WorkspaceModel::renameNote(std::string_view from, const std::string& to) {
+  if(from.empty() || to.empty() || from == to) return;
+  for(auto& tab : tabs) {
+    if(tab.noteId == from) tab.noteId = to;
+  }
+}
+
 void WorkspaceModel::closeTab(std::size_t index) {
   if(index >= tabs.size()) return;
   tabs.erase(tabs.begin() + static_cast<std::ptrdiff_t>(index));

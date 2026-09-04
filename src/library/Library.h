@@ -43,6 +43,22 @@ public:
   LoadedNote loadNote(const std::filesystem::path& path) const;
   NoteMetadata loadNoteMetadata(const std::filesystem::path& path) const;
   bool saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const;
+  // Files whatever is at `path` right now as a note of its own, beside it, and
+  // returns that note's file name. Empty when there was nothing there to keep
+  // or the copy could not be written.
+  //
+  // For the moment a save discovers that something else -- another editor, a
+  // sync daemon, a `git checkout` -- has rewritten a note under the buffer.
+  // Both versions matter and neither may be dropped, so the one that is *not*
+  // on screen becomes a note in the library: visible in the sidebar, indexed,
+  // searchable, and openable side by side with the one that is. Hiding it in a
+  // state directory would technically not lose it and practically would.
+  //
+  // The copy is given a fresh id rather than inheriting the original's. Two
+  // notes carrying one id are one row in the index -- the upsert keys on it --
+  // so an inherited id would make the copy and the note fight over which of
+  // them the library lists.
+  std::string preserveExternalVersion(const std::filesystem::path& path) const;
   bool updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const;
   std::filesystem::path createFolder(const std::filesystem::path& relativeFolder) const;
   std::filesystem::path renameNote(const std::filesystem::path& path, const std::string& newTitle) const;

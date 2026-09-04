@@ -3,6 +3,7 @@
 #include "CoreAliases.h"
 
 #include "core/persistence/SqliteDb.h"
+#include "library/Metadata.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -76,6 +77,44 @@ public:
   bool migrate();
   bool rebuild();
   bool refreshChangedFiles();
+
+  // What re-indexing one file found.
+  //
+  // `listFieldsChanged` reports whether any of the five fields the *note list*
+  // is built from -- id, path, title, tags, icon -- came out different. It is
+  // false for the ordinary save, which changes only the body, and that is the
+  // whole point of it: the sidebar, the folder counts, the tag list and the
+  // note-by-id map are all derived from those five, so a false answer means
+  // none of them has to be thrown away and rebuilt.
+  struct FileRefresh {
+    bool ok = false;
+    bool listFieldsChanged = false;
+  };
+
+  // Re-indexes exactly one file: no tree walk, no whole-table read, no
+  // transaction unless something actually changed.
+  //
+  // This is what a save wants. `refreshChangedFiles` exists to *discover* what
+  // changed, and paid a recursive walk plus a stat per note plus a read of
+  // every row in the table to do it; a save already knows which single file it
+  // just wrote. On a 1,000-note library that discovery was the entire cost of
+  // an autosave.
+  //
+  // A path that no longer exists has its rows removed, so this is also the
+  // right call after a delete or a move -- once for each end of the move.
+  FileRefresh refreshFile(const std::filesystem::path& absolutePath);
+
+  // The same refresh, for a caller that has *just written* the file and so
+  // already holds everything the index wants from it: the front matter it
+  // wrote and the body under it.
+  //
+  // `refreshFile` would open the note micronotes wrote milliseconds ago and
+  // parse it back apart -- for a 200 KB note that is a 200 KB read plus three
+  // copies of it (the file, the stripped body, the row), on the autosave path,
+  // to recover bytes the caller is still holding.
+  FileRefresh refreshWrittenFile(const std::filesystem::path& absolutePath,
+                                 const NoteMetadata& metadata, std::string_view body);
+
   std::vector<SearchResult> search(std::string_view query, SearchScope scope = SearchScope::All) const;
 
   // Every note whose text carries a `[[target]]` naming this one.
@@ -86,6 +125,7 @@ public:
   // means a rename changes what resolves without touching a single row.
   // `title` and `stem` are the two spellings a link is allowed to use.
   std::vector<Backlink> backlinks(std::string_view title, std::string_view stem) const;
+  // How many notes the index holds. One `count(*)` over the primary key.
   std::size_t size() const;
   bool isOpen() const;
 
@@ -101,9 +141,16 @@ public:
   const std::vector<std::filesystem::path>& directories() const;
 
 private:
+  // The body both refreshes share. `written` is the front matter and body the
+  // caller already holds, or null when they have to be read off the disk.
+  struct WrittenNote {
+    const NoteMetadata* metadata = nullptr;
+    std::string_view body;
+  };
+  FileRefresh refreshPath(const std::filesystem::path& absolutePath, const WrittenNote* written);
+
   std::filesystem::path root_;
   std::filesystem::path dbPath_;
-  std::vector<SearchResult> rows_;
   // Filled by every walk this class makes, so `directories()` never causes one.
   std::vector<std::filesystem::path> directories_;
   // One connection for the index's lifetime. Every method used to open its own,

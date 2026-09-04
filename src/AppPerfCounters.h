@@ -1,9 +1,9 @@
 #pragma once
 
-// micronotes-specific performance counters, injected into the shared core's
-// counter table. src/core/perf/PerformanceCounters.h includes this file and
+// micronotes-specific performance counters, injected into the core's counter
+// table. src/core/perf/PerformanceCounters.h includes this file and
 // concatenates MICROCORE_APP_PERF_COUNTERS onto its own list, which is what
-// lets the core header stay byte-identical across every app that vendors it.
+// keeps the core header free of app-specific rows.
 //
 // Same rules as the core list: "<subsystem>.<event>", plural nouns count that
 // noun, and every id declared here must be incremented somewhere in src/ or
@@ -14,6 +14,14 @@
   X(LibraryIndexRebuilds, "library.index_rebuilds")                                    \
   X(LibraryIndexFilesScanned, "library.index_files_scanned")                           \
   X(LibraryIndexRefreshCalls, "library.index_refresh_calls")                           \
+  /* Refreshes of one named file against refreshes that had to go and look.     */   \
+  /* A save knows which file it wrote, so it costs a stat and -- only if the    */   \
+  /* stat moved -- one read and one transaction. index_refresh_calls is the     */   \
+  /* other kind: a recursive walk, a stat per note and a read of every row in   */   \
+  /* the table, which is what discovering the change costs when nobody said     */   \
+  /* what it was. Refresh calls climbing with the typing rate means a save has  */   \
+  /* gone back to rescanning the library once a second.                         */   \
+  X(LibraryIndexFileRefreshCalls, "library.index_file_refresh_calls")                  \
   X(LibraryIndexFilesReread, "library.index_files_reread")                             \
   X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
@@ -28,6 +36,20 @@
   /* refresh, and zero per note list.                                          */   \
   X(LibraryNoteRowsSelected, "library.note_rows_selected")                             \
   X(LibrarySearchCalls, "library.search_calls")                                        \
+  /* Reads of the open note's front matter off the disk. Everything that wants  */   \
+  /* the note's title, tags or icon reads a record instead, so this should be   */   \
+  /* one per note opened -- not one per asker, and above all not one per        */   \
+  /* library revision. It used to be the latter: the page header, the           */   \
+  /* right-hand panel and the save itself each re-read and re-parsed the whole  */   \
+  /* note on every autosave. This climbing with the typing rate means something */   \
+  /* is asking a question about the open note through the wrong door.            */   \
+  X(AppStateOpenNoteReads, "app_state.open_note_reads")                                \
+  /* Saves that found the file rewritten under the buffer since it was read.    */   \
+  /* Each one filed the version that was on disk beside the note rather than    */   \
+  /* overwriting it, so this is the count of external changes rescued. Nonzero  */   \
+  /* with no sync daemon or second editor in play means micronotes has lost     */   \
+  /* track of a file it wrote itself.                                            */   \
+  X(AppStateSaveConflicts, "app_state.save_conflicts")                                 \
   /* --- crash recovery ----------------------------------------------------- */      \
   /* Recovery copies posted against recovery copies actually written. A post is  */    \
   /* a memcpy and a notify; a write is two `fsync` barriers, which measured      */    \

@@ -210,6 +210,21 @@ bool Library::saveNote(const std::filesystem::path& path, const NoteMetadata& me
   return platform::writeFileDurably(safePath, {header, body});
 }
 
+std::string Library::preserveExternalVersion(const std::filesystem::path& path) const {
+  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  if(!std::filesystem::exists(safePath)) return {};
+  auto note = loadNote(safePath);
+  const auto stem = safePath.stem().string();
+  const auto title = (note.metadata.title.empty() ? stem : note.metadata.title) +
+                     " (external change " + timestampNow() + ")";
+  note.metadata.id = generateNoteId();
+  note.metadata.title = title;
+  const auto target = uniqueMarkdownPath(
+    safePath.parent_path() / (platform::sanitizeFileStem(title) + ".md"));
+  if(!saveNote(target, note.metadata, note.body)) return {};
+  return target.filename().string();
+}
+
 bool Library::updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const {
   auto note = loadNote(path);
   note.metadata.tags = tags;

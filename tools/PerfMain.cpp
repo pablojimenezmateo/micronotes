@@ -1093,7 +1093,7 @@ int main() {
     auto notes = state.currentNotes();
     if(!notes.empty()) {
       state.selectNote(notes.front().id);
-      (void)state.selectedNote();
+      (void)state.readSelectedNote();
     }
   }
 

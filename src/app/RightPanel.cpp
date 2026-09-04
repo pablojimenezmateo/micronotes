@@ -145,10 +145,10 @@ void refreshLibraryViews(UiRuntime& ui) {
   memo.tags.clear();
   if(noteId.empty() || !ui.state.hasLibrary()) return;
   memo.backlinks = ui.state.backlinksToSelected();
-  // Only the tags are kept, not the whole note: `selectedNote` reads the file
-  // and hands back its body as well, and holding that here would be a second
-  // copy of the open buffer for the sake of a row of chips.
-  if(const auto note = ui.state.selectedNote()) memo.tags = note->metadata.tags;
+  // From the open-note record rather than the file. This used to read and parse
+  // the whole note -- for a row of chips -- on every library revision, and the
+  // revision moves on every save.
+  memo.tags = ui.state.openNote().metadata.tags;
 }
 
 }

@@ -9,6 +9,7 @@
 #include "core/AppIdentity.h"
 #include "core/persistence/SqliteDb.h"
 #include "core/perf/PerformanceCounters.h"
+#include "core/platform/DurableFile.h"
 
 #include <sqlite3.h>
 
@@ -204,6 +205,164 @@ void recordLinks(sqlite3_stmt* stmt, const std::string& noteId, std::string_view
   }
 }
 
+// One note as every table here holds it.
+struct NoteRow {
+  std::string id;
+  std::string relative;   // library-relative, generic form; the `path` column
+  std::string title;
+  std::string tags;       // joined, space separated
+  std::string icon;
+  long long mtime = 0;
+  long long size = 0;
+  std::string body;
+};
+
+// The five fields the note list is built from. Deliberately not the body and
+// not the stat: a save changes both of those and neither is visible in the
+// sidebar, the tree, the folder counts or the tag list.
+static bool sameListFields(const NoteRow& lhs, const NoteRow& rhs) {
+  return lhs.id == rhs.id && lhs.relative == rhs.relative && lhs.title == rhs.title &&
+         lhs.tags == rhs.tags && lhs.icon == rhs.icon;
+}
+
+// A note's front matter and body in row form. The one place the five list
+// fields are derived, so the read path and the just-written path cannot come to
+// different answers about the same note.
+static NoteRow noteRowFrom(const NoteMetadata& metadata, const std::filesystem::path& path,
+                           std::string relative, long long mtime, long long size) {
+  NoteRow row;
+  // A note written by another tool has no front matter; it is indexed anyway,
+  // under an id derived from its path.
+  row.id = metadata.id.empty() ? fallbackNoteId(relative) : metadata.id;
+  row.title = metadata.title.empty() ? path.stem().string() : metadata.title;
+  row.tags = joinTagList(metadata.tags);
+  row.icon = metadata.icon;
+  row.relative = std::move(relative);
+  row.mtime = mtime;
+  row.size = size;
+  return row;
+}
+
+// Reads the note at `path` into row form. The stat is passed in rather than
+// taken here, because every caller already has one -- the tree scan from the
+// directory_entry it walked, the single-file refresh from the stat it needed to
+// decide whether to bother at all.
+static NoteRow readNoteRow(const Library& library, const std::filesystem::path& path,
+                           std::string relative, long long mtime, long long size) {
+  auto note = library.loadNote(path);
+  NoteRow row = noteRowFrom(note.metadata, path, std::move(relative), mtime, size);
+  row.body = std::move(note.body);
+  return row;
+}
+
+// The statements one note's rows go through, prepared once and reused.
+//
+// The full rebuild, the changed-file scan and the single-file refresh all write
+// the same three tables in the same order. They used to carry a copy each of
+// the same six statements and the same twelve binds, and the copies had already
+// drifted: only one of the three went through `recordLinks`, and only one knew
+// that an fts5 row can be addressed by rowid. One writer means a fix to the
+// order or the binds is a fix everywhere.
+class NoteWriter {
+public:
+  explicit NoteWriter(SqliteDb& db)
+    : upsert_(db.prepare("INSERT INTO notes(id,path,title,mtime,size,tags,icon,body) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,tags=excluded.tags,icon=excluded.icon,body=excluded.body;")),
+      // The fts row is addressed by rowid, and the rowid it carries is the note
+      // row's own. `notes_fts` has no indexed id column -- fts5 would store one
+      // UNINDEXED and build nothing over it -- so a delete by anything else is
+      // a full scan of the whole index, once per changed file. That made
+      // indexing the first thousand notes quadratic in the library, and it was
+      // 78% of the refresh.
+      rowId_(db.prepare("SELECT rowid FROM notes WHERE id=?;")),
+      deleteFts_(db.prepare("DELETE FROM notes_fts WHERE rowid=?;")),
+      insertFts_(db.prepare("INSERT INTO notes_fts(rowid,title,body,path) VALUES(?,?,?,?);")),
+      deleteLinks_(db.prepare("DELETE FROM links WHERE src_id=?;")),
+      insertLink_(db.prepare("INSERT OR REPLACE INTO links(src_id,target,line) VALUES(?,?,?);")),
+      deleteNote_(db.prepare("DELETE FROM notes WHERE path=?;")),
+      db_(db) {}
+
+  bool ready() const {
+    return upsert_ && rowId_ && deleteFts_ && insertFts_ && deleteLinks_ && insertLink_ &&
+           deleteNote_;
+  }
+
+  // Writes the note's row, its fts row and its links. `intoEmptyTables` skips
+  // the fts delete, which a table that was just emptied cannot need.
+  bool write(const NoteRow& row, bool intoEmptyTables) {
+    perf::ScopeTimer timer("library_index.write_rows");
+    sqlite3_reset(upsert_);
+    bindText(upsert_, 1, row.id);
+    bindText(upsert_, 2, row.relative);
+    bindText(upsert_, 3, row.title);
+    sqlite3_bind_int64(upsert_, 4, static_cast<sqlite3_int64>(row.mtime));
+    sqlite3_bind_int64(upsert_, 5, static_cast<sqlite3_int64>(row.size));
+    bindText(upsert_, 6, row.tags);
+    bindText(upsert_, 7, row.icon);
+    bindText(upsert_, 8, row.body);
+    if(sqlite3_step(upsert_) != SQLITE_DONE) return false;
+
+    sqlite3_int64 rowId = 0;
+    if(intoEmptyTables) {
+      rowId = sqlite3_last_insert_rowid(db_.handle());
+    } else {
+      // Asked rather than assumed: an upsert that *updated* does not move
+      // `last_insert_rowid`. One lookup through the unique index on `id`.
+      sqlite3_reset(rowId_);
+      bindText(rowId_, 1, row.id);
+      if(sqlite3_step(rowId_) != SQLITE_ROW) return false;
+      rowId = sqlite3_column_int64(rowId_, 0);
+      sqlite3_reset(deleteFts_);
+      sqlite3_bind_int64(deleteFts_, 1, rowId);
+      if(sqlite3_step(deleteFts_) != SQLITE_DONE) return false;
+    }
+
+    sqlite3_reset(insertFts_);
+    sqlite3_bind_int64(insertFts_, 1, rowId);
+    bindText(insertFts_, 2, row.title);
+    bindText(insertFts_, 3, row.body);
+    bindText(insertFts_, 4, row.relative);
+    if(sqlite3_step(insertFts_) != SQLITE_DONE) return false;
+
+    // Rewritten wholesale rather than diffed: a note's links are however many
+    // it has, and working out which of them changed costs more than writing
+    // them all again.
+    if(!intoEmptyTables) {
+      sqlite3_reset(deleteLinks_);
+      bindText(deleteLinks_, 1, row.id);
+      if(sqlite3_step(deleteLinks_) != SQLITE_DONE) return false;
+    }
+    perf::ScopeTimer linkTimer("library_index.record_links");
+    recordLinks(insertLink_, row.id, row.body);
+    return true;
+  }
+
+  // Drops every trace of the note filed at `relative`. `ftsRowId` is the note
+  // row's own rowid, carried by the caller because the row is about to go and
+  // the fts table cannot be addressed without it.
+  bool erase(const std::string& relative, const std::string& id, sqlite3_int64 ftsRowId) {
+    perf::addCounter(perf::CounterId::LibraryIndexRowsDeleted);
+    sqlite3_reset(deleteNote_);
+    bindText(deleteNote_, 1, relative);
+    if(sqlite3_step(deleteNote_) != SQLITE_DONE) return false;
+    sqlite3_reset(deleteLinks_);
+    bindText(deleteLinks_, 1, id);
+    sqlite3_step(deleteLinks_);
+    sqlite3_reset(deleteFts_);
+    sqlite3_bind_int64(deleteFts_, 1, ftsRowId);
+    return sqlite3_step(deleteFts_) == SQLITE_DONE;
+  }
+
+private:
+  Statement upsert_;
+  Statement rowId_;
+  Statement deleteFts_;
+  Statement insertFts_;
+  Statement deleteLinks_;
+  Statement insertLink_;
+  Statement deleteNote_;
+  SqliteDb& db_;
+};
+
 }
 
 bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
@@ -230,7 +389,14 @@ bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
 //    a re-open plus a front-matter parse of every note in it -- immediately
 //    after the refresh had read the same files for the same fields. Two
 //    columns turn that into a `SELECT`.
-static constexpr int kSchemaVersion = 3;
+// 4: there is an index on `notes(path)`. `path` is how a single file is found
+//    and how a removed row is deleted, and both were a scan of the whole
+//    table -- which is the entire point of `refreshFile`, so without this it
+//    would have been a scan per save. Deliberately NOT unique: two files
+//    exchanging names make the upsert momentarily want one path on two rows,
+//    and a uniqueness violation there would roll back the whole refresh rather
+//    than leave the duplicate the old code silently allowed.
+static constexpr int kSchemaVersion = 4;
 
 bool LibraryIndex::migrate() {
   if(!db_.isOpen()) return false;
@@ -259,6 +425,7 @@ bool LibraryIndex::migrate() {
     // resolution happens at query time so a rename does not invalidate rows.
     db.exec("CREATE TABLE IF NOT EXISTS links(src_id TEXT NOT NULL, target TEXT NOT NULL, line TEXT NOT NULL, PRIMARY KEY(src_id, target));") &&
     db.exec("CREATE INDEX IF NOT EXISTS links_target ON links(target COLLATE NOCASE);") &&
+    db.exec("CREATE INDEX IF NOT EXISTS notes_path ON notes(path);") &&
     db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, body, path);");
   if(ok && version < kSchemaVersion) {
     ok = db.exec("PRAGMA user_version=" + std::to_string(kSchemaVersion) + ";");
@@ -269,61 +436,140 @@ bool LibraryIndex::migrate() {
 bool LibraryIndex::rebuild() {
   perf::ScopeTimer timer("library_index.rebuild");
   perf::addCounter(perf::CounterId::LibraryIndexRebuilds);
-  rows_.clear();
   if(!db_.isOpen()) return false;
   SqliteDb& db = db_;
   if(!db.exec("BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM notes_fts; DELETE FROM links;")) {
     return false;
   }
 
-  Statement noteStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,tags,icon,body) VALUES(?,?,?,?,?,?,?,?);");
-  Statement ftsStmt = db.prepare("INSERT INTO notes_fts(rowid,title,body,path) VALUES(?,?,?,?);");
-  Statement linkStmt = db.prepare("INSERT OR REPLACE INTO links(src_id,target,line) VALUES(?,?,?);");
+  NoteWriter writer(db);
+  if(!writer.ready()) {
+    db.exec("ROLLBACK;");
+    return false;
+  }
 
   Library library(root_);
   std::vector<std::filesystem::directory_entry> entries;
   library.walk(&entries, &directories_);
+  bool ok = true;
   for(const auto& entry : entries) {
     const auto& path = entry.path();
     perf::addCounter(perf::CounterId::LibraryIndexFilesScanned);
-    const auto note = library.loadNote(path);
-    const auto relative = path.lexically_relative(root_).generic_string();
-    // Files written by other tools have no front matter; index them anyway.
-    const auto noteId = note.metadata.id.empty() ? fallbackNoteId(relative) : note.metadata.id;
-    const auto stat = std::filesystem::status(path);
-    const auto mtime = std::filesystem::last_write_time(path).time_since_epoch().count();
-    const auto size = static_cast<long long>(std::filesystem::file_size(path));
-    const auto title = note.metadata.title.empty() ? path.stem().string() : note.metadata.title;
-
-    sqlite3_reset(noteStmt);
-    bindText(noteStmt, 1, noteId);
-    bindText(noteStmt, 2, relative);
-    bindText(noteStmt, 3, title);
-    sqlite3_bind_int64(noteStmt, 4, static_cast<sqlite3_int64>(mtime));
-    sqlite3_bind_int64(noteStmt, 5, static_cast<sqlite3_int64>(size));
-    bindText(noteStmt, 6, joinTagList(note.metadata.tags));
-    bindText(noteStmt, 7, note.metadata.icon);
-    bindText(noteStmt, 8, note.body);
-    sqlite3_step(noteStmt);
-
-    // The fts row takes the note row's own rowid. See `refreshChangedFiles`:
-    // it is the only address an fts5 table can be deleted by in less than a
-    // full scan of it.
-    sqlite3_reset(ftsStmt);
-    sqlite3_bind_int64(ftsStmt, 1, sqlite3_last_insert_rowid(db.handle()));
-    bindText(ftsStmt, 2, title);
-    bindText(ftsStmt, 3, note.body);
-    bindText(ftsStmt, 4, relative);
-    sqlite3_step(ftsStmt);
-
-    recordLinks(linkStmt, noteId, note.body);
-
-    rows_.push_back({noteId, path, title});
-    (void)stat;
+    std::error_code error;
+    const auto mtime = entry.last_write_time(error).time_since_epoch().count();
+    const auto size = static_cast<long long>(entry.file_size(error));
+    if(error) continue;
+    // The tables were emptied above, so every write is an insert: no fts row to
+    // delete first, and no links row either.
+    ok = writer.write(readNoteRow(library, path, path.lexically_relative(root_).generic_string(),
+                                  static_cast<long long>(mtime), size),
+                      /*intoEmptyTables=*/true);
+    if(!ok) break;
   }
 
-  const bool ok = db.exec("COMMIT;");
-  return ok;
+  if(!ok) {
+    db.exec("ROLLBACK;");
+    return false;
+  }
+  return db.exec("COMMIT;");
+}
+
+LibraryIndex::FileRefresh LibraryIndex::refreshFile(const std::filesystem::path& absolutePath) {
+  return refreshPath(absolutePath, nullptr);
+}
+
+LibraryIndex::FileRefresh LibraryIndex::refreshWrittenFile(const std::filesystem::path& absolutePath,
+                                                           const NoteMetadata& metadata,
+                                                           std::string_view body) {
+  const WrittenNote written {&metadata, body};
+  return refreshPath(absolutePath, &written);
+}
+
+LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path& absolutePath,
+                                                    const WrittenNote* written) {
+  perf::ScopeTimer timer("library_index.refresh_file");
+  perf::addCounter(perf::CounterId::LibraryIndexFileRefreshCalls);
+  FileRefresh result;
+  if(!db_.isOpen()) return result;
+  SqliteDb& db = db_;
+  const auto relative = absolutePath.lexically_relative(root_).generic_string();
+  if(relative.empty() || relative.starts_with("..")) return result;
+
+  // The row as it stands, by path. `notes_path` is what makes this a lookup
+  // rather than a scan of the whole table.
+  NoteRow before;
+  bool hadRow = false;
+  sqlite3_int64 rowId = 0;
+  if(Statement stmt = db.prepare("SELECT id,title,tags,icon,mtime,size,rowid FROM notes WHERE path=?;");
+     stmt) {
+    bindText(stmt, 1, relative);
+    if(sqlite3_step(stmt) == SQLITE_ROW) {
+      hadRow = true;
+      before.id = columnText(stmt, 0);
+      before.title = columnText(stmt, 1);
+      before.tags = columnText(stmt, 2);
+      before.icon = columnText(stmt, 3);
+      before.mtime = sqlite3_column_int64(stmt, 4);
+      before.size = sqlite3_column_int64(stmt, 5);
+      before.relative = relative;
+      rowId = sqlite3_column_int64(stmt, 6);
+    }
+  }
+
+  const auto disk = platform::statFile(absolutePath);
+  if(!disk.exists) {
+    // Gone. Nothing to do unless the index still thinks it is there, which is
+    // what a delete and the vacated end of a move both look like.
+    if(!hadRow) {
+      result.ok = true;
+      return result;
+    }
+    if(!db.exec("BEGIN IMMEDIATE;")) return result;
+    NoteWriter writer(db);
+    const bool ok = writer.ready() && writer.erase(relative, before.id, rowId);
+    result.ok = ok && db.exec("COMMIT;");
+    if(!result.ok) db.exec("ROLLBACK;");
+    // A row that went away is a row the note list was showing.
+    result.listFieldsChanged = result.ok;
+    return result;
+  }
+
+  // Unchanged since the row was written: this is the common answer when the
+  // watcher reports our own write back to us, and it costs one stat.
+  if(hadRow && before.mtime == static_cast<long long>(disk.mtimeNanos) &&
+     before.size == static_cast<long long>(disk.size)) {
+    result.ok = true;
+    return result;
+  }
+
+  NoteRow row;
+  if(written) {
+    row = noteRowFrom(*written->metadata, absolutePath, relative,
+                      static_cast<long long>(disk.mtimeNanos), static_cast<long long>(disk.size));
+    // The one copy of the body this path makes, and it is the copy sqlite needs
+    // anyway. Nothing is read and nothing is parsed.
+    row.body = written->body;
+  } else {
+    perf::addCounter(perf::CounterId::LibraryIndexFilesReread);
+    perf::ScopeTimer readTimer("library_index.refresh_file.read");
+    Library library(root_);
+    row = readNoteRow(library, absolutePath, relative, static_cast<long long>(disk.mtimeNanos),
+                      static_cast<long long>(disk.size));
+  }
+
+  if(!db.exec("BEGIN IMMEDIATE;")) return result;
+  NoteWriter writer(db);
+  bool ok = writer.ready() && writer.write(row, /*intoEmptyTables=*/false);
+  // A note whose front-matter id changed leaves its old row behind under the
+  // same path -- the upsert keys on id, so it inserted rather than updated.
+  if(ok && hadRow && before.id != row.id) ok = writer.erase(relative, before.id, rowId);
+  result.ok = ok && db.exec("COMMIT;");
+  if(!result.ok) {
+    db.exec("ROLLBACK;");
+    return result;
+  }
+  result.listFieldsChanged = !hadRow || !sameListFields(before, row);
+  return result;
 }
 
 bool LibraryIndex::refreshChangedFiles() {
@@ -393,7 +639,7 @@ bool LibraryIndex::refreshChangedFiles() {
       continue;
     }
     seenPaths.insert(relative);
-    changed.push_back(ChangedFile {path, std::move(relative), mtime, size});
+    changed.push_back(ChangedFile {path, std::move(relative), static_cast<long long>(mtime), size});
   }
   }
 
@@ -409,128 +655,36 @@ bool LibraryIndex::refreshChangedFiles() {
   }
 
   bool ok = true;
-  const bool hasWork = !changed.empty() || !removed.empty();
-
   // Pass two: apply, in one transaction, only if there is anything to apply.
-  if(hasWork) {
+  if(!changed.empty() || !removed.empty()) {
     if(!db.exec("BEGIN IMMEDIATE;")) return false;
+    NoteWriter writer(db);
+    ok = writer.ready();
 
-    Statement upsertStmt = db.prepare("INSERT INTO notes(id,path,title,mtime,size,tags,icon,body) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path,title=excluded.title,mtime=excluded.mtime,size=excluded.size,tags=excluded.tags,icon=excluded.icon,body=excluded.body;");
-    // The fts row is addressed by rowid, and the rowid it carries is the note
-    // row's own. `id` in `notes_fts` is UNINDEXED -- fts5 stores it and builds
-    // no index over it -- so `DELETE ... WHERE id=?` was a full scan of the
-    // whole index, once per changed file. Indexing the first thousand notes of
-    // a library was therefore quadratic in the library, and it was 78% of the
-    // refresh.
-    Statement rowidStmt = db.prepare("SELECT rowid FROM notes WHERE id=?;");
-    Statement deleteFtsStmt = db.prepare("DELETE FROM notes_fts WHERE rowid=?;");
-    Statement insertFtsStmt = db.prepare("INSERT INTO notes_fts(rowid,title,body,path) VALUES(?,?,?,?);");
-    Statement deleteNoteStmt = db.prepare("DELETE FROM notes WHERE path=?;");
-    Statement deleteLinksStmt = db.prepare("DELETE FROM links WHERE src_id=?;");
-    Statement insertLinkStmt = db.prepare("INSERT OR REPLACE INTO links(src_id,target,line) VALUES(?,?,?);");
-    ok = upsertStmt && rowidStmt && deleteFtsStmt && insertFtsStmt && deleteNoteStmt &&
-         deleteLinksStmt && insertLinkStmt;
-
-    if(ok) {
-      for(const auto& file : changed) {
-        perf::addCounter(perf::CounterId::LibraryIndexFilesReread);
-        LoadedNote note;
-        {
-          perf::ScopeTimer readTimer("library_index.refresh.read_file");
-          note = library.loadNote(file.path);
-        }
-        perf::ScopeTimer writeTimer("library_index.refresh.write_rows");
-        // A note without a front-matter id still belongs in the index; it gets
-        // an id derived from its path rather than being skipped.
-        const auto noteId = note.metadata.id.empty() ? fallbackNoteId(file.relative) : note.metadata.id;
-        seenIds.insert(noteId);
-        const auto title = note.metadata.title.empty() ? file.path.stem().string() : note.metadata.title;
-
-        sqlite3_reset(upsertStmt);
-        bindText(upsertStmt, 1, noteId);
-        bindText(upsertStmt, 2, file.relative);
-        bindText(upsertStmt, 3, title);
-        sqlite3_bind_int64(upsertStmt, 4, static_cast<sqlite3_int64>(file.mtime));
-        sqlite3_bind_int64(upsertStmt, 5, static_cast<sqlite3_int64>(file.size));
-        bindText(upsertStmt, 6, joinTagList(note.metadata.tags));
-        bindText(upsertStmt, 7, note.metadata.icon);
-        bindText(upsertStmt, 8, note.body);
-        ok = sqlite3_step(upsertStmt) == SQLITE_DONE;
-        if(!ok) break;
-
-        // Which row the upsert wrote. An upsert that updated does not move
-        // `last_insert_rowid`, so this is asked rather than assumed -- one
-        // lookup through the unique index on `id`.
-        sqlite3_reset(rowidStmt);
-        bindText(rowidStmt, 1, noteId);
-        if(sqlite3_step(rowidStmt) != SQLITE_ROW) {
-          ok = false;
-          break;
-        }
-        const sqlite3_int64 rowId = sqlite3_column_int64(rowidStmt, 0);
-
-        sqlite3_reset(deleteFtsStmt);
-        sqlite3_bind_int64(deleteFtsStmt, 1, rowId);
-        ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
-        if(!ok) break;
-
-        sqlite3_reset(insertFtsStmt);
-        sqlite3_bind_int64(insertFtsStmt, 1, rowId);
-        bindText(insertFtsStmt, 2, title);
-        bindText(insertFtsStmt, 3, note.body);
-        bindText(insertFtsStmt, 4, file.relative);
-        ok = sqlite3_step(insertFtsStmt) == SQLITE_DONE;
-        if(!ok) break;
-
-        // Rewritten wholesale rather than diffed: a note's links are however
-        // many it has, and working out which ones changed costs more than
-        // writing them all again.
-        sqlite3_reset(deleteLinksStmt);
-        bindText(deleteLinksStmt, 1, noteId);
-        ok = sqlite3_step(deleteLinksStmt) == SQLITE_DONE;
-        if(!ok) break;
-        {
-          perf::ScopeTimer linkTimer("library_index.refresh.record_links");
-          recordLinks(insertLinkStmt, noteId, note.body);
-        }
+    for(const auto& file : changed) {
+      if(!ok) break;
+      perf::addCounter(perf::CounterId::LibraryIndexFilesReread);
+      NoteRow row;
+      {
+        perf::ScopeTimer readTimer("library_index.refresh.read_file");
+        row = readNoteRow(library, file.path, file.relative, file.mtime, file.size);
       }
+      seenIds.insert(row.id);
+      ok = writer.write(row, /*intoEmptyTables=*/false);
     }
 
-    if(ok) {
-      for(const auto& row : removed) {
-        // A note that moved keeps its id under a new path; the upsert above
-        // already rewrote the row, so deleting by the old path would drop it.
-        if(seenIds.contains(row.id)) continue;
-        perf::addCounter(perf::CounterId::LibraryIndexRowsDeleted);
-        sqlite3_reset(deleteNoteStmt);
-        bindText(deleteNoteStmt, 1, row.relative);
-        ok = sqlite3_step(deleteNoteStmt) == SQLITE_DONE;
-        if(!ok) break;
-        sqlite3_reset(deleteLinksStmt);
-        bindText(deleteLinksStmt, 1, row.id);
-        sqlite3_step(deleteLinksStmt);
-        sqlite3_reset(deleteFtsStmt);
-        sqlite3_bind_int64(deleteFtsStmt, 1, row.rowId);
-        ok = sqlite3_step(deleteFtsStmt) == SQLITE_DONE;
-        if(!ok) break;
-      }
+    for(const auto& row : removed) {
+      if(!ok) break;
+      // A note that moved keeps its id under a new path; the write above
+      // already rewrote the row, so deleting by the old path would drop it.
+      if(seenIds.contains(row.id)) continue;
+      ok = writer.erase(row.relative, row.id, row.rowId);
     }
 
     ok = ok && db.exec("COMMIT;");
     if(!ok) db.exec("ROLLBACK;");
   }
 
-  // rows_ is a projection of the table. Reloading it means 1000 rows and 1000
-  // heap allocations, so only do it when the table actually moved -- or when we
-  // have never loaded it.
-  if(ok && (hasWork || rows_.empty())) {
-    rows_.clear();
-    if(Statement selectStmt = db.prepare("SELECT id,path,title FROM notes ORDER BY title;"); selectStmt) {
-      while(sqlite3_step(selectStmt) == SQLITE_ROW) {
-        rows_.push_back({columnText(selectStmt, 0), root_ / columnText(selectStmt, 1), columnText(selectStmt, 2)});
-      }
-    }
-  }
   return ok;
 }
 
@@ -572,12 +726,11 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
       return out;
     }
   }
-  for(const auto& row : rows_) {
-    if((scope != SearchScope::Content && row.title.find(query) != std::string::npos) ||
-       (scope == SearchScope::All && row.path.string().find(query) != std::string::npos)) {
-      out.push_back(row);
-    }
-  }
+  // No connection, so no rows. There used to be an in-memory projection of the
+  // table here to fall back on -- a thousand `SearchResult`s rebuilt on every
+  // refresh that found work, which is every save -- and it was unreachable:
+  // nothing filled it unless the database was open, and while the database is
+  // open the branch above always returns.
   return out;
 }
 
@@ -602,7 +755,10 @@ std::vector<Backlink> LibraryIndex::backlinks(std::string_view title, std::strin
 }
 
 std::size_t LibraryIndex::size() const {
-  return rows_.size();
+  if(!db_.isOpen()) return 0;
+  Statement stmt = db_.prepare("SELECT count(*) FROM notes;");
+  if(!stmt || sqlite3_step(stmt) != SQLITE_ROW) return 0;
+  return static_cast<std::size_t>(sqlite3_column_int64(stmt, 0));
 }
 
 bool LibraryIndex::isOpen() const {

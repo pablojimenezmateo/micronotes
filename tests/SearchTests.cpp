@@ -681,3 +681,108 @@ MICRONOTES_TEST(library_index_treats_sql_wildcards_as_ordinary_characters) {
   MICRONOTES_REQUIRE(index.search("percent").size() == 1);
   std::filesystem::remove_all(root);
 }
+
+// The refresh a save takes: one named file, no walk of the tree and no read of
+// every row in the table. `refreshChangedFiles` exists to *discover* what
+// changed and pays for the discovery; a save already knows.
+MICRONOTES_TEST(library_index_refreshes_one_named_file_without_walking_the_tree) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-one-file";
+  std::filesystem::remove_all(root);
+  ScopedXdgDataHome xdg(root / "xdg");
+
+  micronotes::library::Library library(root);
+  std::vector<std::filesystem::path> paths;
+  for(int i = 0; i < 20; ++i) {
+    micronotes::library::NoteMetadata metadata;
+    metadata.id = "n" + std::to_string(i);
+    metadata.title = "Note " + std::to_string(i);
+    paths.push_back(library.createNote(metadata, "body " + std::to_string(i)));
+  }
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+  MICRONOTES_REQUIRE(index.size() == 20);
+
+  microcore::perf::resetCounters();
+  micronotes::library::NoteMetadata changed;
+  changed.id = "n7";
+  changed.title = "Note 7";
+  MICRONOTES_REQUIRE(library.saveNote(paths[7], changed, "rewritten needle\n"));
+  const auto refresh = index.refreshFile(paths[7]);
+  MICRONOTES_REQUIRE(refresh.ok);
+  // The five fields the note list is built from did not move, so the sidebar,
+  // the folder counts and the tag list did not have to be rebuilt.
+  MICRONOTES_REQUIRE(!refresh.listFieldsChanged);
+  // One file read, and the tree never walked.
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::LibraryIndexFilesReread) == 1);
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::LibraryNoteFilesCalls) == 0);
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::LibraryIndexRefreshCalls) == 0);
+  // And the body reached the search index.
+  MICRONOTES_REQUIRE(index.search("needle").size() == 1);
+  MICRONOTES_REQUIRE(index.size() == 20);
+
+  // A title change is a note-list change, and says so.
+  changed.title = "Renamed 7";
+  MICRONOTES_REQUIRE(library.saveNote(paths[7], changed, "rewritten needle\n"));
+  MICRONOTES_REQUIRE(index.refreshFile(paths[7]).listFieldsChanged);
+
+  // An unchanged file is a stat and nothing else: no read, no transaction.
+  microcore::perf::resetCounters();
+  const auto execBefore = microcore::perf::readCounter(microcore::perf::CounterId::SqliteExecCalls);
+  MICRONOTES_REQUIRE(index.refreshFile(paths[7]).ok);
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::LibraryIndexFilesReread) == 0);
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::SqliteExecCalls) == execBefore);
+
+  // A file that is gone takes its rows with it, and that is a list change.
+  std::filesystem::remove(paths[3]);
+  const auto removed = index.refreshFile(paths[3]);
+  MICRONOTES_REQUIRE(removed.ok);
+  MICRONOTES_REQUIRE(removed.listFieldsChanged);
+  MICRONOTES_REQUIRE(index.size() == 19);
+  MICRONOTES_REQUIRE(index.search("body 3").empty());
+
+  std::filesystem::remove_all(root);
+}
+
+// The form a save takes: the caller has just written the file, so it hands over
+// the front matter and body instead of making the index read them back.
+MICRONOTES_TEST(library_index_indexes_a_written_file_without_reading_it_back) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-written";
+  std::filesystem::remove_all(root);
+  ScopedXdgDataHome xdg(root / "xdg");
+
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "n1";
+  metadata.title = "Written";
+  metadata.tags = {"alpha"};
+  const auto path = library.createNote(metadata, "first body\n");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+
+  microcore::perf::resetCounters();
+  MICRONOTES_REQUIRE(library.saveNote(path, metadata, "second body with a needle\n"));
+  const auto refresh = index.refreshWrittenFile(path, metadata, "second body with a needle\n");
+  MICRONOTES_REQUIRE(refresh.ok);
+  MICRONOTES_REQUIRE(!refresh.listFieldsChanged);
+  // Nothing was read off the disk.
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::LibraryIndexFilesReread) == 0);
+  // And the rows say the same thing they would have if it had been.
+  MICRONOTES_REQUIRE(index.search("needle").size() == 1);
+  MICRONOTES_REQUIRE(index.search("first body").empty());
+  const auto notes = index.notes();
+  MICRONOTES_REQUIRE(notes.size() == 1);
+  MICRONOTES_REQUIRE(notes.front().title == "Written");
+  MICRONOTES_REQUIRE(notes.front().tags.size() == 1);
+  MICRONOTES_REQUIRE(notes.front().tags.front() == "alpha");
+
+  // The handed-over form and the read form have to agree, or a save and a
+  // watcher wake-up would index the same note differently.
+  MICRONOTES_REQUIRE(!index.refreshFile(path).listFieldsChanged);
+  MICRONOTES_REQUIRE(index.search("needle").size() == 1);
+
+  std::filesystem::remove_all(root);
+}

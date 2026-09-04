@@ -3,6 +3,7 @@
 #include "app/Shell.h"
 #include "app/WikiLinks.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,40 @@ void resetPageScroll(UiRuntime& ui) {
   ui.readingPage.setScroll(0);
 }
 
+// Puts the selected note into the editor, preferring the crash-recovery copy
+// when it differs from what is on disk.
+//
+// The one path into the editor buffer. There were three: two identical copies
+// inside `selectNoteAt` and `selectNoteById`, and a third in
+// `loadSelectedIntoEditor` that had drifted -- it did not consult the recovery
+// store at all. That third one is the *startup* path, which is the one case the
+// recovery store exists for. So a crash with unsaved text handed the draft back
+// only if you happened to click the note's name again afterwards; open the app,
+// see the note it had left open, type one character, and 1.2 seconds later the
+// autosave retired the recovery file and the draft was gone. Two hundred lines
+// of careful durable-write machinery, defeated by the buffer being filled
+// through the wrong door.
+void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
+  const auto note = ui.state.readSelectedNote();
+  if(!note) return;
+  const std::string noteId = ui.state.selection().noteId;
+  ui.loadedNoteId = noteId;
+  const auto recovered = ui.state.selectedRecoveryBody();
+  const bool unsaved = recovered && *recovered != note->body;
+  ui.editor.setText(unsaved ? *recovered : note->body);
+  // Marked dirty so the recovered text is treated as unsaved work rather than
+  // as the file's contents -- which is what makes the next autosave commit it.
+  if(unsaved) ui.editor.markDirty();
+  if(resetView) {
+    ui.editorScroll = 0;
+    resetPageScroll(ui);
+    ui.revealEditorCursor = false;
+  }
+  const std::string title(ui.state.selectedTitle());
+  ui.status = unsaved ? "Recovered unsaved " + title : "Loaded " + title;
+  ui.state.noteOpened(noteId);
+}
+
 }
 
 void selectNoteAt(UiRuntime& ui, int index) {
@@ -29,17 +64,7 @@ void selectNoteAt(UiRuntime& ui, int index) {
   index = std::clamp(index, 0, static_cast<int>(notes.size()) - 1);
   ui.noteCursor = index;
   ui.state.selectNote(notes[static_cast<std::size_t>(index)].id);
-  if(auto note = ui.state.selectedNote()) {
-    ui.loadedNoteId = note->metadata.id;
-    const auto recovered = ui.state.selectedRecoveryBody();
-    ui.editor.setText(recovered ? *recovered : note->body);
-    if(recovered && *recovered != note->body) ui.editor.markDirty();
-    ui.editorScroll = 0;
-    resetPageScroll(ui);
-    ui.revealEditorCursor = false;
-    ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
-    ui.state.noteOpened(note->metadata.id);
-  }
+  loadSelectedBuffer(ui, /*resetView=*/true);
 }
 
 void selectTag(UiRuntime& ui, const std::string& tag) {
@@ -51,27 +76,59 @@ void selectTag(UiRuntime& ui, const std::string& tag) {
 void selectNoteById(UiRuntime& ui, const std::string& noteId) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectNote(noteId);
-  if(auto note = ui.state.selectedNote()) {
-    ui.loadedNoteId = note->metadata.id;
-    const auto recovered = ui.state.selectedRecoveryBody();
-    ui.editor.setText(recovered ? *recovered : note->body);
-    if(recovered && *recovered != note->body) ui.editor.markDirty();
-    ui.editorScroll = 0;
-    resetPageScroll(ui);
-    ui.revealEditorCursor = false;
-    ui.status = recovered && *recovered != note->body ? "Recovered unsaved " + note->metadata.title : "Loaded " + note->metadata.title;
-    ui.state.noteOpened(note->metadata.id);
-  }
+  loadSelectedBuffer(ui, /*resetView=*/true);
 }
 
 void loadSelectedIntoEditor(UiRuntime& ui) {
   ui.clearBlockSelection();
-  if(auto note = ui.state.selectedNote()) {
-    if(ui.loadedNoteId != note->metadata.id || !ui.editor.dirty()) {
-      ui.loadedNoteId = note->metadata.id;
-      ui.editor.setText(note->body);
-    }
+  // A dirty buffer for the note already showing is the newest copy of it, so it
+  // stays. Anything else -- a different note, or the same one with nothing
+  // unsaved -- is read.
+  if(ui.loadedNoteId == ui.state.selection().noteId && ui.editor.dirty()) return;
+  // The view is kept: the callers are a rename and opening a library, and in
+  // neither case has the reader's position in the note moved.
+  loadSelectedBuffer(ui, /*resetView=*/false);
+}
+
+bool reloadSelectedIfChangedOnDisk(UiRuntime& ui) {
+  if(!ui.state.hasLibrary() || ui.state.selection().noteId.empty()) return false;
+  switch(ui.state.selectedNoteDiskState()) {
+    case ui::DiskState::Agrees:
+      return false;
+    case ui::DiskState::Vanished:
+      // The buffer is now the only copy there is, so it is kept and the next
+      // save writes the file back. Deleting the note out from under a reader
+      // because something else deleted the file is the wrong way to be
+      // consistent.
+      ui.status = "The file for this note is gone -- saving writes it back";
+      return false;
+    case ui::DiskState::Changed:
+    case ui::DiskState::Unknown:
+      break;
   }
+  if(ui.editor.dirty()) {
+    // Not overwritten. The save path resolves this, and resolves it without
+    // dropping either version: the text that appeared on disk is filed beside
+    // the note as a note of its own.
+    ui.status = "Changed on disk -- saving keeps both versions";
+    return false;
+  }
+  if(!ui.state.reloadSelectedNote()) return false;
+  invalidateWikiNotes(ui);
+  // The reader's place in the note is kept rather than reset. The bytes moved,
+  // so it is an approximation -- but jumping a reader to the top of a note
+  // because a sync daemon touched the file is worse than an approximate
+  // position, and the layout clamps whatever no longer fits.
+  loadSelectedBuffer(ui, /*resetView=*/false);
+  ui.status = "Reloaded " + std::string(ui.state.selectedTitle()) + " from disk";
+  return true;
+}
+
+void rescanLibraryAfterExternalChange(UiRuntime& ui) {
+  if(!ui.state.hasLibrary()) return;
+  invalidateWikiNotes(ui);
+  ui.state.refreshLibrary();
+  reloadSelectedIfChangedOnDisk(ui);
 }
 
 void createNote(UiRuntime& ui) {
@@ -113,19 +170,26 @@ bool saveCurrent(UiRuntime& ui, bool quiet) {
   if(ui.state.selection().noteId.empty()) {
     createNote(ui);
   }
-  if(ui.state.saveSelectedNote(ui.editor.text())) {
-    ui.editor.markSaved();
+  const auto result = ui.state.saveSelectedNote(ui.editor.text());
+  if(!result.ok) {
+    ui.status = quiet ? "Autosave failed" : "Save failed";
+    return false;
+  }
+  ui.editor.markSaved();
+  if(!result.conflictCopy.empty()) {
+    // Never quiet, however the save was triggered. Something else had rewritten
+    // the note and that version has been kept as a note of its own; a person
+    // who is not told will not find it, and an autosave the user did not ask
+    // for is exactly when they most need to hear it.
+    ui.status = "Saved -- the changed file was kept as " + result.conflictCopy;
+    invalidateWikiNotes(ui);
+  } else if(!quiet) {
     // Named by the library, not by the first line of the buffer. The title
     // lives in the note's header, and a note whose body happens to be empty is
     // still not called "Untitled".
-    if(!quiet) {
-      const auto note = ui.state.findNote(ui.state.selection().noteId);
-      ui.status = "Saved " + (note ? note->title : std::string("note"));
-    }
-    return true;
+    ui.status = "Saved " + std::string(ui.state.selectedTitle());
   }
-  ui.status = quiet ? "Autosave failed" : "Save failed";
-  return false;
+  return true;
 }
 
 }
