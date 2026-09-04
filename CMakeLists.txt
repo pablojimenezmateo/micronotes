@@ -277,6 +277,7 @@ add_executable(micronotes_tests
   tests/BlockScanTests.cpp
   tests/ClipGuardTests.cpp
   tests/ColorMathTests.cpp
+  tests/DurableFileTests.cpp
   tests/EditorViewerTests.cpp
   tests/EditsTests.cpp
   tests/FoldTests.cpp

@@ -170,7 +170,8 @@ std::filesystem::path Library::notePath(const std::string& title) const {
 std::filesystem::path Library::createNote(const NoteMetadata& metadata, std::string_view body) const {
   ensureLayout();
   const auto path = uniqueMarkdownPath(platform::normalizeInsideRoot(root_, notePath(metadata.title)));
-  if(!platform::writeFileDurably(path, metadataHeader(metadata) + std::string(body))) {
+  const auto header = metadataHeader(metadata);
+  if(!platform::writeFileDurably(path, {header, body})) {
     throw std::runtime_error("failed to create note");
   }
   return path;
@@ -202,7 +203,11 @@ NoteMetadata Library::loadNoteMetadata(const std::filesystem::path& path) const 
 
 bool Library::saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const {
   const auto safePath = platform::normalizeInsideRoot(root_, path);
-  return platform::writeFileDurably(safePath, metadataHeader(metadata) + std::string(body));
+  // Two pieces rather than one concatenated buffer: the body is the whole note,
+  // and gluing a hundred-byte header to the front of it cost an allocation and
+  // a copy of every byte of the note on every autosave.
+  const auto header = metadataHeader(metadata);
+  return platform::writeFileDurably(safePath, {header, body});
 }
 
 bool Library::updateTags(const std::filesystem::path& path, const std::vector<std::string>& tags) const {
@@ -421,6 +426,11 @@ void Library::walk(std::vector<std::filesystem::directory_entry>* filesOut,
     }
     if(!it->is_regular_file(error)) continue;
     if(it->path().extension() != ".md") continue;
+    // A durable write stages beside its target, so a save in flight puts a file
+    // in this tree for the length of one rename. Named rather than left to the
+    // extension test above, which happens to reject it today only because the
+    // staging counter is the last component of the name.
+    if(platform::isTemporaryWriteName(it->path().filename().native())) continue;
     files.push_back(*it);
   }
 }
