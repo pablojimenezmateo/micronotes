@@ -381,6 +381,81 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   key.scroll = ui.sidebarScroll;
 }
 
+// Scrolls the cursor row into view using last frame's geometry, which is all
+// that is needed to know whether it is off an edge and by how much.
+void revealSidebarRow(UiRuntime& ui, std::size_t index) {
+  if(index >= ui.sidebarRows.size() || ui.sidebarRect.h <= 0.0f) return;
+  const Rect row = ui.sidebarRows[index].rect;
+  const float top = ui.sidebarRect.y + 8.0f;
+  const float bottom = ui.sidebarRect.y + ui.sidebarRect.h - 8.0f;
+  if(row.y < top) ui.sidebarScroll -= static_cast<int>(std::ceil(top - row.y));
+  else if(row.y + row.h > bottom) ui.sidebarScroll += static_cast<int>(std::ceil(row.y + row.h - bottom));
+  ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
+}
+
+void moveTreeCursor(UiRuntime& ui, int delta) {
+  if(ui.sidebarRows.empty()) return;
+  int index = std::clamp(ui.folderCursor, 0, static_cast<int>(ui.sidebarRows.size()) - 1) + delta;
+  // A *caption* is drawn and nothing else, so the cursor steps over it. A band
+  // is a control -- it shuts the rows under it -- so the cursor stops on one,
+  // and Left/Right there shuts and opens it. Without that the collapsing was
+  // reachable only with a pointer.
+  //
+  // Landing on a band is safe because `activateSidebarRow` ignores a `Cursor`
+  // activation on one: arrowing past a band must not shut it.
+  while(index >= 0 && index < static_cast<int>(ui.sidebarRows.size()) &&
+        ui.sidebarRows[static_cast<std::size_t>(index)].kind == SidebarRow::Kind::SectionLabel &&
+        !ui.sidebarRows[static_cast<std::size_t>(index)].section) {
+    index += delta;
+  }
+  if(index < 0 || index >= static_cast<int>(ui.sidebarRows.size())) return;
+  ui.folderCursor = index;
+  revealSidebarRow(ui, static_cast<std::size_t>(index));
+  // Cursor, not Click: arrowing through the tree shows each note it passes
+  // over, and must neither unfold the library nor open a tab per note.
+  activateSidebarRow(ui, ui.sidebarRows[static_cast<std::size_t>(index)], RowActivation::Cursor);
+}
+
+// Right opens a folder, or steps into it when it is already open; Left closes
+// it, or jumps to its parent when there is nothing to close.
+void expandTreeCursor(UiRuntime& ui, bool open) {
+  if(ui.folderCursor < 0 || ui.folderCursor >= static_cast<int>(ui.sidebarRows.size())) return;
+  const SidebarRow row = ui.sidebarRows[static_cast<std::size_t>(ui.folderCursor)];
+  // A band shuts and opens like a folder does, which is what it looks like:
+  // both wear the same chevron and both hide the rows under them.
+  if(row.kind == SidebarRow::Kind::SectionLabel && row.section) {
+    if(open == !ui.state.workspace().sectionCollapsed(*row.section)) {
+      moveTreeCursor(ui, open ? 1 : -1);
+      return;
+    }
+    ui.state.workspace().setSectionCollapsed(*row.section, !open);
+    return;
+  }
+  if(row.kind != SidebarRow::Kind::Tree || row.tree.kind == ui::TreeRowKind::Note) {
+    if(!open) moveTreeCursor(ui, -1);
+    return;
+  }
+  if(open == row.tree.expanded) {
+    moveTreeCursor(ui, open ? 1 : -1);
+    return;
+  }
+  if(!row.tree.expandable) return;
+  ui.tree.setExpanded(row.tree.folder, open);
+}
+
+FocusArea chooseSidebarCursorRow(UiRuntime& ui) {
+  if(ui.folderCursor < 0 || ui.folderCursor >= static_cast<int>(ui.sidebarRows.size())) {
+    return FocusArea::Editor;
+  }
+  const SidebarRow row = ui.sidebarRows[static_cast<std::size_t>(ui.folderCursor)];
+  activateSidebarRow(ui, row, RowActivation::Click);
+  // A tag and a band both change what the list is showing rather than opening
+  // anything, so the reader stays in the list to see what happened.
+  const bool changedTheList = row.kind == SidebarRow::Kind::Tag ||
+                              (row.kind == SidebarRow::Kind::SectionLabel && row.section);
+  return changedTheList ? FocusArea::Folders : FocusArea::Editor;
+}
+
 void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uint8 button) {
   // Innermost control first, all the way down. Each of these is drawn *on* the
   // row, so testing the row before any of them would mean the row swallowed
@@ -449,7 +524,15 @@ void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how)
     return;
   }
   if(row.kind == SidebarRow::Kind::Tag) {
-    selectTag(ui, row.tag);
+    // Click only, for the reason a folder is not unfolded by being passed over
+    // and a note passed over does not get a tab of its own: choosing a tag
+    // replaces the **entire row list** with the notes carrying it, so a walk
+    // that applied one would destroy the list it was walking -- the cursor's
+    // index would then point into a different list, and the next Down would
+    // land somewhere unrelated. Holding Down through the TAGS band did exactly
+    // that, and with the toggle on `selectTag` a second pass over the same tag
+    // turned the filter off again.
+    if(how == RowActivation::Click) selectTag(ui, row.tag);
     return;
   }
   if(row.kind != SidebarRow::Kind::Tree) return;

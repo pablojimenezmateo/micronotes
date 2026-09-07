@@ -549,51 +549,6 @@ static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
 }
 
 
-// Scrolls the cursor row into view using last frame's geometry, which is all
-// that is needed to know whether it is off an edge and by how much.
-static void revealSidebarRow(UiRuntime& ui, std::size_t index) {
-  if(index >= ui.sidebarRows.size() || ui.sidebarRect.h <= 0.0f) return;
-  const Rect row = ui.sidebarRows[index].rect;
-  const float top = ui.sidebarRect.y + 8.0f;
-  const float bottom = ui.sidebarRect.y + ui.sidebarRect.h - 8.0f;
-  if(row.y < top) ui.sidebarScroll -= static_cast<int>(std::ceil(top - row.y));
-  else if(row.y + row.h > bottom) ui.sidebarScroll += static_cast<int>(std::ceil(row.y + row.h - bottom));
-  ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
-}
-
-static void moveTreeCursor(UiRuntime& ui, int delta) {
-  if(ui.sidebarRows.empty()) return;
-  int index = std::clamp(ui.folderCursor, 0, static_cast<int>(ui.sidebarRows.size()) - 1) + delta;
-  // Section labels are drawn, not selectable, so the cursor steps over them.
-  while(index >= 0 && index < static_cast<int>(ui.sidebarRows.size()) &&
-        ui.sidebarRows[static_cast<std::size_t>(index)].kind == SidebarRow::Kind::SectionLabel) {
-    index += delta;
-  }
-  if(index < 0 || index >= static_cast<int>(ui.sidebarRows.size())) return;
-  ui.folderCursor = index;
-  revealSidebarRow(ui, static_cast<std::size_t>(index));
-  // Cursor, not Click: arrowing through the tree shows each note it passes
-  // over, and must neither unfold the library nor open a tab per note.
-  activateSidebarRow(ui, ui.sidebarRows[static_cast<std::size_t>(index)], RowActivation::Cursor);
-}
-
-// Right opens a folder, or steps into it when it is already open; Left closes
-// it, or jumps to its parent when there is nothing to close.
-static void expandTreeCursor(UiRuntime& ui, bool open) {
-  if(ui.folderCursor < 0 || ui.folderCursor >= static_cast<int>(ui.sidebarRows.size())) return;
-  const SidebarRow row = ui.sidebarRows[static_cast<std::size_t>(ui.folderCursor)];
-  if(row.kind != SidebarRow::Kind::Tree || row.tree.kind == ui::TreeRowKind::Note) {
-    if(!open) moveTreeCursor(ui, -1);
-    return;
-  }
-  if(open == row.tree.expanded) {
-    moveTreeCursor(ui, open ? 1 : -1);
-    return;
-  }
-  if(!row.tree.expandable) return;
-  ui.tree.setExpanded(row.tree.folder, open);
-}
-
 // A note with no icon still needs something in the icon column, or its title
 // would sit where a folder's does and the two would read as one kind of thing.
 
@@ -1709,7 +1664,8 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(ui.focus == FocusArea::Folders) {
     if(key == SDLK_DOWN || key == SDLK_UP) moveTreeCursor(ui, key == SDLK_DOWN ? 1 : -1);
     else if(key == SDLK_RIGHT || key == SDLK_LEFT) expandTreeCursor(ui, key == SDLK_RIGHT);
-    else if(key == SDLK_RETURN) ui.focus = FocusArea::Editor;
+    // Enter chooses the row the cursor is on; see `chooseSidebarCursorRow`.
+    else if(key == SDLK_RETURN) ui.focus = chooseSidebarCursorRow(ui);
   }
 }
 

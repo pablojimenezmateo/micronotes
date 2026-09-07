@@ -165,9 +165,6 @@ inline constexpr float kSpace6 = 24.0f;
 // are placed by two different files is a heading with two geometries.
 inline constexpr float kSectionChevronX = kSpace1;
 inline constexpr float kSectionLabelX = kSectionChevronX + kTreeChevronSlotWidth + kTreeLabelGap;
-// Reserved at a band's trailing edge for its count, so a long section name is
-// ellipsized before it reaches the number rather than over it.
-inline constexpr float kSectionCountWidth = 30.0f;
 
 // A tooltip sits this far off the control it describes.
 inline constexpr float kTooltipGap = 6.0f;

@@ -1153,3 +1153,68 @@ MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
 
   std::filesystem::remove_all(root);
 }
+
+// The bands are reachable from the keyboard, which is the half that was missing
+// when the collapsing was written: `moveTreeCursor` stepped over every section
+// label, so nothing but a pointer could shut one.
+MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
+  using micronotes::ui::SidebarSection;
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-band-keys";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  {
+    std::ofstream out(root / "hub.md", std::ios::binary | std::ios::trunc);
+    out << "---\nid: bk-hub\ntitle: Hub\ntags: work\n---\n\nBody.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  ui.tree.setExpanded({}, true);
+  const micronotes::app::SidebarMetrics metrics = micronotes::app::sidebarMetrics(16, 13);
+  const micronotes::ui::Rect list {0.0f, 0.0f, 260.0f, 900.0f};
+  const auto rebuild = [&] {
+    ui.sidebarRowsKey.valid = false;
+    micronotes::app::buildSidebarRows(ui, list, metrics);
+  };
+  rebuild();
+  ui.sidebarRect = list;
+
+  const auto indexOfBand = [&](SidebarSection section) {
+    for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
+      const auto& row = ui.sidebarRows[i];
+      if(row.section && *row.section == section) return static_cast<int>(i);
+    }
+    return -1;
+  };
+
+  // The cursor stops on a band...
+  const int tagsBand = indexOfBand(SidebarSection::Tags);
+  MICRONOTES_REQUIRE(tagsBand >= 0);
+  ui.folderCursor = tagsBand;
+  // ...and Left shuts it, Right opens it, exactly as they do for a folder --
+  // which is what it looks like, since both wear the same chevron.
+  micronotes::app::expandTreeCursor(ui, /*open=*/false);
+  MICRONOTES_REQUIRE(ui.state.workspace().sectionCollapsed(SidebarSection::Tags));
+  rebuild();
+  ui.folderCursor = indexOfBand(SidebarSection::Tags);
+  micronotes::app::expandTreeCursor(ui, /*open=*/true);
+  MICRONOTES_REQUIRE(!ui.state.workspace().sectionCollapsed(SidebarSection::Tags));
+
+  // But arrowing *past* a band must not shut it: the cursor lands there and
+  // waits, so a walk down the list does not collapse the library on the way.
+  rebuild();
+  ui.folderCursor = 0;
+  for(int step = 0; step < static_cast<int>(ui.sidebarRows.size()) + 2; ++step) {
+    micronotes::app::moveTreeCursor(ui, 1);
+  }
+  std::size_t sectionCount = 0;
+  const auto* sections = micronotes::ui::sidebarSections(&sectionCount);
+  for(std::size_t i = 0; i < sectionCount; ++i) {
+    micronotes::tests::require(
+      !ui.state.workspace().sectionCollapsed(sections[i]),
+      std::string("arrowing past the ") + std::string(micronotes::ui::sidebarSectionName(sections[i])) +
+        " band shut it");
+  }
+
+  std::filesystem::remove_all(root);
+}

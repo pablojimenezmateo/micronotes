@@ -83,10 +83,6 @@ public:
   // Round-trips through the ui state file.
   const std::map<std::string, int, std::less<>>& choices() const;
 
-  // A tag was renamed, so its colour follows it. Without this, retagging a
-  // note repaints every dot that tag was showing.
-  void rename(std::string_view from, std::string to);
-
 private:
   std::map<std::string, int, std::less<>> picked_;
 };

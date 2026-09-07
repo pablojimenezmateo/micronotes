@@ -117,16 +117,6 @@ const std::map<std::string, int, std::less<>>& TagColors::choices() const {
   return picked_;
 }
 
-void TagColors::rename(std::string_view from, std::string to) {
-  const auto found = picked_.find(from);
-  if(found == picked_.end()) return;
-  const int swatch = found->second;
-  picked_.erase(found);
-  // The new name wins if it had a colour of its own: renaming onto an existing
-  // tag is a merge, and the tag that survives keeps what it looked like.
-  if(!to.empty()) picked_.emplace(std::move(to), swatch);
-}
-
 SDL_Color tagColor(const TagColors& colors, std::string_view tag) {
   return tagSwatch(colors.swatchOf(tag));
 }

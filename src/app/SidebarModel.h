@@ -197,6 +197,38 @@ enum class RowActivation { Click, Cursor };
 // handler, that order was invisible next to a dozen unrelated branches.
 void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uint8 button);
 
+// Walking the list with the keyboard, and the other half of the same question.
+//
+// `moveTreeCursor` steps the cursor by `delta` and opens whatever it lands on;
+// `expandTreeCursor` is Right and Left on the row it is sitting on -- open a
+// folder or a band, or step to the neighbour when there is nothing to open.
+// `revealSidebarRow` scrolls a row into view from last frame's geometry, which
+// is all that is needed to know whether it is off an edge and by how much.
+//
+// Here with `pressSidebarRow` rather than in the shell's key handler because
+// the two are the same behaviour reached two ways, and the rules they share are
+// not obvious: a caption is stepped over and a band is stopped on, a folder
+// opens without becoming the selection, and a note passed over takes the tab
+// showing rather than opening one of its own. Split between two files, the
+// pointer and the keyboard drifted -- which is how the collapsing came to be
+// reachable only with a mouse.
+void moveTreeCursor(UiRuntime& ui, int delta);
+void expandTreeCursor(UiRuntime& ui, bool open);
+void revealSidebarRow(UiRuntime& ui, std::size_t index);
+
+// Enter on the row the cursor is sitting on, and where focus should go next.
+//
+// A walk *passes over* the rows it can open -- a note takes the tab showing, a
+// folder is not unfolded -- and deliberately does not act on the two kinds it
+// cannot: a tag replaces the entire row list, and a band shuts it, so either
+// one applied by an arrow key would destroy the list being walked. So those two
+// need a key that means "this one, now", and Enter is it.
+//
+// Returns the focus the caller should take: the page for a note or a folder,
+// because that is what was opened, and the list for a tag or a band, because
+// the list is what changed and the reader is still in it.
+FocusArea chooseSidebarCursorRow(UiRuntime& ui);
+
 // The one place a sidebar row turns into a selection, so a click, an arrow key
 // and a drop can never disagree about what selecting a row means.
 //

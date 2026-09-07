@@ -95,29 +95,6 @@ MICRONOTES_TEST(tag_colors_remember_what_was_picked_and_only_that) {
   MICRONOTES_REQUIRE(colors.choices().empty());
 }
 
-// A renamed tag keeps its colour. Without this, retagging a note repaints every
-// dot that tag was showing, for no reason the reader could see.
-MICRONOTES_TEST(tag_colors_follow_a_renamed_tag) {
-  TagColors colors;
-  colors.set("wrok", 5);
-  colors.rename("wrok", "work");
-  MICRONOTES_REQUIRE(!colors.picked("wrok"));
-  MICRONOTES_REQUIRE(colors.picked("work"));
-  MICRONOTES_REQUIRE(colors.swatchOf("work") == 5);
-
-  // Renaming onto a tag that already had a colour is a merge, and the tag that
-  // survives keeps what it looked like -- the reader is left with the colour
-  // they can still see rather than one that has just vanished.
-  colors.set("other", 9);
-  colors.rename("work", "other");
-  MICRONOTES_REQUIRE(colors.swatchOf("other") == 9);
-  MICRONOTES_REQUIRE(!colors.picked("work"));
-
-  // Renaming something with no colour is not an error and invents nothing.
-  colors.rename("never-coloured", "still-not");
-  MICRONOTES_REQUIRE(!colors.picked("still-not"));
-}
-
 // The reason a tag's colour is stored as an *index* and not as an RGB: the two
 // palettes are different colours, and one pick has to read correctly in both.
 // A stored RGB that was legible on the dark theme could be invisible on the
