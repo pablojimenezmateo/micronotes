@@ -403,7 +403,14 @@ void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect
   // above rather than from the rows it heads -- those belong to it.
   fill(renderer, {band.x, band.y, band.w, kDividerThickness}, theme().border);
 
-  const TextStyle style = chromeSmallStyle();
+  // The chrome size, not a step down from it. At 0.85 of it the label came out
+  // 11px, and 11px uppercase in a mono face with `textSecondary`'s ink has
+  // stems the rasterizer spreads over two columns at partial coverage -- so the
+  // headings read as blurred next to the 13px rows they head, which is the one
+  // thing a heading must not do. microide's section headers are set at its
+  // single chrome size for the same reason; what distinguishes a band from a
+  // row is its ground and its outdent, never a smaller type.
+  const TextStyle style = chromeStyle();
   float right = band.x + band.w - kSidebarInset;
   if(!trailing.empty()) {
     const float width = static_cast<float>(text.width(trailing, style));

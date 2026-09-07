@@ -84,6 +84,11 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // A caption on what the list is showing: the result count, the tag being
   // filtered by. It heads the list the same way a band does and reads the same,
   // but there is nothing under it to shut, so it gets no chevron.
+  //
+  // Title case throughout, not caps. microide's sections are "Staged" and
+  // "Unstaged", and at 13px the reason is legible: uppercase in a mono face is
+  // a row of same-width rectangles with no ascenders or descenders to tell them
+  // apart, so a caps heading reads as a texture before it reads as a word.
   const auto pushCaption = [&](std::string label) {
     SidebarRow row;
     row.kind = SidebarRow::Kind::SectionLabel;
@@ -188,7 +193,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
       finish();
       return;
     }
-    pushCaption(std::to_string(results.size()) + (results.size() == 1 ? " RESULT" : " RESULTS"));
+    pushCaption(std::to_string(results.size()) + (results.size() == 1 ? " result" : " results"));
     for(std::size_t i = 0; i < results.size(); ++i) {
       const auto& result = results[i];
       SidebarRow row;
@@ -239,7 +244,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
 
   const auto& favorites = ui.state.workspace().favorites;
   if(const std::size_t count = resolvable(favorites, kMaxFavoriteRows); count > 0) {
-    if(pushSection(ui::SidebarSection::Favorites, "FAVORITES", count)) {
+    if(pushSection(ui::SidebarSection::Favorites, "Favorites", count)) {
       pushNoteShortcuts(favorites, kMaxFavoriteRows);
     }
   }
@@ -247,9 +252,9 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // The tree is a band like the other three. It had no heading at all, which is
   // most of what made the divisions unclear: an unlabelled group between two
   // labelled ones reads as the tail of the one above it.
-  auto treeRows = ui.tree.rows(ui.state.folders(), notes, root);
+  auto treeRows = ui.tree.rows(ui.state.folders(), notes);
   if(!treeRows.empty()) {
-    if(pushSection(ui::SidebarSection::Notebooks, "NOTEBOOKS", notes.size())) {
+    if(pushSection(ui::SidebarSection::Notebooks, "Notebooks", notes.size())) {
       for(auto& row : treeRows) pushTreeRow(std::move(row));
     }
   }
@@ -258,7 +263,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   if(!tags.empty()) {
     // Tags are a filter over the tree, not a second way to organise it, so they
     // sit below it.
-    if(pushSection(ui::SidebarSection::Tags, "TAGS", tags.size())) {
+    if(pushSection(ui::SidebarSection::Tags, "Tags", tags.size())) {
       for(const auto& tag : tags) {
         SidebarRow row;
         row.kind = SidebarRow::Kind::Tag;
@@ -272,7 +277,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
 
   const auto& recents = ui.state.workspace().recents;
   if(const std::size_t count = resolvable(recents, kMaxRecentRows); count > 0) {
-    if(pushSection(ui::SidebarSection::Recent, "RECENT", count)) {
+    if(pushSection(ui::SidebarSection::Recent, "Recent", count)) {
       pushNoteShortcuts(recents, kMaxRecentRows);
     }
   }

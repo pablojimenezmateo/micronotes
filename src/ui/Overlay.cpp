@@ -43,6 +43,18 @@ bool usesField(const Overlay& overlay) {
   return overlay.kind == OverlayKind::TextPrompt || (overlay.kind == OverlayKind::List && overlay.filterable);
 }
 
+// The three faces an overlay sets, named once so the layout reserves room in
+// the same style the draw paints in. They had drifted: the hint's height was
+// reserved in Sans at the `tiny` size and drawn in Mono at 0.85 of `chrome`,
+// and the title's in Sans/`small`-bold and drawn in Mono/`chrome`-bold. Both
+// pairs happen to be within a pixel, which is exactly why nobody noticed.
+TextStyle titleFace() {
+  return {FontFamily::Mono, true, false, type().chrome};
+}
+TextStyle hintFace() {
+  return chromeSmallStyle();
+}
+
 }
 
 bool OverlayStack::active() const {
@@ -124,11 +136,10 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   const float titleH = overlay.title.empty()
                          ? 0.0f
                          : std::max(kTitleBandHeight,
-                                    static_cast<float>(text.lineHeight(
-                                      TextStyle {FontFamily::Mono, true, false, type().chrome})) +
-                                      kSpace2);
+                                    static_cast<float>(text.lineHeight(titleFace())) + kSpace2);
   const float fieldH = field ? kFieldHeight + kPadding : 0.0f;
-  const float hintProbe = overlay.hint.empty() ? 0.0f : static_cast<float>(text.lineHeight(TextStyle {FontFamily::Sans, false, false, type().tiny})) + 8.0f;
+  const float hintProbe = overlay.hint.empty() ? 0.0f
+                                               : static_cast<float>(text.lineHeight(hintFace())) + kSpace2;
   // What is left of the window below where the panel starts, once its own
   // chrome is paid for. Measured from the top the panel will actually take, or
   // a tall list would be laid out past the bottom of the window.
@@ -148,16 +159,30 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
                         ? static_cast<float>(swatchRows) * (kSwatchCell + kSwatchGap) - kSwatchGap
                         : 0.0f;
   const float confirmH = overlay.kind == OverlayKind::Confirm ? kRowHeight + kPadding : 0.0f;
-  const float hintH = overlay.hint.empty() ? 0.0f : static_cast<float>(text.lineHeight(TextStyle {FontFamily::Sans, false, false, type().tiny})) + 8.0f;
+  const float hintH = hintProbe;
 
   // A grid asks for exactly the width its columns need, rather than being
   // stretched to whatever the caller guessed: a swatch grid with a ragged right
   // edge reads as a list of colours that failed to line up.
+  //
+  // *And* for whatever its hint needs, which is the wider of the two here: six
+  // swatches come to 200px and "Enter choose   Esc cancel" to rather more, so a
+  // panel sized to the grid alone had its own hint hanging out past its right
+  // edge -- which is what "the cancel goes out of the popup" was.
   const float gridW = static_cast<float>(kSwatchColumns) * (kSwatchCell + kSwatchGap) - kSwatchGap;
-  const float asked = overlay.kind == OverlayKind::ColorPicker ? gridW + kPadding * 2.0f
-                                                               : overlay.width;
+  float asked = overlay.width;
+  if(overlay.kind == OverlayKind::ColorPicker) {
+    const float hintW = overlay.hint.empty()
+                          ? 0.0f
+                          : static_cast<float>(text.width(overlay.hint, hintFace()));
+    asked = std::max(gridW, hintW) + kPadding * 2.0f;
+  }
   const float width = std::min(asked, static_cast<float>(windowWidth) - 40.0f);
-  const float height = kPadding * 2.0f + titleH + fieldH + listH + gridH + confirmH + hintH;
+  // A hint under a grid needs the gap a hint under a list does not: a list row
+  // carries its own vertical padding and a swatch is a hard-edged block, so
+  // without it the hint sat directly against the bottom row of colours.
+  const float gridHintGap = gridH > 0.0f && hintH > 0.0f ? kPadding : 0.0f;
+  const float height = kPadding * 2.0f + titleH + fieldH + listH + gridH + gridHintGap + confirmH + hintH;
 
   float x = 0.0f;
   float y = 0.0f;
@@ -181,10 +206,14 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
     cursorY += fieldH;
   }
   if(overlay.kind == OverlayKind::ColorPicker) {
+    // Centred, because the panel is as wide as the *wider* of the grid and the
+    // hint: left-aligned under a hint that outruns it, the grid would sit off
+    // to one side of its own panel.
+    const float gridX = std::round(x + (width - gridW) / 2.0f);
     for(std::size_t i = 0; i < indices.size(); ++i) {
       const auto column = static_cast<float>(i % kSwatchColumns);
       const auto gridRow = static_cast<float>(i / kSwatchColumns);
-      layout.itemRects.push_back({x + kPadding + column * (kSwatchCell + kSwatchGap),
+      layout.itemRects.push_back({gridX + column * (kSwatchCell + kSwatchGap),
                                   cursorY + gridRow * (kSwatchCell + kSwatchGap),
                                   kSwatchCell, kSwatchCell});
       layout.itemIndices.push_back(indices[i]);
@@ -451,9 +480,9 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   // set in the text face reads as a document about commands rather than as a
   // list of them, and its accelerators -- which are keys, not words -- have to
   // line up in a column to be scanned at all.
-  const TextStyle titleStyle {FontFamily::Mono, true, false, type().chrome};
+  const TextStyle titleStyle = titleFace();
   const TextStyle bodyStyle = chromeStyle();
-  const TextStyle hintStyle = chromeSmallStyle();
+  const TextStyle hintStyle = hintFace();
 
   // The panel, with the header band a titled overlay wears. The title used to
   // be a line of text on the panel's own ground, which is a title that looks

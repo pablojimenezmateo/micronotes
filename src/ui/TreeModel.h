@@ -22,9 +22,10 @@ enum class TreeRowKind {
 struct TreeRow {
   TreeRowKind kind = TreeRowKind::Folder;
   int depth = 0;
-  // A folder row's own path; a note row's parent folder. Empty is the library
-  // root, which is a real row so that selecting and dropping onto it work the
-  // same way as for any other folder.
+  // A folder row's own path; a note row's parent folder. Empty means the
+  // library root -- which a *note* row can name, since notes sit directly in
+  // it, but which has no folder row of its own: the tree starts at the root's
+  // contents. See `rows`.
   std::filesystem::path folder;
   std::string noteId;   // note rows only
   std::string label;
@@ -41,6 +42,8 @@ class TreeModel {
 public:
   bool expanded(const std::filesystem::path& folder) const;
   void setExpanded(const std::filesystem::path& folder, bool value);
+  // Returns what the folder is open-or-closed *afterwards*, which for the
+  // library root is always open: see `expanded`.
   bool toggle(const std::filesystem::path& folder);
   // Opens every ancestor of `folder`, so revealing a note can never leave it
   // hidden behind a parent someone collapsed earlier.
@@ -51,16 +54,19 @@ public:
   // between them they say whether the rows the last frame built still stand.
   std::uint64_t revision() const { return revision_; }
 
-  // The rows to draw, top to bottom. `root` is the library directory: note
-  // paths are absolute, and the tree speaks in paths relative to it. The root
-  // row is labelled with its name.
+  // The rows to draw, top to bottom.
+  //
+  // The tree starts at the root's **contents**, with no row for the root
+  // itself. It had one, labelled with the library directory's own name, and it
+  // was a container inside a container: the sidebar's Notebooks band already
+  // names the section and already collapses it, so the root row said the same
+  // thing again and indented every other row one step to do it.
   //
   // This is O(library), not O(viewport): it relativises a path and builds a map
   // key for every note before it can place the first row. The caller is
   // expected to hold the result and ask again only when `revision()` moves.
   std::vector<TreeRow> rows(const std::vector<library::FolderNode>& folders,
-                            const std::vector<library::NoteListItem>& notes,
-                            const std::filesystem::path& root) const;
+                            const std::vector<library::NoteListItem>& notes) const;
 
   // One expanded folder path per line, so the file stays readable and a path
   // containing any character but a newline round-trips unescaped.
@@ -70,10 +76,11 @@ public:
 
 private:
   // Transparent comparator: every lookup arrives as a path, not a string.
+  //
+  // Real folders only. The root used to need a `rootExpanded_` flag beside this
+  // because it has no path to key on; it has no row to close either, now, so
+  // there is nothing to remember about it.
   std::set<std::string, std::less<>> expanded_;
-  // The root has no path to key on, and it starts open: a sidebar that opens
-  // empty reads as broken rather than tidy.
-  bool rootExpanded_ = true;
   bool dirty_ = false;
   std::uint64_t revision_ = 0;
 };

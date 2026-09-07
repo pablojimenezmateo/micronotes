@@ -544,7 +544,7 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
 
   // And the note is now a row inside that folder rather than only in a flat
   // list above it -- which is the thing the user was looking for.
-  const auto rows = ui.tree.rows(ui.state.folders(), ui.state.allNotes(), ui.state.libraryRoot());
+  const auto rows = ui.tree.rows(ui.state.folders(), ui.state.allNotes());
   bool folderRow = false;
   bool noteUnderIt = false;
   for(const auto& row : rows) {
@@ -998,7 +998,7 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   // the tail of the one above it.
   const auto* notebooks = bandFor(SidebarSection::Notebooks);
   MICRONOTES_REQUIRE(notebooks != nullptr);
-  MICRONOTES_REQUIRE(notebooks->label == "NOTEBOOKS");
+  MICRONOTES_REQUIRE(notebooks->label == "Notebooks");
   // A band spans the panel where the rows it heads are inset, which is what
   // makes it a division of the list rather than a card sitting in it.
   MICRONOTES_REQUIRE(notebooks->rect.x == list.x);

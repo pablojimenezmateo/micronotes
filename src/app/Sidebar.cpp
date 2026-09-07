@@ -358,19 +358,22 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
         const bool overflow = dots.size() < tagCount && d + 1 == dots.size();
         if(overflow) {
           ui::drawTagDot(renderer, dots[d], theme().textMuted);
+          // The names it stands for, and only those. A count and a prefix would
+          // be the tooltip explaining itself instead of answering the one
+          // question a coloured dot raises.
           std::string rest;
           for(std::size_t t = d; t < tagged->tags.size(); ++t) {
             rest += (rest.empty() ? "" : ", ") + tagged->tags[t];
           }
-          ui.offerTooltip(dots[d], std::to_string(tagged->tags.size() - d) + " more: " + rest);
+          ui.offerTooltip(dots[d], rest);
           continue;
         }
         const auto& tag = tagged->tags[d];
         ui::drawTagDot(renderer, dots[d], ui::tagColor(colors, tag));
-        // The dot is a control: it says which tags a note has, and clicking one
-        // filters by it. So it names itself under the pointer -- a 7px disc
-        // with no label is a colour until something tells you what it means.
-        ui.offerTooltip(dots[d], "Filter by " + tag);
+        // The tag's name, and nothing else. A 7px disc raises exactly one
+        // question -- *which* tag -- and "Filter by work" answers it while also
+        // narrating a click the reader has not made yet.
+        ui.offerTooltip(dots[d], tag);
       }
     }
   }

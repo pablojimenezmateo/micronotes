@@ -43,44 +43,61 @@ std::string shape(const std::vector<TreeRow>& rows) {
 
 }
 
-MICRONOTES_TEST(tree_shows_only_what_is_expanded) {
+// The tree starts at the library root's *contents*. The root had a row of its
+// own, labelled with the library directory's name -- so a library at `~/Notes`
+// grew a `[Notes]` node that everything else hung under, which reads as a
+// folder somebody added and is a container inside a container: the sidebar's
+// Notebooks band already names the section and already collapses it.
+//
+// The visible payoff is the indent: every row is one step further left, and the
+// top level sits at depth 0 where it used to sit at 1.
+MICRONOTES_TEST(tree_starts_at_the_library_contents_not_at_a_root_row) {
   TreeModel tree;
-  // Root open, everything under it closed: one row per top-level entry.
-  MICRONOTES_REQUIRE(shape(tree.rows(fixtureFolders(), fixtureNotes(), kRoot)) ==
-                     "[Notes]\n"
-                     "  [ideas]\n"
-                     "  [work]\n"
-                     "  Inbox\n");
+  MICRONOTES_REQUIRE(shape(tree.rows(fixtureFolders(), fixtureNotes())) ==
+                     "[ideas]\n"
+                     "[work]\n"
+                     "Inbox\n");
 
   tree.setExpanded("work", true);
   // Folders before notes at every level, each sorted by name.
-  MICRONOTES_REQUIRE(shape(tree.rows(fixtureFolders(), fixtureNotes(), kRoot)) ==
-                     "[Notes]\n"
-                     "  [ideas]\n"
-                     "  [work]\n"
-                     "    [2026]\n"
-                     "    Alpha\n"
-                     "    Beta\n"
-                     "  Inbox\n");
+  MICRONOTES_REQUIRE(shape(tree.rows(fixtureFolders(), fixtureNotes())) ==
+                     "[ideas]\n"
+                     "[work]\n"
+                     "  [2026]\n"
+                     "  Alpha\n"
+                     "  Beta\n"
+                     "Inbox\n");
+}
 
-  MICRONOTES_REQUIRE(tree.toggle("") == false);
-  MICRONOTES_REQUIRE(shape(tree.rows(fixtureFolders(), fixtureNotes(), kRoot)) == "[Notes]\n");
+// The root is always open, because there is no row to close it with. Asking is
+// still allowed -- `reveal` walks from the root and would otherwise need a
+// special case -- and the answer never changes.
+MICRONOTES_TEST(tree_treats_the_root_as_permanently_open) {
+  TreeModel tree;
+  MICRONOTES_REQUIRE(tree.expanded(""));
+  // Setting it is a no-op rather than an error, and does not dirty the file:
+  // there is nothing about the root left to persist.
+  tree.setExpanded("", false);
+  MICRONOTES_REQUIRE(tree.expanded(""));
+  MICRONOTES_REQUIRE(!tree.dirty());
+  MICRONOTES_REQUIRE(tree.toggle("") == true);
+  MICRONOTES_REQUIRE(tree.expanded(""));
+  // And the tree is still there, which is the thing that used to be closable.
+  MICRONOTES_REQUIRE(!tree.rows(fixtureFolders(), fixtureNotes()).empty());
 }
 
 MICRONOTES_TEST(tree_reveal_opens_every_ancestor) {
   TreeModel tree;
-  tree.setExpanded("", false);
   tree.reveal("work/2026");
-  const auto rows = tree.rows(fixtureFolders(), fixtureNotes(), kRoot);
+  const auto rows = tree.rows(fixtureFolders(), fixtureNotes());
   MICRONOTES_REQUIRE(shape(rows) ==
-                     "[Notes]\n"
-                     "  [ideas]\n"
-                     "  [work]\n"
-                     "    [2026]\n"
-                     "      Plan\n"
-                     "    Alpha\n"
-                     "    Beta\n"
-                     "  Inbox\n");
+                     "[ideas]\n"
+                     "[work]\n"
+                     "  [2026]\n"
+                     "    Plan\n"
+                     "  Alpha\n"
+                     "  Beta\n"
+                     "Inbox\n");
   // A folder with nothing in it offers no disclosure control to click.
   for(const auto& row : rows) {
     if(row.label == "ideas") MICRONOTES_REQUIRE(!row.expandable);
@@ -91,22 +108,35 @@ MICRONOTES_TEST(tree_reveal_opens_every_ancestor) {
 MICRONOTES_TEST(tree_expansion_round_trips_through_its_file) {
   TreeModel tree;
   tree.reveal("work/2026");
-  tree.setExpanded("", false);
   MICRONOTES_REQUIRE(tree.dirty());
 
   TreeModel reloaded;
   reloaded.load(tree.serialize());
   MICRONOTES_REQUIRE(!reloaded.dirty());
-  MICRONOTES_REQUIRE(!reloaded.expanded(""));
   MICRONOTES_REQUIRE(reloaded.expanded("work"));
   MICRONOTES_REQUIRE(reloaded.expanded("work/2026"));
   MICRONOTES_REQUIRE(!reloaded.expanded("ideas"));
 }
 
+// A `tree.state` written when the root had a row could carry `!root` to say it
+// was closed. That line has to be read and dropped rather than taken for a
+// folder named "!root", which would otherwise sit in the expanded set forever
+// and be written back out on every save.
+MICRONOTES_TEST(tree_drops_the_collapsed_root_line_an_older_file_may_carry) {
+  TreeModel tree;
+  tree.load("!root\nwork\n");
+  MICRONOTES_REQUIRE(tree.expanded("work"));
+  MICRONOTES_REQUIRE(!tree.expanded("!root"));
+  // And it is gone from the file the next save writes.
+  MICRONOTES_REQUIRE(tree.serialize() == "work\n");
+  // The tree it used to hide is showing, which is the point.
+  MICRONOTES_REQUIRE(!tree.rows(fixtureFolders(), fixtureNotes()).empty());
+}
+
 MICRONOTES_TEST(tree_carries_the_note_icon_and_folder_counts) {
   TreeModel tree;
   tree.setExpanded("work", true);
-  for(const auto& row : tree.rows(fixtureFolders(), fixtureNotes(), kRoot)) {
+  for(const auto& row : tree.rows(fixtureFolders(), fixtureNotes())) {
     if(row.label == "Alpha") MICRONOTES_REQUIRE(row.icon == "\xF0\x9F\x93\x93");
     if(row.label == "Beta") MICRONOTES_REQUIRE(row.icon.empty());
     if(row.kind == TreeRowKind::Folder && row.label == "work") MICRONOTES_REQUIRE(row.noteCount == 2);

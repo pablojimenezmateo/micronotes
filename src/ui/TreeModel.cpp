@@ -15,35 +15,37 @@ static std::string key(const std::filesystem::path& folder) {
 
 // A library root written with a trailing slash has an empty filename, so fall
 // back to the directory above it before giving up on a name entirely.
-static std::string rootName(const std::filesystem::path& root) {
-  auto name = root.filename().generic_string();
-  if(name.empty()) name = root.parent_path().filename().generic_string();
-  return name.empty() ? "Library" : name;
-}
-
 }
 
 bool TreeModel::expanded(const std::filesystem::path& folder) const {
-  if(folder.empty()) return rootExpanded_;
+  // The library root is always open, because it has no row to close it with:
+  // the tree starts at the root's *contents*, and hiding the whole tree is what
+  // the sidebar's Notebooks band does. It used to carry a `rootExpanded_` flag
+  // for a chevron that no longer exists.
+  //
+  // Answered rather than refused so `reveal` can keep walking from the root
+  // without a special case at the top of every loop.
+  if(folder.empty()) return true;
   return expanded_.contains(key(folder));
 }
 
 void TreeModel::setExpanded(const std::filesystem::path& folder, bool value) {
+  // Nothing to set for the root: see `expanded`.
+  if(folder.empty()) return;
   if(expanded(folder) == value) return;
   dirty_ = true;
   ++revision_;
-  if(folder.empty()) {
-    rootExpanded_ = value;
-    return;
-  }
   if(value) expanded_.insert(key(folder));
   else expanded_.erase(key(folder));
 }
 
 bool TreeModel::toggle(const std::filesystem::path& folder) {
-  const bool value = !expanded(folder);
-  setExpanded(folder, value);
-  return value;
+  // Reports what the folder *is* afterwards, not what was asked for. Those
+  // differ for the library root, which is permanently open and ignores the
+  // request -- and reporting "closed" for something that is open is the kind of
+  // answer a caller would act on.
+  setExpanded(folder, !expanded(folder));
+  return expanded(folder);
 }
 
 void TreeModel::reveal(const std::filesystem::path& folder) {
@@ -56,18 +58,14 @@ void TreeModel::reveal(const std::filesystem::path& folder) {
 }
 
 std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& folders,
-                                     const std::vector<library::NoteListItem>& notes,
-                                     const std::filesystem::path& root) const {
+                                     const std::vector<library::NoteListItem>& notes) const {
   // Children by parent, so the walk below is a lookup rather than a scan of
   // every folder at every level.
   std::map<std::string, std::vector<const library::FolderNode*>> children;
   std::map<std::string, std::vector<const library::NoteListItem*>> owned;
-  const library::FolderNode* rootNode = nullptr;
   for(const auto& folder : folders) {
-    if(folder.path.empty()) {
-      rootNode = &folder;
-      continue;
-    }
+    // The root's own entry is not a child of anything, and has no row.
+    if(folder.path.empty()) continue;
     children[key(folder.path.parent_path())].push_back(&folder);
   }
   for(const auto& note : notes) {
@@ -75,33 +73,41 @@ std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& fol
   }
 
   std::vector<TreeRow> rows;
-  // Recursion by hand: the depth and the "is this open" question both belong to
-  // the walk, and an explicit stack would say the same thing less clearly.
-  const auto walk = [&](auto&& self, const std::filesystem::path& folder, int noteCount, int depth) -> void {
-    TreeRow row;
-    row.kind = TreeRowKind::Folder;
-    row.depth = depth;
-    row.folder = folder;
-    row.label = folder.empty() ? rootName(root) : folder.filename().generic_string();
-    row.noteCount = noteCount;
+  // What is *inside* `folder`, at `depth`. Recursion by hand: the depth and the
+  // "is this open" question both belong to the walk, and an explicit stack
+  // would say the same thing less clearly.
+  //
+  // The contents rather than the folder itself, which is what leaves the
+  // library root without a row. It had one, labelled with the library
+  // directory's own name, and it was a container inside a container: the
+  // sidebar's Notebooks band already names the section and already collapses
+  // it, so the root row said the same thing a second time and indented every
+  // other row one step to do it.
+  const auto emit = [&](auto&& self, const std::filesystem::path& folder, int depth) -> void {
     auto& subfolders = children[key(folder)];
     auto& subnotes = owned[key(folder)];
-    row.expandable = !subfolders.empty() || !subnotes.empty();
-    row.expanded = expanded(folder);
-    rows.push_back(std::move(row));
-    if(!expanded(folder)) return;
-
     std::sort(subfolders.begin(), subfolders.end(),
               [](const auto* lhs, const auto* rhs) { return lhs->path < rhs->path; });
-    for(const auto* child : subfolders) self(self, child->path, child->noteCount, depth + 1);
     // Folders first, then notes: a folder that scrolls away under its own
     // notes is the thing every file tree gets wrong.
+    for(const auto* child : subfolders) {
+      TreeRow row;
+      row.kind = TreeRowKind::Folder;
+      row.depth = depth;
+      row.folder = child->path;
+      row.label = child->path.filename().generic_string();
+      row.noteCount = child->noteCount;
+      row.expandable = !children[key(child->path)].empty() || !owned[key(child->path)].empty();
+      row.expanded = expanded(child->path);
+      rows.push_back(std::move(row));
+      if(expanded(child->path)) self(self, child->path, depth + 1);
+    }
     std::sort(subnotes.begin(), subnotes.end(),
               [](const auto* lhs, const auto* rhs) { return lhs->title < rhs->title; });
     for(const auto* note : subnotes) {
       TreeRow noteRow;
       noteRow.kind = TreeRowKind::Note;
-      noteRow.depth = depth + 1;
+      noteRow.depth = depth;
       noteRow.folder = folder;
       noteRow.noteId = note->id;
       noteRow.label = note->title;
@@ -109,13 +115,13 @@ std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& fol
       rows.push_back(std::move(noteRow));
     }
   };
-  walk(walk, {}, rootNode ? rootNode->noteCount : 0, 0);
+  emit(emit, {}, 0);
   perf::addCounter(perf::CounterId::TreeRowsBuilt, rows.size());
   return rows;
 }
 
 std::string TreeModel::serialize() const {
-  std::string out = rootExpanded_ ? "" : "!root\n";
+  std::string out;
   for(const auto& folder : expanded_) {
     out += folder;
     out.push_back('\n');
@@ -125,12 +131,14 @@ std::string TreeModel::serialize() const {
 
 void TreeModel::load(std::string_view value) {
   expanded_.clear();
-  rootExpanded_ = true;
   std::size_t from = 0;
   while(from < value.size()) {
     const auto end = value.find('\n', from);
     const auto line = value.substr(from, end == std::string_view::npos ? std::string_view::npos : end - from);
-    if(line == "!root") rootExpanded_ = false;
+    // `!root` is a file written when the library root had a row of its own and
+    // could be closed. It has neither now, so the line is read and dropped
+    // rather than taken for a folder called "!root".
+    if(line == "!root") { /* an older file's collapsed root */ }
     else if(!line.empty()) expanded_.insert(std::string(line));
     if(end == std::string_view::npos) break;
     from = end + 1;
