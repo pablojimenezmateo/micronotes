@@ -81,6 +81,16 @@ SDL_HitTestResult SDLCALL windowHitTest(SDL_Window* window, const SDL_Point* are
 
 }
 
+void setInputHints() {
+  // Deliver the click that activates an unfocused window to the app instead of
+  // swallowing it. SDL's default ("0") eats the focusing click, so clicking a
+  // background micronotes raised the window and whatever was under the pointer
+  // -- a note in the sidebar, a tab, a caret position -- never saw the press,
+  // and the user had to click twice. "1" is the click-through behaviour every
+  // modern editor has: one click both focuses the window and does the thing.
+  SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+}
+
 bool installWindowHitTest(SDL_Window* window, SDL_Renderer* renderer, UiRuntime& ui,
                           HitTestContext& context) {
   context = HitTestContext {&ui, renderer};

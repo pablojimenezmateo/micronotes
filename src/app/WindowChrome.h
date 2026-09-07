@@ -14,6 +14,13 @@ struct UiRuntime;
 // what a click on a drawn button asked for. Both need the SDL_Window, which is
 // why they are here rather than beside the drawing in Chrome.cpp.
 
+// The SDL hints that decide how input reaches a window, set before SDL_Init
+// because that is when the video backend reads them. They live beside the
+// hit test for the same reason it does: both are the display server's half of
+// a window that draws its own controls, and both are invisible in the drawing
+// code that depends on them.
+void setInputHints();
+
 // Makes `window` movable and resizable by its drawn chrome. Returns false when
 // the platform refuses a hit test, having already put the decorations back and
 // cleared `ui.customChrome` -- a borderless window nobody can move is worse

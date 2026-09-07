@@ -2405,6 +2405,7 @@ int run(ApplicationOptions options) {
   if(!attachFromCli(ui, options.attachPath)) return 1;
   if(options.headless) return 0;
 
+  setInputHints();
   if(!SDL_Init(SDL_INIT_VIDEO)) {
     std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
     return 1;
