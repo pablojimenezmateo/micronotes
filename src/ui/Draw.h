@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,40 +48,73 @@ void fill(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void stroke(SDL_Renderer* renderer, Rect rect, SDL_Color color);
 void hLine(SDL_Renderer* renderer, float x1, float x2, float y, SDL_Color color);
 
-// A filled rectangle with rounded corners, assembled from horizontal spans: a
-// centre block, and one span per scanline of the two corner bands. At the radii
-// the shell actually uses that is a couple of dozen spans submitted in a single
-// SDL_RenderFillRects, which is cheaper than the texture a general rounded-rect
-// routine would want to cache and invalidate.
+// Nothing here rounds a corner.
 //
-// A radius of zero, or one too large for the rect to hold, degrades to the
-// square fill rather than to a shape nobody asked for -- callers pass a token,
-// and a token has no idea how small the rect it lands in has been squeezed.
-void fillRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius);
-void strokeRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius);
+// The shell used to have three radii -- one for controls, one for blocks in the
+// page, one for what floats over it -- which is three answers to a question a
+// flat interface does not ask. What separates two surfaces now is that their
+// fills differ and, where that is not enough, a single-weight 1px rule; and
+// what makes a control a control is its ground, not its silhouette. See
+// `Theme`'s contrast corrector, which is what makes that hold up.
 void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor);
 void drawSurface(SDL_Renderer* renderer, Rect rect);
-// The rounded counterpart of drawSurface: fill, border, and no sheen. The sheen
-// is a Notion device -- a 1px lit top edge on a raised panel -- and it reads as
-// a seam once the corners are round.
-void drawRoundedSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor,
-                        float radius);
-// A row that is selected, pointed at, or neither.
-//
-// Selection is a fill and a strip of accent down the left edge -- the shape of
-// a marker in a margin. It used to also outline the row, which made a list of
-// rows read as a list of boxes and made "selected" and "focused" look the same
-// as each other.
-void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot);
 
-// Which surface has the keyboard. Drawn as a strip down the edge nearest the
-// rest of the window rather than as an outline round the whole pane: an outline
-// competes with every border already on screen, and at this size reads as a
-// selected control rather than as "typing goes here".
-void drawFocusEdge(SDL_Renderer* renderer, Rect pane, bool focused);
-// A disclosure triangle, drawn rather than typeset: the UI face has no glyph
-// for one, and a triangle assembled from lines stays crisp at any scale.
-void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color);
+// A row in a list: selected, pointed at, or neither.
+//
+// Hover and selection share a ground, and the 2px strip of accent down the
+// leading edge is the whole of what says "this one" rather than "this is what
+// I would click". Three shades for three states is three shades a reader cannot
+// tell apart; a strip is a difference in kind.
+void drawRow(SDL_Renderer* renderer, Rect row, SDL_Color base, bool emphasized,
+             bool accentStrip = false);
+// The same, against the panel ground, for the callers that have no other base.
+void drawRow(SDL_Renderer* renderer, Rect row, bool selected, bool hot);
+
+// Which surface has the keyboard, as a 1px outline round the pane. An outline
+// rather than an edge strip: the strip is what a selected *row* wears, and one
+// device cannot mean two things.
+void drawFocusRing(SDL_Renderer* renderer, Rect pane, bool focused);
+
+// A folder's disclosure mark: two short strokes meeting at a point, down when
+// open and right when shut. Drawn rather than typeset -- the mono face has no
+// glyph for one, and two lines stay exact at any scale where a glyph would be
+// resampled into a smudge.
+void drawChevron(SDL_Renderer* renderer, float x, float centerY, bool open, SDL_Color color);
+
+// A close cross, and a tick. Both drawn for the same reason as the chevron.
+void drawCloseGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
+void drawCheckGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
+// A single-headed arrow pointing left or right, for the tab strip's overflow
+// buttons and anything else that scrolls a strip.
+void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color);
+
+// A magnifier, for the search field.
+void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
+
+// The favourite mark: filled when the note is kept, an outline when it is an
+// offer. Drawn rather than typeset because the chrome face is a mono
+// programming face and has neither star -- the breadcrumb used to set them from
+// the proportional face, and switching the chrome to mono left tofu where the
+// star had been.
+void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color);
+// Minimise, maximise (or restore), close: `which` is 0, 1, 2 in that order,
+// which is the order they are laid out in.
+void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized,
+                     SDL_Color color);
+
+// A text field's frame: the panel ground with a 1px rule round it, accent when
+// it has the keyboard.
+void drawTextFieldFrame(SDL_Renderer* renderer, Rect box, bool active);
+
+// A button with its label centred. `tone` picks the fill: a neutral button
+// takes the raised ground, a destructive one takes the warning colour.
+enum class ButtonTone {
+  Neutral,
+  Accent,
+  Destructive
+};
+
+class TextRenderer;
 
 class TextRenderer {
 public:
@@ -409,9 +443,27 @@ float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_v
 // A vertical scrollbar down the right of a viewport, drawn only when there is
 // something to scroll. The geometry is exposed because the hit test and the
 // drag both have to agree with what was painted.
-void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll);
-Rect scrollbarTrack(Rect viewport);
-Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll);
+// Where a scrolling surface's scrollbar goes, or nothing when the content fits.
+//
+// One function, asked by the paint, by the hit test, by the cursor shape and by
+// the drag that moves it -- so what is drawn and what responds cannot drift.
+// They did: `PageView` carried a private copy of these numbers, painted the
+// live page's scrollbar from it, and was hit-tested against ui's, so the two
+// agreeing was a coincidence rather than a fact (TD-20).
+struct ScrollbarGeometry {
+  Rect track;
+  Rect thumb;
+
+  friend bool operator==(const ScrollbarGeometry&, const ScrollbarGeometry&) = default;
+};
+
+std::optional<ScrollbarGeometry> scrollbarGeometry(Rect viewport, int scroll, int maxScroll);
+
+// `active` is a live drag, which takes the accent: a thumb being dragged should
+// answer visibly, and at rest it should read as grabbable without shouting.
+void drawScrollbar(SDL_Renderer* renderer, const ScrollbarGeometry& geometry, bool active);
+void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll,
+                           bool active = false);
 // The thumb, grown so it can be grabbed. One inflate governs the grab region
 // and the region that changes the cursor, so they cannot drift apart.
 Rect scrollbarHitRect(Rect thumb);
@@ -423,5 +475,46 @@ void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip&
 // Shortens `value` with an ellipsis until it fits `maxWidth`.
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, const TextStyle& style);
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, bool heading = false, bool mono = false);
+
+// A button with its label centred, in the chrome face.
+void drawButton(SDL_Renderer* renderer, TextRenderer& text, Rect box, std::string_view label,
+                bool enabled, bool hovered, ButtonTone tone = ButtonTone::Neutral);
+
+// One row of a menu: the tick slot, the label, and the accelerator right up
+// against the trailing edge.
+//
+// Shared by the menu bar's popups, the context menus and the command palette,
+// because all three are the same object. They used to be two: an `Overlay`
+// list row and, in microide, a `DrawMenuRow` -- with different heights, so a
+// context menu and the palette that can run the same command looked unrelated.
+void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, std::string_view label,
+                 std::string_view accelerator, bool enabled, bool hovered, bool checked,
+                 bool destructive = false);
+
+// One tab in a strip: a flat fill, a 2px accent lid when it is the active one,
+// the title, and the room its close cross needs kept clear.
+//
+// The lid is what makes the active tab read as continuous with the page under
+// it. The tab used to be rounded at the top and square at the foot, drawn a
+// corner taller than the strip so the clip took the bottom corners off -- a
+// shape that only works while the strip's ground and the page's differ by
+// exactly the right amount.
+struct StripTabColors {
+  SDL_Color activeFill;
+  SDL_Color inactiveFill;
+  SDL_Color hoverFill;
+  SDL_Color activeText;
+  SDL_Color inactiveText;
+};
+
+StripTabColors stripTabColors();
+
+void drawStripTab(SDL_Renderer* renderer, TextRenderer& text, Rect rect, std::string_view label,
+                  bool active, bool hovered, float closeReserve, const StripTabColors& colors);
+
+// The chevron button at a strip's end, with the number of tabs hidden past it.
+// Zero hidden draws nothing at all, so a strip that fits has no furniture.
+void drawStripOverflowButton(SDL_Renderer* renderer, TextRenderer& text, Rect box,
+                             bool pointRight, std::size_t hidden, bool hovered);
 
 }

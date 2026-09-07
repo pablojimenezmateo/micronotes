@@ -46,17 +46,17 @@ struct ShellLayoutInputs {
 // can lay out, paint and hit-test against the same rect unconditionally and let
 // the clip do the work.
 struct ShellLayout {
-  // Full width along the top, above every panel: the breadcrumb, the star, and
-  // the window controls. Reserved whether or not a note is open, so a hit test
-  // against the rest of the window agrees with what was drawn.
-  Rect titleBar;
-  // The icon rail down the leading edge, outside the sidebar rather than inside
-  // it: it is always there, at one width, whether or not any panel is showing.
-  // That is the whole point of it -- with every panel hidden it is still the
-  // way back to them.
-  Rect ribbon;
+  // Full width along the top, above every panel: the menus, the application's
+  // name, and the window controls. Reserved whether or not a note is open, so a
+  // hit test against the rest of the window agrees with what was drawn.
+  Rect menuBar;
   Rect sidebar;      // search field, notebooks, favorites, tags
-  Rect tabs;         // the tab strip above the page
+  // The tab strip and the breadcrumb under it belong to the page's own column,
+  // not to the window: they start where the sidebar ends. A window-wide strip
+  // makes the band above the sidebar change owner depending on what is open,
+  // and puts the tabs of the note you are reading over the tree you are not.
+  Rect tabs;
+  Rect breadcrumb;   // the folder trail, the note's title, the favourite star
   Rect content;      // the page itself
   Rect rightPanel;   // outline, backlinks
   Rect status;       // the status bar, full width under everything

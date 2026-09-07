@@ -164,6 +164,7 @@ set(MICROCORE_SOURCES
 # micronotes-only code: the live-Markdown document model, the note library,
 # and the app shell state.
 set(MICRONOTES_APP_SOURCES
+  src/app/EditCommands.cpp
   src/app/EditorBlocks.cpp
   src/app/FrameTrace.cpp
   src/doc/BlockScan.cpp
@@ -182,7 +183,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/Fuzzy.cpp
   src/ui/ColorMath.cpp
   src/ui/NoteProperties.cpp
-  src/ui/RibbonLayout.cpp
+  src/ui/Menus.cpp
   src/ui/SearchScope.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
@@ -219,12 +220,14 @@ target_compile_definitions(micronotes_core PUBLIC
 # testable at all.
 set(MICRONOTES_SHELL_SOURCES
   src/app/Application.cpp
+  src/app/Breadcrumb.cpp
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
   src/app/Folds.cpp
   src/app/InlineText.cpp
   src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
+  src/app/MenuBar.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
   src/app/PageChrome.cpp
@@ -233,7 +236,6 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/PageView.cpp
   src/app/RawPane.cpp
   src/app/ReadingPage.cpp
-  src/app/Ribbon.cpp
   src/app/RightPanel.cpp
   src/app/Screenshot.cpp
   src/app/Scroll.cpp
@@ -295,7 +297,7 @@ add_executable(micronotes_tests
   tests/OutlineTests.cpp
   tests/PathUtilsTests.cpp
   tests/PerfTraceTests.cpp
-  tests/RibbonLayoutTests.cpp
+  tests/MenusTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
   tests/ShellLayoutTests.cpp

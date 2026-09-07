@@ -2,6 +2,7 @@
 #include "ui/Draw.h"
 
 #include "core/editor/SoftWrap.h"
+#include "ui/ColorMath.h"
 #include "ui/Metrics.h"
 #include "ui/TextUtil.h"
 
@@ -124,175 +125,232 @@ void hLine(SDL_Renderer* renderer, float x1, float x2, float y, SDL_Color color)
   SDL_RenderLine(renderer, x1, y, x2, y);
 }
 
-namespace {
-
-// The largest radius the span buffer below is sized for. Nothing in the shell
-// asks for a corner this round; the cap is here so a bad number cannot walk off
-// the end of the array rather than because a rounder corner was refused.
-constexpr int kMaxCornerRadius = 24;
-
-// How far in from the edge the fill starts on scanline `i` of a corner band.
-// Measured from the middle of the scanline, so the curve sits where the eye
-// expects rather than half a pixel high.
-float cornerInset(float radius, int i) {
-  const float dy = radius - static_cast<float>(i) - 0.5f;
-  const float inner = radius * radius - dy * dy;
-  return radius - std::sqrt(std::max(0.0f, inner));
-}
-
-// The radius a rect can actually hold. A token is chosen for how the shape
-// should read, not for how small the rect will be when a panel is dragged
-// narrow, so the clamp belongs here and not at every call site.
-float usableRadius(Rect rect, float radius) {
-  return std::clamp(radius, 0.0f, std::min({static_cast<float>(kMaxCornerRadius), rect.w / 2.0f, rect.h / 2.0f}));
-}
-
-}
-
-void fillRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius) {
-  const float r = usableRadius(rect, radius);
-  if(r < 1.0f || rect.w <= 0.0f || rect.h <= 0.0f) {
-    fill(renderer, rect, color);
-    return;
-  }
-  const int band = static_cast<int>(r);
-  // Two spans per corner scanline plus the block between them.
-  SDL_FRect spans[kMaxCornerRadius * 2 + 1];
-  int count = 0;
-  spans[count++] = SDL_FRect {rect.x, rect.y + r, rect.w, rect.h - 2.0f * r};
-  for(int i = 0; i < band; ++i) {
-    const float inset = cornerInset(r, i);
-    const float width = rect.w - 2.0f * inset;
-    if(width <= 0.0f) continue;
-    spans[count++] = SDL_FRect {rect.x + inset, rect.y + static_cast<float>(i), width, 1.0f};
-    spans[count++] = SDL_FRect {rect.x + inset, rect.y + rect.h - static_cast<float>(i) - 1.0f, width, 1.0f};
-  }
-  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  SDL_RenderFillRects(renderer, spans, count);
-}
-
-void strokeRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float radius) {
-  const float r = usableRadius(rect, radius);
-  if(r < 1.0f || rect.w <= 0.0f || rect.h <= 0.0f) {
-    stroke(renderer, rect, color);
-    return;
-  }
-  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  const float right = rect.x + rect.w;
-  const float bottom = rect.y + rect.h;
-  // The four straight edges, each stopping where its corners begin.
-  SDL_RenderLine(renderer, rect.x + r, rect.y, right - r - 1.0f, rect.y);
-  SDL_RenderLine(renderer, rect.x + r, bottom - 1.0f, right - r - 1.0f, bottom - 1.0f);
-  SDL_RenderLine(renderer, rect.x, rect.y + r, rect.x, bottom - r - 1.0f);
-  SDL_RenderLine(renderer, right - 1.0f, rect.y + r, right - 1.0f, bottom - r - 1.0f);
-  // The corners, one point per scanline. Four points share each scanline, which
-  // is why they are gathered rather than drawn one call at a time.
-  SDL_FPoint points[kMaxCornerRadius * 4];
-  int count = 0;
-  const int band = static_cast<int>(r);
-  for(int i = 0; i < band; ++i) {
-    const float inset = cornerInset(r, i);
-    const float y = rect.y + static_cast<float>(i);
-    const float flipped = bottom - static_cast<float>(i) - 1.0f;
-    points[count++] = SDL_FPoint {rect.x + inset, y};
-    points[count++] = SDL_FPoint {right - inset - 1.0f, y};
-    points[count++] = SDL_FPoint {rect.x + inset, flipped};
-    points[count++] = SDL_FPoint {right - inset - 1.0f, flipped};
-  }
-  SDL_RenderPoints(renderer, points, count);
-}
-
-void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme().surfaceRaised, SDL_Color borderColor = theme().border) {
+void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme().surfaceRaised,
+                 SDL_Color borderColor = theme().border) {
   fill(renderer, rect, fillColor);
+  // No sheen. A lit 1px top edge is what made a panel read as raised out of the
+  // page; these panels are meant to read as cut into it, and the sheen was the
+  // last thing left of the shell that had radii.
+  if(borderColor.r == fillColor.r && borderColor.g == fillColor.g &&
+     borderColor.b == fillColor.b && borderColor.a == fillColor.a) {
+    return;
+  }
   stroke(renderer, rect, borderColor);
-  hLine(renderer, rect.x + 1, rect.x + rect.w - 2, rect.y + 1, theme().border);
 }
 
-void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot) {
-  // A rounded fill and nothing else.
-  //
-  // It used to be a fill plus a strip of accent down the left edge, and before
-  // that an outline as well. The strip was there to say "this one" louder than
-  // the fill could, on a palette where the selected fill was two shades off the
-  // panel behind it. On this one it is not: the fill carries the whole message,
-  // and a column of accent bars down a tree reads as a series of tabs.
-  if(selected) fillRounded(renderer, row, theme().rowHighlight, kRadiusSmall);
-  else if(hot) fillRounded(renderer, row, theme().rowHighlight, kRadiusSmall);
+void drawRow(SDL_Renderer* renderer, Rect row, SDL_Color base, bool emphasized, bool accentStrip) {
+  fill(renderer, row, emphasized ? theme().rowHighlight : base);
+  if(!emphasized || !accentStrip) return;
+  fill(renderer, {row.x, row.y, kRowAccentWidth, row.h}, theme().accent);
 }
 
-void drawFocusEdge(SDL_Renderer* renderer, Rect pane, bool focused) {
-  if(!focused || pane.w <= 0.0f) return;
-  fill(renderer, {pane.x, pane.y, kFocusEdgeWidth, pane.h}, theme().accent);
+void drawRow(SDL_Renderer* renderer, Rect row, bool selected, bool hot) {
+  if(!selected && !hot) return;
+  drawRow(renderer, row, theme().surfaceBackground, true, selected);
 }
 
-void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color) {
+void drawFocusRing(SDL_Renderer* renderer, Rect pane, bool focused) {
+  if(!focused || pane.w <= 0.0f || pane.h <= 0.0f) return;
+  stroke(renderer, pane, theme().accent);
+}
+
+void drawChevron(SDL_Renderer* renderer, float x, float centerY, bool open, SDL_Color color) {
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  const float cx = std::round(x);
+  const float cy = std::round(centerY);
+  if(open) {
+    // Pointing down: two strokes meeting below their ends.
+    SDL_RenderLine(renderer, cx, cy - 2.0f, cx + 4.0f, cy + 2.0f);
+    SDL_RenderLine(renderer, cx + 8.0f, cy - 2.0f, cx + 4.0f, cy + 2.0f);
+    return;
+  }
+  SDL_RenderLine(renderer, cx + 2.0f, cy - 4.0f, cx + 6.0f, cy);
+  SDL_RenderLine(renderer, cx + 2.0f, cy + 4.0f, cx + 6.0f, cy);
+}
+
+void drawCloseGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   const float cx = std::round(box.x + box.w / 2.0f);
   const float cy = std::round(box.y + box.h / 2.0f);
+  SDL_RenderLine(renderer, cx - 3.0f, cy - 3.0f, cx + 3.0f, cy + 3.0f);
+  SDL_RenderLine(renderer, cx + 3.0f, cy - 3.0f, cx - 3.0f, cy + 3.0f);
+}
+
+void drawCheckGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  for(int i = 0; i < 5; ++i) {
-    const float span = 4.0f - static_cast<float>(i);
-    if(open) SDL_RenderLine(renderer, cx - span, cy - 2.0f + static_cast<float>(i), cx + span, cy - 2.0f + static_cast<float>(i));
-    else SDL_RenderLine(renderer, cx - 2.0f + static_cast<float>(i), cy - span, cx - 2.0f + static_cast<float>(i), cy + span);
+  const float cx = std::round(box.x + box.w / 2.0f);
+  const float cy = std::round(box.y + box.h / 2.0f);
+  // Two strokes, the short arm down-right and the long one up-right. Doubled a
+  // pixel apart so the tick has some weight against a row's ground; a
+  // single-pixel tick disappears next to the label beside it.
+  for(float d = 0.0f; d <= 1.0f; d += 1.0f) {
+    SDL_RenderLine(renderer, cx - 4.0f, cy + d, cx - 1.0f, cy + 3.0f + d);
+    SDL_RenderLine(renderer, cx - 1.0f, cy + 3.0f + d, cx + 4.0f, cy - 3.0f + d);
   }
+}
+
+void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color) {
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  const float cx = std::round(box.x + box.w / 2.0f);
+  const float cy = std::round(box.y + box.h / 2.0f);
+  const float arm = std::max(3.0f, box.h * 0.22f);
+  const float dx = pointRight ? arm * 0.5f : -arm * 0.5f;
+  SDL_RenderLine(renderer, cx - dx, cy - arm, cx + dx, cy);
+  SDL_RenderLine(renderer, cx + dx, cy, cx - dx, cy + arm);
+}
+
+void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  // A ring and a handle. The ring is a rounded outline rather than a circle: at
+  // twelve pixels the difference is invisible and the outline is exact.
+  const float ring = std::max(6.0f, box.w - 4.0f);
+  stroke(renderer, {box.x, box.y, ring, ring}, color);
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  SDL_RenderLine(renderer, box.x + ring - 1.0f, box.y + ring - 1.0f, box.x + box.w - 1.0f,
+                 box.y + box.h - 1.0f);
+}
+
+void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color) {
+  const float cx = std::round(box.x + box.w / 2.0f);
+  const float cy = std::round(box.y + box.h / 2.0f);
+  const float r = std::max(4.0f, std::min(box.w, box.h) / 2.0f - 1.0f);
+  // Five points, alternating outer and inner radius. Built as a polygon and
+  // then either scan-filled or stroked, so the two states are the same shape --
+  // a filled star and an outline of a different star would read as two marks.
+  constexpr int kPoints = 10;
+  SDL_FPoint hull[kPoints + 1];
+  for(int i = 0; i < kPoints; ++i) {
+    const float radius = (i % 2 == 0) ? r : r * 0.42f;
+    // Starting at -90 degrees, so a point sits at the top where the eye looks.
+    const float angle = -1.5707963f + static_cast<float>(i) * 3.14159265f / 5.0f;
+    hull[i] = SDL_FPoint {cx + std::cos(angle) * radius, cy + std::sin(angle) * radius};
+  }
+  hull[kPoints] = hull[0];
+
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  if(!filled) {
+    SDL_RenderLines(renderer, hull, kPoints + 1);
+    return;
+  }
+  // Scanline fill: for each row, the span between the leftmost and rightmost
+  // crossing of the outline. A star is not convex, so this over-fills the two
+  // notches either side of the bottom points by a pixel or so -- at twelve
+  // pixels that is what a filled star looks like anyway, and it costs one
+  // submit rather than a triangulation.
+  SDL_FRect spans[64];
+  int count = 0;
+  const int top = static_cast<int>(std::floor(cy - r));
+  const int bottom = static_cast<int>(std::ceil(cy + r));
+  for(int y = top; y <= bottom && count < 64; ++y) {
+    const float row = static_cast<float>(y) + 0.5f;
+    float left = 0.0f;
+    float right = 0.0f;
+    bool any = false;
+    for(int i = 0; i < kPoints; ++i) {
+      const SDL_FPoint a = hull[i];
+      const SDL_FPoint b = hull[i + 1];
+      if((row < a.y && row < b.y) || (row >= a.y && row >= b.y)) continue;
+      const float t = (row - a.y) / (b.y - a.y);
+      const float x = a.x + (b.x - a.x) * t;
+      if(!any) {
+        left = x;
+        right = x;
+        any = true;
+        continue;
+      }
+      left = std::min(left, x);
+      right = std::max(right, x);
+    }
+    if(!any || right - left < 0.5f) continue;
+    spans[count++] = SDL_FRect {std::round(left), static_cast<float>(y),
+                                std::round(right - left), 1.0f};
+  }
+  if(count > 0) SDL_RenderFillRects(renderer, spans, count);
+}
+
+void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized,
+                     SDL_Color color) {
+  const float cx = std::round(box.x + box.w / 2.0f);
+  const float cy = std::round(box.y + box.h / 2.0f);
+  const auto line = [&](float x1, float y1, float x2, float y2) {
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    SDL_RenderLine(renderer, x1, y1, x2, y2);
+  };
+  if(which == 0) {
+    hLine(renderer, cx - 4.0f, cx + 4.0f, cy, color);
+    return;
+  }
+  if(which == 1) {
+    if(maximized) {
+      // Two offset outlines: the restored window in front of the space it
+      // currently fills.
+      stroke(renderer, {cx - 4.0f, cy - 1.0f, 7.0f, 7.0f}, color);
+      hLine(renderer, cx - 1.0f, cx + 3.0f, cy - 4.0f, color);
+      line(cx + 3.0f, cy - 4.0f, cx + 3.0f, cy + 1.0f);
+    } else {
+      stroke(renderer, {cx - 4.0f, cy - 4.0f, 8.0f, 8.0f}, color);
+    }
+    return;
+  }
+  line(cx - 4.0f, cy - 4.0f, cx + 4.0f, cy + 4.0f);
+  line(cx - 4.0f, cy + 4.0f, cx + 4.0f, cy - 4.0f);
+}
+
+void drawTextFieldFrame(SDL_Renderer* renderer, Rect box, bool active) {
+  fill(renderer, box, theme().surfaceBackground);
+  stroke(renderer, box, active ? theme().accent : theme().border);
 }
 
 void drawSurface(SDL_Renderer* renderer, Rect rect) {
   drawSurface(renderer, rect, theme().surfaceRaised, theme().border);
 }
 
-void drawRoundedSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor,
-                        float radius) {
-  fillRounded(renderer, rect, fillColor, radius);
-  // A border the same colour as the fill is how a caller asks for a surface
-  // with no edge at all; stroking it anyway would only cost a draw call.
-  if(borderColor.r == fillColor.r && borderColor.g == fillColor.g && borderColor.b == fillColor.b &&
-     borderColor.a == fillColor.a) {
-    return;
-  }
-  strokeRounded(renderer, rect, borderColor, radius);
-}
+std::optional<ScrollbarGeometry> scrollbarGeometry(Rect viewport, int scroll, int maxScroll) {
+  if(maxScroll <= 0 || viewport.w <= 0.0f || viewport.h <= 0.0f) return std::nullopt;
+  const float trackH = viewport.h - kScrollbarInset * 2.0f;
+  if(trackH <= kScrollbarMinThumbLength) return std::nullopt;
 
-Rect scrollbarTrack(Rect viewport) {
-  return {viewport.x + viewport.w - kScrollbarInsetX, viewport.y + kScrollbarInsetY,
-          kScrollbarTrackWidth,
-          std::max(kScrollbarMinTrack, viewport.h - kScrollbarInsetY * 2.0f)};
-}
-
-Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll) {
-  if(maxScroll <= 0) return {};
-  const auto track = scrollbarTrack(viewport);
-  const float visibleRatio =
-    std::clamp(viewport.h / (viewport.h + static_cast<float>(maxScroll)), kScrollbarMinThumbRatio, 1.0f);
-  const float thumbH = std::max(kScrollbarMinThumb, track.h * visibleRatio);
+  ScrollbarGeometry geometry;
+  geometry.track = {viewport.x + viewport.w - kScrollbarThickness - kScrollbarInset,
+                    viewport.y + kScrollbarInset, kScrollbarThickness, trackH};
+  // What share of the whole the viewport shows. `maxScroll` is the pixels of
+  // content past the bottom, so the whole is the viewport plus that.
+  const float visible = viewport.h / (viewport.h + static_cast<float>(maxScroll));
+  const float thumbH = std::clamp(trackH * visible, kScrollbarMinThumbLength, trackH);
   const float t = static_cast<float>(std::clamp(scroll, 0, maxScroll)) / static_cast<float>(maxScroll);
-  // Centred on the track, which is what makes the thumb read as a handle on it
-  // rather than as a wider fill of it.
-  return {track.x - (kScrollbarThumbWidth - kScrollbarTrackWidth) / 2.0f,
-          track.y + (track.h - thumbH) * t, kScrollbarThumbWidth, thumbH};
+  // The thumb fills the track's width. A narrower handle on a wider rail reads
+  // as decoration until the pointer is already on it.
+  geometry.thumb = {geometry.track.x, std::round(geometry.track.y + (trackH - thumbH) * t),
+                    geometry.track.w, std::round(thumbH)};
+  return geometry;
 }
 
-// Composed from the two above rather than repeating their arithmetic, so what
-// is painted and what is hit-tested cannot drift. They did: `PageView` carried
-// a private fourth copy of these numbers, painted the live page's scrollbar
-// from it, and was hit-tested against these -- identical only by luck.
-void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
-  if(maxScroll <= 0) return;
-  fill(renderer, scrollbarTrack(viewport), theme().surfaceRaised);
-  const Rect thumb = scrollbarThumb(viewport, scroll, maxScroll);
-  fill(renderer, thumb, theme().textMuted);
-  stroke(renderer, thumb, theme().border);
+void drawScrollbar(SDL_Renderer* renderer, const ScrollbarGeometry& geometry, bool active) {
+  fill(renderer, geometry.track, theme().surfaceRaised);
+  // A resting thumb has to read as grabbable at a glance, so it is the muted
+  // ink pulled most of the way toward the track rather than a shade of it; a
+  // live drag takes the accent, so the grab gives a strong, distinct response.
+  fill(renderer, geometry.thumb,
+       active ? theme().accent : blend(theme().textMuted, theme().surfaceRaised, 0.6f));
+}
+
+void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll,
+                           bool active) {
+  if(const auto geometry = scrollbarGeometry(viewport, scroll, maxScroll)) {
+    drawScrollbar(renderer, *geometry, active);
+  }
 }
 
 Rect scrollbarHitRect(Rect thumb) {
-  return {thumb.x - kScrollbarInsetX, thumb.y - kScrollbarHitInflate / 2.0f,
-          thumb.w + kScrollbarInsetX * 2.0f, thumb.h + kScrollbarHitInflate};
+  if(empty(thumb)) return thumb;
+  return {thumb.x - kScrollbarHitInflate, thumb.y - kScrollbarHitInflate,
+          thumb.w + kScrollbarHitInflate * 2.0f, thumb.h + kScrollbarHitInflate * 2.0f};
 }
 
 int scrollFromThumbY(Rect viewport, float y, float dragOffsetY, int maxScroll) {
-  const auto track = scrollbarTrack(viewport);
-  const auto thumb = scrollbarThumb(viewport, 0, maxScroll);
-  const float range = std::max(1.0f, track.h - thumb.h);
-  const float t = std::clamp((y - dragOffsetY - track.y) / range, 0.0f, 1.0f);
+  const auto geometry = scrollbarGeometry(viewport, 0, maxScroll);
+  if(!geometry) return 0;
+  const float range = std::max(1.0f, geometry->track.h - geometry->thumb.h);
+  const float t = std::clamp((y - dragOffsetY - geometry->track.y) / range, 0.0f, 1.0f);
   return static_cast<int>(std::round(t * static_cast<float>(maxScroll)));
 }
 
@@ -302,7 +360,7 @@ void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip&
   const float width = static_cast<float>(text.width(tooltip.text, style)) + kTooltipPadX * 2.0f;
   const float height = static_cast<float>(text.lineHeight(style)) + kTooltipPadY * 2.0f;
   const Rect card = placeTooltip(tooltip.anchor, width, height, bounds);
-  drawRoundedSurface(renderer, card, theme().overlayBackground, theme().border, kRadiusSmall);
+  drawSurface(renderer, card, theme().overlayBackground, theme().border);
   text.draw(tooltip.text, card.x + kTooltipPadX, card.y + kTooltipPadY, theme().textPrimary, style);
 }
 
@@ -360,6 +418,115 @@ float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_v
     y += static_cast<float>(text.lineHeight(keyStyle));
   }
   return y + 14.0f - top;
+}
+
+void drawButton(SDL_Renderer* renderer, TextRenderer& text, Rect box, std::string_view label,
+                bool enabled, bool hovered, ButtonTone tone) {
+  SDL_Color fillColor = theme().surfaceRaised;
+  SDL_Color borderColor = theme().border;
+  SDL_Color ink = theme().textPrimary;
+  if(tone == ButtonTone::Accent) {
+    fillColor = theme().accent;
+    borderColor = theme().accent;
+    ink = theme().onAccent;
+  } else if(tone == ButtonTone::Destructive) {
+    fillColor = theme().warn;
+    borderColor = theme().warn;
+    ink = theme().onAccent;
+  }
+  if(!enabled) {
+    fillColor = theme().surfaceBackground;
+    borderColor = theme().border;
+    ink = theme().textDisabled;
+  } else if(hovered) {
+    // Toward the ink rather than toward a second fill: one blend serves all
+    // three tones, where a hover colour per tone is three more constants that
+    // have to be kept in step with the three they hover over.
+    fillColor = blend(fillColor, ink, 0.14f);
+  }
+  fill(renderer, box, fillColor);
+  stroke(renderer, box, borderColor);
+
+  const TextStyle style = chromeStyle();
+  const float width = static_cast<float>(text.width(label, style));
+  text.draw(label, std::round(box.x + (box.w - width) / 2.0f), textTop(box, text, style), ink, style);
+}
+
+void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, std::string_view label,
+                 std::string_view accelerator, bool enabled, bool hovered, bool checked,
+                 bool destructive) {
+  if(hovered && enabled) fill(renderer, row, theme().rowHighlight);
+  const TextStyle style = chromeStyle();
+  const SDL_Color ink = !enabled ? theme().textDisabled
+                       : destructive ? theme().warn
+                       : hovered ? theme().textPrimary
+                                 : theme().textSecondary;
+  if(checked) {
+    drawCheckGlyph(renderer, {row.x + kSpace2, row.y, 12.0f, row.h},
+                   enabled ? theme().accent : theme().textDisabled);
+  }
+  const float baseline = textTop(row, text, style);
+  const float acceleratorWidth =
+    accelerator.empty() ? 0.0f : static_cast<float>(text.width(accelerator, style));
+  const float labelRoom = row.w - kMenuPopupLabelInset - kMenuPopupAcceleratorInset -
+                          acceleratorWidth - kSpace2;
+  text.draw(ellipsizeToWidth(text, std::string(label), static_cast<int>(labelRoom), style),
+            row.x + kMenuPopupLabelInset, baseline, ink, style);
+  if(accelerator.empty()) return;
+  // The accelerator is never ellipsized: a chord with its tail cut off is worse
+  // than no chord at all, and the popup's width was measured to hold it.
+  text.draw(accelerator, row.x + row.w - acceleratorWidth - kMenuPopupAcceleratorInset, baseline,
+            enabled ? theme().textMuted : theme().textDisabled, style);
+}
+
+StripTabColors stripTabColors() {
+  return {
+    theme().chromeActive,
+    theme().chromeBackground,
+    theme().rowHighlight,
+    theme().chromeActiveText,
+    theme().chromeTextSecondary,
+  };
+}
+
+void drawStripTab(SDL_Renderer* renderer, TextRenderer& text, Rect rect, std::string_view label,
+                  bool active, bool hovered, float closeReserve, const StripTabColors& colors) {
+  const SDL_Color background = active ? colors.activeFill
+                             : hovered ? colors.hoverFill
+                                       : colors.inactiveFill;
+  fill(renderer, rect, background);
+  // The lid, not an outline: it says which tab the page below belongs to, and
+  // an outline would say "this tab is selected" about a strip where exactly one
+  // tab is always selected.
+  if(active) fill(renderer, {rect.x, rect.y, rect.w, kRowAccentWidth}, theme().accent);
+  // A rule between one tab and the next, so two inactive neighbours do not read
+  // as one wide tab. Skipped on the active one, which its own fill separates.
+  if(!active) {
+    fill(renderer, {rect.x + rect.w - kDividerThickness, rect.y + kSpace1, kDividerThickness,
+                    rect.h - kSpace1 * 2.0f}, theme().border);
+  }
+
+  const TextStyle style = chromeStyle();
+  const float left = rect.x + kSidebarInset;
+  const int room = static_cast<int>(rect.x + rect.w - closeReserve - left);
+  text.draw(ellipsizeToWidth(text, std::string(label), room, style), left,
+            textTop(rect, text, style), active ? colors.activeText : colors.inactiveText, style);
+}
+
+void drawStripOverflowButton(SDL_Renderer* renderer, TextRenderer& text, Rect box,
+                             bool pointRight, std::size_t hidden, bool hovered) {
+  if(hidden == 0 || empty(box)) return;
+  const SDL_Color background = hovered ? theme().rowHighlight : theme().chromeBackground;
+  const SDL_Color ink = hovered ? theme().textPrimary : theme().chromeTextSecondary;
+  fill(renderer, box, background);
+  stroke(renderer, box, theme().border);
+  drawArrowGlyph(renderer, {box.x, box.y, 16.0f, box.h}, pointRight, ink);
+
+  const TextStyle style = chromeSmallStyle();
+  const std::string count = std::to_string(hidden);
+  const float width = static_cast<float>(text.width(count, style));
+  if(width + 18.0f > box.w) return;
+  text.draw(count, box.x + box.w - width - kSpace1, textTop(box, text, style), ink, style);
 }
 
 }

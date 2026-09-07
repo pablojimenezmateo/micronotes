@@ -12,11 +12,12 @@ namespace micronotes::app {
 
 struct UiRuntime;
 
-// The two strips that frame the page: the one along the top carrying the trail
-// of notebooks down to the open note, the star that pins it and the controls
-// this borderless window draws for itself; and the line along the bottom that
-// says where you are and how to get somewhere else.
-void drawTitleBar(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
+// The line along the bottom of the window: whether the note is saved, what just
+// happened, which view you are in, and how much you have written.
+//
+// The strip that used to be its counterpart along the top is two things now: a
+// menu bar (`app/MenuBar.h`), and the breadcrumb band over the page
+// (`app/Breadcrumb.h`) that carries the trail down to the open note.
 void drawStatus(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
 // A note's icon, or a drawn mark when no emoji face is installed. Shared with

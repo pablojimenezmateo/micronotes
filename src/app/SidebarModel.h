@@ -29,35 +29,41 @@ namespace micronotes::app {
 
 // The tree is drawn as a flat list: one row height, one indent per level, and
 // the nesting carried entirely by that indent.
-inline constexpr float kSidebarIndent = 13.0f;
+//
+// Entirely -- there are no guide hairlines down the levels any more. They were
+// there to say which folder a row six levels down belonged to, which is what
+// the indent and the chevron above it already say; a column of rules down a
+// panel reads as a table, and the tree is not one.
+inline constexpr float kSidebarIndent = ui::kTreeIndentWidth;
 
-// Left to right inside a row: the gutter that holds a disclosure triangle or a
+// Left to right inside a row: the slot that holds a folder's chevron or a
 // note's icon, then the label.
 //
 // One pair of numbers for the whole list. A section heading, a tag, a search
 // result and a tree row are four kinds of row in one column, and they used to
 // start their text at four different x -- 18, 20, 20 and 28 -- because each was
 // nudged into place on its own. Nothing in the list lined up with anything else.
-inline constexpr float kSidebarGutterX = ui::kSpace1;
-inline constexpr float kSidebarGutterWidth = 16.0f;
-inline constexpr float kSidebarLabelX = kSidebarGutterX + kSidebarGutterWidth + ui::kSpace1;
+inline constexpr float kSidebarGutterX = ui::kSidebarInset;
+inline constexpr float kSidebarGutterWidth = ui::kTreeChevronSlotWidth;
+inline constexpr float kSidebarLabelX = kSidebarGutterX + kSidebarGutterWidth + ui::kTreeLabelGap;
 
 // The sidebar's vertical rhythm.
 //
 // Every row holds a line of text, and text grows with the reader's text size
-// while chrome stays put -- so a row nailed to 26 pixels was a row that, at the
+// while chrome stays put -- so a row nailed to 20 pixels was a row that, at the
 // large size, drew its label into the row beneath it. The floors are what the
-// medium size already gave, so a reader who has not touched the setting sees
-// nothing move.
+// default mono chrome size gives, which is where the tree's density comes from:
+// a 20px row against the 26px this replaced fits a third more of the library on
+// screen, and that is most of what makes a tree feel like an IDE's.
 //
 // Taken as line heights rather than as a renderer, so the model stays free of
 // the font: the draw measures, this decides, and both are testable apart.
 struct SidebarMetrics {
-  float row = 26.0f;
-  float tag = 24.0f;
-  float label = 34.0f;
-  float resultTitle = 24.0f;
-  float snippet = 16.0f;
+  float row = ui::kSidebarRowHeight;
+  float tag = ui::kSidebarRowHeight;
+  float label = 26.0f;
+  float resultTitle = ui::kSidebarRowHeight;
+  float snippet = 15.0f;
 };
 
 SidebarMetrics sidebarMetrics(int uiLineHeight, int snippetLineHeight);

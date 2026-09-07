@@ -35,13 +35,16 @@ SidebarMetrics sidebarMetrics(int uiLineHeight, int snippetLineHeight) {
   const float line = static_cast<float>(uiLineHeight);
   const float small = static_cast<float>(snippetLineHeight);
   SidebarMetrics metrics;
-  metrics.row = std::max(metrics.row, line + ui::kSpace2);
-  metrics.tag = std::max(metrics.tag, line + ui::kSpace1);
+  // A row is its line of text plus a hair of air, not plus a whole spacing
+  // step: the tree is meant to be dense, and the step was what made a
+  // twenty-note folder need scrolling.
+  metrics.row = std::max(metrics.row, line + 2.0f);
+  metrics.tag = std::max(metrics.tag, line + 2.0f);
   // A heading over a list wants the air above it that separates it from the
   // list before, which is why it is the one row with a whole step of padding.
-  metrics.label = std::max(metrics.label, line + ui::kSpace4);
-  metrics.resultTitle = std::max(metrics.resultTitle, line + ui::kSpace1);
-  metrics.snippet = std::max(metrics.snippet, small + 2.0f);
+  metrics.label = std::max(metrics.label, line + ui::kSpace3);
+  metrics.resultTitle = std::max(metrics.resultTitle, line + 2.0f);
+  metrics.snippet = std::max(metrics.snippet, small + 1.0f);
   return metrics;
 }
 

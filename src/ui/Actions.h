@@ -22,6 +22,7 @@ enum class ActionId {
   SearchAllNotes,
   Shortcuts,
   Settings,
+  Quit,
 
   NewNote,
   NewFolder,

@@ -122,16 +122,23 @@ MICRONOTES_TEST(shell_sidebar_row_band_is_the_rows_that_touch_it) {
   MICRONOTES_REQUIRE(none.first == none.second);
 }
 
-// Chrome stays put while text grows with the reader's size setting, so a row
-// nailed to 26 pixels drew its label into the row beneath it at the large size.
-MICRONOTES_TEST(shell_sidebar_metrics_never_fall_below_the_medium_size) {
+// A tree of one-line rows at the density an IDE's file tree has, and never
+// tighter than the line of text a row holds -- text grows with the reader's
+// size setting, so a row nailed to a constant draws its label into the row
+// beneath it at the large size.
+MICRONOTES_TEST(shell_sidebar_metrics_never_fall_below_the_default_density) {
   const auto small = sidebarMetrics(10, 8);
-  MICRONOTES_REQUIRE(small.row >= 26.0f);
-  MICRONOTES_REQUIRE(small.tag >= 24.0f);
-  MICRONOTES_REQUIRE(small.label >= 34.0f);
+  MICRONOTES_REQUIRE(small.row >= micronotes::ui::kSidebarRowHeight);
+  MICRONOTES_REQUIRE(small.tag >= micronotes::ui::kSidebarRowHeight);
+  // A heading over a list keeps the air that separates it from the list before.
+  MICRONOTES_REQUIRE(small.label > small.row);
   const auto large = sidebarMetrics(30, 22);
   MICRONOTES_REQUIRE(large.row > small.row);
   MICRONOTES_REQUIRE(large.snippet > small.snippet);
+  // And a row is its line of text plus a hair, not plus a whole spacing step:
+  // the density is most of what makes a tree read as a file tree, and a step
+  // per row is what made a twenty-note folder need scrolling.
+  MICRONOTES_REQUIRE(large.row <= 34.0f);
   // A result row has to hold its title and every matching line it lists.
   MICRONOTES_REQUIRE(searchResultRowHeight(3, large) >
                      searchResultRowHeight(1, large));

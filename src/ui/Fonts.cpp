@@ -44,6 +44,7 @@ const TypeScale& typeScale() {
     scaled.small *= scale;
     scaled.tiny *= scale;
     scaled.mono *= scale;
+    scaled.chrome *= scale;
   }
   return scaled;
 }
@@ -133,6 +134,16 @@ float headingSize(int level) {
     case 3: return t.h3;
     default: return t.h4;
   }
+}
+
+TextStyle chromeStyle() {
+  return {FontFamily::Mono, false, false, typeScale().chrome};
+}
+
+TextStyle chromeSmallStyle() {
+  // Not a second entry in the scale: one step down from the chrome size, taken
+  // as a ratio so the two move together when the reader changes the text size.
+  return {FontFamily::Mono, false, false, typeScale().chrome * 0.85f};
 }
 
 #if MICRONOTES_HAS_SDL3_TTF

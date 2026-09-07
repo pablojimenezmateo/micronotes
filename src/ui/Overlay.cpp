@@ -361,7 +361,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
 
   // Rounded, like every other floating surface: a square-cornered card over a
   // page of rounded blocks reads as a screenshot pasted on top of the window.
-  drawRoundedSurface(renderer, layout.panel, theme().overlayBackground, theme().border, kRadiusLarge);
+  drawSurface(renderer, layout.panel, theme().overlayBackground, theme().border);
 
   const TextStyle titleStyle {FontFamily::Sans, true, false, type().small};
   const TextStyle bodyStyle {FontFamily::Sans, false, false, type().ui};
@@ -374,7 +374,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   }
 
   if(usesField(*overlay)) {
-    drawRoundedSurface(renderer, layout.field, theme().surfaceBackground, theme().accent, kRadiusSmall);
+    drawSurface(renderer, layout.field, theme().surfaceBackground, theme().accent);
     // `textTop`, like every other centred line in the shell. These four sites
     // each centred by hand and none of them rounded, so the palette's text
     // landed on half pixels and its glyph stems smeared.
@@ -410,8 +410,8 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       // Confirm wears the destructive colour: every Confirm overlay in the shell
       // asks about a deletion, and a button that is about to delete something
       // should not look like the one beside it that will not.
-      drawRoundedSurface(renderer, rect, isConfirm ? theme().warn : (hot ? theme().rowHighlight : theme().surfaceRaised),
-                         isConfirm ? theme().warn : theme().border, kRadiusSmall);
+      drawSurface(renderer, rect, isConfirm ? theme().warn : (hot ? theme().rowHighlight : theme().surfaceRaised),
+                         isConfirm ? theme().warn : theme().border);
       const auto label = isConfirm ? overlay->confirmLabel : std::string("Cancel");
       const int labelW = text.width(label, bodyStyle);
       text.draw(label, std::round(rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f),
@@ -422,9 +422,9 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     const auto& item = overlay->items[static_cast<std::size_t>(index)];
     const bool selected = index == overlay->highlighted;
     if(selected) {
-      fillRounded(renderer, rect, theme().rowHighlight, kRadiusSmall);
+      fill(renderer, rect, theme().rowHighlight);
     } else if(contains(rect, mouseX_, mouseY_) && item.enabled) {
-      fillRounded(renderer, rect, theme().rowHighlight, kRadiusSmall);
+      fill(renderer, rect, theme().rowHighlight);
     }
     const SDL_Color label = !item.enabled ? theme().textMuted : (item.destructive ? theme().warn : theme().textPrimary);
     const float labelY = textTop(rect, text, bodyStyle);
@@ -467,8 +467,8 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     // fraction and the thumb's travel come out identical to what was here.
     const float shown = static_cast<float>(layout.itemRects.size());
     const float pitch = (layout.itemRects.back().y + layout.itemRects.back().h - layout.itemRects.front().y) / shown;
-    const Rect band {layout.panel.x, layout.itemRects.front().y - kScrollbarInsetY, layout.panel.w,
-                     shown * pitch + kScrollbarInsetY * 2.0f};
+    const Rect band {layout.panel.x, layout.itemRects.front().y - kScrollbarInset, layout.panel.w,
+                     shown * pitch + kScrollbarInset * 2.0f};
     const int hidden = static_cast<int>(filtered.size() - layout.itemRects.size());
     drawVerticalScrollbar(renderer, band, static_cast<int>(std::lround(static_cast<float>(overlay->scroll) * pitch)),
                           static_cast<int>(std::lround(static_cast<float>(hidden) * pitch)));

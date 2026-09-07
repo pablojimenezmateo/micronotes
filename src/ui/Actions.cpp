@@ -20,6 +20,7 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::SearchAllNotes,  "search",         "Search every note",               "Ctrl+Shift+F", "",              S::Navigation, false, true, ""},
   {ActionId::Shortcuts,       "shortcuts",      "Keyboard shortcuts...",           "F1",           "",              S::Navigation, false, true, ""},
   {ActionId::Settings,        "settings",       "Settings...",                     "Ctrl+,",       "",              S::Navigation, false, true, ""},
+  {ActionId::Quit,            "quit",           "Quit micronotes",                 "Ctrl+Q",       "",              S::Navigation, false, true, ""},
 
   {ActionId::NewNote,         "new-note",       "New note",                        "Ctrl+N",       "",              S::Notes, false, true, ""},
   {ActionId::NewFolder,       "new-folder",     "New notebook",                    "",             "",              S::Notes, false, true, ""},

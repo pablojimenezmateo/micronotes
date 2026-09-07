@@ -10,7 +10,9 @@
 #include "app/LivePage.h"
 #include "app/ReadingPage.h"
 #include "app/SessionState.h"
-#include "app/Ribbon.h"
+#include "app/Breadcrumb.h"
+#include "app/EditCommands.h"
+#include "app/MenuBar.h"
 #include "app/Scroll.h"
 #include "app/RightPanel.h"
 #include "app/Chrome.h"
@@ -98,7 +100,7 @@ using micronotes::ui::computeShellLayout;
 using micronotes::ui::TextRenderer;
 using micronotes::ui::clipRect;
 using micronotes::ui::contains;
-using micronotes::ui::drawSelection;
+using micronotes::ui::drawRow;
 using micronotes::ui::drawEmptyMessage;
 using micronotes::ui::drawSectionLabel;
 using micronotes::ui::drawSurface;
@@ -119,213 +121,6 @@ using micronotes::ui::theme;
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
 // The shell's geometry, as a pure function of the window and the shell model.
-// Block transforms arrive as one erase-and-insert, so they land on the editor's
-// single undo stack instead of keeping state of their own.
-static bool applyEdit(UiRuntime& ui, const doc::Edit& edit) {
-  if(!edit.valid) return false;
-  ui.editor.replaceRange(edit.start, edit.end, edit.text);
-  if(edit.selects) ui.editor.selectRange(edit.anchor, edit.cursor);
-  else ui.editor.moveCursor(edit.cursor);
-  ui.markEdited();
-  ui.revealEditorCursor = true;
-  return true;
-}
-
-// Runs a transform against the buffer as it stands right now. Chaining these
-// with `||` is safe: a transform only sees the buffer when the earlier ones
-// declined to change it -- and a transform that did change it has moved the
-// editor's revision on, so the next one in the chain is handed no partition
-// rather than a stale one.
-template <typename Transform>
-static bool applyTransform(UiRuntime& ui, Transform&& transform) {
-  return applyEdit(ui, transform(ui.editor.text(), ui.editor.cursor(), editorBlocks(ui)));
-}
-
-static void wrapEditorSelection(UiRuntime& ui, std::string_view open, std::string_view close, std::string_view label) {
-  if(ui.focus != FocusArea::Editor) return;
-  const std::size_t start = ui.editor.hasSelection() ? ui.editor.selectionStart() : ui.editor.cursor();
-  const std::size_t end = ui.editor.hasSelection() ? ui.editor.selectionEnd() : ui.editor.cursor();
-  if(applyEdit(ui, doc::wrapSelection(ui.editor.text(), start, end, open, close))) ui.status = std::string(label);
-}
-
-static void linkEditorSelection(UiRuntime& ui) {
-  if(ui.focus != FocusArea::Editor) return;
-  const std::size_t start = ui.editor.hasSelection() ? ui.editor.selectionStart() : ui.editor.cursor();
-  const std::size_t end = ui.editor.hasSelection() ? ui.editor.selectionEnd() : ui.editor.cursor();
-  if(applyEdit(ui, doc::makeLink(ui.editor.text(), start, end))) ui.status = "Link: type the destination";
-}
-
-// The blocks a command applies to: the block selection when there is one,
-// otherwise the block holding the caret. Both ends are carets, not indices.
-static std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui) {
-  if(!ui.blockSelectActive) return {ui.editor.cursor(), ui.editor.cursor()};
-  return {std::min(ui.blockSelectAnchor, ui.blockSelectFocus),
-          std::max(ui.blockSelectAnchor, ui.blockSelectFocus)};
-}
-
-static void selectBlockAtCursor(UiRuntime& ui) {
-  const EditorBlocks blocks(ui);
-  std::size_t index = doc::blockIndexAt(blocks, ui.editor.cursor());
-  // A blank line - the empty last line included - is a separator, not something
-  // to select: step back to the nearest real block.
-  while(index > 0 && blocks[index].kind == doc::BlockKind::Blank) --index;
-  ui.blockSelectActive = true;
-  ui.blockSelectAnchor = blocks[index].start;
-  ui.blockSelectFocus = blocks[index].start;
-  ui.editor.moveCursor(blocks[index].start);
-  ui.editor.clearSelection();
-  ui.editor.breakUndoGroup();
-}
-
-// A range transform hands back its result as a text selection. A block
-// selection wants the same span expressed as blocks again.
-static void syncBlockSelectionToEdit(UiRuntime& ui) {
-  if(!ui.blockSelectActive) return;
-  if(ui.editor.hasSelection()) {
-    ui.blockSelectAnchor = ui.editor.selectionStart();
-    // One byte inside the last block, not the boundary after it, so the range
-    // does not reach into whatever follows.
-    ui.blockSelectFocus = ui.editor.selectionEnd() > ui.blockSelectAnchor ? ui.editor.selectionEnd() - 1
-                                                                         : ui.blockSelectAnchor;
-    ui.editor.clearSelection();
-    ui.editor.moveCursor(ui.blockSelectAnchor);
-  } else {
-    ui.blockSelectAnchor = ui.editor.cursor();
-    ui.blockSelectFocus = ui.editor.cursor();
-  }
-}
-
-// Moves the focus end of a block selection by whole blocks. Blanks are skipped:
-// they are separators, not something a user means to select.
-static void moveBlockSelection(UiRuntime& ui, int delta, bool extend) {
-  const EditorBlocks blocks(ui);
-  std::size_t next = doc::blockIndexAt(blocks, ui.blockSelectFocus);
-  bool moved = false;
-  while(true) {
-    if(delta < 0) {
-      if(next == 0) break;
-      --next;
-    } else {
-      if(next + 1 >= blocks.size()) break;
-      ++next;
-    }
-    if(blocks[next].kind != doc::BlockKind::Blank) {
-      moved = true;
-      break;
-    }
-  }
-  if(!moved) return;
-  ui.blockSelectFocus = blocks[next].start;
-  if(!extend) ui.blockSelectAnchor = ui.blockSelectFocus;
-  ui.editor.moveCursor(blocks[next].start);
-  ui.editor.clearSelection();
-  ui.revealEditorCursor = true;
-}
-
-static void turnCurrentBlockInto(UiRuntime& ui, doc::BlockKind kind, int level, std::string_view label) {
-  if(ui.focus != FocusArea::Editor) return;
-  const auto [from, to] = blockSelectionCarets(ui);
-  if(applyEdit(ui, doc::turnBlocksInto(ui.editor.text(), from, to, kind, level, editorBlocks(ui)))) {
-    syncBlockSelectionToEdit(ui);
-    ui.status = std::string(label);
-  } else {
-    ui.status = "Already " + std::string(label);
-  }
-}
-
-// Every block shape the block menu, the slash menu and the turn-into submenu
-// can produce. One table, so the three stay in step.
-struct BlockKindEntry {
-  const char* id;
-  const char* label;
-  const char* detail;
-  doc::BlockKind kind;
-  int level;
-};
-
-static constexpr BlockKindEntry kBlockKinds[] = {
-  {"turn:text", "Text", "Plain paragraph", doc::BlockKind::Paragraph, 0},
-  {"turn:h1", "Heading 1", "# ", doc::BlockKind::Heading, 1},
-  {"turn:h2", "Heading 2", "## ", doc::BlockKind::Heading, 2},
-  {"turn:h3", "Heading 3", "### ", doc::BlockKind::Heading, 3},
-  {"turn:bullet", "Bulleted list", "- ", doc::BlockKind::Bullet, 0},
-  {"turn:ordered", "Numbered list", "1. ", doc::BlockKind::Ordered, 0},
-  {"turn:todo", "To-do list", "- [ ] ", doc::BlockKind::Todo, 0},
-  {"turn:quote", "Quote", "> ", doc::BlockKind::Quote, 0},
-  {"turn:callout", "Callout", "> [!NOTE] ", doc::BlockKind::Callout, 0},
-  {"turn:tip", "Tip callout", "> [!TIP] ", doc::BlockKind::Callout, 1},
-  {"turn:important", "Important callout", "> [!IMPORTANT] ", doc::BlockKind::Callout, 2},
-  {"turn:warning", "Warning callout", "> [!WARNING] ", doc::BlockKind::Callout, 3},
-  {"turn:caution", "Caution callout", "> [!CAUTION] ", doc::BlockKind::Callout, 4},
-  {"turn:code", "Code block", "```", doc::BlockKind::Code, 0},
-  {"turn:divider", "Divider", "---", doc::BlockKind::Divider, 0},
-};
-
-static const BlockKindEntry* blockKindFor(std::string_view id) {
-  for(const auto& entry : kBlockKinds) {
-    if(id == entry.id) return &entry;
-  }
-  return nullptr;
-}
-
-static bool moveSelectedBlocks(UiRuntime& ui, int delta) {
-  const auto [from, to] = blockSelectionCarets(ui);
-  if(!applyEdit(ui, doc::moveBlocks(ui.editor.text(), from, to, delta, editorBlocks(ui)))) return false;
-  syncBlockSelectionToEdit(ui);
-  ui.status = delta < 0 ? "Moved block up" : "Moved block down";
-  return true;
-}
-
-// Folding changes what is on screen and never the file, so it goes nowhere near
-// the editor or the undo stack.
-static void toggleFoldAt(UiRuntime& ui, std::size_t caret) {
-  const std::string& source = ui.editor.text();
-  const EditorBlocks blocks(ui);
-  const std::size_t index = doc::foldHeadFor(blocks, doc::blockIndexAt(blocks, std::min(caret, source.size())));
-  if(index >= blocks.size()) {
-    ui.status = "Nothing to fold here";
-    return;
-  }
-  const bool folded = ui.folds.toggle(ui.state.selection().noteId, doc::foldKey(source, blocks[index]));
-  // A section that just collapsed must not be left holding the caret. Only the
-  // blocks it actually hides count: the caret further down the note stays put.
-  const std::size_t end = doc::foldEnd(blocks, index);
-  const std::size_t caretNow = ui.editor.cursor();
-  if(folded && caretNow >= blocks[index].end() && caretNow < blocks[end - 1].end()) {
-    ui.editor.moveCursor(blocks[index].contentEnd());
-    ui.editor.clearSelection();
-  }
-  ui.status = folded ? "Folded" : "Unfolded";
-  ui.revealEditorCursor = true;
-}
-
-// The one place block commands are dispatched, shared by the block menu, the
-// slash menu, the selection toolbar and the keyboard.
-static void performBlockCommand(UiRuntime& ui, const std::string& id) {
-  if(const auto* entry = blockKindFor(id)) {
-    turnCurrentBlockInto(ui, entry->kind, entry->level, entry->label);
-    return;
-  }
-  const auto [from, to] = blockSelectionCarets(ui);
-  if(id == "duplicate") {
-    if(applyEdit(ui, doc::duplicateBlocks(ui.editor.text(), from, to, editorBlocks(ui)))) {
-      syncBlockSelectionToEdit(ui);
-      ui.status = "Duplicated block";
-    }
-  } else if(id == "delete") {
-    if(applyEdit(ui, doc::deleteBlocks(ui.editor.text(), from, to, editorBlocks(ui)))) {
-      syncBlockSelectionToEdit(ui);
-      ui.status = "Deleted block";
-    }
-  } else if(id == "move-up") {
-    moveSelectedBlocks(ui, -1);
-  } else if(id == "move-down") {
-    moveSelectedBlocks(ui, 1);
-  } else if(id == "fold") {
-    toggleFoldAt(ui, ui.editor.cursor());
-  }
-}
-
 static bool setClipboardText(std::string_view value) {
   const std::string text {value};
   SDL_ClearError();
@@ -804,8 +599,8 @@ static void expandTreeCursor(UiRuntime& ui, bool open) {
 
 
 static bool scrollbarHit(Rect viewport, int scroll, int maxScroll, float x, float y) {
-  if(maxScroll <= 0) return false;
-  return contains(scrollbarHitRect(scrollbarThumb(viewport, scroll, maxScroll)), x, y);
+  const auto geometry = ui::scrollbarGeometry(viewport, scroll, maxScroll);
+  return geometry && contains(ui::scrollbarHitRect(geometry->thumb), x, y);
 }
 
 static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int height) {
@@ -816,24 +611,15 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   const float y = ui.mouseY;
   const ShellLayout layout = shellLayout(ui, width, height);
   if(isResizeGutter(layout, x, y)) return CursorKind::ResizeHorizontal;
-  if(contains(layout.titleBar, x, y)) {
-    if(contains(ui.favoriteButton, x, y)) return CursorKind::Pointer;
-    for(const auto& box : ui.windowButtons) {
-      if(contains(box, x, y)) return CursorKind::Pointer;
-    }
-    for(const auto& [rect, folder] : ui.crumbs) {
-      (void)folder;
-      if(contains(rect, x, y)) return CursorKind::Pointer;
-    }
-  }
+  if(menuBarHasControlAt(text, ui, layout.menuBar, x, y)) return CursorKind::Pointer;
+  if(breadcrumbHasControlAt(ui, layout.breadcrumb, x, y)) return CursorKind::Pointer;
 
   if(ui.overlays.active()) return CursorKind::Pointer;
 
-  if(contains(layout.ribbon, x, y)) {
-    return ribbonHasControlAt(ui, layout.ribbon, x, y) ? CursorKind::Pointer : CursorKind::Default;
-  }
-
   if(contains(layout.sidebar, x, y)) {
+    if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebarScroll, ui.sidebarMaxScroll, x, y)) {
+      return CursorKind::Pointer;
+    }
     const Rect search = searchBoxRect(layout.sidebar);
     if(contains(search, x, y)) {
       return contains(ui.searchScopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
@@ -897,17 +683,12 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   // so a frame can never end up with two tooltips resolved.
   ui.tooltip = {};
 
-  // First, whatever is or is not open behind it: it carries the window controls.
+  // First, above everything: it carries the menus and the window controls, and
+  // the popup drawn at the end of the frame hangs off it.
+  ui.menuBarRect = layout.menuBar;
   {
-    const perf::ScopeTimer timer("shell.title_bar");
-    drawTitleBar(renderer, text, ui, layout.titleBar);
-  }
-
-  // The rail, then whatever is beside it. Drawn before the panels because it is
-  // the one column that is always there: everything else lays out against it.
-  {
-    const perf::ScopeTimer timer("shell.ribbon");
-    drawRibbon(renderer, text, ui, layout.ribbon);
+    const perf::ScopeTimer timer("shell.menu_bar");
+    drawMenuBar(renderer, text, ui, layout.menuBar);
   }
   // A hidden panel is zero wide, and its rule would land on the edge of
   // whatever took its place.
@@ -919,6 +700,10 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   if(!ui::empty(layout.tabs)) {
     const perf::ScopeTimer timer("shell.tab_strip");
     drawTabStrip(renderer, text, ui, layout.tabs);
+  }
+  {
+    const perf::ScopeTimer timer("shell.breadcrumb");
+    drawBreadcrumb(renderer, text, ui, layout.breadcrumb);
   }
   if(!ui.state.hasLibrary()) {
     fill(renderer, layout.content, theme().editorBackground);
@@ -965,6 +750,11 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   // be answering a question nobody is asking any more.
   if(ui.overlays.active()) ui.tooltip = {};
   {
+    // After every panel, so it lands on top of whichever one it hangs over.
+    const perf::ScopeTimer timer("shell.menu");
+    drawOpenMenu(renderer, text, ui, {0, 0, static_cast<float>(width), static_cast<float>(height)});
+  }
+  {
     const perf::ScopeTimer timer("shell.overlays");
     ui.overlays.draw(renderer, text, width, height);
     // Last, so nothing paints over it.
@@ -989,7 +779,7 @@ static int captureFrame(SDL_Renderer* renderer, TextRenderer& text, ImageCache& 
 // menu and the block menu, so a new block type appears in all three at once.
 static std::vector<ui::OverlayItem> blockKindItems() {
   std::vector<ui::OverlayItem> items;
-  for(const auto& entry : kBlockKinds) items.push_back({entry.id, entry.label, entry.detail, "", true, false});
+  for(const auto& entry : blockKinds()) items.push_back({entry.id, entry.label, entry.detail, "", true, false});
   return items;
 }
 
@@ -1350,7 +1140,38 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
     ui.status = ui::themeMode() == ui::ThemeMode::Light ? "Light theme" : "Dark theme";
   }
   else if(id == "settings") openSettings(ui);
+  // Through the same pending action the close button raises, so the one place
+  // that knows how to shut the window down -- flushing the open note and the
+  // library's state on the way out -- stays the only one.
+  else if(id == "quit") ui.pendingWindowAction = WindowAction::Close;
   else if(id == "shortcuts") openShortcutHelp(ui);
+  // The editing verbs. They used to be reachable only from the key chain, on
+  // the reasoning that a palette row for one is useless -- the palette has
+  // taken the keyboard away from the editor, so there is no selection left to
+  // embolden. That is still true of the palette and it is why these rows carry
+  // `inPalette = false`; it is not true of the menu bar, which leaves
+  // `ui.focus` where it was, so the caret and the selection are still there
+  // when the item is chosen.
+  else if(id == "bold") wrapEditorSelection(ui, "**", "**", "Bold");
+  else if(id == "italic") wrapEditorSelection(ui, "*", "*", "Italic");
+  else if(id == "code") wrapEditorSelection(ui, "`", "`", "Code");
+  else if(id == "link") linkEditorSelection(ui);
+  else if(id == "undo") {
+    if(ui.focus == FocusArea::Editor) (void)undoEditorEdit(ui);
+  }
+  else if(id == "redo") {
+    if(ui.focus == FocusArea::Editor) (void)redoEditorEdit(ui);
+  }
+  else if(id == "toggle-task") {
+    if(ui.focus != FocusArea::Editor) ui.status = "Put the caret in a task first";
+    else if(!applyTransform(ui, doc::toggleTodo)) ui.status = "No task to toggle here";
+  }
+  else if(id == "turn-into") openTurnIntoMenu(ui, ui.mouseX, ui.mouseY);
+  else if(id == "insert-block") openSlashMenu(ui, ui.editor.cursor());
+  else if(id == "duplicate-block") performBlockCommand(ui, "duplicate");
+  else if(id == "delete-block") performBlockCommand(ui, "delete");
+  else if(id == "move-block-up") performBlockCommand(ui, "move-up");
+  else if(id == "move-block-down") performBlockCommand(ui, "move-down");
   else if(id == "refresh") {
     invalidateWikiNotes(ui);
     ui.state.refreshLibrary();
@@ -1665,18 +1486,14 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
     // still works on a layout where the Z key does not produce 'z'.
     if(auto* field = focusedField(ui)) {
       if(field->editor.undo()) syncFocusedInput(ui);
-    } else if(ui.focus == FocusArea::Editor && ui.editor.undo()) {
-      ui.markEdited();
-      ui.revealEditorCursor = true;
-      ui.status = "Undo";
+    } else if(ui.focus == FocusArea::Editor) {
+      (void)undoEditorEdit(ui);
     }
   } else if(shortcut(SDLK_Y, SDL_SCANCODE_Y)) {
     if(auto* field = focusedField(ui)) {
       if(field->editor.redo()) syncFocusedInput(ui);
-    } else if(ui.focus == FocusArea::Editor && ui.editor.redo()) {
-      ui.markEdited();
-      ui.revealEditorCursor = true;
-      ui.status = "Redo";
+    } else if(ui.focus == FocusArea::Editor) {
+      (void)redoEditorEdit(ui);
     }
   } else if(shortcut(SDLK_V, SDL_SCANCODE_V)) {
     if(focusedField(ui)) pasteClipboardIntoInput(ui);
@@ -1897,15 +1714,17 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
   const ShellLayout layout = shellLayout(ui, width, height);
 
-  // The rail first. It owns its whole column, so a click that lands between two
-  // of its buttons is swallowed rather than falling through to the sidebar
-  // behind it -- which is not behind it at all, but next to it.
-  if(contains(layout.ribbon, x, y)) {
-    if(button != SDL_BUTTON_LEFT) return;
-    if(const auto action = handleRibbonClick(ui, layout.ribbon, x, y)) {
-      if(const auto* spec = ui::findAction(*action)) performCommand(ui, std::string(spec->name));
+  // The menu bar first, and its popup before that: the popup is drawn over
+  // every panel, so it has to be clicked before them too. A press that misses
+  // both only dismisses an open menu -- it is not swallowed, because clicking a
+  // tree row with the File menu open should select that row.
+  const Rect windowRect {0, 0, static_cast<float>(width), static_cast<float>(height)};
+  if(button == SDL_BUTTON_LEFT) {
+    const MenuBarClick menu = handleMenuBarClick(text, ui, layout.menuBar, windowRect, x, y);
+    if(menu.action) {
+      if(const auto* spec = ui::findAction(*menu.action)) performCommand(ui, std::string(spec->name));
     }
-    return;
+    if(menu.handled) return;
   }
 
   const bool ctrlHeld = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
@@ -1973,10 +1792,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
 
   if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
     const int maxScroll = ui.livePage.maxScroll();
-    const auto thumb = scrollbarThumb(ui.livePage.pageRect(), ui.livePage.scroll(), maxScroll);
-    if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
+    const auto bar = ui::scrollbarGeometry(ui.livePage.pageRect(), ui.livePage.scroll(), maxScroll);
+    if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
       ui.scrollDragTarget = ScrollDragTarget::Live;
-      ui.scrollDragOffsetY = y - thumb.y;
+      ui.scrollDragOffsetY = y - bar->thumb.y;
       ui.focus = FocusArea::Editor;
       return;
     }
@@ -1988,10 +1807,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       const Rect editorRect = panes.editor;
       const Rect writing = editorWritingRect(editorRect);
       const int maxScroll = editorMaxScroll(text, ui, editorRect);
-      const auto thumb = scrollbarThumb(writing, ui.editorScroll, maxScroll);
-      if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
+      const auto bar = ui::scrollbarGeometry(writing, ui.editorScroll, maxScroll);
+      if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
         ui.scrollDragTarget = ScrollDragTarget::Editor;
-        ui.scrollDragOffsetY = y - thumb.y;
+        ui.scrollDragOffsetY = y - bar->thumb.y;
         ui.focus = FocusArea::Editor;
         ui.revealEditorCursor = false;
         return;
@@ -2000,10 +1819,10 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     if(panes.hasViewer) {
       const Rect page = ui::pageRectIn(panes.viewer);
       const int maxScroll = ui.readingPage.maxScroll();
-      const auto thumb = scrollbarThumb(page, ui.readingPage.scroll(), maxScroll);
-      if(maxScroll > 0 && contains(scrollbarHitRect(thumb), x, y)) {
+      const auto bar = ui::scrollbarGeometry(page, ui.readingPage.scroll(), maxScroll);
+      if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
         ui.scrollDragTarget = ScrollDragTarget::Viewer;
-        ui.scrollDragOffsetY = y - thumb.y;
+        ui.scrollDragOffsetY = y - bar->thumb.y;
         ui.focus = FocusArea::Viewer;
         return;
       }
@@ -2027,6 +1846,18 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   }
 
   if(contains(layout.sidebar, x, y)) {
+    // The scrollbar first: its thumb overlaps the trailing edge of every row it
+    // covers, and a press on a handle has to move the handle rather than select
+    // whatever it happens to be lying on.
+    if(button == SDL_BUTTON_LEFT) {
+      const Rect list = sidebarListRect(layout.sidebar);
+      const auto bar = ui::scrollbarGeometry(list, ui.sidebarScroll, ui.sidebarMaxScroll);
+      if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
+        ui.scrollDragTarget = ScrollDragTarget::Sidebar;
+        ui.scrollDragOffsetY = y - bar->thumb.y;
+        return;
+      }
+    }
     // The search field is part of the sidebar but not part of its row list, so
     // it takes the click before any row arithmetic happens.
     if(contains(searchBoxRect(layout.sidebar), x, y)) {
@@ -2080,23 +1911,11 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     return;
   }
-  if(contains(layout.titleBar, x, y)) {
+  if(contains(layout.menuBar, x, y)) {
     if(pressWindowButton(ui, x, y, button)) return;
-    if(contains(ui.favoriteButton, x, y)) {
-      const auto noteId = ui.state.selection().noteId;
-      ui.status = ui.state.toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
-      return;
-    }
-    for(const auto& [rect, folder] : ui.crumbs) {
-      if(!contains(rect, x, y)) continue;
-      if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-      showFolder(ui, folder);
-      ui.search.reset();
-      selectNoteAt(ui, 0);
-      return;
-    }
     return;
   }
+  if(handleBreadcrumbClick(ui, layout.breadcrumb, x, y)) return;
   if(contains(layout.content, x, y)) {
     // A page's own chrome sits above its text, so a link underneath it must not
     // swallow the click. Copying is the one piece of it a read-only page still
@@ -2522,7 +2341,28 @@ int run(ApplicationOptions options) {
         handleText(ui, event.text.text);
       } else if(event.type == SDL_EVENT_KEY_DOWN) {
         perf::addCounter(perf::CounterId::InputKeyEvents);
-        handleKey(ui, event.key.key, event.key.scancode, event.key.mod);
+        // An open menu owns the keyboard first: arrows walk it, Enter chooses,
+        // Escape shuts it. Anything else closes it and falls through, so typing
+        // with a menu accidentally open does not silently go nowhere.
+        //
+        // Here rather than inside handleKey because the walk needs the bar's
+        // geometry and the face it was measured in, and handleKey has neither
+        // -- threading both through it would have every other branch carry them
+        // for the one that uses them.
+        bool menuTook = false;
+        if(ui.openMenu != ui::MenuId::None) {
+          const ShellLayout layout = shellLayout(ui, width, height);
+          const MenuBarKey menu = handleMenuBarKey(
+            text, ui, layout.menuBar,
+            {0, 0, static_cast<float>(width), static_cast<float>(height)}, event.key.key);
+          if(menu.action) {
+            if(const auto* spec = ui::findAction(*menu.action)) {
+              performCommand(ui, std::string(spec->name));
+            }
+          }
+          menuTook = menu.handled;
+        }
+        if(!menuTook) handleKey(ui, event.key.key, event.key.scancode, event.key.mod);
       } else if(event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
         ui.mouseX = event.button.x;
         ui.mouseY = event.button.y;
@@ -2538,6 +2378,15 @@ int run(ApplicationOptions options) {
         ui.mouseY = event.motion.y;
         if(ui.overlays.active()) {
           ui.overlays.handleMotion(event.motion.x, event.motion.y);
+          updateCursor(width, height);
+        } else if(ui.openMenu != ui::MenuId::None) {
+          // Sliding along the bar with a menu open switches menus without a
+          // click, which is the whole of what makes a menu bar feel like one
+          // rather than like seven buttons.
+          const ShellLayout layout = shellLayout(ui, width, height);
+          (void)handleMenuBarMotion(text, ui, layout.menuBar,
+                                    {0, 0, static_cast<float>(width), static_cast<float>(height)},
+                                    event.motion.x, event.motion.y);
           updateCursor(width, height);
         } else if(ui.draggingBlock) {
           ui.blockDropOffset = ui.livePage.dropOffsetAt(event.motion.y);
@@ -2557,6 +2406,10 @@ int run(ApplicationOptions options) {
           const ShellLayout layout = shellLayout(ui, width, height);
           if(ui.scrollDragTarget == ScrollDragTarget::Live) {
             ui.livePage.setScroll(scrollFromThumbY(ui.livePage.pageRect(), event.motion.y, ui.scrollDragOffsetY, ui.livePage.maxScroll()));
+          } else if(ui.scrollDragTarget == ScrollDragTarget::Sidebar) {
+            const Rect list = sidebarListRect(layout.sidebar);
+            ui.sidebarScroll = scrollFromThumbY(list, event.motion.y, ui.scrollDragOffsetY,
+                                                ui.sidebarMaxScroll);
           } else if(ui.scrollDragTarget == ScrollDragTarget::Editor) {
             Rect editorRect = layout.content;
             if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;

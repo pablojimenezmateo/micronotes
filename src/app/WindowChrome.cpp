@@ -2,6 +2,7 @@
 
 #include "app/Shell.h"
 
+#include "ui/Menus.h"
 #include "ui/Metrics.h"
 
 #include <cstddef>
@@ -62,19 +63,16 @@ SDL_HitTestResult SDLCALL windowHitTest(SDL_Window* window, const SDL_Point* are
 
   const ShellLayout layout = shellLayout(ui, static_cast<int>(std::lround(right)),
                                          static_cast<int>(std::lround(bottom)));
-  if(!contains(layout.titleBar, x, y)) return SDL_HITTEST_NORMAL;
+  if(!contains(layout.menuBar, x, y)) return SDL_HITTEST_NORMAL;
   // Everything in the strip that is a target keeps its click; the rest of it
   // moves the window. A press on a draggable region is consumed by the platform
   // to start that move and never reaches the app, which is why the maximize
   // button is the only way to maximize: there is no second click for a
   // double-click to pair with.
-  if(contains(ui.favoriteButton, x, y)) return SDL_HITTEST_NORMAL;
+  if(contains(ui.menuItemsBand, x, y)) return SDL_HITTEST_NORMAL;
+  if(contains(ui.menuChevron, x, y)) return SDL_HITTEST_NORMAL;
   for(const auto& box : ui.windowButtons) {
-    if(contains(box, x, y)) return SDL_HITTEST_NORMAL;
-  }
-  for(const auto& [rect, folder] : ui.crumbs) {
-    (void)folder;
-    if(contains(rect, x, y)) return SDL_HITTEST_NORMAL;
+    if(contains(ui::windowButtonHitRect(box), x, y)) return SDL_HITTEST_NORMAL;
   }
   return SDL_HITTEST_DRAGGABLE;
 }

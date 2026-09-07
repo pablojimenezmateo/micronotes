@@ -18,19 +18,22 @@ namespace {
 using ui::ClipGuard;
 using ui::Rect;
 using ui::TextRenderer;
-using ui::drawDisclosure;
+using ui::drawChevron;
 using ui::drawEmptyMessage;
 using ui::drawSectionLabel;
-using ui::drawSelection;
+using ui::drawRow;
 using ui::ellipsizeToWidth;
 using ui::fill;
 using ui::hLine;
 using ui::stroke;
 using ui::theme;
 
-// The prefix on the search box. Named because its width sets where the field
-// begins, so the string and the geometry cannot drift apart.
-constexpr std::string_view kSearchLabel = "Find";
+// The magnifier at the head of the search box. A drawn glyph rather than a
+// word: the box used to be prefixed with the label "Find" *and* carry the
+// placeholder "Search all notes", which read as "Find Search all notes" and
+// said the same thing twice in two different registers. Named because its
+// width sets where the field begins, so the mark and the geometry cannot drift.
+constexpr float kSearchGlyphSize = 12.0f;
 
 // Reserved at the trailing edge of a folder row for the note count, so a long
 // folder name is ellipsized before it reaches the number rather than over it.
@@ -39,7 +42,8 @@ constexpr float kCountColumnWidth = 26.0f;
 // Core measures text through a callback so it stays free of any font
 // dependency; this binds it to the renderer actually drawing the field.
 editor::TextWidthFn fieldMeasure(const TextRenderer& text) {
-  return [&text](std::string_view run) { return text.width(run); };
+  const ui::TextStyle style = ui::chromeStyle();
+  return [&text, style](std::string_view run) { return text.width(run, style); };
 }
 
 // The search field on top of the navigation it filters.
@@ -47,17 +51,15 @@ static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRunt
   const Rect search = searchBoxRect(rect);
   const SearchBoxParts parts = searchBoxParts(rect, text);
   const bool focused = ui.focus == FocusArea::Search;
-  const ui::TextStyle style {};
-  ui::drawRoundedSurface(renderer, search, theme().surfaceBackground, focused ? theme().accent : theme().border,
-                         ui::kRadiusSmall);
+  const ui::TextStyle style = ui::chromeStyle();
+  ui::drawTextFieldFrame(renderer, search, focused);
   ui.searchScopeToggle = parts.scope;
   ui.offerTooltip(ui.searchScopeToggle,
                   "Searching " + std::string(ui::searchScopeName(ui.searchScope)) + " - click to change");
-  text.draw(kSearchLabel, parts.label.x, ui::textTop(parts.label, text, style),
-            focused ? theme().accent : theme().textMuted, style);
+  ui::drawSearchGlyph(renderer, parts.label, focused ? theme().accent : theme().textMuted);
   drawTextField(renderer, text, ui, ui.search, parts.field, focused, "Search all notes");
-  ui::drawRoundedSurface(renderer, parts.scope, focused ? theme().surfaceRaised : theme().surfaceRaised,
-                         focused ? theme().accent : theme().border, ui::kRadiusSmall);
+  ui::drawSurface(renderer, parts.scope, theme().surfaceRaised,
+                  focused ? theme().accent : theme().border);
   const auto scopeLabel = ui::searchScopeLabel(ui.searchScope);
   text.draw(scopeLabel,
             std::round(parts.scope.x + (parts.scope.w - static_cast<float>(text.width(scopeLabel, style))) / 2.0f),
@@ -68,7 +70,7 @@ static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRunt
 // keeps a match inside the column, which are two places that have to agree
 // about it or the trim is measured against the wrong font.
 static ui::TextStyle snippetTextStyle() {
-  return {ui::FontFamily::Sans, false, false, ui::type().tiny};
+  return ui::chromeSmallStyle();
 }
 
 // The one place with nothing to list says which nothing it is, because the way
@@ -113,12 +115,13 @@ Rect searchBoxRect(Rect sidebar) {
 // what the field is for, and a label touching its own field says nothing.
 SearchBoxParts searchBoxParts(Rect sidebar, const TextRenderer& text) {
   const Rect box = searchBoxRect(sidebar);
-  const ui::TextStyle style {};
+  const ui::TextStyle style = ui::chromeStyle();
   const float line = static_cast<float>(text.lineHeight(style));
   const float toggle = std::min(box.h - ui::kSpace2, std::max(20.0f, line + ui::kSpace1));
 
   SearchBoxParts parts;
-  parts.label = {box.x + ui::kSpace3, box.y, static_cast<float>(text.width(kSearchLabel, style)), box.h};
+  parts.label = {box.x + ui::kSpace2, std::round(box.y + (box.h - kSearchGlyphSize) / 2.0f),
+                 kSearchGlyphSize, kSearchGlyphSize};
   parts.scope = {box.x + box.w - toggle - ui::kSpace1, std::round(box.y + (box.h - toggle) / 2.0f), toggle, toggle};
   const float left = parts.label.x + parts.label.w + ui::kSpace2;
   parts.field = {left, std::round(box.y + (box.h - line) / 2.0f),
@@ -144,6 +147,7 @@ Rect sidebarListRect(Rect sidebar) {
 void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
                           editor::TextField& field, Rect box, bool focused,
                           std::string_view placeholder) {
+  const ui::TextStyle style = ui::chromeStyle();
   const auto view = editor::layoutSingleLine(field.editor, box.w, field.scrollX, fieldMeasure(text));
   field.scrollX = view.scrollX;
 
@@ -154,9 +158,9 @@ void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
                     view.selectionEndX - view.selectionStartX, box.h + 4.0f}, theme().selectionFill);
   }
   if(field.empty() && !placeholder.empty()) {
-    text.draw(placeholder, box.x, box.y, theme().textMuted);
+    text.draw(placeholder, box.x, box.y, theme().textMuted, style);
   } else {
-    text.draw(field.text(), originX, box.y, theme().textPrimary);
+    text.draw(field.text(), originX, box.y, theme().textPrimary, style);
   }
   if(focused) {
     const float caretX = originX + view.caretX;
@@ -180,10 +184,13 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   fill(renderer, rect, theme().surfaceBackground);
   ClipGuard clip(renderer, rect);
   drawSidebarSearch(renderer, text, ui, rect);
+  // A rule under the search band, so the field reads as chrome over the list
+  // rather than as the first row of it.
+  hLine(renderer, rect.x, rect.x + rect.w, rect.y + ui::kSidebarSearchBand - 1.0f, theme().border);
 
   const Rect list = sidebarListRect(rect);
   ui.sidebarRect = list;
-  const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
+  const ui::TextStyle rowStyle = ui::chromeStyle();
   const ui::TextStyle snippetStyle = snippetTextStyle();
   // Measured here and handed to the model, which stays free of the font: the
   // rows have to be as tall as the text they hold, and only the renderer knows
@@ -224,7 +231,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     }
     if(row.kind == SidebarRow::Kind::SearchResult) {
       const bool selected = row.noteId == selection.noteId;
-      drawSelection(renderer, row.rect, selected, hot);
+      drawRow(renderer, row.rect, selected, hot);
       if(!selected && !hot) {
         hLine(renderer, row.rect.x + ui::kSpace2, row.rect.x + row.rect.w - ui::kSpace2,
               row.rect.y + row.rect.h, theme().border);
@@ -243,9 +250,9 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
           const std::string_view shown = line.text;
           const float from = static_cast<float>(text.width(shown.substr(0, line.start), snippetStyle));
           const float to = static_cast<float>(text.width(shown.substr(0, line.start + line.length), snippetStyle));
-          ui::fillRounded(renderer, {snippetX + from, snippetY,
+          ui::fill(renderer, {snippetX + from, snippetY,
                                      std::max(2.0f, to - from), metrics.snippet - 1.0f},
-                          theme().searchMatch, ui::kRadiusSmall / 2.0f);
+                          theme().searchMatch);
         }
         text.draw(line.text, snippetX, snippetY, selected ? theme().accent : theme().textMuted, snippetStyle);
         snippetY += metrics.snippet;
@@ -254,39 +261,31 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     }
     if(row.kind == SidebarRow::Kind::Tag) {
       const bool selected = selection.tag == row.tag;
-      drawSelection(renderer, row.rect, selected, hot);
+      drawRow(renderer, row.rect, selected, hot);
       text.draw("#" + ellipsizeToWidth(text, row.tag, static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace4), rowStyle),
                 row.rect.x + kSidebarLabelX, ui::textTop(row.rect, text, rowStyle),
                 selected ? theme().accent : theme().textMuted, rowStyle);
       continue;
     }
 
-    // Nesting guides: one hairline per level above this row, drawn under it
-    // rather than beside it, so a run of siblings reads as one branch. Drawn
-    // before the row's own fill would be wrong -- the fill is what a selected
-    // row is -- so they go on top of it and stop short of the text.
     const bool isNote = row.tree.kind == ui::TreeRowKind::Note;
     // A folder is the current context and a note is the open document, so only
-    // the note wears the strong selection: two accent bars at once would read
-    // as two selections rather than one place and one file.
+    // the note wears the accent strip: two markers at once would read as two
+    // selections rather than as one place and one file.
     const bool selected = isNote && row.tree.noteId == selection.noteId;
     const bool current = !isNote && selection.tag.empty() && selection.folder == row.tree.folder;
     const bool dropTarget = ui.sidebarDropRow && *ui.sidebarDropRow == i;
-    if(current) fill(renderer, row.rect, theme().rowHighlight);
-    drawSelection(renderer, row.rect, selected, hot || dropTarget);
+    // Hover lifts the row's ground and nothing else, so the tree reads as "this
+    // is what I would click" without masquerading as selected.
+    drawRow(renderer, row.rect, theme().surfaceBackground,
+            selected || current || hot || dropTarget, selected);
     if(dropTarget) stroke(renderer, row.rect, theme().accent);
 
-    // Down the middle of the gutter each ancestor level would have used, so a
-    // guide lines up with the disclosure of the folder it descends from.
-    for(int depth = 0; depth < row.tree.depth; ++depth) {
-      const float guideX = std::round(row.rect.x + kSidebarGutterX + kSidebarGutterWidth / 2.0f
-                                      + static_cast<float>(depth) * kSidebarIndent);
-      fill(renderer, {guideX, row.rect.y, ui::kTreeGuideWidth, row.rect.h}, theme().border);
-    }
-
     if(row.disclosure.w > 0.0f) {
-      drawDisclosure(renderer, row.disclosure, row.tree.expanded,
-                     ui.hovered(row.disclosure) ? theme().textPrimary : theme().textMuted);
+      drawChevron(renderer, row.disclosure.x, row.disclosure.y + row.disclosure.h / 2.0f,
+                  row.tree.expanded,
+                  selected || current || ui.hovered(row.disclosure) ? theme().textPrimary
+                                                                    : theme().textMuted);
     }
     if(isNote) {
       drawNoteIcon(renderer, text, row.tree.icon,
@@ -296,15 +295,22 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     }
     const float labelY = ui::textTop(row.rect, text, rowStyle);
     const float countW = row.tree.noteCount > 0 && !isNote ? kCountColumnWidth : ui::kSpace2;
+    // A folder is a container and a note is a leaf, so the folder's name is the
+    // brighter of the two -- the file tree's rule in every IDE, and the reverse
+    // of what a list of documents would do.
+    const SDL_Color ink = selected || current ? theme().textPrimary
+                        : isNote              ? theme().textSecondary
+                                              : theme().textPrimary;
     text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), rowStyle),
-              labelX, labelY, selected || current ? theme().textPrimary : (isNote ? theme().textSecondary : theme().textPrimary), rowStyle);
+              labelX, labelY, ink, rowStyle);
     if(!isNote && row.tree.noteCount > 0) {
       const auto count = std::to_string(row.tree.noteCount);
       text.draw(count, row.rect.x + row.rect.w - static_cast<float>(text.width(count, rowStyle)) - ui::kSpace2,
                 labelY, current ? theme().accent : theme().textMuted, rowStyle);
     }
   }
-  drawVerticalScrollbar(renderer, list, ui.sidebarScroll, ui.sidebarMaxScroll);
+  drawVerticalScrollbar(renderer, list, ui.sidebarScroll, ui.sidebarMaxScroll,
+                        ui.scrollDragTarget == ScrollDragTarget::Sidebar);
 }
 
 }

@@ -4,7 +4,7 @@
 #include "core/render/FontResolver.h"
 #include "core/render/TextTextureCache.h"
 #include "ui/Actions.h"
-#include "ui/RibbonLayout.h"
+#include "ui/Menus.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -236,7 +236,7 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // moves behaviour out of the file lowers it in the same commit, and nothing
 // raises it. If this fails, the fix is a named unit under src/ -- not a bigger
 // budget.
-constexpr int kApplicationLineBudget = 2632;
+constexpr int kApplicationLineBudget = 2485;
 
 MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
   const auto path = repoRoot() / "src" / "app" / "Application.cpp";
@@ -321,7 +321,7 @@ MICRONOTES_TEST(architecture_key_names_are_formatted_not_typed) {
 
 // Every action a surface can offer has to be dispatched by something.
 //
-// The palette, the icon rail and the keyboard all funnel into
+// The palette, the menu bar and the keyboard all funnel into
 // performCommand(), which is a chain of `id == "name"` branches, and a name
 // with no branch is a control that does nothing at all when clicked -- silently,
 // because the chain simply falls off the end. That is how the rail's Commands
@@ -345,13 +345,17 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
   for(const auto& spec : micronotes::ui::actionSpecs()) {
     if(spec.inPalette) offered.insert(std::string(spec.name));
   }
-  // Everything the icon rail can be clicked on. Read from the rail's own table
-  // rather than a copy of it, so a control added there is covered by this test
-  // the moment it is added.
-  for(const auto& control : micronotes::ui::ribbonControls()) {
-    const auto* spec = micronotes::ui::findAction(control.action);
-    MICRONOTES_REQUIRE(spec != nullptr);
-    offered.insert(std::string(spec->name));
+  // Everything the menu bar can be clicked on. Read from the menus' own tables
+  // rather than a copy of them, so an item added there is covered by this test
+  // the moment it is added -- and the bar offers far more than the seven-button
+  // icon rail it replaced, which is most of the value of this check.
+  for(const auto& menu : micronotes::ui::menuSpecs()) {
+    for(const auto& item : menu.items) {
+      if(item.separator) continue;
+      const auto* spec = micronotes::ui::findAction(item.action);
+      MICRONOTES_REQUIRE(spec != nullptr);
+      offered.insert(std::string(spec->name));
+    }
   }
   MICRONOTES_REQUIRE(!offered.empty());
 
@@ -363,6 +367,6 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
   }
   micronotes::tests::require(
     missing.empty(),
-    "actions the palette or the icon rail offer but performCommand does not handle: " + missing +
+    "actions the palette or the menu bar offer but performCommand does not handle: " + missing +
     " -- clicking one of these does nothing at all, and nothing else notices");
 }

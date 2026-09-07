@@ -16,6 +16,7 @@
 #include "ui/Outline.h"
 #include "ui/FoldState.h"
 #include "ui/Actions.h"
+#include "ui/Menus.h"
 #include "ui/Overlay.h"
 #include "ui/Rect.h"
 #include "ui/ShellLayout.h"
@@ -77,7 +78,12 @@ enum class ScrollDragTarget {
   Live,
   None,
   Editor,
-  Viewer
+  Viewer,
+  // The sidebar's own scrollbar. It had none: the old bar was a 3px hairline
+  // with a 5px thumb, which nobody would try to grab, so nothing answered when
+  // they did. A 10px track with a thumb filling it reads as a handle, and a
+  // handle that does not move when pulled is worse than no handle.
+  Sidebar
 };
 
 enum class CursorKind {
@@ -499,8 +505,25 @@ struct UiRuntime {
   ScrollDragTarget scrollDragTarget = ScrollDragTarget::None;
   float scrollDragOffsetY = 0.0f;
   Rect searchScopeToggle;
-  // The breadcrumb trail along the title bar, recorded as it is drawn: a crumb
-  // is a folder to jump to, and the star at the end pins the note.
+  // Which menu on the bar is open, and which of its rows the keyboard is on.
+  // The pointer owns the highlight while it is inside the popup, so a walk with
+  // the arrows followed by a mouse move does not leave two rows lit.
+  ui::MenuId openMenu = ui::MenuId::None;
+  std::size_t menuHighlight = 0;
+  // Last frame's menu bar, so the popup -- which is drawn after every panel, on
+  // top of them -- can find the item it hangs off without being handed the
+  // whole layout.
+  Rect menuBarRect;
+  // The bar's targets, recorded as they are drawn: the run the menus occupy,
+  // and the overflow chevron. Recorded rather than recomputed because the one
+  // caller that needs them is the borderless window's hit test, which runs on
+  // the platform's callback with no renderer to measure a label with -- and
+  // everything in the bar that is *not* one of these is the strip the window is
+  // dragged by. The window buttons below are recorded for the same reason.
+  Rect menuItemsBand;
+  Rect menuChevron;
+  // The breadcrumb trail over the page, recorded as it is drawn: a crumb is a
+  // folder to jump to, and the star at the end pins the note.
   std::vector<std::pair<Rect, std::filesystem::path>> crumbs;
   Rect favoriteButton;
   // What a click on a window control asked for, held until the frame is over.

@@ -18,7 +18,6 @@ namespace {
 
 using ui::Rect;
 using ui::fill;
-using ui::fillRounded;
 using ui::hLine;
 using ui::theme;
 
@@ -111,7 +110,7 @@ void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       const float width = static_cast<float>(text.width(label, key)) + ui::kSpace3;
       if(x + width > valueLeft + valueRoom) break;
       const Rect box {x, y + 3.0f, width, kPropertyRowHeight - 7.0f};
-      fillRounded(renderer, box, theme().surfaceRaised, ui::kRadiusSmall);
+      fill(renderer, box, theme().surfaceRaised);
       text.draw(label, x + ui::kSpace2 - 2.0f,
                 box.y + (box.h - static_cast<float>(text.lineHeight(key))) / 2.0f, theme().textSecondary, key);
       x += width + ui::kSpace1;

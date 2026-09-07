@@ -23,9 +23,8 @@ namespace {
 
 using micronotes::ui::Rect;
 using micronotes::ui::TextRenderer;
-using micronotes::ui::drawDisclosure;
+using micronotes::ui::drawChevron;
 using micronotes::ui::fill;
-using micronotes::ui::fillRounded;
 using micronotes::ui::hLine;
 using micronotes::ui::stroke;
 using micronotes::ui::theme;
@@ -561,7 +560,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         // and then does nothing is worse than one that never invited the click.
         const bool hot = !readOnly_ && ui::contains(hit, pointerX_, pointerY_);
         if(block.checked) {
-          fillRounded(renderer, box, theme().accent, ui::kRadiusSmall);
+          fill(renderer, box, theme().accent);
           const SDL_Color tick = theme().onAccent;
           SDL_SetRenderDrawColor(renderer, tick.r, tick.g, tick.b, tick.a);
           SDL_RenderLine(renderer, box.x + 3.5f, box.y + 7.0f, box.x + 6.0f, box.y + 9.5f);
@@ -569,7 +568,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         } else {
           // The box lights up under the pointer, because a control that never
           // reacts is one people do not learn is clickable.
-          ui::strokeRounded(renderer, box, hot ? theme().accent : theme().textMuted, ui::kRadiusSmall);
+          ui::stroke(renderer, box, hot ? theme().accent : theme().textMuted);
         }
       }
     }
@@ -745,7 +744,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     if(block.kind == doc::BlockKind::Code) {
       if(layout.complex || top + layout.height < viewTop || top > viewBottom) continue;
       const Rect codeRect {left, top + 2.0f, columnWidth_ - layout.indent, std::max(8.0f, layout.height - 8.0f)};
-      fillRounded(renderer, codeRect, theme().codeBackground, ui::kRadiusSmall);
+      fill(renderer, codeRect, theme().codeBackground);
       continue;
     }
 
@@ -776,7 +775,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     // No rule down the left edge. The tint is already the whole shape, and a
     // bar beside it makes the box read as a quote wearing a colour rather than
     // as a callout.
-    ui::drawRoundedSurface(renderer, callout, style.surface, style.surface, ui::kRadiusMedium);
+    ui::drawSurface(renderer, callout, style.surface, style.surface);
     if(!layout.calloutTitle) continue;
 
     // The head line is the title: a mark in the gutter, and the kind's own name
@@ -786,11 +785,11 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     // Sized and placed to sit inside the quote gutter the layout already
     // reserves, so the mark never crowds the title beside it. The size and the
     // inset are `ui::Metrics`' because the reading pane draws the same mark.
-    fillRounded(renderer,
+    fill(renderer,
                 {std::round(callout.x + ui::kCalloutMarkInset),
                  std::round(lineY + (lineH - ui::kCalloutMarkSize) / 2.0f),
                  ui::kCalloutMarkSize, ui::kCalloutMarkSize},
-                style.accent, ui::kCalloutMarkSize / 2.0f);
+                style.accent);
 
     bool titled = false;
     if(!layout.lines.empty()) {
@@ -835,8 +834,8 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
       codeButtons_.push_back({button, block.start});
       const bool hot = ui::contains(button, pointerX_, pointerY_);
       // Drawn over the code, so it needs its own ground to stay readable.
-      ui::drawRoundedSurface(renderer, button, hot ? theme().overlayBackground : theme().surfaceRaised,
-                             hot ? theme().border : theme().surfaceRaised, ui::kRadiusSmall);
+      ui::drawSurface(renderer, button, hot ? theme().overlayBackground : theme().surfaceRaised,
+                             hot ? theme().border : theme().surfaceRaised);
       text.draw(copy, button.x + 7.0f, button.y + 3.0f, hot ? theme().textPrimary : theme().textSecondary, label);
     }
 
@@ -877,7 +876,8 @@ void PageView::drawFoldControls(SDL_Renderer* renderer) {
     foldHits_.push_back({box, i, blocks[i].start, folded});
     const bool hot = ui::contains(box, pointerX_, pointerY_);
     if(hot) ui::drawSurface(renderer, box, theme().surfaceRaised, theme().border);
-    drawDisclosure(renderer, box, !folded, hot ? theme().textPrimary : (folded ? theme().textSecondary : theme().textMuted));
+    drawChevron(renderer, std::round(box.x + (box.w - 8.0f) / 2.0f), box.y + box.h / 2.0f, !folded,
+                hot ? theme().textPrimary : (folded ? theme().textSecondary : theme().textMuted));
   }
 }
 

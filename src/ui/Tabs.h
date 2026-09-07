@@ -54,13 +54,35 @@ struct TabSlot {
   bool visible = false;
 };
 
-// How wide a tab may be. A strip of eight notes should still show enough of
-// each title to tell them apart; a strip of two should not stretch them across
-// the window.
-inline constexpr float kMinTabWidth = 110.0f;
+// Everything the strip drew, so the paint and the hit test read one answer.
+struct TabStripLayout {
+  std::vector<TabSlot> slots;
+  // The chevron buttons at either end, and how many tabs each hides. Empty
+  // rects and a zero count when the strip fits, so a strip of two notes has no
+  // furniture at all.
+  Rect scrollLeft;
+  Rect scrollRight;
+  std::size_t hiddenLeft = 0;
+  std::size_t hiddenRight = 0;
+};
+
+// How wide a tab may be, and what it reserves. A strip of eight notes should
+// still show enough of each title to tell them apart; a strip of two should not
+// stretch them across the window.
+//
+// Measured-and-clamped rather than an even share of the strip: tabs that resize
+// as tabs open and close mean the one you were about to click has moved.
+inline constexpr float kTabPadding = 58.0f;
+inline constexpr float kMinTabWidth = 132.0f;
 inline constexpr float kMaxTabWidth = 220.0f;
-inline constexpr float kTabClosePadding = 8.0f;
+inline constexpr float kTabClosePadding = 6.0f;
 inline constexpr float kTabCloseSize = 14.0f;
+// What a tab keeps clear at its trailing edge for the cross, whether or not one
+// is currently drawn there: a title that reflows when the pointer arrives is a
+// title that moves under the pointer.
+inline constexpr float kTabCloseReserve = 40.0f;
+// The chevron button at either end of an overflowing strip.
+inline constexpr float kTabScrollButtonWidth = 28.0f;
 // The close button's grab area is larger than the cross drawn in it. One
 // constant, read by the paint and by the hit test alike, so the region that
 // responds and the region that looks like it will can never drift apart.
@@ -80,9 +102,9 @@ inline constexpr float kTabCloseHitInflate = 3.0f;
 // keep in step and cannot drift between the draw and the hit test. Tabs opened
 // past the right edge used to be laid out and then simply not drawn, so they
 // existed, were unreachable by mouse, and could only be got to with Ctrl+Tab.
-std::vector<TabSlot> layoutTabs(const std::vector<std::string>& titles, Rect strip,
-                                const std::function<int(std::string_view)>& measure,
-                                std::size_t activeTab = 0);
+TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
+                          const std::function<int(std::string_view)>& measure,
+                          std::size_t activeTab = 0);
 
 // The close button of `slot`, grown by the hit inflate. Used by the hit test;
 // the paint uses `slot.close` itself.

@@ -188,19 +188,30 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   ui::ClipGuard clip(renderer, rect);
 
   const auto& workspace = ui.state.workspace();
-  const ui::TextStyle tabStyle {ui::FontFamily::Sans, false, false, ui::type().small};
-  const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
+  const ui::TextStyle tabStyle = ui::chromeStyle();
+  const ui::TextStyle rowStyle = ui::chromeStyle();
 
   const int tabCount = static_cast<int>(std::size(kViews));
   for(int i = 0; i < tabCount; ++i) {
     const Rect tab = tabRect(rect, i, tabCount);
     const bool active = workspace.rightPanelView == kViews[i];
     const bool hot = ui::contains(tab, ui.mouseX, ui.mouseY);
-    if(active) ui::fillRounded(renderer, tab, theme().rowHighlight, ui::kRadiusSmall);
-    else if(hot) ui::fillRounded(renderer, tab, theme().rowHighlight, ui::kRadiusSmall);
+    // The active mode takes the chrome's raised ground and an accent rule along
+    // its foot, pointing at the list it heads. Hover takes the row highlight
+    // alone -- the two used to take the same fill, which made the panel's
+    // header say nothing about which of the three views was showing.
+    if(active) {
+      ui::fill(renderer, tab, theme().chromeActive);
+      ui::fill(renderer, {tab.x, tab.y + tab.h - ui::kRowAccentWidth, tab.w, ui::kRowAccentWidth},
+               theme().accent);
+    } else if(hot) {
+      ui::fill(renderer, tab, theme().rowHighlight);
+    }
     const auto label = viewLabel(kViews[i]);
     const float labelX = tab.x + (tab.w - static_cast<float>(text.width(label, tabStyle))) / 2.0f;
-    text.draw(label, labelX, ui::textTop(tab, text, tabStyle), active ? theme().textPrimary : theme().textMuted, tabStyle);
+    text.draw(label, labelX, ui::textTop(tab, text, tabStyle),
+              active ? theme().chromeActiveText : hot ? theme().textPrimary : theme().textMuted,
+              tabStyle);
   }
   ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + kHeaderHeight - 1.0f, theme().border);
 
@@ -252,7 +263,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       const auto& entry = entries[i];
       const bool here = i == current;
       const bool hot = ui::contains(row, ui.mouseX, ui.mouseY);
-      ui::drawSelection(renderer, row, here, hot);
+      ui::drawRow(renderer, row, here, hot);
       const float x = row.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
       // A top-level heading carries the note's structure and reads as the
       // strong row; anything nested under it is support.
@@ -272,7 +283,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
             "Write [[the title of this note]] in another note and it will show up.");
       return;
     }
-    const ui::TextStyle lineStyle {ui::FontFamily::Sans, false, false, ui::type().small};
+    const ui::TextStyle lineStyle = ui::chromeSmallStyle();
     // Two lines and the air around them, which at the large text size is more
     // than the 44 this row used to be nailed to.
     const float pitch = std::max(kBacklinkMinHeight,
@@ -283,7 +294,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     for(const auto& link : backlinks) {
       if(y + pitch >= list.y && y <= list.y + list.h) {
         const Rect row = rowRect(list, y, pitch);
-        ui::drawSelection(renderer, row, false, ui::contains(row, ui.mouseX, ui.mouseY));
+        ui::drawRow(renderer, row, false, ui::contains(row, ui.mouseX, ui.mouseY));
         const int room = static_cast<int>(row.w - kPadX * 2.0f);
         // Two lines centred in the row together, rather than dropped a fixed
         // two pixels into it: the pair grows with the reader's text size and
@@ -330,7 +341,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     if(y + pitch >= list.y && y <= list.y + list.h) {
       const Rect row = rowRect(list, y, pitch);
       const bool selected = activeTag == tag;
-      ui::drawSelection(renderer, row, selected, ui::contains(row, ui.mouseX, ui.mouseY));
+      ui::drawRow(renderer, row, selected, ui::contains(row, ui.mouseX, ui.mouseY));
       const std::string label = "#" + tag;
       text.draw(ui::ellipsizeToWidth(text, label, static_cast<int>(row.w - kPadX * 2.0f), rowStyle),
                 row.x + kPadX, ui::textTop(row, text, rowStyle),
@@ -354,8 +365,8 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   // A click on the scrollbar is a click on the scrollbar, wherever the rows
   // under it happen to fall.
   const Rect list = listRect(rect);
-  if(ui.rightPanelMaxScroll > 0 &&
-     ui::contains(ui::scrollbarHitRect(ui::scrollbarTrack(list)), x, y)) {
+  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanelScroll, ui.rightPanelMaxScroll);
+     bar && ui::contains(ui::scrollbarHitRect(bar->track), x, y)) {
     return true;
   }
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
@@ -380,7 +391,7 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   // rather than a walk of every heading in the note. The pitch is the drawn
   // one, and the scroll is the drawn one, or a click lands on the row that
   // would have been there before the list was scrolled.
-  const ui::TextStyle rowStyle {ui::FontFamily::Sans, false, false, ui::type().ui};
+  const ui::TextStyle rowStyle = ui::chromeStyle();
   const float pitch = rowPitch(text, rowStyle);
   const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanelScroll);
   if(offset >= 0.0f) {

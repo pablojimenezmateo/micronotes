@@ -34,12 +34,13 @@ ShellLayout computeShellLayout(const ShellLayoutInputs& inputs) {
   ShellLayout layout;
 
   const float window = std::max(inputs.windowWidth, kMinUsableWidth);
-  // The mode is a question about the window, so it is asked of the window. The
-  // panel arithmetic below is a question about the room left over, so it is
-  // asked of that -- the ribbon's width is spoken for before anything else has
-  // a say in it.
+  // The mode is a question about the window, so it is asked of the window; the
+  // panel arithmetic below is a question about the room left over. Those used to
+  // be different numbers -- the icon rail's width was spoken for before anything
+  // else had a say -- and with the rail gone the sidebar starts at the window's
+  // own leading edge and the two questions have the same answer.
   layout.mode = resolveLayoutMode(window, inputs.previousMode);
-  const float usable = std::max(kMinContentWidth, window - kRibbonWidth);
+  const float usable = std::max(kMinContentWidth, window);
 
   float sidebar = inputs.sidebarWidth;
   if(layout.mode == LayoutMode::Compact) sidebar = kCompactSidebarWidth;
@@ -62,24 +63,31 @@ ShellLayout computeShellLayout(const ShellLayoutInputs& inputs) {
   squeeze(right, inputs.rightPanelVisible, kRightPanelSqueezeFloor);
   squeeze(sidebar, inputs.sidebarVisible, kSidebarSqueezeFloor);
 
-  // The title bar spans the window above everything, so every other region
-  // starts below it and the panels are that much shorter.
-  const float bodyY = kTitleBarHeight;
+  // The menu bar spans the window above everything, and the status bar spans it
+  // below: both hold controls that have to reach the actual corners. Every
+  // other region lives in the band between them.
+  const float bodyY = kMenuBarHeight;
   const float paneBottom = inputs.windowHeight - kStatusBarHeight;
   const float paneHeight = std::max(0.0f, paneBottom - bodyY);
-  const float contentX = kRibbonWidth + sidebar;
-  // Floored at zero. On a window too narrow to hold the ribbon, both panels and
-  // a page at once, the panels overhang rather than the page being handed a
-  // negative width that every hit test downstream would have to defend against.
-  const float contentW = std::max(0.0f, inputs.windowWidth - contentX - right);
+  // A panel that is showing takes a divider's worth of room as well, so the
+  // rule between it and the page belongs to neither and overlaps nothing.
+  const float contentX = sidebar + (inputs.sidebarVisible ? kDividerThickness : 0.0f);
+  const float rightReserve = right + (inputs.rightPanelVisible ? kDividerThickness : 0.0f);
+  // Floored at zero. On a window too narrow to hold both panels and a page at
+  // once, the panels overhang rather than the page being handed a negative
+  // width that every hit test downstream would have to defend against.
+  const float contentW = std::max(0.0f, inputs.windowWidth - contentX - rightReserve);
   const float tabsH = inputs.tabStripVisible ? kTabStripHeight : 0.0f;
 
-  layout.titleBar = {0.0f, 0.0f, inputs.windowWidth, kTitleBarHeight};
-  layout.ribbon = {0.0f, bodyY, kRibbonWidth, paneHeight};
-  layout.sidebar = {kRibbonWidth, bodyY, sidebar, paneHeight};
+  layout.menuBar = {0.0f, 0.0f, inputs.windowWidth, kMenuBarHeight};
+  layout.sidebar = {0.0f, bodyY, sidebar, paneHeight};
   layout.tabs = {contentX, bodyY, contentW, tabsH};
-  layout.content = {contentX, bodyY + tabsH, contentW, std::max(0.0f, paneHeight - tabsH)};
-  layout.rightPanel = {contentX + contentW, bodyY, right, paneHeight};
+  layout.breadcrumb = {contentX, bodyY + tabsH, contentW, kBreadcrumbHeight};
+  const float contentY = layout.breadcrumb.y + layout.breadcrumb.h + kDividerThickness;
+  layout.content = {contentX, contentY, contentW,
+                    std::max(0.0f, paneBottom - contentY)};
+  layout.rightPanel = {contentX + contentW + (inputs.rightPanelVisible ? kDividerThickness : 0.0f),
+                       bodyY, right, paneHeight};
   layout.status = {0.0f, paneBottom, inputs.windowWidth, kStatusBarHeight};
   return layout;
 }

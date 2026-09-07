@@ -31,9 +31,9 @@ std::vector<std::string> tabTitles(const UiRuntime& ui) {
 // Takes the titles rather than fetching them: `drawTabStrip` needs them for the
 // draw as well, and building them twice a frame is a vector of strings and a
 // `findNote` per tab, twice, to lay out the handful of tabs a strip can show.
-std::vector<ui::TabSlot> slotsFor(const std::vector<std::string>& titles, ui::TextRenderer* text,
-                                  Rect rect, std::size_t activeTab) {
-  const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().ui};
+ui::TabStripLayout slotsFor(const std::vector<std::string>& titles, ui::TextRenderer* text,
+                            Rect rect, std::size_t activeTab) {
+  const ui::TextStyle style = ui::chromeStyle();
   std::function<int(std::string_view)> measure;
   if(text) {
     measure = [text, style](std::string_view value) {
@@ -43,34 +43,21 @@ std::vector<ui::TabSlot> slotsFor(const std::vector<std::string>& titles, ui::Te
   return ui::layoutTabs(titles, rect, measure, activeTab);
 }
 
-// Drawn rather than typeset: the UI face has no glyph for a close cross that
-// stays crisp at this size, and a missing glyph here would read as a bug.
-void drawCross(SDL_Renderer* renderer, Rect box, SDL_Color color) {
-  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  const float inset = 4.0f;
-  const float x0 = box.x + inset;
-  const float y0 = box.y + inset;
-  const float x1 = box.x + box.w - inset;
-  const float y1 = box.y + box.h - inset;
-  SDL_RenderLine(renderer, x0, y0, x1, y1);
-  SDL_RenderLine(renderer, x0, y1, x1, y0);
-}
-
 }
 
 void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rect) {
-  // The strip is chrome, so it takes the chrome's ground; the active tab is the
-  // page's ground pushed up into it. That contrast is what makes the tab read
-  // as continuous with the note under it, and it is why the strip no longer
-  // needs a rule between one tab and the next.
-  ui::fill(renderer, rect, theme().surfaceBackground);
+  // The strip is chrome, so it takes the chrome's ground; the active tab is a
+  // step up out of it with a 2px accent lid. The lid is what makes that tab
+  // read as continuous with the note under it, and it is why the strip needs no
+  // seam between one tab and its active neighbour.
+  ui::fill(renderer, rect, theme().chromeBackground);
   ui::ClipGuard clip(renderer, rect);
   const auto& workspace = ui.state.workspace();
   const auto titles = tabTitles(ui);
-  const auto slots = slotsFor(titles, &text, rect, workspace.activeTab);
-  const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().ui};
+  const auto layout = slotsFor(titles, &text, rect, workspace.activeTab);
+  const ui::StripTabColors colors = ui::stripTabColors();
 
-  for(const auto& slot : slots) {
+  for(const auto& slot : layout.slots) {
     // `continue`, not `break`. Under the old layout the only invisible tabs
     // were the ones past the right edge, so stopping at the first was the same
     // thing; a strip that scrolls is invisible at *both* ends, and breaking on
@@ -80,35 +67,34 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     if(!slot.visible) continue;
     const bool active = slot.index == workspace.activeTab;
     const bool hot = ui::contains(slot.rect, ui.mouseX, ui.mouseY);
-    if(active) {
-      // Rounded at the top and square at the foot, so the tab meets the page
-      // without a seam: the radius is drawn into a rect a corner taller than
-      // the strip, and the strip's own clip takes the bottom corners off.
-      ui::fillRounded(renderer, {slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h + ui::kRadiusMedium},
-                      theme().editorBackground, ui::kRadiusMedium);
-    } else if(hot) {
-      ui::fillRounded(renderer, {slot.rect.x + 2.0f, slot.rect.y + ui::kSpace1 - 1.0f,
-                                 slot.rect.w - 4.0f, slot.rect.h - ui::kSpace1 + 1.0f},
-                      theme().rowHighlight, ui::kRadiusSmall);
-    }
-
-    const float textLeft = slot.rect.x + ui::kTabClosePadding + ui::kSpace1;
-    const int room = static_cast<int>(slot.close.x - textLeft - ui::kSpace1);
-    const auto shown = ui::ellipsizeToWidth(text, titles[slot.index], room, style);
-    text.draw(shown, textLeft, ui::textTop(slot.rect, text, style),
-              active ? theme().textPrimary : theme().textSecondary, style);
+    ui::drawStripTab(renderer, text, slot.rect, titles[slot.index], active, hot,
+                     ui::kTabCloseReserve, colors);
     // A tab only says what it is when the title did not fit. Repeating a title
     // that is already legible is noise.
-    if(shown != titles[slot.index]) ui.offerTooltip(slot.rect, titles[slot.index]);
+    const ui::TextStyle style = ui::chromeStyle();
+    const float room = slot.rect.w - ui::kSidebarInset - ui::kTabCloseReserve;
+    if(static_cast<float>(text.width(titles[slot.index], style)) > room) {
+      ui.offerTooltip(slot.rect, titles[slot.index]);
+    }
     // The close button appears on the tab you are pointing at and on the one
     // you are reading; a strip of crosses is a strip that reads as a warning.
-    if(active || hot) {
-      const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.mouseX, ui.mouseY);
-      drawCross(renderer, slot.close, overClose ? theme().textPrimary : theme().textMuted);
-      // Offered after the tab's own, so the innermost control wins.
-      ui.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
-    }
+    if(!active && !hot) continue;
+    const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.mouseX, ui.mouseY);
+    ui::drawCloseGlyph(renderer, slot.close,
+                       overClose ? theme().textPrimary
+                       : active  ? colors.activeText
+                                 : colors.inactiveText);
+    // Offered after the tab's own, so the innermost control wins.
+    ui.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
   }
+
+  // The overflow chevrons last, over whichever tab reaches under them.
+  ui::drawStripOverflowButton(renderer, text, layout.scrollLeft, false, layout.hiddenLeft,
+                              ui.hovered(layout.scrollLeft));
+  ui::drawStripOverflowButton(renderer, text, layout.scrollRight, true, layout.hiddenRight,
+                              ui.hovered(layout.scrollRight));
+  if(layout.hiddenLeft > 0) ui.offerTooltip(layout.scrollLeft, "Earlier tabs");
+  if(layout.hiddenRight > 0) ui.offerTooltip(layout.scrollRight, "Later tabs");
 }
 
 bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y,
@@ -125,8 +111,19 @@ bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float
   // on the second tab landed in the first one's rect and activated it, a click
   // past the last drawn tab still hit one, and the close cross's target sat in
   // empty strip well to the right of the cross. The strip looked inert.
-  const auto slots = slotsFor(tabTitles(ui), &text, rect, ui.state.workspace().activeTab);
-  for(const auto& slot : slots) {
+  const auto layout = slotsFor(tabTitles(ui), &text, rect, ui.state.workspace().activeTab);
+  // The chevrons first: they are drawn over the tabs that reach under them, so
+  // they are clicked before them too. Each steps the active tab one along,
+  // which is what scrolls the derived window -- there is no scroll to set.
+  if(ui::contains(layout.scrollLeft, x, y)) {
+    if(layout.hiddenLeft > 0 && button == SDL_BUTTON_LEFT) stepTab(ui, -1);
+    return true;
+  }
+  if(ui::contains(layout.scrollRight, x, y)) {
+    if(layout.hiddenRight > 0 && button == SDL_BUTTON_LEFT) stepTab(ui, 1);
+    return true;
+  }
+  for(const auto& slot : layout.slots) {
     if(!slot.visible || !ui::contains(slot.rect, x, y)) continue;
     // Middle click closes, as it does in every tab strip; so does the cross.
     if(button == SDL_BUTTON_MIDDLE || ui::contains(ui::tabCloseHitRect(slot), x, y)) {

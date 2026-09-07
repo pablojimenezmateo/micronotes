@@ -20,8 +20,19 @@ struct TextStyle {
   float size = 0.0f;
 };
 
-// Notion-like type scale, in logical pixels.
+// The type scale, in logical pixels.
+//
+// Two families, and the split is not decorative. The *chrome* -- the menu bar,
+// the tree, the tab strips, the status bar, every panel and every popup -- is
+// set in the mono face at one size, which is what makes it read as an IDE's
+// shell rather than as a document's furniture: a column of proportional labels
+// in a tree has no vertical rhythm, and a strip of tabs set in a text face
+// reads as prose. The *page* keeps the proportional face and the heading
+// scale, because that is where the prose actually is.
 struct TypeScale {
+  // Chrome. One size, and the only mono size the shell outside the page uses.
+  float chrome = 13.0f;
+
   float pageTitle = 40.0f;
   float h1 = 30.0f;
   float h2 = 24.0f;
@@ -39,6 +50,16 @@ const TypeScale& type();
 
 // Size for a heading of the given Markdown level (1-6).
 float headingSize(int level);
+
+// The face every chrome surface draws in. A function rather than a constant
+// because the size moves with the reader's text setting, and a helper rather
+// than the four fields written out at each of the thirty-odd call sites --
+// which is how the shell came to have chrome in three different faces.
+TextStyle chromeStyle();
+
+// The same, for the one row of chrome that wants a second step down: a search
+// snippet under its note's title, a caption under a section label.
+TextStyle chromeSmallStyle();
 
 // Owns every font face and hides SDL_ttf from the rest of the application.
 class FontStore {

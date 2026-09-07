@@ -33,30 +33,74 @@ bool nearlyEqual(float a, float b) {
 }
 
 MICRONOTES_TEST(shell_layout_panes_tile_the_window_without_a_gap) {
-  const ShellLayout layout = computeShellLayout(wideShell());
-  MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.x, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.x, layout.ribbon.x + layout.ribbon.w));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.content.x, layout.sidebar.x + layout.sidebar.w));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x, layout.content.x + layout.content.w));
+  ShellLayoutInputs inputs = wideShell();
+  inputs.rightPanelVisible = true;
+  const ShellLayout layout = computeShellLayout(inputs);
+  // The sidebar reaches the window's own leading edge. It used to start at the
+  // icon rail's width, which was the one column nothing could take room from.
+  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.x, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.content.x,
+                                 layout.sidebar.x + layout.sidebar.w +
+                                   micronotes::ui::kDividerThickness));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x,
+                                 layout.content.x + layout.content.w +
+                                   micronotes::ui::kDividerThickness));
   MICRONOTES_REQUIRE(nearlyEqual(layout.rightPanel.x + layout.rightPanel.w, 1600.0f));
-  // The panes hang between the title bar and the status bar, meeting both.
-  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.y, micronotes::ui::kTitleBarHeight));
+  // The panes hang between the menu bar and the status bar, meeting both.
+  MICRONOTES_REQUIRE(nearlyEqual(layout.sidebar.y, micronotes::ui::kMenuBarHeight));
   MICRONOTES_REQUIRE(nearlyEqual(layout.status.y, layout.sidebar.y + layout.sidebar.h));
   MICRONOTES_REQUIRE(nearlyEqual(layout.status.w, 1600.0f));
   MICRONOTES_REQUIRE(nearlyEqual(layout.status.h, micronotes::ui::kStatusBarHeight));
 }
 
-// The title bar spans the whole window above every panel, because the window
+// The menu bar spans the whole window above every panel, because the window
 // controls at its right end have to reach the actual corner.
-MICRONOTES_TEST(shell_layout_title_bar_spans_the_window_above_every_panel) {
+MICRONOTES_TEST(shell_layout_menu_bar_spans_the_window_above_every_panel) {
   const ShellLayout layout = computeShellLayout(wideShell());
-  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.x, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.y, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.w, 1600.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(layout.titleBar.h, micronotes::ui::kTitleBarHeight));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.menuBar.x, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.menuBar.y, 0.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.menuBar.w, 1600.0f));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.menuBar.h, micronotes::ui::kMenuBarHeight));
   // Nothing starts above the bottom of it.
-  for(const auto& region : {layout.sidebar, layout.tabs, layout.content, layout.rightPanel}) {
-    MICRONOTES_REQUIRE(region.y >= layout.titleBar.y + layout.titleBar.h - 0.001f);
+  for(const auto& region : {layout.sidebar, layout.tabs, layout.breadcrumb, layout.content,
+                            layout.rightPanel}) {
+    MICRONOTES_REQUIRE(region.y >= layout.menuBar.y + layout.menuBar.h - 0.001f);
+  }
+}
+
+// The tab strip and the breadcrumb belong to the page's column, not to the
+// window. A window-wide strip put the tabs of the note being read over the tree
+// that is not being read, and made the band above the sidebar change owner
+// depending on what happened to be open.
+MICRONOTES_TEST(shell_layout_tabs_and_breadcrumb_stay_inside_the_page_column) {
+  ShellLayoutInputs inputs = wideShell();
+  inputs.tabStripVisible = true;
+  inputs.rightPanelVisible = true;
+  const ShellLayout layout = computeShellLayout(inputs);
+  for(const auto& band : {layout.tabs, layout.breadcrumb}) {
+    MICRONOTES_REQUIRE(nearlyEqual(band.x, layout.content.x));
+    MICRONOTES_REQUIRE(nearlyEqual(band.w, layout.content.w));
+    // Clear of both panels, which run the full height beside them.
+    MICRONOTES_REQUIRE(band.x >= layout.sidebar.x + layout.sidebar.w - 0.001f);
+    MICRONOTES_REQUIRE(band.x + band.w <= layout.rightPanel.x + 0.001f);
+  }
+  // Stacked: tabs, then the breadcrumb, then the page.
+  MICRONOTES_REQUIRE(nearlyEqual(layout.breadcrumb.y, layout.tabs.y + layout.tabs.h));
+  MICRONOTES_REQUIRE(nearlyEqual(layout.content.y,
+                                 layout.breadcrumb.y + layout.breadcrumb.h +
+                                   micronotes::ui::kDividerThickness));
+}
+
+// The breadcrumb is reserved whether or not a note is open, so a hit test
+// against the page agrees with what was drawn. It is where the note's own
+// identity lives, and a band that appears and disappears would move the page
+// under the reader every time a tab closed.
+MICRONOTES_TEST(shell_layout_breadcrumb_is_always_reserved) {
+  for(const bool tabs : {true, false}) {
+    ShellLayoutInputs inputs = wideShell();
+    inputs.tabStripVisible = tabs;
+    const ShellLayout layout = computeShellLayout(inputs);
+    MICRONOTES_REQUIRE(nearlyEqual(layout.breadcrumb.h, micronotes::ui::kBreadcrumbHeight));
   }
 }
 
@@ -70,33 +114,35 @@ MICRONOTES_TEST(shell_layout_hidden_panels_give_their_room_to_the_page) {
   const ShellLayout hidden = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(hidden.sidebar.w, 0.0f));
   MICRONOTES_REQUIRE(hidden.content.w > withPanels);
-  // The page starts where the ribbon ends. The ribbon is not a panel and does
-  // not hide, so this is the leftmost the page can ever be.
-  MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x, micronotes::ui::kRibbonWidth));
+  // With the sidebar away the page starts at the window's edge: there is no
+  // rail left to keep a column for, and a hidden panel takes no divider either.
+  MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x, 0.0f));
   MICRONOTES_REQUIRE(nearlyEqual(hidden.content.x + hidden.content.w, 1600.0f));
 }
 
-// The ribbon is the way back to a panel that has been hidden, so it keeps its
-// width whatever else is showing and whatever the window is doing.
-MICRONOTES_TEST(shell_layout_ribbon_keeps_its_width_at_every_size) {
+// Whatever the window is doing and whichever panels are showing, no region is
+// ever handed a negative size and none of them overlaps another. This was the
+// invariant the icon rail's own test carried, and it outlives the rail.
+MICRONOTES_TEST(shell_layout_never_hands_a_region_a_negative_size) {
   const float widths[] = {320.0f, 700.0f, 1000.0f, 1600.0f, 3840.0f};
   for(const float width : widths) {
     ShellLayoutInputs inputs = wideShell();
     inputs.windowWidth = width;
     for(const bool sidebar : {true, false}) {
       for(const bool right : {true, false}) {
-        inputs.sidebarVisible = sidebar;
-        inputs.rightPanelVisible = right;
-        const ShellLayout layout = computeShellLayout(inputs);
-        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.w, micronotes::ui::kRibbonWidth));
-        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.x, 0.0f));
-        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.y, layout.sidebar.y));
-        MICRONOTES_REQUIRE(nearlyEqual(layout.ribbon.h, layout.sidebar.h));
-        // Nothing overlaps it, and no region is ever handed a negative width.
-        MICRONOTES_REQUIRE(layout.sidebar.x >= layout.ribbon.w - 0.001f);
-        MICRONOTES_REQUIRE(layout.content.w >= 0.0f);
-        MICRONOTES_REQUIRE(layout.rightPanel.w >= 0.0f);
-        MICRONOTES_REQUIRE(layout.sidebar.w >= 0.0f);
+        for(const bool tabs : {true, false}) {
+          inputs.sidebarVisible = sidebar;
+          inputs.rightPanelVisible = right;
+          inputs.tabStripVisible = tabs;
+          const ShellLayout layout = computeShellLayout(inputs);
+          for(const auto& region : {layout.menuBar, layout.sidebar, layout.tabs,
+                                    layout.breadcrumb, layout.content, layout.rightPanel,
+                                    layout.status}) {
+            MICRONOTES_REQUIRE(region.w >= 0.0f);
+            MICRONOTES_REQUIRE(region.h >= 0.0f);
+          }
+          MICRONOTES_REQUIRE(layout.content.x >= layout.sidebar.x + layout.sidebar.w - 0.001f);
+        }
       }
     }
   }
@@ -110,7 +156,11 @@ MICRONOTES_TEST(shell_layout_right_panel_takes_room_only_when_shown) {
   inputs.rightPanelVisible = true;
   const ShellLayout with = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(with.rightPanel.w, micronotes::ui::kDefaultRightPanelWidth));
-  MICRONOTES_REQUIRE(nearlyEqual(with.content.w, without.content.w - micronotes::ui::kDefaultRightPanelWidth));
+    // The panel's width *and* the rule between it and the page, which belongs to
+  // neither of them.
+  MICRONOTES_REQUIRE(nearlyEqual(with.content.w,
+                                 without.content.w - micronotes::ui::kDefaultRightPanelWidth -
+                                   micronotes::ui::kDividerThickness));
   // The panel the other side of the page is unmoved by it.
   MICRONOTES_REQUIRE(with.sidebar == without.sidebar);
 }
@@ -119,13 +169,18 @@ MICRONOTES_TEST(shell_layout_tab_strip_pushes_the_page_down) {
   ShellLayoutInputs inputs = wideShell();
   const ShellLayout without = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(without.tabs.h, 0.0f));
-  MICRONOTES_REQUIRE(nearlyEqual(without.content.y, micronotes::ui::kTitleBarHeight));
+  MICRONOTES_REQUIRE(nearlyEqual(without.content.y,
+                                 micronotes::ui::kMenuBarHeight +
+                                   micronotes::ui::kBreadcrumbHeight +
+                                   micronotes::ui::kDividerThickness));
 
   inputs.tabStripVisible = true;
   const ShellLayout with = computeShellLayout(inputs);
   MICRONOTES_REQUIRE(nearlyEqual(with.tabs.h, micronotes::ui::kTabStripHeight));
-  MICRONOTES_REQUIRE(nearlyEqual(with.tabs.y, micronotes::ui::kTitleBarHeight));
-  MICRONOTES_REQUIRE(nearlyEqual(with.content.y, with.tabs.y + with.tabs.h));
+  MICRONOTES_REQUIRE(nearlyEqual(with.tabs.y, micronotes::ui::kMenuBarHeight));
+  MICRONOTES_REQUIRE(nearlyEqual(with.content.y,
+                                 with.breadcrumb.y + with.breadcrumb.h +
+                                   micronotes::ui::kDividerThickness));
   // The page loses exactly the strip's height, and nothing runs past the status bar.
   MICRONOTES_REQUIRE(nearlyEqual(with.content.h, without.content.h - micronotes::ui::kTabStripHeight));
   MICRONOTES_REQUIRE(nearlyEqual(with.content.y + with.content.h, with.status.y));
