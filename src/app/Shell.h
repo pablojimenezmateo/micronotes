@@ -359,20 +359,16 @@ struct UiRuntime {
     std::string tag;
   };
   std::vector<TagRow> tagRows;
-  // The open note's name and front matter, drawn above its first block.
+  // The open note's front matter, drawn above its first block.
   //
-  // Producing them means reading the file, so they are cached against the note
-  // and the library's revision rather than rebuilt per frame -- the header is
-  // drawn every frame and a note is read from disk when it is opened, renamed,
+  // Producing it means reading the file, so it is cached against the note and
+  // the library's revision rather than rebuilt per frame -- the header is drawn
+  // every frame and a note is read from disk when it is opened, renamed,
   // retagged or re-iconed, all of which move the revision.
-  std::string headerTitle;
   std::vector<ui::NoteProperty> headerProperties;
   std::string headerNoteId;
   std::uint64_t headerRevision = 0;
   bool headerValid = false;
-  // Where the title was drawn last frame, so a click can find it without
-  // laying the header out a second time.
-  Rect headerTitleRect;
 
   // What the right panel is showing, cached against the inputs that decide it.
   //

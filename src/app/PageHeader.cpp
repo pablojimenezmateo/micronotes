@@ -22,9 +22,8 @@ using ui::fillRounded;
 using ui::hLine;
 using ui::theme;
 
-// Air above the title, between it and the properties, and below the lot.
-constexpr float kSpaceAboveTitle = 6.0f;
-constexpr float kSpaceBelowTitle = 10.0f;
+// Air above the properties and below the lot.
+constexpr float kSpaceAboveProperties = 6.0f;
 constexpr float kPropertyRowHeight = 24.0f;
 constexpr float kSpaceBelowHeader = 18.0f;
 // How much of the column the key column takes. Wide enough for the keys people
@@ -32,10 +31,6 @@ constexpr float kSpaceBelowHeader = 18.0f;
 // one absurd key does not push every value off the right of the page.
 constexpr float kKeyColumnFraction = 0.26f;
 constexpr float kKeyColumnMax = 160.0f;
-
-ui::TextStyle titleStyle() {
-  return ui::TextStyle {ui::FontFamily::Sans, true, false, ui::type().pageTitle};
-}
 
 ui::TextStyle keyStyle() {
   return ui::TextStyle {ui::FontFamily::Sans, false, false, ui::type().small};
@@ -62,16 +57,14 @@ const UiRuntime& refreshedHeader(UiRuntime& ui) {
   ui.headerValid = true;
   ui.headerNoteId = noteId;
   ui.headerRevision = revision;
-  ui.headerTitle.clear();
   ui.headerProperties.clear();
   if(noteId.empty() || !ui.state.hasLibrary()) return ui;
   // From the open-note record, which costs nothing. This used to be
   // `selectedNote()`: a read and a front-matter parse of the whole note, keyed
-  // on the library revision -- which moves on every save. Drawing the note's
-  // name re-read the note once a second while somebody was typing into it.
+  // on the library revision -- which moves on every save. Drawing the header
+  // re-read the note once a second while somebody was typing into it.
   const auto& note = ui.state.openNote();
   if(note.noteId.empty()) return ui;
-  ui.headerTitle = ui.state.selectedTitle();
   ui.headerProperties = ui::notePropertiesOf(note.metadata);
   return ui;
 }
@@ -84,57 +77,17 @@ float propertiesHeight(const UiRuntime& ui) {
 }
 
 float pageHeaderHeight(ui::TextRenderer& text, UiRuntime& ui) {
+  (void)text;
   refreshedHeader(ui);
-  if(ui.headerTitle.empty() && ui.headerProperties.empty()) return 0.0f;
-  const float title = static_cast<float>(text.lineHeight(titleStyle()));
-  return kSpaceAboveTitle + title + kSpaceBelowTitle + propertiesHeight(ui) + kSpaceBelowHeader;
+  if(ui.headerProperties.empty()) return 0.0f;
+  return kSpaceAboveProperties + propertiesHeight(ui) + kSpaceBelowHeader;
 }
 
 void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect column, float top) {
   refreshedHeader(ui);
-  ui.headerTitleRect = {};
-  if(ui.headerTitle.empty() && ui.headerProperties.empty()) return;
-
-  const auto title = titleStyle();
-  const float titleHeight = static_cast<float>(text.lineHeight(title));
-  float y = top + kSpaceAboveTitle;
-  const Rect titleRect {column.x, y, column.w, titleHeight};
-  ui.headerTitleRect = titleRect;
-
-  const bool editing = ui.focus == FocusArea::RenameNote;
-  if(editing) {
-    // Edited in place rather than in a dialog, because the title is already
-    // drawn where it belongs and a box over the top of it would only be hiding
-    // the thing being renamed. The field's own keys, Enter and Esc are handled
-    // where every other field's are.
-    const std::string& value = ui.rename.text();
-    const auto& field = ui.rename.editor;
-    if(field.hasSelection()) {
-      const float from = static_cast<float>(text.width(std::string_view(value).substr(0, field.selectionStart()), title));
-      const float to = static_cast<float>(text.width(std::string_view(value).substr(0, field.selectionEnd()), title));
-      fill(renderer, {column.x + from, y, std::max(1.0f, to - from), titleHeight}, theme().selectionBg);
-    }
-    text.draw(value, column.x, y, theme().text, title);
-    const float caret = static_cast<float>(text.width(std::string_view(value).substr(0, field.cursor()), title));
-    fill(renderer, {std::round(column.x + caret), y + 2.0f, 2.0f, titleHeight - 4.0f}, theme().accent);
-  } else {
-    const bool hot = ui.hovered(titleRect);
-    text.draw(ui::ellipsizeToWidth(text, ui.headerTitle, static_cast<int>(column.w), title),
-              column.x, y, theme().text, title);
-    // The offer to rename is an underline under the pointer and nothing at all
-    // otherwise: a box drawn around the title permanently would make every note
-    // look like it was already being edited.
-    if(hot) {
-      hLine(renderer, column.x, column.x + static_cast<float>(text.width(ui.headerTitle, title)),
-            y + titleHeight - 2.0f, theme().accentDim);
-      ui.offerTooltip(titleRect, "Rename  " + ui::keysFor(ui::ActionId::RenameNote));
-    }
-  }
-  y += titleHeight + kSpaceBelowTitle;
-
   if(ui.headerProperties.empty()) return;
-  hLine(renderer, column.x, column.x + column.w, std::round(y), theme().hairline);
-  y += ui::kSpace2;
+
+  float y = top + kSpaceAboveProperties;
 
   const auto key = keyStyle();
   const auto value = valueStyle();
@@ -165,22 +118,6 @@ void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     }
     y += kPropertyRowHeight;
   }
-}
-
-TitleEdit pageHeaderClickAway(UiRuntime& ui, float x, float y) {
-  if(ui.focus != FocusArea::RenameNote) return TitleEdit::None;
-  if(ui::contains(ui.headerTitleRect, x, y)) return TitleEdit::None;
-  if(ui.rename.text() != ui.headerTitle) return TitleEdit::Kept;
-  ui.focus = FocusArea::Editor;
-  return TitleEdit::Abandoned;
-}
-
-bool handlePageHeaderClick(UiRuntime& ui, float x, float y) {
-  if(ui.focus == FocusArea::RenameNote) return false;
-  if(ui.headerTitle.empty() || !ui::contains(ui.headerTitleRect, x, y)) return false;
-  ui.rename.beginWith(ui.headerTitle);
-  ui.focus = FocusArea::RenameNote;
-  return true;
 }
 
 }

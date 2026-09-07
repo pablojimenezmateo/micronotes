@@ -893,10 +893,6 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   const ShellLayout layout = shellLayout(ui, width, height);
   ui.linkRegions.clear();
   ui.buttonRegions.clear();
-  // Set by whichever surface draws the header this frame, and by none of them
-  // in raw mode -- so it is cleared here rather than left pointing at where the
-  // title was the last time a pane that has one was showing.
-  ui.headerTitleRect = {};
   // Cleared here and set by whichever surface the pointer turns out to be over,
   // so a frame can never end up with two tooltips resolved.
   ui.tooltip = {};
@@ -1972,16 +1968,6 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       }
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
     }
-    return;
-  }
-
-  if(pageHeaderClickAway(ui, x, y) == TitleEdit::Kept) saveRename(ui);
-
-  // The inline title, before the page beneath it: a click on the note's name is
-  // a rename, not a caret placed in the first paragraph. Not gated on the pane
-  // mode -- the title's rect is cleared every frame and set only by a surface
-  // that actually drew one, so a mode with no header has nothing to hit.
-  if(button == SDL_BUTTON_LEFT && contains(layout.content, x, y) && handlePageHeaderClick(ui, x, y)) {
     return;
   }
 
