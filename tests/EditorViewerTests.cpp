@@ -530,6 +530,40 @@ MICRONOTES_TEST(editor_undo_history_is_bounded) {
   MICRONOTES_REQUIRE(editor.undoBytes() <= 32u * 1024u * 1024u);
 }
 
+// The test above drove a 4 KB buffer, so it measured 400 KB of history against
+// a 32 MB assertion and could not have failed. A snapshot is the whole buffer,
+// so what bounds the memory is the note's size times the depth -- and on a note
+// the size the rest of the harness uses, the count ceiling alone left 19.6 MB
+// of undo for one open note, against a whole-process peak RSS of about 30 MB.
+//
+// Driven at 200 KB, which is where the byte ceiling is the one doing the work.
+MICRONOTES_TEST(editor_undo_history_is_bounded_in_bytes_on_a_large_note) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText(std::string(200 * 1024, 'x'));
+  for(int i = 0; i < 400; ++i) {
+    editor.moveCursor(static_cast<std::size_t>(i % 100));
+    editor.insert("a");
+  }
+  MICRONOTES_REQUIRE(editor.undoBytes() <= 8u * 1024u * 1024u);
+  // And it is still an undo history: the budget trades depth for bytes, it does
+  // not trade the feature away.
+  MICRONOTES_REQUIRE(editor.undoDepth() >= 8);
+  for(int i = 0; i < 8; ++i) MICRONOTES_REQUIRE(editor.undo());
+}
+
+// A note one snapshot of which already exceeds the whole budget still has undo:
+// the floor is what stops the trim from emptying the history it is trimming.
+MICRONOTES_TEST(editor_undo_survives_a_note_larger_than_the_byte_budget) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText(std::string(12u * 1024u * 1024u, 'x'));
+  for(int i = 0; i < 12; ++i) {
+    editor.moveCursor(static_cast<std::size_t>(i));
+    editor.insert("a");
+  }
+  MICRONOTES_REQUIRE(editor.undoDepth() >= 1);
+  MICRONOTES_REQUIRE(editor.undo());
+}
+
 MICRONOTES_TEST(editor_redo_returns_the_undone_edit) {
   microcore::editor::MarkdownEditor editor;
   editor.setText("a");

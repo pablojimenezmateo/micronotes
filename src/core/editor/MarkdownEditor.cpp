@@ -9,7 +9,23 @@
 namespace microcore::editor {
 namespace {
 
+// Two ceilings, because one of them cannot bound the thing that matters.
+//
+// The count alone was the whole policy, and a snapshot is the *whole buffer*:
+// 100 of them on a 200 KB note is 19.6 MB of undo history for one open note,
+// against a whole-process peak RSS of about 30 MB on the perf fixture. The test
+// that was meant to guard this asserted a byte figure but drove it with a 4 KB
+// buffer, so it measured 400 KB and passed with room to spare.
+//
+// So the count governs small notes -- where 100 steps is cheap and worth having
+// -- and the byte budget governs large ones, where it is the count that has to
+// give. A 200 KB note keeps about 40 steps under this, a 1 MB note about 8.
 constexpr std::size_t kMaxUndoSnapshots = 100;
+constexpr std::size_t kMaxUndoBytes = 8u * 1024u * 1024u;
+// However big the note, this many steps survive the byte budget. An editor that
+// can undo once is not an editor with undo, and a note large enough to blow the
+// budget on a single snapshot must not end up there.
+constexpr std::size_t kMinUndoSnapshots = 8;
 // Typing pauses longer than this start a new undo step, so a burst of keys is
 // one Ctrl+Z but a considered edit minutes later is its own.
 constexpr std::chrono::milliseconds kCoalesceWindow {600};
@@ -443,15 +459,31 @@ void MarkdownEditor::snapshot(EditKind kind) {
     perf::addCounter(perf::CounterId::EditorUndoRecords);
     perf::addCounter(perf::CounterId::EditorUndoBytesRetained, text_.size());
     undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
-    if(undo_.size() > kMaxUndoSnapshots) {
-      perf::addCounter(perf::CounterId::EditorUndoRecordsDropped);
-      undo_.erase(undo_.begin());
-    }
+    trimUndo();
   }
   redo_.clear();
   groupOpen_ = kind != EditKind::Structural;
   groupKind_ = kind;
   groupAt_ = now;
+}
+
+// Drops the oldest steps until the history is inside both ceilings, in one
+// erase rather than one per step: removing from the front of a vector shifts
+// everything above it, and a note that has just gone over the byte budget can
+// drop several at once.
+void MarkdownEditor::trimUndo() {
+  std::size_t drop = undo_.size() > kMaxUndoSnapshots ? undo_.size() - kMaxUndoSnapshots : 0;
+  std::size_t bytes = 0;
+  for(const auto& record : undo_) bytes += record.text.size();
+  // Newest first, keeping what fits: the oldest steps are the ones nobody
+  // reaches for, and they are what the budget spends its bytes on.
+  while(bytes > kMaxUndoBytes && undo_.size() - drop > kMinUndoSnapshots) {
+    bytes -= undo_[drop].text.size();
+    ++drop;
+  }
+  if(drop == 0) return;
+  perf::addCounter(perf::CounterId::EditorUndoRecordsDropped, drop);
+  undo_.erase(undo_.begin(), undo_.begin() + static_cast<std::ptrdiff_t>(drop));
 }
 
 void MarkdownEditor::closeEdit() {

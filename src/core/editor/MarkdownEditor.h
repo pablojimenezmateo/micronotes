@@ -142,6 +142,8 @@ private:
   void recordChange(std::size_t start, std::size_t oldEnd, std::size_t newEnd);
 
   void snapshot(EditKind kind);
+  // Brings the undo history back inside its count and byte ceilings.
+  void trimUndo();
   void closeEdit();
 
   std::string text_;
