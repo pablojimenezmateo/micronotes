@@ -46,6 +46,16 @@ void showFolder(UiRuntime& ui, const std::filesystem::path& folder);
 // is here rather than at either of them.
 void selectTag(UiRuntime& ui, const std::string& tag);
 
+// Puts the tree back. A tag filter replaces the whole row list, so while one is
+// in force there is no tree on screen to click your way out through -- and the
+// tag row you came in by is not on screen either. Without this the only way
+// back was to search for something and clear the search, which is a way out
+// only if you already know the tree is still there.
+//
+// Reports whether it did anything, so Esc can fall through to whatever else it
+// means when no filter is running.
+bool clearTagFilter(UiRuntime& ui);
+
 // Reloads the page from whatever the selection now names.
 void loadSelectedIntoEditor(UiRuntime& ui);
 

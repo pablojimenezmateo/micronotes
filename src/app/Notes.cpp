@@ -69,8 +69,34 @@ void selectNoteAt(UiRuntime& ui, int index) {
 
 void selectTag(UiRuntime& ui, const std::string& tag) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  // Choosing the tag already in force clears it, which is the affordance the
+  // empty state has been promising ("click the tag again to clear the filter")
+  // since before there was anything to click: a tag row and a note row look and
+  // behave alike everywhere else, so a second click on the row you are already
+  // filtered by should not be a no-op. Reachable from the right panel's Tags
+  // view, which keeps listing the tags while the filter runs.
+  if(!tag.empty() && ui.state.selection().tag == tag) {
+    clearTagFilter(ui);
+    return;
+  }
   ui.state.selectTag(tag);
   selectNoteAt(ui, 0);
+}
+
+bool clearTagFilter(UiRuntime& ui) {
+  if(ui.state.selection().tag.empty()) return false;
+  // The note stays open. Leaving the filter is a question about what the
+  // sidebar lists, not about what is being read -- closing the note as well
+  // would make going back cost the reader their place.
+  const auto note = ui.state.findNote(ui.state.selection().noteId);
+  ui.state.selectTag({});
+  // Onto the folder the open note lives in, with the tree opened to it, so the
+  // list comes back showing where you ended up rather than at the root having
+  // forgotten the last five minutes. `selectTag` cleared the folder on the way
+  // in, which is why there is something to restore.
+  showFolder(ui, note ? note->folder : std::filesystem::path {});
+  ui.status = "Cleared tag filter";
+  return true;
 }
 
 void showFolder(UiRuntime& ui, const std::filesystem::path& folder) {

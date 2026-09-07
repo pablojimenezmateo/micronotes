@@ -29,6 +29,20 @@ using ui::theme;
 constexpr float kFavoriteWidth = 26.0f;
 constexpr float kCrumbIconSize = 14.0f;
 
+// The star *mark*, which is not the size of the star's *target*.
+//
+// `drawStarGlyph` fills whatever box it is handed, and it was handed the whole
+// 26x24 hit rect -- so the mark grew to fill a target sized for a pointer and
+// ended up the largest thing in a 26px strip, competing with the note's own
+// name rather than annotating it. A hit area is sized for the hand and a glyph
+// for the eye; the tab strip already keeps those apart (`kTabCloseReserve`
+// against `tabCloseHitRect`), and this is the same split.
+//
+// A point under the crumb icon beside it: a five-pointed star reads larger than
+// a document glyph in the same box, so matching the box would not match the
+// weight.
+constexpr float kFavoriteGlyphSize = 13.0f;
+
 }
 
 void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
@@ -94,8 +108,13 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
   const bool pinned = ui.state.favorite(note->id);
   ui.offerTooltip(ui.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
   if(ui.hovered(ui.favoriteButton)) fill(renderer, ui.favoriteButton, theme().rowHighlight);
-  ui::drawStarGlyph(renderer, ui.favoriteButton, pinned,
-                    pinned ? theme().accent : theme().textMuted);
+  // The mark centred in the target rather than filling it. See
+  // `kFavoriteGlyphSize`.
+  ui::drawStarGlyph(renderer,
+                    {std::round(ui.favoriteButton.x + (ui.favoriteButton.w - kFavoriteGlyphSize) / 2.0f),
+                     std::round(ui.favoriteButton.y + (ui.favoriteButton.h - kFavoriteGlyphSize) / 2.0f),
+                     kFavoriteGlyphSize, kFavoriteGlyphSize},
+                    pinned, pinned ? theme().accent : theme().textMuted);
 }
 
 bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {

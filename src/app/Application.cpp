@@ -11,6 +11,7 @@
 #include "app/ReadingPage.h"
 #include "app/SessionState.h"
 #include "app/Breadcrumb.h"
+#include "app/Dismiss.h"
 #include "app/EditCommands.h"
 #include "app/MenuBar.h"
 #include "app/Scroll.h"
@@ -1559,19 +1560,18 @@ static void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL
   } else if(shortcut(SDLK_F, SDL_SCANCODE_F)) {
     focusFindInNote(ui);
   } else if(key == SDLK_ESCAPE) {
-    if(ui.focus == FocusArea::Search && !ui.search.empty()) {
-      ui.search.reset();
-      ui.state.setSearch("", ui.searchScope);
+    // One press undoes one narrowing; `app/Dismiss.h` owns which, and why.
+    const Dismissed undid = dismissOne(ui);
+    // With nothing narrowed, Esc belongs to whatever has focus: in the live
+    // surface it steps out of the text onto the block, and the press after that
+    // is the block selection `dismissOne` then finds.
+    if(undid == Dismissed::Nothing && ui.focus == FocusArea::Editor &&
+       ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+      selectBlockAtCursor(ui);
     }
-    if(ui.focus == FocusArea::Find) ui.find.reset();
-    ui.creatingFolder = false;
-    // In the live surface Esc steps out of the text and selects the block
-    // itself; a second Esc puts the caret back.
-    if(ui.focus == FocusArea::Editor && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
-      if(ui.blockSelectActive) ui.clearBlockSelection();
-      else selectBlockAtCursor(ui);
-    }
-    ui.focus = FocusArea::Editor;
+    // Leaving a tag filter lands in the tree that has just come back; every
+    // other narrowing hands focus to the page.
+    ui.focus = undid == Dismissed::TagFilter ? FocusArea::Folders : FocusArea::Editor;
   } else if(ui.focus == FocusArea::Search && (key == SDLK_DOWN || key == SDLK_UP)) {
     // The results are sidebar rows now, so walking them is the tree cursor: the
     // field keeps the typing and the list keeps the selection. A single-line

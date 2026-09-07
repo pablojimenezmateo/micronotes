@@ -10,6 +10,7 @@
 #include "doc/BlockScan.h"
 #include "ui/TextUtil.h"
 #include "app/SidebarModel.h"
+#include "app/Dismiss.h"
 #include "app/Notes.h"
 #include "app/SessionState.h"
 #include "app/WikiLinks.h"
@@ -715,4 +716,123 @@ MICRONOTES_TEST(shell_a_link_region_is_found_under_the_pointer) {
   MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 161.0f, 209.0f));
   MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 130.0f, 199.0f));
   MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 130.0f, 219.0f));
+}
+
+// A tag filter is a one-way door without this.
+//
+// Choosing a tag replaces the entire row list with the notes carrying it, so
+// while one is in force neither the tree nor the tag row that started it is on
+// screen to click -- and nothing else clears `selection().tag`. The empty state
+// even told the reader to "click the tag again", which was advice about a row
+// the filter had just taken away. Both ways out are checked here: Esc's, and a
+// second choice of the tag already in force.
+MICRONOTES_TEST(shell_a_tag_filter_has_a_way_back_to_the_tree) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-tag-filter";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work");
+  {
+    std::ofstream out(root / "work" / "plan.md", std::ios::binary | std::ios::trunc);
+    out << "---\nid: tf-plan\ntitle: Plan\ntags: work\n---\n\nBody.\n";
+  }
+  {
+    std::ofstream out(root / "loose.md", std::ios::binary | std::ios::trunc);
+    out << "---\nid: tf-loose\ntitle: Loose\n---\n\nBody.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  micronotes::app::selectTag(ui, "work");
+  MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
+  // The filter picked the note under it, which is what makes the folder worth
+  // restoring: it is not the folder the reader started in.
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "tf-plan");
+  MICRONOTES_REQUIRE(ui.state.selection().folder.empty());
+
+  MICRONOTES_REQUIRE(micronotes::app::clearTagFilter(ui));
+  MICRONOTES_REQUIRE(ui.state.selection().tag.empty());
+  // The note stays open -- leaving the filter is a question about the list, not
+  // about what is being read -- and the tree comes back opened onto where that
+  // note actually lives rather than at the root.
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "tf-plan");
+  MICRONOTES_REQUIRE(ui.state.selection().folder == std::filesystem::path("work"));
+  MICRONOTES_REQUIRE(ui.tree.expanded(std::filesystem::path("work")));
+
+  // Idempotent, so Esc with no filter running falls through to whatever else
+  // Esc means rather than being swallowed.
+  MICRONOTES_REQUIRE(!micronotes::app::clearTagFilter(ui));
+
+  // And the second route: choosing the tag already in force toggles it off,
+  // which is what the right panel's Tags view -- the one surface that keeps
+  // listing tags while a filter runs -- offers.
+  micronotes::app::selectTag(ui, "work");
+  MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
+  micronotes::app::selectTag(ui, "work");
+  MICRONOTES_REQUIRE(ui.state.selection().tag.empty());
+
+  std::filesystem::remove_all(root);
+}
+
+// One press of Escape undoes one narrowing, innermost first.
+//
+// The pile of `if`s this replaced fired all of them at once, so a reader who
+// had typed a query while a tag filter was running got both cleared by a single
+// press and no way to see the middle state -- and the tag filter, which nothing
+// else could undo, was not in the pile at all.
+MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
+  using micronotes::app::Dismissed;
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-dismiss";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  {
+    std::ofstream out(root / "plan.md", std::ios::binary | std::ios::trunc);
+    out << "---\nid: dm-plan\ntitle: Plan\ntags: work\n---\n\nFindable body.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  // Nothing narrowed: Esc has nothing to undo and says so, which is what lets
+  // the caller give the key to whatever has focus instead of swallowing it.
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
+
+  // Stack all four up, outermost first, in the order a reader would reach them.
+  micronotes::app::selectTag(ui, "work");
+  ui.creatingFolder = true;
+  ui.find.beginWith("body");
+  ui.search.beginWith("Findable");
+  ui.state.setSearch(ui.search.text(), ui.searchScope);
+  MICRONOTES_REQUIRE(!ui.state.currentSearchResults().empty());
+
+  // And they come off one at a time, innermost first. Each assertion also
+  // pins that the *others* are still standing, which is the property the
+  // pile of `if`s did not have.
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Search);
+  MICRONOTES_REQUIRE(ui.search.empty());
+  MICRONOTES_REQUIRE(!ui.find.empty());
+  MICRONOTES_REQUIRE(ui.creatingFolder);
+  MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
+
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Find);
+  MICRONOTES_REQUIRE(ui.find.empty());
+  MICRONOTES_REQUIRE(ui.creatingFolder);
+  MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
+
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::FolderName);
+  MICRONOTES_REQUIRE(!ui.creatingFolder);
+  MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
+
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::TagFilter);
+  MICRONOTES_REQUIRE(ui.state.selection().tag.empty());
+
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
+
+  // A block selection is last: it is a selection inside the page rather than a
+  // filter over the library, so it only comes off once nothing is narrowed.
+  ui.blockSelectActive = true;
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::BlockSelection);
+  MICRONOTES_REQUIRE(!ui.blockSelectActive);
+  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
+
+  std::filesystem::remove_all(root);
 }
