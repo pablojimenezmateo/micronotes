@@ -7,12 +7,15 @@
 
 namespace micronotes::ui {
 
-std::vector<OutlineEntry> outlineOf(std::string_view source) {
-  std::vector<OutlineEntry> entries;
-  // scanBlocks already knows the difference between a heading and a line that
-  // starts with a hash inside a fence, so the outline asks it rather than
+namespace {
+
+// Fills `entries` from a partition, whichever way the caller got one.
+void buildOutline(std::string_view source, doc::BlockSpan blocks,
+                  std::vector<OutlineEntry>& entries) {
+  // The block scan already knows the difference between a heading and a line
+  // that starts with a hash inside a fence, so the outline asks it rather than
   // scanning for "#" itself and getting that wrong in a second place.
-  for(const auto& block : doc::scanBlocks(source)) {
+  for(const auto& block : blocks) {
     if(block.kind != doc::BlockKind::Heading) continue;
     OutlineEntry entry;
     entry.level = std::clamp<int>(block.level, 1, 6);
@@ -36,6 +39,29 @@ std::vector<OutlineEntry> outlineOf(std::string_view source) {
     entry.depth = static_cast<int>(open.size());
     open.push_back(entry.level);
   }
+}
+
+}
+
+void outlineInto(std::string_view source, doc::BlockSpan blocks,
+                 std::vector<OutlineEntry>* out) {
+  std::vector<OutlineEntry>& entries = *out;
+  // Cleared rather than replaced: the vector and its entries' strings keep the
+  // capacity they had, which on a note whose outline barely changes between
+  // keystrokes is every allocation this used to make.
+  entries.clear();
+  if(!blocks.empty()) {
+    buildOutline(source, blocks, entries);
+    return;
+  }
+  // No partition lent, so derive one. Exactly what every caller got before.
+  const std::vector<doc::SourceBlock> scanned = doc::scanBlocks(source);
+  buildOutline(source, doc::BlockSpan(scanned), entries);
+}
+
+std::vector<OutlineEntry> outlineOf(std::string_view source) {
+  std::vector<OutlineEntry> entries;
+  outlineInto(source, {}, &entries);
   return entries;
 }
 

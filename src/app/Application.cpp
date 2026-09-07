@@ -940,17 +940,12 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     const perf::ScopeTimer timer("shell.ribbon");
     drawRibbon(renderer, text, ui, layout.ribbon);
   }
-
   // A hidden panel is zero wide, and its rule would land on the edge of
   // whatever took its place.
   if(!ui::empty(layout.sidebar)) {
     const perf::ScopeTimer timer("shell.sidebar");
     drawSidebar(renderer, text, ui, layout.sidebar);
     fill(renderer, {layout.sidebar.x + layout.sidebar.w, layout.sidebar.y, 1, layout.sidebar.h}, theme().hairline);
-  }
-  if(!ui::empty(layout.rightPanel)) {
-    const perf::ScopeTimer timer("shell.right_panel");
-    drawRightPanel(renderer, text, ui, layout.rightPanel);
   }
   if(!ui::empty(layout.tabs)) {
     const perf::ScopeTimer timer("shell.tab_strip");
@@ -985,6 +980,11 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
       fill(renderer, {content.x + split, content.y, 1, content.h}, theme().hairline);
       drawReading(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
     }
+  }
+  // After the content: its outline borrows the partition the live page splices.
+  if(!ui::empty(layout.rightPanel)) {
+    const perf::ScopeTimer timer("shell.right_panel");
+    drawRightPanel(renderer, text, ui, layout.rightPanel);
   }
   {
     const perf::ScopeTimer timer("shell.status");

@@ -1,5 +1,6 @@
 #include "app/RightPanel.h"
 
+#include "app/EditorBlocks.h"
 #include "app/Notes.h"
 #include "app/Shell.h"
 
@@ -111,7 +112,30 @@ void resetScrollOnChange(UiRuntime& ui) {
   ui.rightPanelWheel.remainder = 0.0f;
 }
 
+}
+
 // The outline of the open buffer, rebuilt only when the buffer has moved.
+//
+// "Only when the buffer has moved" is every keystroke, which is what made the
+// rebuild worth caring about rather than a once-per-note cost: it was a block
+// scan of the whole note per typed character -- 226 us on a 200 KB note, of
+// which 194 us was the scan, against the ~14 us that keystroke's own layout
+// update costs. The panel is on by default, so this was the largest thing a
+// keystroke did.
+//
+// The partition comes from the live page now, through the same `editorBlocks`
+// borrow the block edits take: the layout splices it during its own update, and
+// the editor's revision is what proves it describes this buffer. When there is
+// nothing to borrow -- the raw pane, the first keystroke after a note opens --
+// it scans, which is what this always did.
+//
+// This is also why `drawApp` draws the right panel *after* the content. Ahead of
+// it, the panel asked for the partition of a revision the layout had not reached
+// yet, and the borrow missed every single time: the answer would have been last
+// frame's, and `blocksAt` correctly refuses to hand that over. Moving the call
+// is the whole difference between the borrow working and being decoration, and
+// nothing about the paint depends on the order -- the shell's surfaces are
+// disjoint rects and the tooltip and overlays are resolved after all of them.
 const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui) {
   auto& memo = ui.rightPanel;
   const std::uint64_t revision = ui.editor.revision();
@@ -122,9 +146,14 @@ const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui) {
   perf::addCounter(perf::CounterId::RightPanelOutlineBuilds);
   memo.outlineValid = true;
   memo.outlineRevision = revision;
-  memo.outline = ui::outlineOf(ui.editor.text());
+  const doc::BlockSpan blocks = editorBlocks(ui);
+  perf::addCounter(blocks.empty() ? perf::CounterId::RightPanelOutlineScans
+                                  : perf::CounterId::RightPanelOutlineBlocksBorrowed);
+  ui::outlineInto(ui.editor.text(), blocks, &memo.outline);
   return memo.outline;
 }
+
+namespace {
 
 // The two views that come from the library rather than from the buffer. Both are
 // filled together because both turn on the same key, and asking for either is

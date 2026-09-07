@@ -148,6 +148,12 @@
   /* the panel is costing more per frame than the note beside it does.          */    \
   X(RightPanelOutlineBuilds, "right_panel.outline_builds")                             \
   X(RightPanelOutlineReused, "right_panel.outline_reused")                             \
+  /* Where a rebuild got its block partition. The whole cost of an outline      */    \
+  /* rebuild is in the scan, so these two split "rebuilt" into the cheap case   */    \
+  /* and the expensive one -- without them a build is a build and the borrow    */    \
+  /* could stop working with nothing to show it.                                */    \
+  X(RightPanelOutlineBlocksBorrowed, "right_panel.outline_blocks_borrowed")            \
+  X(RightPanelOutlineScans, "right_panel.outline_scans")                              \
   X(RightPanelLibraryBuilds, "right_panel.library_builds")                             \
   X(RightPanelLibraryReused, "right_panel.library_reused")                             \
   /* The palette's filter: runs against calls served from the standing answer,  */    \

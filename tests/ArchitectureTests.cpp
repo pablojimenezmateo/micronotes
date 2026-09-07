@@ -250,6 +250,35 @@ MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
       "named unit under src/ and lower the budget instead of raising it.");
 }
 
+// The right panel is drawn after the content, and that is a performance
+// contract rather than a matter of taste.
+//
+// The panel's outline borrows the block partition the live page splices during
+// its own layout. `blocksAt` hands it over only for the revision it was built
+// from -- which is what makes the borrow safe -- so if the panel is drawn ahead
+// of the content it asks one revision early, is correctly refused, and rescans
+// the whole note on every keystroke instead: 194 us of a 226 us rebuild on a
+// 200 KB note, against the ~14 us that keystroke's own layout costs.
+//
+// Nothing else fails when that happens. The pixels are identical, every unit
+// test still passes -- `shell_outline_borrows_the_partition_the_live_page_
+// already_spliced` drives the two directly and so cannot see the order they are
+// called in -- and the only evidence is a counter in a session nobody is
+// running. So the order is asserted here, where it is cheap, rather than left
+// to be rediscovered.
+MICRONOTES_TEST(architecture_the_right_panel_is_drawn_after_the_content) {
+  const std::string text = readText(repoRoot() / "src" / "app" / "Application.cpp");
+  const auto content = text.find("\"shell.content\"");
+  const auto rightPanel = text.find("\"shell.right_panel\"");
+  micronotes::tests::require(content != std::string::npos && rightPanel != std::string::npos,
+                             "drawApp no longer has both a content and a right-panel scope");
+  micronotes::tests::require(
+    rightPanel > content,
+    "drawApp draws the right panel before the content. Its outline then asks the live page for a "
+    "block partition the page has not laid out yet, is refused, and rescans the whole note on "
+    "every keystroke -- with identical pixels and a green suite. Draw it after the content.");
+}
+
 // Actions are named in one table so the palette, the shortcut list and the key
 // handler cannot drift. That only holds while nobody writes a key name out by
 // hand somewhere else: a hint line that says "Ctrl+P" is a fourth copy, and the

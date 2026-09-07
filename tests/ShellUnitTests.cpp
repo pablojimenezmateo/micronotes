@@ -3,6 +3,7 @@
 #include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
 #include "app/PageView.h"
+#include "app/RightPanel.h"
 #include "app/Shell.h"
 #include "core/perf/PerformanceCounters.h"
 #include "doc/BlockScan.h"
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 // Nothing under src/app/ used to be reachable from a test: every file there was
@@ -406,4 +408,83 @@ MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
   MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
 
   std::filesystem::remove_all(root);
+}
+
+// The outline panel rebuilds on every keystroke -- it is keyed on the editor's
+// revision, and that moves with every typed character. What it must not do on
+// every keystroke is derive the block partition again: that is a pass over every
+// byte of the note plus a fresh vector, 194 us of the 226 us an outline rebuild
+// cost on a 200 KB note, against the ~14 us that keystroke's own layout costs.
+//
+// The live page splices the partition during its own update, and `editorBlocks`
+// lends it. But the borrow only hits if the page has already laid out *this*
+// revision -- `blocksAt` refuses to hand over a partition belonging to a buffer
+// that has moved, which is exactly what makes it safe.
+//
+// This covers the borrow and the refusal. It deliberately does NOT cover the
+// order `drawApp` calls the two in, because it drives them directly and so
+// cannot see it -- and drawn in the wrong order the borrow misses every frame
+// with this test still green. `architecture_the_right_panel_is_drawn_after_the_
+// content` is what guards that half.
+MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_spliced) {
+  using microcore::perf::CounterId;
+  std::string source;
+  for(int i = 0; i < 60; ++i) {
+    source += "## Heading " + std::to_string(i) + "\n\nSome paragraph text here.\n\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  micronotes::ui::TextRenderer text {nullptr};
+  ui.editor.setText(source);
+
+  const auto counter = [](CounterId id) {
+    return microcore::perf::captureCounters()[static_cast<std::size_t>(id)];
+  };
+  // What `drawLive` does: stamp the page with the editor's revision plus one --
+  // zero means "cannot say" to the layout's reuse check -- and lay it out.
+  const auto layOutTheLivePage = [&] {
+    ui.livePage.setRevisions(ui.editor.revision() + 1ull, 1);
+    ui.livePage.setHeaderHeight(0.0f);
+    ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), {0.0f, 0.0f, 800.0f, 600.0f});
+  };
+  const auto rebuildTheOutline = [&] {
+    ui.rightPanel.outlineValid = false;
+    const auto scansBefore = counter(CounterId::RightPanelOutlineScans);
+    const auto borrowsBefore = counter(CounterId::RightPanelOutlineBlocksBorrowed);
+    const std::size_t headings = micronotes::app::outlineFor(ui).size();
+    MICRONOTES_REQUIRE(headings == 60);
+    return std::pair<std::uint64_t, std::uint64_t> {
+      counter(CounterId::RightPanelOutlineScans) - scansBefore,
+      counter(CounterId::RightPanelOutlineBlocksBorrowed) - borrowsBefore,
+    };
+  };
+
+  // Before the page has laid anything out there is nothing to borrow, and the
+  // fallback scan is the right answer rather than a failure.
+  {
+    const auto [scans, borrows] = rebuildTheOutline();
+    MICRONOTES_REQUIRE(scans == 1);
+    MICRONOTES_REQUIRE(borrows == 0);
+  }
+
+  // Once it has, the borrow hits -- and keeps hitting as the buffer moves,
+  // which is the steady state while somebody types.
+  layOutTheLivePage();
+  for(int i = 0; i < 5; ++i) {
+    const auto [scans, borrows] = rebuildTheOutline();
+    MICRONOTES_REQUIRE(scans == 0);
+    MICRONOTES_REQUIRE(borrows == 1);
+    ui.editor.moveTo(source.size(), false);
+    ui.editor.insert(".");
+    layOutTheLivePage();
+  }
+
+  // And a buffer the page has not caught up with is refused rather than
+  // answered wrongly: this is the case the ordering bug produced every frame.
+  ui.editor.insert("!");
+  {
+    const auto [scans, borrows] = rebuildTheOutline();
+    MICRONOTES_REQUIRE(scans == 1);
+    MICRONOTES_REQUIRE(borrows == 0);
+  }
 }
