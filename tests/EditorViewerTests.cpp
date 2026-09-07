@@ -610,3 +610,126 @@ MICRONOTES_TEST(editor_revision_moves_only_when_the_text_does) {
   editor.setText("a different note");
   MICRONOTES_REQUIRE(editor.revision() != before);
 }
+
+namespace {
+
+// The count from scratch, by the definition the status bar means: a word is a
+// run of non-space bytes. Deliberately spelled differently from the editor's
+// incremental version -- a reference implementation that shares the production
+// one's structure checks nothing.
+std::size_t wordsFromScratch(std::string_view text) {
+  std::size_t words = 0;
+  bool inWord = false;
+  for(const unsigned char c : text) {
+    const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    if(space) {
+      inWord = false;
+      continue;
+    }
+    if(!inWord) ++words;
+    inWord = true;
+  }
+  return words;
+}
+
+}
+
+// The word count is carried across every edit rather than recomputed, because
+// recomputing it walks the whole note on every keystroke. The risk that buys is
+// the nasty kind: a count that drifts is wrong quietly, in a corner of the
+// status bar, with nothing to point at.
+//
+// So it is checked against a from-scratch count after every single edit of a
+// long random sequence, over text chosen to hit the cases the increment reasons
+// about: an edit landing inside a word, on the space between two, at either end
+// of the buffer, and one that joins or splits words.
+MICRONOTES_TEST(editor_word_count_matches_a_full_recount_after_every_edit) {
+  const char* fragments[] = {"a", " ", "  ", "\n", "word", " word ", "x y", "\n\n", "", ".", "ab cd ef"};
+  for(const std::uint64_t seed : {0x9E3779B97F4A7C15ull, 0x1234567891234567ull, 0xDEADBEEFCAFEF00Dull}) {
+    std::uint64_t state = seed;
+    const auto next = [&](std::uint64_t bound) {
+      state ^= state << 13;
+      state ^= state >> 7;
+      state ^= state << 17;
+      return bound == 0 ? 0ull : state % bound;
+    };
+    microcore::editor::MarkdownEditor editor;
+    editor.setText("the quick brown fox jumps over the lazy dog");
+    MICRONOTES_REQUIRE(editor.wordCount() == wordsFromScratch(editor.text()));
+
+    for(int step = 0; step < 400; ++step) {
+      const std::size_t size = editor.text().size();
+      switch(next(4)) {
+        case 0: {
+          editor.moveTo(next(size + 1), false);
+          editor.insert(fragments[next(std::size(fragments))]);
+          break;
+        }
+        case 1: {
+          editor.moveTo(next(size + 1), false);
+          editor.erasePrevious();
+          break;
+        }
+        case 2: {
+          editor.moveTo(next(size + 1), false);
+          editor.eraseNext();
+          break;
+        }
+        default: {
+          const std::size_t from = next(size + 1);
+          const std::size_t to = from + next(size - from + 1);
+          editor.replaceRange(from, to, fragments[next(std::size(fragments))]);
+          break;
+        }
+      }
+      MICRONOTES_REQUIRE(editor.wordCount() == wordsFromScratch(editor.text()));
+    }
+
+    // And across the whole-buffer replacements, which recount rather than carry.
+    while(editor.undo()) {
+      MICRONOTES_REQUIRE(editor.wordCount() == wordsFromScratch(editor.text()));
+    }
+    while(editor.redo()) {
+      MICRONOTES_REQUIRE(editor.wordCount() == wordsFromScratch(editor.text()));
+    }
+  }
+}
+
+// The edge cases the window arithmetic turns on, named rather than left to the
+// random walk to stumble into.
+MICRONOTES_TEST(editor_word_count_handles_the_edges_of_the_buffer) {
+  microcore::editor::MarkdownEditor editor;
+  editor.setText("");
+  MICRONOTES_REQUIRE(editor.wordCount() == 0);
+
+  // A word appearing, then split in two by a space typed into its middle, then
+  // joined again by deleting that space.
+  editor.insert("ab");
+  MICRONOTES_REQUIRE(editor.wordCount() == 1);
+  editor.moveTo(1, false);
+  editor.insert(" ");
+  MICRONOTES_REQUIRE(editor.text() == "a b");
+  MICRONOTES_REQUIRE(editor.wordCount() == 2);
+  editor.moveTo(2, false);
+  editor.erasePrevious();
+  MICRONOTES_REQUIRE(editor.text() == "ab");
+  MICRONOTES_REQUIRE(editor.wordCount() == 1);
+
+  // At the very end of the buffer, which is the position the window clamps at.
+  editor.moveDocumentEnd();
+  editor.insert(" c");
+  MICRONOTES_REQUIRE(editor.wordCount() == 2);
+  // And at the very start, which is the one position with no predecessor byte.
+  editor.moveTo(0, false);
+  editor.insert("z ");
+  MICRONOTES_REQUIRE(editor.text() == "z ab c");
+  MICRONOTES_REQUIRE(editor.wordCount() == 3);
+
+  // A buffer with no whitespace at all: one word however long it is, and the
+  // window must not walk it looking for a boundary.
+  editor.setText(std::string(4096, 'x'));
+  MICRONOTES_REQUIRE(editor.wordCount() == 1);
+  editor.moveTo(2048, false);
+  editor.insert("y");
+  MICRONOTES_REQUIRE(editor.wordCount() == 1);
+}

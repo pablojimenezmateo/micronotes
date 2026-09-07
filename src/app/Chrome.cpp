@@ -64,51 +64,24 @@ void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool m
   line(cx - 5.0f, cy + 5.0f, cx + 5.0f, cy - 5.0f);
 }
 
-// Words and characters in the buffer, in one pass.
+// Words and characters in the buffer.
 //
 // A word is a run of non-space bytes, which is what every editor's status bar
-// means by the word and what a reader checking a word budget expects.
-// Characters are bytes of the note as stored, not codepoints; saying so here
-// is cheaper than a UTF-8 walk nobody asked for.
-// Memoised on the buffer's revision, because this used to run on every frame.
+// means by the word and what a reader checking a word budget expects. The
+// editor carries both numbers, so there is nothing to memoise and nothing to
+// walk.
 //
-// The comment that stood here said it ran "about once per keystroke", on the
-// reasoning that frames are event driven. That was wrong, and the counters said
-// so the moment they existed: status.word_counts tracked frame.presents exactly,
-// because a scroll, a hover and a window focus all draw a frame and none of them
-// touches the text. It was a byte-at-a-time walk of the whole note, 0.1 ms a
-// frame on a 235 KB one, to render a number that had not changed.
+// This was a memo keyed on the buffer's revision, which stopped it running on
+// every *frame* -- a scroll, a hover and a window focus all draw one and none of
+// them touches the text. What it could not stop was running on every
+// *keystroke*, which is exactly when the revision does move, and that is a
+// byte-at-a-time walk of the whole note: 247 us on a 200 KB one, against the
+// ~14 us that keystroke's own layout update costs, and the largest single thing
+// a keystroke did.
 //
-// The revision is the editor's, so a buffer that has not been edited cannot be
-// recounted no matter what else happened. The memo lives on the runtime beside
-// the note it counts -- see `UiRuntime::BufferCountsMemo` for why it is not a
-// `static` in here.
-const UiRuntime::BufferCountsMemo& countBuffer(UiRuntime& ui) {
-  auto& memo = ui.bufferCounts;
-  const std::uint64_t revision = ui.editor.revision();
-  if(memo.valid && memo.revision == revision) {
-    perf::addCounter(perf::CounterId::StatusWordCountsReused);
-    return memo;
-  }
-  perf::ScopeTimer timer("status.count_buffer");
-  perf::addCounter(perf::CounterId::StatusWordCounts);
-  memo.valid = true;
-  memo.revision = revision;
-  memo.words = 0;
-  const std::string_view text = ui.editor.text();
-  memo.characters = text.size();
-  bool inWord = false;
-  for(const unsigned char c : text) {
-    const bool space = c == ' ' || c == '\t' || c == '\n' || c == '\r';
-    if(space) {
-      inWord = false;
-      continue;
-    }
-    if(!inWord) ++memo.words;
-    inWord = true;
-  }
-  return memo;
-}
+// `MarkdownEditor::splice` carries the count across each edit instead, so the
+// question is now a member read and the memo, its struct on `UiRuntime` and its
+// two counters are all gone.
 
 std::string plural(std::size_t count, std::string_view noun) {
   return std::to_string(count) + " " + std::string(noun) + (count == 1 ? "" : "s");
@@ -143,8 +116,10 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   // The right first, so the left knows how much room it was left with.
   float right = rect.x + rect.w - ui::kSpace3;
   if(!ui.state.selection().noteId.empty()) {
-    const auto& counts = countBuffer(ui);
-    const std::string tally = plural(counts.words, "word") + "    " + plural(counts.characters, "character");
+    // Characters are bytes of the note as stored, not codepoints; saying so
+    // here is cheaper than a UTF-8 walk nobody asked for.
+    const std::string tally = plural(ui.editor.wordCount(), "word") + "    " +
+                              plural(ui.editor.text().size(), "character");
     const float width = static_cast<float>(text.width(tally));
     text.draw(tally, right - width, baseline, theme().dim);
     right -= width + ui::kSpace4;

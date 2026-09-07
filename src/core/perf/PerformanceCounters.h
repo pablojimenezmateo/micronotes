@@ -47,6 +47,14 @@ namespace microcore::perf {
   X(EditorUndoRecordsCoalesced, "editor.undo_records_coalesced")                       \
   X(EditorUndoBytesRetained, "editor.undo_bytes_retained")                             \
   X(EditorUndoRecordsDropped, "editor.undo_records_dropped")                           \
+  /* The buffer's word count. `updates` is the incremental path and `rebuilds`  */    \
+  /* the whole-buffer one (setText, undo, redo); `bytes_scanned` is what the    */    \
+  /* two actually read, which is the number that says the increment is working  */    \
+  /* -- a regression to recounting shows up here as bytes per keystroke going   */    \
+  /* from a handful to the size of the note.                                    */    \
+  X(EditorWordCountUpdates, "editor.word_count_updates")                              \
+  X(EditorWordCountRebuilds, "editor.word_count_rebuilds")                            \
+  X(EditorWordCountBytesScanned, "editor.word_count_bytes_scanned")                   \
   X(EditorSingleLineLayouts, "editor.single_line_layouts")                              \
   X(EditorSingleLineMeasures, "editor.single_line_measures")                            \
   X(EditorWrapLines, "editor.wrap_lines")                                                \

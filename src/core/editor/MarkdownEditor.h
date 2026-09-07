@@ -113,6 +113,8 @@ public:
 
   // Retained undo bytes and record count, exposed for tests and the harness.
   std::size_t undoBytes() const;
+  // Whitespace-delimited words in the buffer. O(1): maintained by every edit.
+  std::size_t wordCount() const;
   std::size_t undoDepth() const;
 
 private:
@@ -141,6 +143,17 @@ private:
   // dirty flag rather than setting it.
   void recordChange(std::size_t start, std::size_t oldEnd, std::size_t newEnd);
 
+  // The one place the buffer's bytes change: applies the splice, and carries
+  // the word count across it without rereading the note. See the .cpp for why
+  // the delta is exact rather than an estimate.
+  void splice(std::size_t start, std::size_t oldEnd, std::string_view text);
+  // Word starts in `[from, to)` -- a non-space byte whose predecessor is a
+  // space, or byte zero. The count is the number of these in the buffer.
+  std::size_t wordStartsIn(std::size_t from, std::size_t to) const;
+  // For the three mutations that replace the whole buffer and so have nothing
+  // to carry: `setText`, undo and redo.
+  void recountWords();
+
   void snapshot(EditKind kind);
   // Brings the undo history back inside its count and byte ceilings.
   void trimUndo();
@@ -153,6 +166,11 @@ private:
   bool dirty_ = false;
   std::uint64_t revision_ = 0;
   TextChange lastChange_;
+  // Whitespace-delimited words in `text_`, carried across every edit rather
+  // than recounted. The status bar asks for this on every keystroke, and
+  // walking a 200 KB note to answer took 247 us -- seventeen times the cost of
+  // that keystroke's own layout update.
+  std::size_t words_ = 0;
   std::vector<Snapshot> undo_;
   std::vector<Snapshot> redo_;
   EditKind groupKind_ = EditKind::Structural;

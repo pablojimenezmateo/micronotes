@@ -351,20 +351,6 @@ struct UiRuntime {
     std::string noteId;
   };
   std::vector<BacklinkRow> backlinkRows;
-  // Words and characters in the open buffer, for the status bar.
-  //
-  // On the runtime rather than in a function-local `static`, which is where it
-  // was: a process-wide cache keyed on a revision number is correct only for as
-  // long as there is exactly one editor in the process, and nothing said so.
-  // AGENTS.md's rule about hidden global state has one deliberate exception and
-  // this was not it.
-  struct BufferCountsMemo {
-    bool valid = false;
-    std::uint64_t revision = 0;
-    std::size_t words = 0;
-    std::size_t characters = 0;
-  };
-  BufferCountsMemo bufferCounts;
   // The same, for the right panel's tag rows. A tag there filters the library
   // exactly as a tag in the sidebar does, so a click has to be able to find
   // which one it landed on.

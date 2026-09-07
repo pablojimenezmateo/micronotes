@@ -78,12 +78,6 @@
   /* something is measuring strings nobody measures twice.                      */     \
   X(RenderTextMeasureCalls, "render.text_measure_calls")                               \
   X(RenderTextMeasureCacheHits, "render.text_measure_cache_hits")                      \
-  /* --- status bar --------------------------------------------------------- */     \
-  /* Word counts actually walked, against those served from the memo. The walk */    \
-  /* used to happen on every frame -- reused reads zero and counts tracks the   */    \
-  /* frame count exactly when the memo is broken, which is how it was found.    */    \
-  X(StatusWordCounts, "status.word_counts")                                            \
-  X(StatusWordCountsReused, "status.word_counts_reused")                                            \
   /* --- frame loop / input ------------------------------------------------ */       \
   X(FrameEventWakes, "frame.event_wakes")                                              \
   X(FramePresents, "frame.presents")                                                   \

@@ -85,9 +85,75 @@ bool isWordByte(char c) {
 
 }
 
+// Word starts in `[from, to)`: positions holding a non-space byte whose
+// predecessor is a space, or the very first byte. The buffer's word count is
+// the number of these in the whole of it, which is what makes the count a sum
+// over positions and therefore something an edit can adjust rather than redo.
+std::size_t MarkdownEditor::wordStartsIn(std::size_t from, std::size_t to) const {
+  std::size_t words = 0;
+  for(std::size_t i = from; i < to; ++i) {
+    if(isSpaceByte(text_[i])) continue;
+    if(i == 0 || isSpaceByte(text_[i - 1])) ++words;
+  }
+  return words;
+}
+
+// The one place the buffer's bytes change.
+//
+// Five call sites used to do their own `erase`/`insert` pair and then tell
+// `markChanged` separately what they had done -- the same fact stated twice,
+// with nothing checking the two agreed. Here the span reported is the span
+// applied, by construction.
+//
+// It is also the only place a running word count can be kept, because it is the
+// only place holding both the bytes going out and the bytes coming in. That
+// matters because the status bar's count is asked for on every keystroke, and
+// counting a 200 KB note takes 247 us -- seventeen times what the keystroke's
+// own layout update costs, and the largest single thing a keystroke did.
+//
+// The window is the replaced span **plus one byte**, and that is the exact
+// extent of what an edit can change, not an approximation:
+//
+//   * a position below `start` is decided by two bytes both below `start`, and
+//     neither moved;
+//   * the position at the far end of the splice -- `oldEnd` before, `newEnd`
+//     after -- holds an unchanged byte but its *predecessor* is the last byte of
+//     the replaced span, so its status can flip. That is the `+ 1`;
+//   * everything past that is decided by two bytes of the untouched suffix,
+//     which sit at the same distance from the end on both sides.
+//
+// An earlier version widened the window to the nearest whitespace on each side,
+// which is also correct and is O(document) on a buffer that has no whitespace in
+// it -- a minified file, a base64 blob, `std::string(12 MB, 'x')`. That is the
+// exact shape this exists to avoid, and the undo tests caught it.
+void MarkdownEditor::splice(std::size_t start, std::size_t oldEnd, std::string_view text) {
+  const std::size_t before = wordStartsIn(start, std::min(oldEnd + 1, text_.size()));
+
+  text_.replace(start, oldEnd - start, text);
+
+  const std::size_t newEnd = start + text.size();
+  const std::size_t to = std::min(newEnd + 1, text_.size());
+  perf::addCounter(perf::CounterId::EditorWordCountUpdates);
+  perf::addCounter(perf::CounterId::EditorWordCountBytesScanned,
+                   (std::min(oldEnd + 1, text_.size()) - start) + (to - start));
+  words_ = words_ + wordStartsIn(start, to) - before;
+}
+
+// Every byte is new, so there is nothing to carry: `setText`, undo and redo.
+void MarkdownEditor::recountWords() {
+  perf::addCounter(perf::CounterId::EditorWordCountRebuilds);
+  perf::addCounter(perf::CounterId::EditorWordCountBytesScanned, text_.size());
+  words_ = wordStartsIn(0, text_.size());
+}
+
+std::size_t MarkdownEditor::wordCount() const {
+  return words_;
+}
+
 void MarkdownEditor::setText(std::string text) {
   const std::size_t was = text_.size();
   text_ = std::move(text);
+  recountWords();
   cursor_ = text_.size();
   selectionAnchor_ = cursor_;
   selecting_ = false;
@@ -109,12 +175,8 @@ void MarkdownEditor::insert(std::string_view text) {
   snapshot(structural ? EditKind::Structural : EditKind::Insert);
   const std::size_t from = hasSelection() ? selectionStart() : cursor_;
   const std::size_t replaced = hasSelection() ? selectionEnd() : cursor_;
-  if(hasSelection()) {
-    text_.erase(from, replaced - from);
-    cursor_ = from;
-  }
-  text_.insert(cursor_, text);
-  cursor_ += text.size();
+  splice(from, replaced, text);
+  cursor_ = from + text.size();
   clearSelection();
   markChanged(from, replaced, from + text.size());
   closeEdit();
@@ -126,8 +188,7 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
   if(start == end && text.empty()) return;
   perf::addCounter(perf::CounterId::EditorEraseCalls);
   snapshot(EditKind::Structural);
-  text_.erase(start, end - start);
-  text_.insert(start, text);
+  splice(start, end, text);
   cursor_ = start + text.size();
   clearSelection();
   markChanged(start, end, start + text.size());
@@ -143,7 +204,7 @@ void MarkdownEditor::erasePrevious() {
   snapshot(EditKind::Erase);
   const auto previous = previousCodepoint(text_, cursor_);
   const auto was = cursor_;
-  text_.erase(previous, cursor_ - previous);
+  splice(previous, cursor_, {});
   cursor_ = previous;
   clearSelection();
   markChanged(previous, was, previous);
@@ -158,7 +219,7 @@ void MarkdownEditor::eraseNext() {
   if(cursor_ >= text_.size()) return;
   snapshot(EditKind::Erase);
   const auto next = nextCodepoint(text_, cursor_);
-  text_.erase(cursor_, next - cursor_);
+  splice(cursor_, next, {});
   clearSelection();
   markChanged(cursor_, next, cursor_);
   closeEdit();
@@ -245,7 +306,7 @@ void MarkdownEditor::eraseSelection() {
   snapshot(EditKind::Structural);
   const auto start = selectionStart();
   const auto end = selectionEnd();
-  text_.erase(start, end - start);
+  splice(start, end, {});
   cursor_ = start;
   clearSelection();
   markChanged(start, end, start);
@@ -364,6 +425,7 @@ bool MarkdownEditor::undo() {
   const std::size_t was = text_.size();
   redo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
   text_ = std::move(undo_.back().text);
+  recountWords();
   cursor_ = std::min(undo_.back().cursor, text_.size());
   if(undo_.back().selecting) {
     selectionAnchor_ = std::min(undo_.back().anchor, text_.size());
@@ -384,6 +446,7 @@ bool MarkdownEditor::redo() {
   const std::size_t was = text_.size();
   undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
   text_ = std::move(redo_.back().text);
+  recountWords();
   cursor_ = std::min(redo_.back().cursor, text_.size());
   if(redo_.back().selecting) {
     selectionAnchor_ = std::min(redo_.back().anchor, text_.size());
