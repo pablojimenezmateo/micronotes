@@ -41,6 +41,44 @@ bool waitForChanges(DirectoryWatcher& watcher, std::vector<std::filesystem::path
   return false;
 }
 
+// Collects everything the watcher has to say about a write, and waits for it to
+// go quiet before returning.
+//
+// One `write` is several inotify events -- IN_CREATE, IN_MODIFY, IN_CLOSE_WRITE
+// -- and `waitForChanges` returns on the first batch that is non-empty, which
+// may be any one of them. So a read straight afterwards can find the *same*
+// file reported again, from an event that had not been delivered yet. That is
+// the kernel's event stream, not a watcher that reports twice, and a test which
+// asserts emptiness right after one read is asserting something the watcher
+// never promised: `directory_watcher_reports_a_file_written_underneath_it`
+// failed that way about once in every few dozen runs.
+//
+// Settling separates the two claims. The interesting one -- a read drains what
+// it read -- is checked once the stream is quiet, where it is a real property
+// rather than a race with inotify's delivery.
+bool settleChanges(DirectoryWatcher& watcher, std::vector<std::filesystem::path>& out) {
+  out.clear();
+  bool sawAny = false;
+  for(int attempt = 0; attempt < 400; ++attempt) {
+    auto batch = watcher.takeChanges();
+    if(!batch.empty()) {
+      sawAny = true;
+      for(auto& path : batch) out.push_back(std::move(path));
+      // Something arrived, so give the rest of this write's events their turn
+      // rather than counting the quiet stretch from here.
+      attempt = 0;
+    } else if(sawAny) {
+      // Two quiet reads in a row after something was seen: the write is done
+      // being reported.
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      if(watcher.takeChanges().empty()) return true;
+      continue;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return sawAny;
+}
+
 bool contains(const std::vector<std::filesystem::path>& paths, const std::filesystem::path& path) {
   for(const auto& candidate : paths) {
     if(candidate == path) return true;
@@ -65,10 +103,12 @@ MICRONOTES_TEST(directory_watcher_reports_a_file_written_underneath_it) {
   const auto note = dir / "note.md";
   writeFile(note, "hello");
   std::vector<std::filesystem::path> changed;
-  MICRONOTES_REQUIRE(waitForChanges(watcher, changed));
+  // Settled rather than read once: one write is several inotify events, and
+  // which of them the first read catches is the kernel's business.
+  MICRONOTES_REQUIRE(settleChanges(watcher, changed));
   MICRONOTES_REQUIRE(contains(changed, note));
   MICRONOTES_REQUIRE(wakes.load() > 0);
-  // Drained by the read: the same change is not reported twice.
+  // Drained by the read: once the stream is quiet, a further read has nothing.
   MICRONOTES_REQUIRE(watcher.takeChanges().empty());
 
   std::filesystem::remove_all(dir);
