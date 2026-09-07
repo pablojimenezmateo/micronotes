@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -80,7 +81,11 @@ public:
   bool open(const std::filesystem::path& path);
   void close();
 
-  bool exec(std::string_view sql);
+  // NUL-terminated because sqlite3_exec is: taking a view meant every call --
+  // the BEGIN and the COMMIT of every save among them -- built a std::string
+  // purely to get a terminator onto a string literal that already had one.
+  bool exec(const char* sql);
+  bool exec(const std::string& sql) { return exec(sql.c_str()); }
 
   // A statement ready for binding: reset, with bindings cleared. Compiled once
   // per distinct SQL string per connection.
@@ -94,8 +99,18 @@ public:
 private:
   friend class Statement;
 
+  // Transparently hashed, so probing the cache with a `string_view` does not
+  // build a `std::string` from the SQL first. Every prepare paid that -- a heap
+  // allocation and a copy of a statement up to 300 bytes long -- to look up a
+  // statement whose whole purpose is to avoid work.
+  struct SqlHash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view sql) const {
+      return std::hash<std::string_view> {}(sql);
+    }
+  };
   sqlite3* db_ = nullptr;
-  std::unordered_map<std::string, Statement::Slot> cache_;
+  std::unordered_map<std::string, Statement::Slot, SqlHash, std::equal_to<>> cache_;
 };
 
 }

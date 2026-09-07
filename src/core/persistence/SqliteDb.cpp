@@ -78,11 +78,11 @@ void SqliteDb::close() {
   db_ = nullptr;
 }
 
-bool SqliteDb::exec(std::string_view sql) {
+bool SqliteDb::exec(const char* sql) {
   if(!db_) return false;
   perf::addCounter(perf::CounterId::SqliteExecCalls);
   char* error = nullptr;
-  const int rc = sqlite3_exec(db_, std::string(sql).c_str(), nullptr, nullptr, &error);
+  const int rc = sqlite3_exec(db_, sql, nullptr, nullptr, &error);
   sqlite3_free(error);
   return rc == SQLITE_OK;
 }
@@ -90,11 +90,16 @@ bool SqliteDb::exec(std::string_view sql) {
 Statement SqliteDb::prepare(std::string_view sql) {
   if(!db_) return {};
 
-  const auto found = cache_.find(std::string(sql));
+  // Probed by view; only the insert below builds a string, so a cache hit --
+  // which is what every call after the first is -- allocates nothing.
+  const auto found = cache_.find(sql);
   if(found != cache_.end() && !found->second.inUse) {
     found->second.inUse = true;
-    sqlite3_reset(found->second.stmt);
-    sqlite3_clear_bindings(found->second.stmt);
+    // Not reset here. `Statement::release` already resets and clears the
+    // bindings of every cached statement it hands back, precisely so it stops
+    // holding a read transaction open -- so doing it again on the way out was
+    // two sqlite calls per prepare to put a statement into the state it was
+    // already in.
     return Statement(found->second.stmt, &found->second);
   }
 
