@@ -1,6 +1,7 @@
 #pragma once
 
 #include "library/Organization.h"
+#include "ui/Overlay.h"
 #include "ui/Tabs.h"
 
 #include <filesystem>
@@ -68,6 +69,15 @@ bool clearTagFilter(UiRuntime& ui);
 // be a library-wide edit to record a preference. See `ui::TagColors`.
 void setTagColor(UiRuntime& ui, std::string_view tag, std::string_view swatch);
 void clearTagColor(UiRuntime& ui, std::string_view tag);
+
+// Carries out a choice from the tag menu or the colour picker, and says whether
+// it was one of theirs.
+//
+// Here rather than in the shell's overlay dispatcher because every one of the
+// three answers is a verb on this page: filter, colour, un-colour. The tag
+// itself travels in the result's `value` -- a result names the item chosen, and
+// which tag it was about is the other half of the answer.
+bool handleTagOverlayResult(UiRuntime& ui, const ui::OverlayResult& result);
 
 // The note a Markdown link's path names, or null when it names something that
 // is not a note in this library.

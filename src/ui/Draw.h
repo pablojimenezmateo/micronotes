@@ -421,6 +421,22 @@ inline float textTop(Rect row, const TextRenderer& text, const TextStyle& style)
   return std::round(row.y + std::max(0.0f, (row.h - static_cast<float>(text.lineHeight(style))) / 2.0f));
 }
 
+// A panel with a titled header band, and the header's rect back so the caller
+// can set the title in it.
+//
+// The sibling microide's `DrawTitledCardFrame`, and its prompts and overlays
+// are all built on it. What it buys is that a dialog stops being "a rectangle
+// with some bold text at the top": the header takes the *chrome* ground, so it
+// reads as the same kind of surface as the menu bar and the tab strip, and a
+// hairline along its foot separates the question from the answer. micronotes
+// drew the title as a line of text on the panel's own ground, which is a title
+// that looks like the first row of the list under it -- and on a Confirm, where
+// the "list" is two buttons, like a stray label.
+//
+// A header of zero height is a panel with no title, which is what an anchored
+// context menu wants.
+Rect drawTitledCard(SDL_Renderer* renderer, Rect card, float headerHeight);
+
 // A band across a panel heading the rows under it: NOTEBOOKS, TAGS, RECENT.
 //
 // A *band*, not a label. These were four words set in the panel's own ground,

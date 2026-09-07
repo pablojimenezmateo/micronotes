@@ -1,5 +1,6 @@
 #include "app/Notes.h"
 
+#include "app/ContextMenus.h"
 #include "app/Shell.h"
 #include "app/WikiLinks.h"
 
@@ -95,6 +96,20 @@ void setTagColor(UiRuntime& ui, std::string_view tag, std::string_view swatch) {
   if(ec != std::errc {} || ptr != first + swatch.size()) return;
   ui.state.workspace().tagColors.set(std::string(tag), index);
   ui.status = "Coloured " + std::string(tag);
+}
+
+bool handleTagOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
+  if(result.overlayId == "tag-menu") {
+    if(result.itemId == "filter") selectTag(ui, result.value);
+    else if(result.itemId == "color") openTagColorPicker(ui, result.value);
+    else if(result.itemId == "auto-color") clearTagColor(ui, result.value);
+    return true;
+  }
+  if(result.overlayId == "tag-color") {
+    setTagColor(ui, result.value, result.itemId);
+    return true;
+  }
+  return false;
 }
 
 void clearTagColor(UiRuntime& ui, std::string_view tag) {

@@ -130,7 +130,11 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
       }
       const float cursorX = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
       const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.editorScroll) * lineHeight);
-      fill(renderer, {std::min(cursorX, writing.x + writing.w - 8), cursorY, 2, static_cast<float>(lineHeight - 2)}, theme().accent);
+      // On the blink's on-phase, like every other caret in the shell. See
+      // `ui::CaretBlink`.
+      if(ui.caretVisible) {
+        fill(renderer, {std::min(cursorX, writing.x + writing.w - 8), cursorY, 2, static_cast<float>(lineHeight - 2)}, theme().accent);
+      }
     }
     if(ui.editor.text().empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, theme().textSecondary);
   }

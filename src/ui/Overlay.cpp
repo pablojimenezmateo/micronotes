@@ -34,6 +34,10 @@ constexpr float kButtonWidth = 96.0f;
 constexpr int kSwatchColumns = 6;
 constexpr float kSwatchCell = 30.0f;
 constexpr float kSwatchGap = 4.0f;
+// The header band a titled overlay wears -- see `drawTitledCard`. The menu
+// bar's height, because it is the same kind of surface and two chrome strips
+// that differ by three pixels read as a mistake.
+constexpr float kTitleBandHeight = kMenuBarHeight + kSpace1;
 
 bool usesField(const Overlay& overlay) {
   return overlay.kind == OverlayKind::TextPrompt || (overlay.kind == OverlayKind::List && overlay.filterable);
@@ -114,7 +118,15 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   const std::vector<int>& indices = visibleIndices(overlay);
   const bool field = usesField(overlay);
 
-  const float titleH = overlay.title.empty() ? 0.0f : static_cast<float>(text.lineHeight(TextStyle {FontFamily::Sans, true, false, type().small})) + 8.0f;
+  // A titled *band* rather than a line of text with a gap under it, so its
+  // height is the band's and not the type's plus a fudge. An anchored context
+  // menu keeps no header: it is a list of commands, not a question.
+  const float titleH = overlay.title.empty()
+                         ? 0.0f
+                         : std::max(kTitleBandHeight,
+                                    static_cast<float>(text.lineHeight(
+                                      TextStyle {FontFamily::Mono, true, false, type().chrome})) +
+                                      kSpace2);
   const float fieldH = field ? kFieldHeight + kPadding : 0.0f;
   const float hintProbe = overlay.hint.empty() ? 0.0f : static_cast<float>(text.lineHeight(TextStyle {FontFamily::Sans, false, false, type().tiny})) + 8.0f;
   // What is left of the window below where the panel starts, once its own
@@ -160,7 +172,10 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   y = std::max(8.0f, y);
   layout.panel = {x, y, width, height};
 
-  float cursorY = y + kPadding + titleH;
+  // The band spans the panel, so the title reads as chrome across the top of
+  // the card rather than as text inset into it.
+  if(titleH > 0.0f) layout.title = {x, y, width, titleH};
+  float cursorY = y + titleH + kPadding;
   if(field) {
     layout.field = {x + kPadding, cursorY, width - kPadding * 2.0f, kFieldHeight};
     cursorY += fieldH;
@@ -343,6 +358,26 @@ bool OverlayStack::handleText(const char* input) {
   return true;
 }
 
+OverlayCursor OverlayStack::cursorAt(float x, float y) const {
+  if(stack_.empty()) return OverlayCursor::Outside;
+  if(!contains(lastLayout_.panel, x, y)) return OverlayCursor::Outside;
+  // The field first: it is drawn inside the panel and a row rect never overlaps
+  // it, so the order only matters for reading.
+  if(lastLayout_.field.w > 0.0f && contains(lastLayout_.field, x, y)) return OverlayCursor::Text;
+  for(std::size_t i = 0; i < lastLayout_.itemRects.size(); ++i) {
+    if(!contains(lastLayout_.itemRects[i], x, y)) continue;
+    // A disabled row is not a control, and a cursor saying it is would be the
+    // cursor lying about the one thing it is for.
+    const int index = lastLayout_.itemIndices[i];
+    if(index >= 0 && index < static_cast<int>(stack_.back().items.size()) &&
+       !stack_.back().items[static_cast<std::size_t>(index)].enabled) {
+      return OverlayCursor::Panel;
+    }
+    return OverlayCursor::Pointer;
+  }
+  return OverlayCursor::Panel;
+}
+
 std::optional<OverlayResult> OverlayStack::handleClick(float x, float y, bool& handled) {
   handled = false;
   Overlay* overlay = top();
@@ -412,8 +447,6 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   const auto layout = layoutFor(*overlay, text, windowWidth, windowHeight);
   lastLayout_ = layout;
 
-  drawSurface(renderer, layout.panel, theme().overlayBackground, theme().border);
-
   // The chrome face, like every other surface that is not the note. A palette
   // set in the text face reads as a document about commands rather than as a
   // list of them, and its accelerators -- which are keys, not words -- have to
@@ -422,10 +455,16 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   const TextStyle bodyStyle = chromeStyle();
   const TextStyle hintStyle = chromeSmallStyle();
 
-  float y = layout.panel.y + kPadding;
-  if(!overlay->title.empty()) {
-    text.draw(overlay->title, layout.panel.x + kPadding, y, theme().textSecondary, titleStyle);
-    y += static_cast<float>(text.lineHeight(titleStyle)) + 8.0f;
+  // The panel, with the header band a titled overlay wears. The title used to
+  // be a line of text on the panel's own ground, which is a title that looks
+  // like the first row of the list beneath it -- and on a Confirm, whose "list"
+  // is two buttons, like a stray label above them.
+  const Rect header = drawTitledCard(renderer, layout.panel, layout.title.h);
+  if(header.h > 0.0f) {
+    text.draw(ellipsizeToWidth(text, overlay->title,
+                               static_cast<int>(header.w - kPadding * 2.0f), titleStyle),
+              header.x + kPadding, textTop(header, text, titleStyle), theme().chromeText,
+              titleStyle);
   }
 
   if(usesField(*overlay)) {
@@ -452,8 +491,13 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
              theme().selectionFill);
       }
       text.draw(overlay->value.text(), left, textY, theme().textPrimary, bodyStyle);
-      fill(renderer, {left + view.caretX, layout.field.y + 4.0f, 2.0f, layout.field.h - 8.0f},
-           theme().accent);
+      // On the blink's on-phase only; the shell settles that once a frame so
+      // this caret and the page's cannot blink out of step. See
+      // `OverlayStack::setCaretVisible`.
+      if(caretVisible_) {
+        fill(renderer, {left + view.caretX, layout.field.y + 4.0f, 2.0f, layout.field.h - 8.0f},
+             theme().accent);
+      }
     }
   }
 

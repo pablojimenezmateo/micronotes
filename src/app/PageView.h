@@ -148,6 +148,9 @@ public:
   // this page with them turned off, rather than a second renderer for the same
   // Markdown. Markers stay hidden whatever the caret says.
   void setReadOnly(bool readOnly);
+  // Whether to paint the caret this frame. See `ui::CaretBlink`; handed in for
+  // the reason the overlay's is, so the two panes of a split blink together.
+  void setCaretVisible(bool visible);
 
   // Lays the note out for this frame. `rect` is the whole content pane.
   void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
@@ -288,6 +291,7 @@ private:
   std::uint64_t wikiLinkRevision_ = 0;
   std::uint64_t imageRevision_ = 0;
   bool readOnly_ = false;
+  bool caretVisible_ = true;
   std::uint64_t sourceRevision_ = 0;
   std::uint64_t foldRevision_ = 0;
   doc::LayoutOptions::EditedSpan editedSpan_;

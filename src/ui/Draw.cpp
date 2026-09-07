@@ -377,6 +377,19 @@ std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth
 }
 
 
+Rect drawTitledCard(SDL_Renderer* renderer, Rect card, float headerHeight) {
+  drawSurface(renderer, card, theme().overlayBackground, theme().border);
+  const Rect header {card.x, card.y, card.w, std::max(0.0f, headerHeight)};
+  if(header.h <= 0.0f) return header;
+  // The chrome ground, so the header reads as the same kind of surface as the
+  // menu bar and the tab strip rather than as the first row of whatever is
+  // under it.
+  fill(renderer, header, theme().chromeBackground);
+  fill(renderer, {header.x, header.y + header.h - kDividerThickness, header.w, kDividerThickness},
+       theme().border);
+  return header;
+}
+
 void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect chevron,
                      std::string_view label, std::string_view trailing, bool collapsed,
                      bool hovered) {

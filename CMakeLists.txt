@@ -181,6 +181,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
   src/ui/Fuzzy.cpp
+  src/ui/CaretBlink.cpp
   src/ui/ColorMath.cpp
   src/ui/NoteProperties.cpp
   src/ui/Menus.cpp
@@ -282,6 +283,7 @@ add_executable(micronotes_tests
   tests/AttachmentTests.cpp
   tests/BlockScanTests.cpp
   tests/ClipGuardTests.cpp
+  tests/CaretBlinkTests.cpp
   tests/ColorMathTests.cpp
   tests/DirectoryWatcherTests.cpp
   tests/DurableFileTests.cpp

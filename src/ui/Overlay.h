@@ -98,6 +98,22 @@ struct Overlay {
   mutable bool filterCacheValid = false;
 };
 
+// What the pointer is over in the overlay on top.
+//
+// The shell used to answer `Pointer` for the whole window whenever any overlay
+// was open -- one line, and it meant the text field in a rename box, a tag
+// editor or the command palette never showed a text cursor. Those are the
+// fields a reader is most likely to be typing into, and every one of them said
+// "click me" while they were being typed in.
+enum class OverlayCursor {
+  // Not over the overlay at all: the click would dismiss it, so it is still a
+  // pointer, but the caller may want to say so differently.
+  Outside,
+  Panel,    // the panel's own ground, which does nothing
+  Text,     // its single-line field
+  Pointer   // a row, a swatch or a button
+};
+
 struct OverlayResult {
   std::string overlayId;
   std::string itemId;   // List/Confirm: the chosen item
@@ -127,9 +143,25 @@ public:
 
   void draw(SDL_Renderer* renderer, TextRenderer& text, int windowWidth, int windowHeight);
 
+  // Which of the overlay's parts is under the pointer, from the geometry the
+  // last frame actually painted -- the same rects `handleClick` tests, so the
+  // cursor cannot promise a click the overlay will not honour.
+  OverlayCursor cursorAt(float x, float y) const;
+
+  // Whether to paint the field's caret this frame. Handed in rather than timed
+  // here: the shell settles the blink once per frame so that every caret on
+  // screen -- this one and the page's, which are both visible in a split -- is
+  // in the same phase.
+  void setCaretVisible(bool visible) { caretVisible_ = visible; }
+
 private:
   struct Layout {
     Rect panel;
+    // The header band, empty when the overlay has no title. Recorded rather
+    // than recomputed at the draw for the reason `hint` is: the layout is the
+    // one thing that knows how tall the band came out, and a title placed by
+    // arithmetic the layout did not do is a title that can drift off its band.
+    Rect title;
     Rect field;
     // Where the hint line goes. Recorded rather than derived at the draw,
     // because it is not always the panel's foot: on a Confirm the hint is the
@@ -156,6 +188,7 @@ private:
   mutable int lastRows_ = 12;
   float mouseX_ = -1.0f;
   float mouseY_ = -1.0f;
+  bool caretVisible_ = true;
 };
 
 }

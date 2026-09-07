@@ -94,6 +94,7 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
   // Measured before the layout, because the header is room the page has to
   // reserve at the top of its scrolling space rather than something drawn over
   // it afterwards.
+  ui.livePage.setCaretVisible(ui.caretVisible);
   ui.livePage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), rect);
 

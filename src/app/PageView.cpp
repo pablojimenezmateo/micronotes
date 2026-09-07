@@ -133,6 +133,10 @@ void PageView::setReadOnly(bool readOnly) {
   readOnly_ = readOnly;
 }
 
+void PageView::setCaretVisible(bool visible) {
+  caretVisible_ = visible;
+}
+
 void PageView::setFoldsActive(bool active) {
   foldsActive_ = active;
 }
@@ -647,7 +651,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     frame->addRuns(runsDrawn);
   }
 
-  if(focused && !readOnly_ && !blockSelection_.active) {
+  if(focused && !readOnly_ && !blockSelection_.active && caretVisible_) {
     const auto rect = document_.caretRect(caret);
     const Rect caretRect = toRect(rect, ox, oy);
     if(caretRect.y + caretRect.h >= viewTop && caretRect.y <= viewBottom) {

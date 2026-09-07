@@ -165,7 +165,13 @@ void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
   }
   if(focused) {
     const float caretX = originX + view.caretX;
-    fill(renderer, {caretX, box.y - 2.0f, 2.0f, box.h + 4.0f}, theme().accent);
+    // Painted only on the blink's on-phase. See `ui::CaretBlink`: a solid bar
+    // in a mono face reads as a pipe character rather than as an insertion
+    // point, so the caret used to say "your typing goes here" in exactly the
+    // same voice as the text beside it.
+    if(ui.caretVisible) {
+      fill(renderer, {caretX, box.y - 2.0f, 2.0f, box.h + 4.0f}, theme().accent);
+    }
     // Give the IME a candidate rectangle here too. Without it a dead-key or
     // composition popup opened while typing in a field lands at the window
     // origin instead of next to the text being composed.

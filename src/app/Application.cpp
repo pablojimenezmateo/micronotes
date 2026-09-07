@@ -614,7 +614,8 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
   if(menuBarHasControlAt(text, ui, layout.menuBar, x, y)) return CursorKind::Pointer;
   if(breadcrumbHasControlAt(ui, layout.breadcrumb, x, y)) return CursorKind::Pointer;
 
-  if(ui.overlays.active()) return CursorKind::Pointer;
+  // Which part of the overlay, rather than one answer for the whole window.
+  if(ui.overlays.active()) return cursorForOverlay(ui.overlays.cursorAt(x, y));
 
   if(contains(layout.sidebar, x, y)) {
     if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebarScroll, ui.sidebarMaxScroll, x, y)) {
@@ -677,6 +678,10 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   SDL_RenderClear(renderer);
 
   const ShellLayout layout = shellLayout(ui, width, height);
+  // Before anything draws a caret, and recorded so the loop can tell when the
+  // blink has flipped underneath it. See `settleCaret`, `caretPhaseChanged`.
+  (void)settleCaret(ui);
+  ui.caretPainted = ui.caretVisible;
   ui.linkRegions.clear();
   ui.buttonRegions.clear();
   // Cleared here and set by whichever surface the pointer turns out to be over,
@@ -756,6 +761,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   }
   {
     const perf::ScopeTimer timer("shell.overlays");
+    ui.overlays.setCaretVisible(ui.caretVisible);
     ui.overlays.draw(renderer, text, width, height);
     // Last, so nothing paints over it.
     drawTooltip(renderer, text, ui.tooltip, {0, 0, static_cast<float>(width), static_cast<float>(height)});
@@ -1252,14 +1258,9 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     // The rest are the palette's, so the menu and the palette cannot drift.
     else if(result.itemId == "move") performCommand(ui, "move-note");
     else performCommand(ui, result.itemId);
-  } else if(result.overlayId == "tag-menu") {
-    // The tag travels in `value`: a result names the item chosen, and which tag
-    // it was about is the other half of the answer.
-    if(result.itemId == "filter") selectTag(ui, result.value);
-    else if(result.itemId == "color") openTagColorPicker(ui, result.value);
-    else if(result.itemId == "auto-color") clearTagColor(ui, result.value);
-  } else if(result.overlayId == "tag-color") {
-    setTagColor(ui, result.value, result.itemId);
+  } else if(handleTagOverlayResult(ui, result)) {
+    // Filter, colour, un-colour: all three are verbs on the tag, so they live
+    // with the others in `app/Notes.h`.
   } else if(result.overlayId == "block-menu") {
     if(result.itemId == "turn") openTurnIntoMenu(ui, ui.mouseX, ui.mouseY);
     else performBlockCommand(ui, result.itemId);
@@ -2258,11 +2259,15 @@ int run(ApplicationOptions options) {
   auto deadlines = [&]() -> FrameDeadlines {
     FrameDeadlines out;
     out.autosaveMs = autosaveWaitMs();
+    // `IdleHint::Blinking` and `caretBlinkMs` were written for this and had no
+    // caller: every caret was drawn solid, so nothing ever needed waking.
+    out.caretBlinkMs = settleCaret(ui);
     // A drag past the edge of a list has to keep scrolling while the pointer is
     // perfectly still, which produces no events at all.
     out.hint = ui.selectingEditorText || ui.draggingNote || ui.draggingFolder || ui.draggingBlock
                  ? IdleHint::Busy
-                 : IdleHint::Idle;
+               : out.caretBlinkMs >= 0 ? IdleHint::Blinking
+                                       : IdleHint::Idle;
     return out;
   };
 
@@ -2439,6 +2444,8 @@ int run(ApplicationOptions options) {
     }
     if(applyPendingWindowAction(window, ui, running)) needsDraw = true;
     if(applyWatchedChanges(ui)) needsDraw = true;
+    // The caret's blink, which is the one change with no event behind it.
+    if(caretPhaseChanged(ui)) needsDraw = true;
 
     const Uint64 now = SDL_GetTicks();
     if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty() &&
