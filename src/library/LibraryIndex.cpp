@@ -53,6 +53,22 @@ static std::string columnText(sqlite3_stmt* stmt, int index) {
   return text ? reinterpret_cast<const char*>(text) : std::string();
 }
 
+// The same column as a view of sqlite's own buffer, which stays valid until the
+// next step or reset of this statement. For a column the caller only reads: a
+// note's body is the largest thing in the row by three orders of magnitude, and
+// copying 200 of them out to look at three lines of one is the whole cost of a
+// search.
+//
+// `sqlite3_column_bytes` must be called after `_text`, not before: it reports
+// the length of the representation the last accessor produced, and asking it
+// first can convert the value and give the length of the wrong encoding.
+static std::string_view columnView(sqlite3_stmt* stmt, int index) {
+  const auto* text = sqlite3_column_text(stmt, index);
+  if(!text) return {};
+  const auto size = static_cast<std::size_t>(sqlite3_column_bytes(stmt, index));
+  return std::string_view(reinterpret_cast<const char*>(text), size);
+}
+
 // Tags round-trip through one column as a space-separated list. A tag cannot
 // hold whitespace -- `ui::splitTags` is what parses one, and it splits on it --
 // so this is lossless, and it keeps the row a row rather than a second table
@@ -89,8 +105,9 @@ static std::string lowerCopy(std::string value) {
 // all but three away, once per note, on every query.
 static constexpr std::size_t kMaxSnippets = 3;
 
-// A `LIKE` pattern matching `query` anywhere, with LIKE's own wildcards taken
-// literally.
+// A `LIKE` pattern matching `lowerQuery` anywhere, with LIKE's own wildcards
+// taken literally. Takes the query already lowered, because the one caller has
+// it lowered for the snippet search too.
 //
 // `%` and `_` mean "anything" to LIKE, so a query carrying one used to match
 // notes that do not contain the query at all -- "a%t" matched every note with
@@ -99,13 +116,15 @@ static constexpr std::size_t kMaxSnippets = 3;
 // literal search of the body and there was nothing literal there to find. The
 // escape character has to be escaped too, or a query ending in a backslash
 // would escape the pattern's own closing wildcard.
-static std::string likePattern(std::string_view query) {
-  std::string out = "%";
-  for(const char c : lowerCopy(std::string(query))) {
+static std::string likePattern(std::string_view lowerQuery) {
+  std::string out;
+  out.reserve(lowerQuery.size() + 2);
+  out.push_back('%');
+  for(const char c : lowerQuery) {
     if(c == '%' || c == '_' || c == '\\') out.push_back('\\');
     out.push_back(c);
   }
-  out += "%";
+  out.push_back('%');
   return out;
 }
 
@@ -146,9 +165,11 @@ static std::string_view lineAt(std::string_view body, std::size_t from, std::siz
 // result set, to show three lines of one. On a query returning 200 notes that
 // was the whole cost of the query. Nothing is allocated here per line, and the
 // walk stops as soon as the third snippet has the line under it.
-static void fillSnippet(SearchResult& result, std::string_view body, std::string_view query) {
-  if(query.empty()) return;
-  const auto lowerQuery = lowerCopy(std::string(query));
+// `lowerQuery` is lowered once by the caller: it is the same string for every
+// row of a result set, and lowering it here allocated twice per row to rebuild
+// a constant.
+static void fillSnippet(SearchResult& result, std::string_view body, std::string_view lowerQuery) {
+  if(lowerQuery.empty()) return;
 
   constexpr std::size_t kNone = static_cast<std::size_t>(-1);
   std::string_view previous;      // the line above the one being tested
@@ -190,7 +211,8 @@ static void fillSnippet(SearchResult& result, std::string_view body, std::string
   }
 }
 
-static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out, std::string_view query) {
+static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out,
+                        std::string_view lowerQuery) {
   while(sqlite3_step(stmt) == SQLITE_ROW) {
     // Through `columnText`, which is the same read the refresh uses. Building a
     // `std::string` straight from `sqlite3_column_text` is a construction from
@@ -199,8 +221,12 @@ static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out, std:
     // sat four functions apart in this file and only one of them was safe.
     out.push_back({columnText(stmt, 0), {}, columnText(stmt, 2)});
     out.back().path = columnText(stmt, 1);
-    if(const auto body = columnText(stmt, 3); !body.empty()) {
-      fillSnippet(out.back(), body, query);
+    // The body is *read*, never kept, so it is borrowed from sqlite rather than
+    // copied out. It was a whole-note allocation per result row -- up to 200 of
+    // them, of which at most three lines of one are ever shown -- and on a
+    // library of large notes that copy was the search.
+    if(const auto body = columnView(stmt, 3); !body.empty()) {
+      fillSnippet(out.back(), body, lowerQuery);
     }
   }
 }
@@ -740,10 +766,12 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
         : scope == SearchScope::Content
           ? "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.rowid = notes_fts.rowid WHERE notes_fts.body MATCH ? ORDER BY rank LIMIT 200;"
           : "SELECT notes.id, notes.path, notes.title, notes.body FROM notes_fts JOIN notes ON notes.rowid = notes_fts.rowid WHERE notes_fts MATCH ? ORDER BY rank LIMIT 200;";
+      // Lowered once for the whole query rather than once per row.
+      const std::string lowerQuery = lowerCopy(std::string(query));
       if(Statement stmt = db.prepare(ftsSql); stmt) {
         const std::string q(query);
         bindText(stmt, 1, q);
-        collectRows(stmt, out, query);
+        collectRows(stmt, out, lowerQuery);
       }
       if(out.empty()) {
         const char* likeSql = scope == SearchScope::Title
@@ -752,13 +780,13 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
             ? "SELECT id,path,title,body FROM notes WHERE lower(body) LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
             : "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ?1 ESCAPE '\\' OR lower(body) LIKE ?2 ESCAPE '\\' OR lower(path) LIKE ?3 ESCAPE '\\' ORDER BY title LIMIT 200;";
         if(Statement stmt = db.prepare(likeSql); stmt) {
-          const std::string q = likePattern(query);
+          const std::string q = likePattern(lowerQuery);
           bindText(stmt, 1, q);
           if(scope == SearchScope::All) {
             bindText(stmt, 2, q);
             bindText(stmt, 3, q);
           }
-          collectRows(stmt, out, query);
+          collectRows(stmt, out, lowerQuery);
         }
       }
       for(auto& result : out) result.path = root_ / result.path;
