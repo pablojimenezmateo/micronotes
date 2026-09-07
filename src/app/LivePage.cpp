@@ -97,6 +97,10 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
   ui.livePage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), rect);
 
+  // The first moment a cross-note anchor can be resolved: the page is now
+  // holding the note the link opened. See `queueAnchorJump`.
+  applyQueuedAnchorJump(ui);
+
   // Leaving a block that was dropped to raw text hands it back to md4c.
   if(const auto raw = ui.livePage.rawOffset()) {
     const auto& blocks = ui.livePage.document().blocks();

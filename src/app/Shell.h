@@ -350,6 +350,15 @@ struct UiRuntime {
   std::uint64_t wikiNotesRevision = 1;
   // The first "[" of the "[[" that opened the wikilink picker.
   std::size_t wikiStart = 0;
+  // A heading to scroll to once the note now being opened has been laid out.
+  //
+  // A link that crosses notes -- `[a section](other.md#a-section)` -- names
+  // both a note and a place in it, and the two cannot be honoured at the same
+  // moment: opening the note replaces the buffer, but the page is still holding
+  // the note you came from until the next frame lays the new one out, and a
+  // page's anchor table is built from its own laid-out document. Asking
+  // immediately searched the wrong note. See `queueAnchorJump`.
+  std::string pendingAnchor;
   // Where the backlinks panel drew each row last frame, so a click can find the
   // note it named without laying the list out a second time.
   struct BacklinkRow {

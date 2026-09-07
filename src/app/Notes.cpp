@@ -83,6 +83,48 @@ void selectTag(UiRuntime& ui, const std::string& tag) {
   selectNoteAt(ui, 0);
 }
 
+const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative) {
+  if(relative.empty() || !ui.state.hasLibrary()) return nullptr;
+  // A URL is somebody else's business, and so is an absolute path: a link out
+  // of the library is not a link to a note in it.
+  if(ui::isRemoteTarget(relative)) return nullptr;
+  const std::string decoded = ui::decodeLinkTarget(relative);
+  if(decoded.empty() || decoded.front() == '/') return nullptr;
+
+  const auto root = ui.state.libraryRoot();
+  // Two bases, most specific first. A relative path in a note means "relative
+  // to this note", which is what every Markdown renderer does and what a link
+  // written by hand inside a subfolder assumes; resolving against the root as
+  // well is what keeps working the links that were written the other way, and
+  // there is no way to tell those apart other than to try both.
+  std::filesystem::path bases[2] = {root, root};
+  if(const auto* open = ui.state.noteById(ui.state.selection().noteId)) {
+    bases[0] = root / open->folder;
+  }
+  for(const auto& base : bases) {
+    std::error_code ec;
+    // `weakly_canonical` rather than `canonical`: the target need not exist for
+    // the arithmetic to be right, and a link to a note that has been deleted
+    // should come back as "not a note" rather than throwing.
+    const auto candidate = std::filesystem::weakly_canonical(base / decoded, ec);
+    if(ec) continue;
+    // Nothing outside the library, however many `..` the target spends getting
+    // there. This is the one check that has to hold whatever the target says:
+    // a note's text is not a licence to open arbitrary files, and the same rule
+    // is why `attachments::AttachmentService` refuses an escaping path.
+    const auto inside = std::filesystem::weakly_canonical(root, ec);
+    if(ec || candidate.native().rfind(inside.native(), 0) != 0) continue;
+    // Against the note list rather than the disk. The list is what the rest of
+    // the app means by "a note", so a `.md` file the index has not taken up --
+    // one inside a hidden folder, say -- stays the desktop's job, and the
+    // answer costs no syscall.
+    for(const auto& note : ui.state.allNotes()) {
+      if(note.path == candidate) return &note;
+    }
+  }
+  return nullptr;
+}
+
 bool clearTagFilter(UiRuntime& ui) {
   if(ui.state.selection().tag.empty()) return false;
   // The note stays open. Leaving the filter is a question about what the

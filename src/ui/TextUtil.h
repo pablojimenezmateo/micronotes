@@ -80,6 +80,27 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
 // A link target that leaves the machine, as opposed to one inside the library.
 bool isRemoteTarget(std::string_view target);
 
+// A link target as a path, with the escapes a Markdown writer puts in it taken
+// out: percent-encoding, and CommonMark's backslash.
+//
+// A note whose name has a space in it -- which is most of them, since the name
+// is the file's stem -- is linked as `[Meeting notes](Meeting%20notes.md)` by
+// every tool that writes these, so a resolver comparing the raw target against
+// a path on disk would miss exactly the ordinary case.
+//
+// Both escapes are decoded exactly as far as the specification goes and no
+// further, because over-decoding and under-decoding both lose a link that
+// works:
+//
+//  * a percent escape needs two hex digits. A bare `%`, a truncated `%2` and a
+//    non-hex `%zz` are kept as written -- `100%.md` is a legal file name.
+//  * a backslash escapes ASCII **punctuation** only, so `a\(b\).md` is
+//    `a(b).md`. Before anything else, including a space, a backslash is itself
+//    a character and a legal one in a name here; `\ ` is not an escaped space
+//    in CommonMark, and a destination that needs a literal space uses the
+//    `<...>` form, whose brackets the inline scanner has already taken off.
+std::string decodeLinkTarget(std::string_view target);
+
 // What to call a clipboard image, given the MIME type it arrived as.
 std::string fileNameForMime(std::string_view mime);
 

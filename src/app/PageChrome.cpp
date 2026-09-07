@@ -73,23 +73,45 @@ bool followLinkAt(UiRuntime& ui, float x, float y) {
       ui.status = spawnDetached({"xdg-open", target}) ? "Opened " + target : "Open failed";
       return true;
     }
-    // `note.md#heading` pointing at the note already open is a jump, not an
-    // open: the file is on screen and scrolling to it is what was meant.
-    if(!anchorPart.empty()) {
-      const auto& note = ui.state.openNote();
-      const bool sameNote = filePart.empty() ||
-                            (!note.noteId.empty() && note.path.filename() ==
-                                                       std::filesystem::path(filePart).filename());
-      if(sameNote && jumpToAnchor(ui, anchorPart)) {
-        ui.status = "Jumped to " + anchorPart;
-        return true;
-      }
-    }
     if(!ui.state.hasLibrary()) {
       ui.status = "No library for local link";
       return true;
     }
     const auto relative = filePart.empty() ? target : filePart;
+    // Which note this path names, if any. Resolved once, and used for both
+    // questions below -- is it the note already open, and is it a note at all.
+    const library::NoteListItem* note = noteAtLinkTarget(ui, relative);
+    // `note.md#heading` pointing at the note already open is a jump, not an
+    // open: the file is on screen and scrolling to it is what was meant.
+    //
+    // By identity rather than by file name. This compared `path.filename()`
+    // against the target's, so in a library with an `index.md` under two
+    // folders a link from one to the other scrolled the note you were already
+    // reading to a heading of its own instead of opening the note asked for.
+    if(!anchorPart.empty() && note && note->id == ui.state.selection().noteId) {
+      ui.status = jumpToAnchor(ui, anchorPart) ? "Jumped to " + anchorPart
+                                              : "Anchor not found: " + anchorPart;
+      return true;
+    }
+    // A link to another note in the library opens that note, in a tab, like
+    // every other route to a note. It used to fall through to the desktop
+    // below, so `[the plan](work/project-plan.md)` -- the form every other
+    // Markdown tool writes, and the form a file imported from elsewhere already
+    // contains -- launched whatever the system associates with `.md` and left
+    // the reader watching a second application open a file out of the library
+    // they were already reading. `[[wikilinks]]` navigated and these did not,
+    // which is what made the viewer's links look inert.
+    if(note) {
+      const auto title = note->title;
+      selectNoteById(ui, note->id);
+      ui.status = "Opened " + title;
+      // The fragment comes along: `other.md#a-section` names both a note and a
+      // place in it, and arriving at the top would drop half the link. Queued
+      // rather than jumped, because the page is still holding the note we came
+      // from until the next frame lays this one out -- see `queueAnchorJump`.
+      if(!anchorPart.empty()) queueAnchorJump(ui, anchorPart);
+      return true;
+    }
     try {
       attachments::AttachmentService service;
       const auto command = service.openCommand(ui.state.libraryRoot(), relative);

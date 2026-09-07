@@ -69,6 +69,9 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
   // of its scrolling space rather than a banner the note passes under.
   ui.readingPage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.readingPage.layout(text, ui.editor.text(), 0, rect);
+  // The first moment a cross-note anchor can be resolved: the page is now
+  // holding the note the link opened. See `queueAnchorJump`.
+  applyQueuedAnchorJump(ui);
 
   // What the note no longer contains, dropped: the parse cache mirrors this
   // page's `Complex` blocks, and this is the only place that knows which they

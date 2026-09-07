@@ -414,3 +414,36 @@ MICRONOTES_TEST(snippet_measures_a_handful_of_times_not_eighteen) {
   // neighbour, and the tail trim doing the same.
   micronotes::tests::require(measures <= 10, "snippet took " + std::to_string(measures) + " measurements");
 }
+
+// A note's name is its file's stem, and most names have a space in them, so
+// `[Meeting notes](Meeting%20notes.md)` is the ordinary form of a link between
+// two notes -- not an edge case. A resolver comparing the raw target against a
+// path on disk would miss exactly that.
+MICRONOTES_TEST(text_link_targets_decode_the_escapes_writers_put_in_them) {
+  using micronotes::ui::decodeLinkTarget;
+  MICRONOTES_REQUIRE(decodeLinkTarget("Meeting%20notes.md") == "Meeting notes.md");
+  MICRONOTES_REQUIRE(decodeLinkTarget("work/a%2Db.md") == "work/a-b.md");
+  // Case-insensitive hex, as every other decoder accepts it.
+  MICRONOTES_REQUIRE(decodeLinkTarget("a%2fb") == "a/b");
+  MICRONOTES_REQUIRE(decodeLinkTarget("a%2Fb") == "a/b");
+  // CommonMark's backslash escapes ASCII punctuation, and only that.
+  MICRONOTES_REQUIRE(decodeLinkTarget("a\\(b\\).md") == "a(b).md");
+  MICRONOTES_REQUIRE(decodeLinkTarget("a\\-b.md") == "a-b.md");
+  // Before anything that is not punctuation -- a space included -- a backslash
+  // is itself a character, and a legal one in a name here. A destination that
+  // needs a literal space uses the `<...>` form, whose brackets the inline
+  // scanner takes off before a target ever reaches this.
+  MICRONOTES_REQUIRE(decodeLinkTarget("my\\ note.md") == "my\\ note.md");
+  MICRONOTES_REQUIRE(decodeLinkTarget("a\\bc") == "a\\bc");
+
+  // A malformed escape is kept as written rather than dropped or half-decoded:
+  // a percent is legal in a file name, and mangling one would turn a link that
+  // works into one that does not.
+  MICRONOTES_REQUIRE(decodeLinkTarget("100%.md") == "100%.md");
+  MICRONOTES_REQUIRE(decodeLinkTarget("a%2") == "a%2");
+  MICRONOTES_REQUIRE(decodeLinkTarget("a%zz.md") == "a%zz.md");
+  MICRONOTES_REQUIRE(decodeLinkTarget("%") == "%");
+  MICRONOTES_REQUIRE(decodeLinkTarget("").empty());
+  // Nothing to decode is the string it was handed.
+  MICRONOTES_REQUIRE(decodeLinkTarget("work/project-plan.md") == "work/project-plan.md");
+}

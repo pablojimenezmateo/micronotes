@@ -134,4 +134,21 @@ bool jumpToAnchor(UiRuntime& ui, std::string_view anchor) {
   return true;
 }
 
+void queueAnchorJump(UiRuntime& ui, std::string_view anchor) {
+  ui.pendingAnchor.assign(anchor);
+}
+
+void applyQueuedAnchorJump(UiRuntime& ui) {
+  if(ui.pendingAnchor.empty()) return;
+  // Taken before it is spent, so a note whose anchor is not there does not ask
+  // again on every subsequent frame -- which would also mean a reader who
+  // scrolled away being dragged back.
+  const std::string anchor = std::move(ui.pendingAnchor);
+  ui.pendingAnchor.clear();
+  // Reported rather than passed over. A link naming a heading that is not in
+  // the note it points at is a broken link, and the note opening at the top
+  // with no explanation looks like the anchor was ignored.
+  if(!jumpToAnchor(ui, anchor)) ui.status = "Anchor not found: " + anchor;
+}
+
 }

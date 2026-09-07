@@ -836,3 +836,105 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
 
   std::filesystem::remove_all(root);
 }
+
+// `[the plan](work/project-plan.md)` is how one note links to another in plain
+// Markdown -- it is what every other tool writes and what an imported file
+// already contains. Following one used to hand the path to `xdg-open`, so the
+// click launched whatever the desktop associates with `.md` and the reader
+// watched a second application open a file out of the library they were
+// already reading. `[[wikilinks]]` navigated and these did not, which is what
+// made the viewer's links look inert.
+MICRONOTES_TEST(shell_a_markdown_link_resolves_to_the_note_it_names) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-note-links";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "deep");
+  std::filesystem::create_directories(root / "personal");
+  const auto note = [&](const std::filesystem::path& relative, const char* id, const char* title) {
+    std::ofstream out(root / relative, std::ios::binary | std::ios::trunc);
+    out << "---\nid: " << id << "\ntitle: " << title << "\n---\n\nBody.\n";
+  };
+  note("hub.md", "ln-hub", "Hub");
+  note("work/plan.md", "ln-plan", "Plan");
+  note("work/deep/buried.md", "ln-buried", "Buried");
+  note("personal/list.md", "ln-list", "List");
+  note("my note.md", "ln-spaced", "my note");
+  // Not a note: an attachment beside them, which stays the desktop's job.
+  {
+    std::ofstream out(root / "work" / "diagram.png", std::ios::binary | std::ios::trunc);
+    out << "not really a png";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  const auto resolves = [&](const char* target) {
+    const auto* found = micronotes::app::noteAtLinkTarget(ui, target);
+    return found ? found->id : std::string("<none>");
+  };
+
+  // From a note at the root, a bare name and a rooted path are the same thing.
+  micronotes::app::selectNoteById(ui, "ln-hub");
+  MICRONOTES_REQUIRE(resolves("work/plan.md") == "ln-plan");
+  MICRONOTES_REQUIRE(resolves("./work/plan.md") == "ln-plan");
+  MICRONOTES_REQUIRE(resolves("work/deep/buried.md") == "ln-buried");
+  // The escaped form every tool writes for a name with a space in it.
+  MICRONOTES_REQUIRE(resolves("my%20note.md") == "ln-spaced");
+  MICRONOTES_REQUIRE(resolves("my note.md") == "ln-spaced");
+
+  // From a note in a subfolder, a relative path means relative to *that note*,
+  // which is what a link written by hand inside the folder assumes and what
+  // every other Markdown renderer does.
+  micronotes::app::selectNoteById(ui, "ln-plan");
+  MICRONOTES_REQUIRE(resolves("deep/buried.md") == "ln-buried");
+  MICRONOTES_REQUIRE(resolves("../hub.md") == "ln-hub");
+  MICRONOTES_REQUIRE(resolves("../personal/list.md") == "ln-list");
+  // And the root is still tried second, so a link written the other way -- the
+  // form that was already in somebody's library -- keeps working. There is no
+  // way to tell the two apart other than to try both.
+  MICRONOTES_REQUIRE(resolves("personal/list.md") == "ln-list");
+
+  // Everything that is not a note in this library comes back empty, and the
+  // caller hands it to the desktop instead.
+  MICRONOTES_REQUIRE(resolves("work/diagram.png") == "<none>");
+  MICRONOTES_REQUIRE(resolves("work") == "<none>");
+  MICRONOTES_REQUIRE(resolves("nothing-here.md") == "<none>");
+  MICRONOTES_REQUIRE(resolves("https://example.com/x.md") == "<none>");
+  MICRONOTES_REQUIRE(resolves("") == "<none>");
+  // A note's text is not a licence to open arbitrary files: an absolute path
+  // and one that climbs out of the library are both refused, however many `..`
+  // it spends getting there.
+  MICRONOTES_REQUIRE(resolves("/etc/passwd") == "<none>");
+  MICRONOTES_REQUIRE(resolves("../../../../../../etc/passwd") == "<none>");
+  MICRONOTES_REQUIRE(resolves("../hub.md/../../hub.md") == "<none>");
+
+  std::filesystem::remove_all(root);
+}
+
+// A link that crosses notes names both a note and a place in it, and the two
+// cannot be honoured at the same moment: opening the note replaces the buffer,
+// but a page's anchor table is built from its own laid-out document and the
+// page is still holding the note you came from until the next frame. Asking
+// straight after the open searched the wrong note's headings and silently
+// dropped the half of the link that said where to go.
+MICRONOTES_TEST(shell_a_cross_note_anchor_waits_for_the_layout) {
+  micronotes::app::UiRuntime ui;
+  // Nothing queued: every frame but one, and it must not cost a lookup or
+  // touch the status line.
+  ui.status = "untouched";
+  micronotes::app::applyQueuedAnchorJump(ui);
+  MICRONOTES_REQUIRE(ui.status == "untouched");
+
+  micronotes::app::queueAnchorJump(ui, "a-section");
+  MICRONOTES_REQUIRE(ui.pendingAnchor == "a-section");
+  // Spent on the first call, whether or not it found anything -- a note whose
+  // anchor is missing must not ask again on every later frame, which would
+  // also mean a reader who scrolled away being dragged back.
+  micronotes::app::applyQueuedAnchorJump(ui);
+  MICRONOTES_REQUIRE(ui.pendingAnchor.empty());
+  // And a broken anchor is reported rather than passed over: the note opening
+  // at the top with no explanation looks like the anchor was ignored.
+  MICRONOTES_REQUIRE(ui.status == "Anchor not found: a-section");
+
+  ui.status = "untouched";
+  micronotes::app::applyQueuedAnchorJump(ui);
+  MICRONOTES_REQUIRE(ui.status == "untouched");
+}

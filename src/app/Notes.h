@@ -1,9 +1,11 @@
 #pragma once
 
+#include "library/Organization.h"
 #include "ui/Tabs.h"
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace micronotes::app {
 
@@ -55,6 +57,30 @@ void selectTag(UiRuntime& ui, const std::string& tag);
 // Reports whether it did anything, so Esc can fall through to whatever else it
 // means when no filter is running.
 bool clearTagFilter(UiRuntime& ui);
+
+// The note a Markdown link's path names, or null when it names something that
+// is not a note in this library.
+//
+// `[the plan](work/project-plan.md)` is the ordinary way to link one note to
+// another -- it is what every other Markdown tool writes, and what a file
+// dropped in from elsewhere already contains. Following one used to hand the
+// path to `xdg-open`, so clicking it launched whatever the desktop associates
+// with `.md` and the reader watched a second application open a file that was
+// already sitting in the library they were reading. `[[wikilinks]]` navigated
+// and these did not, which made the viewer's links look broken.
+//
+// Resolved relative to the *linking note's own folder* first and the library
+// root second, which is the order a relative path means and the order the two
+// disagree in: `work/project-plan.md` written inside `work/` could mean either.
+// Escapes are decoded and a `#fragment` must already be off the string --
+// `followLinkAt` splits it, because the anchor is its business and not this
+// function's.
+//
+// A borrow into the standing note list, so it costs a comparison per note and
+// no allocation. Null for a target outside the library, for a directory, and
+// for a file that is not indexed as a note -- an attachment, an image, a PDF --
+// each of which is still the desktop's job.
+const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative);
 
 // Reloads the page from whatever the selection now names.
 void loadSelectedIntoEditor(UiRuntime& ui);
