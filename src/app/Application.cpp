@@ -2377,14 +2377,8 @@ int run(ApplicationOptions options) {
 
   if(options.theme) ui::setThemeMode(*options.theme);
 
-  // Borderless at creation rather than SDL_SetWindowBordered afterwards: on
-  // Wayland the decoration is a compositor-side object, so asking for one and
-  // then retracting it costs a blocking round-trip to the display server.
-  SDL_Window* window = SDL_CreateWindow("micronotes", options.windowWidth, options.windowHeight,
-                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-                                        SDL_WINDOW_BORDERLESS);
+  SDL_Window* window = createAppWindow(options.windowWidth, options.windowHeight);
   if(!window) {
-    std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
     SDL_Quit();
     return 1;
   }
@@ -2493,6 +2487,8 @@ int run(ApplicationOptions options) {
   }
 
   if(!options.screenshotPath.empty()) {
+    // An unmapped window reads back blank, so a capture maps it before drawing.
+    SDL_ShowWindow(window);
     const int code = captureFrame(renderer, text, images, ui, options);
     cursors.destroy();
     SDL_DestroyRenderer(renderer);
@@ -2501,8 +2497,11 @@ int run(ApplicationOptions options) {
     return code;
   }
 
+  revealWindow(window, [&](int width, int height) { drawApp(renderer, text, images, ui, width, height); });
+
   bool running = true;
-  bool needsDraw = true;
+  // `revealWindow` already painted what the loop's first pass would have.
+  bool needsDraw = false;
   while(running) {
     SDL_Event event;
     const WaitDecision wait = chooseWait(deadlines());

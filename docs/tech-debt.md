@@ -201,3 +201,28 @@ does -- and have the click walk what was drawn. That is small for the tab strip
 alone and worth doing across the four surfaces at once, which is a wider change
 than the bug warranted. Passing the measurer closes the hole; storing the
 geometry is what stops the next surface from opening it.
+
+## TD-21 — a capture waits half a second no matter what it is capturing
+
+`src/app/Screenshot.cpp`.
+
+`captureWindowToFile` draws sixty frames with an `SDL_Delay(8)` between them
+before reading pixels back, on a comment about giving the compositor time to map
+and size the window. That is a fixed ~500 ms floor on every `--screenshot` run.
+
+**What it costs today.** `tools/session-compare.sh` is built on interleaved
+captures — the instrument that the harness's own lanes cannot replace, per
+`docs/performance.md` — and every one of them pays the floor whether the window
+mapped in one frame or thirty. It also makes the capture path the slowest thing
+in the test tooling by an order of magnitude, which is the sort of cost that
+quietly discourages taking the before-and-after pixels the guide asks for.
+
+**Why it has not been paid.** It needs a real readiness signal rather than a
+sleep: `SDL_EVENT_WINDOW_EXPOSED` plus a size that matches what was asked for
+would let the loop stop as soon as the window is actually up, falling back to
+the sixty-frame bound only when neither arrives. The window is now mapped
+explicitly by `app::revealWindow` rather than at creation, so the moment to
+watch for is finally a moment the code chooses — before that the map raced
+everything and the sleep was standing in for a signal nobody had. Not done here
+because the capture path is used by tooling rather than by the app, and this
+change was about the app's first frame.

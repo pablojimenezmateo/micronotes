@@ -91,6 +91,23 @@ void setInputHints() {
   SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
 }
 
+SDL_Window* createAppWindow(int width, int height) {
+  SDL_Window* window = SDL_CreateWindow("micronotes", width, height,
+                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                                        SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIDDEN);
+  if(!window) std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
+  return window;
+}
+
+void revealWindow(SDL_Window* window, const std::function<void(int, int)>& drawFrame) {
+  int width = 0;
+  int height = 0;
+  SDL_GetWindowSize(window, &width, &height);
+  if(drawFrame) drawFrame(width, height);
+  SDL_ShowWindow(window);
+  if(drawFrame) drawFrame(width, height);
+}
+
 bool installWindowHitTest(SDL_Window* window, SDL_Renderer* renderer, UiRuntime& ui,
                           HitTestContext& context) {
   context = HitTestContext {&ui, renderer};
