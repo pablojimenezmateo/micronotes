@@ -120,3 +120,61 @@ MICRONOTES_TEST(tabs_layout_is_the_same_every_time) {
     MICRONOTES_REQUIRE(first[i].close == second[i].close);
   }
 }
+
+// The strip's geometry is *not* independent of the measurer, and a hit test
+// that laid it out without one tested rects that were not on screen.
+//
+// `handleTabStripClick` passed nullptr on a comment saying the geometry was a
+// pure function of the titles and the strip. It is not: `layoutTabs` narrows
+// every tab to the widest title when that is less than an even share, which is
+// the ordinary case -- a couple of short note names in a wide strip. The drawn
+// tabs were a fraction of the width the hit test believed, so a click on the
+// second tab landed inside the first one's rect and activated the wrong note,
+// a click past the last drawn tab still hit one, and the close cross's target
+// sat in empty strip to the right of the cross. The strip read as inert.
+//
+// So this pins the disagreement itself rather than the fix: two short titles in
+// a wide strip must lay out differently with and without a measurer, which is
+// what makes passing the right one load-bearing.
+MICRONOTES_TEST(tabs_need_the_measurer_the_draw_used) {
+  const std::vector<std::string> two {"Notes", "Ideas"};
+  const auto measured = layoutTabs(two, kStrip, measure);
+  const auto unmeasured = layoutTabs(two, kStrip, {});
+  MICRONOTES_REQUIRE(measured.size() == unmeasured.size());
+  // An even share of a 900 px strip is 450 px; the widest title needs 35 px of
+  // text plus the close furniture. The two layouts cannot agree.
+  MICRONOTES_REQUIRE(measured[0].rect.w != unmeasured[0].rect.w);
+
+  // And the disagreement is the one that misroutes a click: the second tab as
+  // drawn falls inside the first tab's rect as the measurer-less hit test saw
+  // it, which is exactly the wrong note being activated.
+  const Rect drawnSecond = measured[1].rect;
+  const float centreX = drawnSecond.x + drawnSecond.w / 2.0f;
+  MICRONOTES_REQUIRE(centreX > unmeasured[0].rect.x);
+  MICRONOTES_REQUIRE(centreX < unmeasured[0].rect.x + unmeasured[0].rect.w);
+
+  // The close target moves with the tab's right edge, so it came adrift too.
+  MICRONOTES_REQUIRE(tabCloseHitRect(measured[1]).x != tabCloseHitRect(unmeasured[1]).x);
+}
+
+// The property the fix relies on: laid out through one measurer, a click at the
+// centre of every drawn tab resolves to that tab and no other.
+MICRONOTES_TEST(tabs_hit_test_agrees_with_the_layout_it_was_drawn_from) {
+  for(const std::size_t count : {1u, 2u, 3u, 7u, 20u}) {
+    const auto slots = layoutTabs(titles(count), kStrip, measure);
+    for(const auto& slot : slots) {
+      if(!slot.visible) continue;
+      const float x = slot.rect.x + slot.rect.w / 2.0f;
+      const float y = slot.rect.y + slot.rect.h / 2.0f;
+      std::size_t hit = slots.size();
+      for(const auto& candidate : slots) {
+        if(!candidate.visible) continue;
+        if(x < candidate.rect.x || x >= candidate.rect.x + candidate.rect.w) continue;
+        if(y < candidate.rect.y || y >= candidate.rect.y + candidate.rect.h) continue;
+        hit = candidate.index;
+        break;
+      }
+      MICRONOTES_REQUIRE(hit == slot.index);
+    }
+  }
+}

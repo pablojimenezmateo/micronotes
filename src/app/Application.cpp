@@ -1941,10 +1941,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     return;
   }
 
-  if(!ui::empty(layout.tabs) &&
-     handleTabStripClick(ui, layout.tabs, x, y, button, (SDL_GetModState() & SDL_KMOD_CTRL) != 0)) {
-    return;
-  }
+  const bool ctrlHeld = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+  if(handleTabStripClick(text, ui, layout.tabs, x, y, button, ctrlHeld)) return;
 
   // The right panel owns everything inside it, including its own background:
   // without that, a click between two outline rows would fall through to the

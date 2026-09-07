@@ -169,3 +169,35 @@ being the thing that runs in three seconds with no display. The first is
 worth doing and is an afternoon; it was not done in the same pass that found the
 bugs, because a lane written to catch the bug you already know about is the one
 that catches nothing else.
+
+## TD-20 — two surfaces derive the same geometry from different inputs
+
+`src/app/TabStrip.cpp` and `src/app/SidebarModel.cpp`, against `ui::layoutTabs`
+and `ui::TreeModel::rows`.
+
+**What it costs today.** It cost a tab strip that did not work. `layoutTabs`
+narrows every tab to the widest title when that is less than an even share of
+the strip, so its result depends on the text measurer it is handed --
+`drawTabStrip` passed one and `handleTabStripClick` passed `nullptr`, on a
+comment asserting the geometry was a pure function of the titles and the strip.
+With two short note names in a wide strip the drawn tabs were a third of the
+width the hit test believed: a click on the second tab landed inside the first
+one's rect and opened the wrong note, a click past the last drawn tab still hit
+one, and the close cross's target sat in empty strip well to the right of the
+cross.
+
+That one is fixed -- the hit test takes the same `TextRenderer` the draw does,
+and `tabs_need_the_measurer_the_draw_used` pins the disagreement so a future
+`nullptr` fails rather than misroutes. The *debt* is the shape, which is still
+here: a draw and a hit test that each call the layout function again, with no
+compiler check that they called it the same way. The sidebar avoids it by
+building `ui.sidebarRows` once and hit-testing the stored rects; the tab strip
+lays out twice a click, and the ribbon and the window controls each derive their
+own boxes in two places too.
+
+**Why it has not been paid.** The fix is to make "lay out" and "hit test" one
+thing: build the slots once per frame into `UiRuntime` -- as the sidebar already
+does -- and have the click walk what was drawn. That is small for the tab strip
+alone and worth doing across the four surfaces at once, which is a wider change
+than the bug warranted. Passing the measurer closes the hole; storing the
+geometry is what stops the next surface from opening it.

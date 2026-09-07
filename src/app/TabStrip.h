@@ -14,7 +14,12 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
 
 // Returns whether the click landed on the strip. `button` distinguishes a
 // middle click, which closes, from a left one, which opens.
-bool handleTabStripClick(UiRuntime& ui, ui::Rect rect, float x, float y, Uint8 button, bool ctrl);
+//
+// `text` is not decoration: a tab's width depends on how wide its title
+// measures, so the hit test has to lay the strip out through the same measurer
+// the draw does or it tests rects that are not the ones on screen.
+bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y,
+                         Uint8 button, bool ctrl);
 
 // Moving between tabs and closing them.
 void stepTab(UiRuntime& ui, int delta);

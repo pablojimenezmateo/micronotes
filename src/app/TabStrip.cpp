@@ -105,11 +105,21 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   }
 }
 
-bool handleTabStripClick(UiRuntime& ui, Rect rect, float x, float y, Uint8 button, bool ctrl) {
+bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y,
+                         Uint8 button, bool ctrl) {
   if(!ui::contains(rect, x, y)) return false;
-  // Laid out with no measurer: the geometry is a pure function of the titles
-  // and the strip, and the close targets do not depend on the font.
-  const auto slots = slotsFor(tabTitles(ui), nullptr, rect);
+  // Through the same measurer the draw uses, because the strip's geometry is
+  // *not* independent of it: `layoutTabs` narrows every tab to the widest title
+  // when that is less than an even share of the strip, so a measurer-less
+  // layout gives each tab the full even share instead.
+  //
+  // This used to pass nullptr, on a comment claiming the geometry was a pure
+  // function of the titles and the strip. With two short titles in a wide strip
+  // the drawn tabs were a third of the width the hit test believed, so a click
+  // on the second tab landed in the first one's rect and activated it, a click
+  // past the last drawn tab still hit one, and the close cross's target sat in
+  // empty strip well to the right of the cross. The strip looked inert.
+  const auto slots = slotsFor(tabTitles(ui), &text, rect);
   for(const auto& slot : slots) {
     if(!slot.visible || !ui::contains(slot.rect, x, y)) continue;
     // Middle click closes, as it does in every tab strip; so does the cross.
