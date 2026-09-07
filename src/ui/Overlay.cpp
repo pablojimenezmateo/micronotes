@@ -361,7 +361,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
 
   // Rounded, like every other floating surface: a square-cornered card over a
   // page of rounded blocks reads as a screenshot pasted on top of the window.
-  drawRoundedSurface(renderer, layout.panel, theme().surfaceElevated, theme().divider, kRadiusLarge);
+  drawRoundedSurface(renderer, layout.panel, theme().overlayBackground, theme().border, kRadiusLarge);
 
   const TextStyle titleStyle {FontFamily::Sans, true, false, type().small};
   const TextStyle bodyStyle {FontFamily::Sans, false, false, type().ui};
@@ -369,18 +369,18 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
 
   float y = layout.panel.y + kPadding;
   if(!overlay->title.empty()) {
-    text.draw(overlay->title, layout.panel.x + kPadding, y, theme().muted, titleStyle);
+    text.draw(overlay->title, layout.panel.x + kPadding, y, theme().textSecondary, titleStyle);
     y += static_cast<float>(text.lineHeight(titleStyle)) + 8.0f;
   }
 
   if(usesField(*overlay)) {
-    drawRoundedSurface(renderer, layout.field, theme().inputBg, theme().accentDim, kRadiusSmall);
+    drawRoundedSurface(renderer, layout.field, theme().surfaceBackground, theme().accent, kRadiusSmall);
     // `textTop`, like every other centred line in the shell. These four sites
     // each centred by hand and none of them rounded, so the palette's text
     // landed on half pixels and its glyph stems smeared.
     const float textY = textTop(layout.field, text, bodyStyle);
     if(overlay->value.empty()) {
-      text.draw(overlay->placeholder, layout.field.x + kRowPadX, textY, theme().dim, bodyStyle);
+      text.draw(overlay->placeholder, layout.field.x + kRowPadX, textY, theme().textMuted, bodyStyle);
     } else {
       // The field lays itself out: the view reports where the caret and the
       // selection sit after scrolling, so a long value keeps the caret in
@@ -394,9 +394,9 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       if(view.hasSelection) {
         fill(renderer, {left + view.selectionStartX, layout.field.y + 6.0f,
                         view.selectionEndX - view.selectionStartX, layout.field.h - 12.0f},
-             theme().selectionBg);
+             theme().selectionFill);
       }
-      text.draw(overlay->value.text(), left, textY, theme().text, bodyStyle);
+      text.draw(overlay->value.text(), left, textY, theme().textPrimary, bodyStyle);
       fill(renderer, {left + view.caretX, layout.field.y + 8.0f, 2.0f, layout.field.h - 16.0f}, theme().accent);
     }
   }
@@ -410,23 +410,23 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       // Confirm wears the destructive colour: every Confirm overlay in the shell
       // asks about a deletion, and a button that is about to delete something
       // should not look like the one beside it that will not.
-      drawRoundedSurface(renderer, rect, isConfirm ? theme().warn : (hot ? theme().hoverBg : theme().surface),
-                         isConfirm ? theme().warn : theme().hairline, kRadiusSmall);
+      drawRoundedSurface(renderer, rect, isConfirm ? theme().warn : (hot ? theme().rowHighlight : theme().surfaceRaised),
+                         isConfirm ? theme().warn : theme().border, kRadiusSmall);
       const auto label = isConfirm ? overlay->confirmLabel : std::string("Cancel");
       const int labelW = text.width(label, bodyStyle);
       text.draw(label, std::round(rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f),
-                textTop(rect, text, bodyStyle), isConfirm ? theme().onAccent : theme().text, bodyStyle);
+                textTop(rect, text, bodyStyle), isConfirm ? theme().onAccent : theme().textPrimary, bodyStyle);
       continue;
     }
 
     const auto& item = overlay->items[static_cast<std::size_t>(index)];
     const bool selected = index == overlay->highlighted;
     if(selected) {
-      fillRounded(renderer, rect, theme().selectedBg, kRadiusSmall);
+      fillRounded(renderer, rect, theme().rowHighlight, kRadiusSmall);
     } else if(contains(rect, mouseX_, mouseY_) && item.enabled) {
-      fillRounded(renderer, rect, theme().hoverBg, kRadiusSmall);
+      fillRounded(renderer, rect, theme().rowHighlight, kRadiusSmall);
     }
-    const SDL_Color label = !item.enabled ? theme().dim : (item.destructive ? theme().warn : theme().text);
+    const SDL_Color label = !item.enabled ? theme().textMuted : (item.destructive ? theme().warn : theme().textPrimary);
     const float labelY = textTop(rect, text, bodyStyle);
     const float labelX = rect.x + kRowPadX;
     int available = static_cast<int>(rect.w - kRowPadX * 2.0f);
@@ -437,14 +437,14 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     const float hintY = textTop(rect, text, hintStyle);
     if(!item.shortcut.empty()) {
       const int shortcutW = text.width(item.shortcut, hintStyle);
-      text.draw(item.shortcut, right - static_cast<float>(shortcutW), hintY, theme().dim, hintStyle);
+      text.draw(item.shortcut, right - static_cast<float>(shortcutW), hintY, theme().textMuted, hintStyle);
       right -= static_cast<float>(shortcutW) + kRowGap;
       available -= shortcutW + static_cast<int>(kRowGap);
     }
     if(!item.detail.empty()) {
       const auto detail = ellipsizeToWidth(text, item.detail, available / 2, hintStyle);
       const int detailW = text.width(detail, hintStyle);
-      text.draw(detail, right - static_cast<float>(detailW), hintY, theme().dim, hintStyle);
+      text.draw(detail, right - static_cast<float>(detailW), hintY, theme().textMuted, hintStyle);
       right -= static_cast<float>(detailW) + kRowGap;
       available -= detailW + static_cast<int>(kRowGap);
     }
@@ -475,7 +475,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   }
 
   if(!overlay->hint.empty() && layout.hint.h > 0.0f) {
-    text.draw(overlay->hint, layout.hint.x, layout.hint.y, theme().dim, hintStyle);
+    text.draw(overlay->hint, layout.hint.x, layout.hint.y, theme().textMuted, hintStyle);
   }
 
   if(overlay->kind == OverlayKind::List && filtered.empty()) {
@@ -486,7 +486,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     text.draw("No matches", layout.panel.x + kPadding + kSpace1,
               usesField(*overlay) ? layout.field.y + layout.field.h + kPadding
                                   : layout.panel.y + kPadding,
-              theme().dim, bodyStyle);
+              theme().textMuted, bodyStyle);
   }
 }
 

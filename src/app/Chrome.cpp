@@ -106,7 +106,7 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   const float baseline = ui::textTop(rect, text, style);
   const float dot = 6.0f;
   fill(renderer, {rect.x + ui::kSpace3, std::round(rect.y + (rect.h - dot) / 2.0f), dot, dot},
-       ui.editor.dirty() ? theme().warn : theme().accentDim);
+       ui.editor.dirty() ? theme().warn : theme().accent);
 
   std::string left = ui.status;
   if(ui.focus == FocusArea::Search) left = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
@@ -121,12 +121,12 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
     const std::string tally = plural(ui.editor.wordCount(), "word") + "    " +
                               plural(ui.editor.text().size(), "character");
     const float width = static_cast<float>(text.width(tally));
-    text.draw(tally, right - width, baseline, theme().dim);
+    text.draw(tally, right - width, baseline, theme().textMuted);
     right -= width + ui::kSpace4;
   }
   const std::string mode = paneModeName(ui.state.workspace().paneMode());
   const float modeWidth = static_cast<float>(text.width(mode));
-  text.draw(mode, right - modeWidth, baseline, theme().dim);
+  text.draw(mode, right - modeWidth, baseline, theme().textMuted);
   right -= modeWidth;
 
   if(left.empty()) return;
@@ -134,7 +134,7 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   const float leftX = rect.x + ui::kSpace3 + dot + ui::kSpace2;
   const float room = right - leftX - ui::kSpace4;
   text.draw(ellipsizeToWidth(text, left, static_cast<int>(room), false, false), leftX, baseline,
-            theme().muted);
+            theme().textSecondary);
 }
 
 const char* paneModeName(ui::PaneMode mode) {
@@ -165,8 +165,8 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
   ui.crumbs.clear();
   ui.favoriteButton = {};
   ui.windowButtons = {};
-  fill(renderer, rect, theme().statusBg);
-  hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h - 1.0f, theme().hairline);
+  fill(renderer, rect, theme().chromeBackground);
+  hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h - 1.0f, theme().border);
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().small};
   const auto note = ui.state.hasLibrary() ? ui.state.findNote(ui.state.selection().noteId) : std::nullopt;
 
@@ -188,8 +188,8 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
       ui.windowButtons[i] = box;
       const bool hot = ui.hovered(box);
       // Close goes red on hover; the other two take the ordinary hover fill.
-      if(hot) fill(renderer, box, i == 2 ? theme().warn : theme().hoverBg);
-      const SDL_Color mark = hot ? (i == 2 ? theme().onAccent : theme().text) : theme().dim;
+      if(hot) fill(renderer, box, i == 2 ? theme().warn : theme().rowHighlight);
+      const SDL_Color mark = hot ? (i == 2 ? theme().onAccent : theme().textPrimary) : theme().textMuted;
       drawWindowGlyph(renderer, box, i, ui.windowMaximized, mark);
     }
     ui.offerTooltip(ui.windowButtons[0], "Minimize");
@@ -220,19 +220,19 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
     const float w = static_cast<float>(text.width(label, style));
     const Rect hit {x - ui::kSpace1, rect.y + ui::kSpace1, w + ui::kSpace2, rect.h - ui::kSpace2};
     const bool hot = ui.hovered(hit);
-    if(hot) fill(renderer, hit, theme().hoverBg);
-    text.draw(label, x, baseline, hot ? theme().text : theme().muted, style);
+    if(hot) fill(renderer, hit, theme().rowHighlight);
+    text.draw(label, x, baseline, hot ? theme().textPrimary : theme().textSecondary, style);
     ui.crumbs.emplace_back(hit, trail[i]);
     x += w + ui::kSpace2;
-    text.draw("/", x, baseline, theme().dim, style);
+    text.draw("/", x, baseline, theme().textMuted, style);
     x += static_cast<float>(text.width("/", style)) + ui::kSpace2;
   }
   if(note && x < limit) {
     drawNoteIcon(renderer, text, note->icon,
                  {x, std::round(rect.y + (rect.h - kCrumbIconSize) / 2.0f), kCrumbIconSize, kCrumbIconSize},
-                 theme().dim);
+                 theme().textMuted);
     x += kCrumbIconSize + ui::kSpace1;
-    text.draw(ellipsizeToWidth(text, note->title, static_cast<int>(limit - x), style), x, baseline, theme().text, style);
+    text.draw(ellipsizeToWidth(text, note->title, static_cast<int>(limit - x), style), x, baseline, theme().textPrimary, style);
   }
 
   if(note) {
@@ -241,12 +241,12 @@ void drawTitleBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
                          rect.h - ui::kSpace2};
     const bool pinned = ui.state.favorite(note->id);
     ui.offerTooltip(ui.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
-    if(ui.hovered(ui.favoriteButton)) fill(renderer, ui.favoriteButton, theme().hoverBg);
+    if(ui.hovered(ui.favoriteButton)) fill(renderer, ui.favoriteButton, theme().rowHighlight);
     const auto star = pinned ? "\xe2\x98\x85" : "\xe2\x98\x86";
     text.draw(star,
               std::round(ui.favoriteButton.x +
                          (ui.favoriteButton.w - static_cast<float>(text.width(star, style))) / 2.0f),
-              baseline, pinned ? theme().accent : theme().dim, style);
+              baseline, pinned ? theme().accent : theme().textMuted, style);
   }
 }
 

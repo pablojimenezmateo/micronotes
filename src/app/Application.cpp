@@ -887,7 +887,7 @@ static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, i
 // nowhere.
 static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, int width, int height) {
   ScopedFrame frame;
-  SDL_SetRenderDrawColor(renderer, theme().appBg.r, theme().appBg.g, theme().appBg.b, theme().appBg.a);
+  SDL_SetRenderDrawColor(renderer, theme().windowBackground.r, theme().windowBackground.g, theme().windowBackground.b, theme().windowBackground.a);
   SDL_RenderClear(renderer);
 
   const ShellLayout layout = shellLayout(ui, width, height);
@@ -914,14 +914,14 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   if(!ui::empty(layout.sidebar)) {
     const perf::ScopeTimer timer("shell.sidebar");
     drawSidebar(renderer, text, ui, layout.sidebar);
-    fill(renderer, {layout.sidebar.x + layout.sidebar.w, layout.sidebar.y, 1, layout.sidebar.h}, theme().hairline);
+    fill(renderer, {layout.sidebar.x + layout.sidebar.w, layout.sidebar.y, 1, layout.sidebar.h}, theme().border);
   }
   if(!ui::empty(layout.tabs)) {
     const perf::ScopeTimer timer("shell.tab_strip");
     drawTabStrip(renderer, text, ui, layout.tabs);
   }
   if(!ui.state.hasLibrary()) {
-    fill(renderer, layout.content, theme().editorBg);
+    fill(renderer, layout.content, theme().editorBackground);
     // The one screen someone can arrive at knowing nothing, so it says what
     // the app is for before it says which key to press.
     drawEmptyMessage(text, "Open a folder of notes",
@@ -929,7 +929,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
                      layout.content.x + 18.0f, layout.content.y + 40.0f, layout.content.w - 36.0f,
                      ui::keysFor(ui::ActionId::Settings) + "  Settings          or start with  --library <path>");
   } else if(ui.state.selection().noteId.empty()) {
-    fill(renderer, layout.content, theme().editorBg);
+    fill(renderer, layout.content, theme().editorBackground);
     drawEmptyMessage(text, "Nothing open", "Pick a note from the sidebar, or start a new one.",
                      layout.content.x + 18.0f, layout.content.y + 40.0f, layout.content.w - 36.0f,
                      ui::keysFor(ui::ActionId::GoToNote) + "  go to note          " + ui::keysFor(ui::ActionId::NewNote) +
@@ -946,7 +946,7 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
     } else {
       const float split = content.w / 2.0f;
       drawEditor(renderer, text, ui, {content.x, content.y, split, content.h});
-      fill(renderer, {content.x + split, content.y, 1, content.h}, theme().hairline);
+      fill(renderer, {content.x + split, content.y, 1, content.h}, theme().border);
       drawReading(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
     }
   }
@@ -957,8 +957,8 @@ static void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& imag
   }
   {
     const perf::ScopeTimer timer("shell.status");
-    fill(renderer, layout.status, theme().statusBg);
-    fill(renderer, {layout.status.x, layout.status.y, layout.status.w, 1}, theme().hairline);
+    fill(renderer, layout.status, theme().chromeBackground);
+    fill(renderer, {layout.status.x, layout.status.y, layout.status.w, 1}, theme().border);
     drawStatus(renderer, text, ui, layout.status);
   }
   // An open overlay is a conversation; a tooltip about what is behind it would

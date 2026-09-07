@@ -202,10 +202,10 @@ void strokeRounded(SDL_Renderer* renderer, Rect rect, SDL_Color color, float rad
   SDL_RenderPoints(renderer, points, count);
 }
 
-void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme().surface, SDL_Color borderColor = theme().hairline) {
+void drawSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor = theme().surfaceRaised, SDL_Color borderColor = theme().border) {
   fill(renderer, rect, fillColor);
   stroke(renderer, rect, borderColor);
-  hLine(renderer, rect.x + 1, rect.x + rect.w - 2, rect.y + 1, theme().surfaceSheen);
+  hLine(renderer, rect.x + 1, rect.x + rect.w - 2, rect.y + 1, theme().border);
 }
 
 void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot) {
@@ -216,13 +216,13 @@ void drawSelection(SDL_Renderer* renderer, Rect row, bool selected, bool hot) {
   // the fill could, on a palette where the selected fill was two shades off the
   // panel behind it. On this one it is not: the fill carries the whole message,
   // and a column of accent bars down a tree reads as a series of tabs.
-  if(selected) fillRounded(renderer, row, theme().selectedBg, kRadiusSmall);
-  else if(hot) fillRounded(renderer, row, theme().hoverBg, kRadiusSmall);
+  if(selected) fillRounded(renderer, row, theme().rowHighlight, kRadiusSmall);
+  else if(hot) fillRounded(renderer, row, theme().rowHighlight, kRadiusSmall);
 }
 
 void drawFocusEdge(SDL_Renderer* renderer, Rect pane, bool focused) {
   if(!focused || pane.w <= 0.0f) return;
-  fill(renderer, {pane.x, pane.y, kFocusEdgeWidth, pane.h}, theme().accentDim);
+  fill(renderer, {pane.x, pane.y, kFocusEdgeWidth, pane.h}, theme().accent);
 }
 
 void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color) {
@@ -237,7 +237,7 @@ void drawDisclosure(SDL_Renderer* renderer, Rect box, bool open, SDL_Color color
 }
 
 void drawSurface(SDL_Renderer* renderer, Rect rect) {
-  drawSurface(renderer, rect, theme().surface, theme().hairline);
+  drawSurface(renderer, rect, theme().surfaceRaised, theme().border);
 }
 
 void drawRoundedSurface(SDL_Renderer* renderer, Rect rect, SDL_Color fillColor, SDL_Color borderColor,
@@ -277,10 +277,10 @@ Rect scrollbarThumb(Rect viewport, int scroll, int maxScroll) {
 // from it, and was hit-tested against these -- identical only by luck.
 void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll) {
   if(maxScroll <= 0) return;
-  fill(renderer, scrollbarTrack(viewport), theme().scrollTrack);
+  fill(renderer, scrollbarTrack(viewport), theme().surfaceRaised);
   const Rect thumb = scrollbarThumb(viewport, scroll, maxScroll);
-  fill(renderer, thumb, theme().scrollThumb);
-  stroke(renderer, thumb, theme().scrollThumbBorder);
+  fill(renderer, thumb, theme().textMuted);
+  stroke(renderer, thumb, theme().border);
 }
 
 Rect scrollbarHitRect(Rect thumb) {
@@ -302,8 +302,8 @@ void drawTooltip(SDL_Renderer* renderer, TextRenderer& text, const HoverTooltip&
   const float width = static_cast<float>(text.width(tooltip.text, style)) + kTooltipPadX * 2.0f;
   const float height = static_cast<float>(text.lineHeight(style)) + kTooltipPadY * 2.0f;
   const Rect card = placeTooltip(tooltip.anchor, width, height, bounds);
-  drawRoundedSurface(renderer, card, theme().surfaceElevated, theme().hairline, kRadiusSmall);
-  text.draw(tooltip.text, card.x + kTooltipPadX, card.y + kTooltipPadY, theme().text, style);
+  drawRoundedSurface(renderer, card, theme().overlayBackground, theme().border, kRadiusSmall);
+  text.draw(tooltip.text, card.x + kTooltipPadX, card.y + kTooltipPadY, theme().textPrimary, style);
 }
 
 std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth, const TextStyle& style) {
@@ -320,7 +320,7 @@ std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth
 
 
 void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y) {
-  text.draw(label, x, y, theme().dim);
+  text.draw(label, x, y, theme().textMuted);
 }
 
 float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail,
@@ -331,7 +331,7 @@ float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_v
   const int room = static_cast<int>(std::max(60.0f, width - 36.0f));
   const float top = y;
   y += 14.0f;
-  text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), x + 18.0f, y, theme().text, titleStyle);
+  text.draw(ellipsizeToWidth(text, std::string(title), room, titleStyle), x + 18.0f, y, theme().textPrimary, titleStyle);
   y += static_cast<float>(text.lineHeight(titleStyle)) + 6.0f;
 
   // The detail wraps rather than being cut off at the column. Every one of
@@ -350,13 +350,13 @@ float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_v
   for(std::size_t i = 0; i < rows.size() && i < kMaxLines; ++i) {
     const bool last = i + 1 == kMaxLines && rows.size() > kMaxLines;
     text.draw(last ? ellipsizeToWidth(text, rows[i].text + "...", room, bodyStyle) : rows[i].text,
-              x + 18.0f, y, theme().muted, bodyStyle);
+              x + 18.0f, y, theme().textSecondary, bodyStyle);
     y += bodyStep;
   }
 
   if(!keys.empty()) {
     y += 8.0f;
-    text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), x + 18.0f, y, theme().dim, keyStyle);
+    text.draw(ellipsizeToWidth(text, std::string(keys), room, keyStyle), x + 18.0f, y, theme().textMuted, keyStyle);
     y += static_cast<float>(text.lineHeight(keyStyle));
   }
   return y + 14.0f - top;

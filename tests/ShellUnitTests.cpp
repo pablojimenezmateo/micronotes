@@ -88,12 +88,12 @@ MICRONOTES_TEST(shell_inline_runs_split_a_wikilink_out_of_plain_text) {
 MICRONOTES_TEST(shell_inline_runs_ask_whether_a_wikilink_resolves) {
   const auto colourOf = [](std::string_view target, bool exists) {
     const auto runs = inlineRuns(textInlines("see [[" + std::string(target) + "]] here"),
-                                 micronotes::ui::theme().text,
+                                 micronotes::ui::theme().textPrimary,
                                  [exists](std::string_view) { return exists; });
     for(const auto& run : runs) {
       if(run.wiki) return run.color;
     }
-    return micronotes::ui::theme().text;
+    return micronotes::ui::theme().textPrimary;
   };
   const auto present = colourOf("Here", true);
   const auto missing = colourOf("Here", false);

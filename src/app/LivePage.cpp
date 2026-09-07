@@ -137,7 +137,7 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
     // exactly where the first character typed will appear.
     const Rect column = ui.livePage.columnRect();
     const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().body};
-    text.draw("Write something. Press / for a block.", column.x, column.y, theme().dim, style);
+    text.draw("Write something. Press / for a block.", column.x, column.y, theme().textMuted, style);
   }
 }
 

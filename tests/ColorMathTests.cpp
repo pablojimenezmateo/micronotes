@@ -107,18 +107,39 @@ MICRONOTES_TEST(theme_palettes_stay_legible_in_both_modes) {
     float minimum;
   };
   static constexpr Pairing kPairings[] = {
-    {"body text on the page", &micronotes::ui::Theme::text, &micronotes::ui::Theme::pageSurface, 4.5f},
-    {"body text on the editor", &micronotes::ui::Theme::text, &micronotes::ui::Theme::editorBg, 4.5f},
-    {"secondary text in the sidebar", &micronotes::ui::Theme::muted, &micronotes::ui::Theme::sidebarBg, 4.5f},
-    {"secondary text in the note list", &micronotes::ui::Theme::muted, &micronotes::ui::Theme::notesBg, 4.5f},
-    {"section labels in the sidebar", &micronotes::ui::Theme::dim, &micronotes::ui::Theme::sidebarBg, 3.0f},
-    {"status bar text", &micronotes::ui::Theme::muted, &micronotes::ui::Theme::statusBg, 4.5f},
-    {"links on the page", &micronotes::ui::Theme::accent, &micronotes::ui::Theme::pageSurface, 3.0f},
-    {"links to a note not written yet", &micronotes::ui::Theme::linkPending, &micronotes::ui::Theme::pageSurface, 3.0f},
+    {"body text on the page", &micronotes::ui::Theme::textPrimary, &micronotes::ui::Theme::editorBackground, 4.5f},
+    {"body text on a panel", &micronotes::ui::Theme::textPrimary, &micronotes::ui::Theme::surfaceBackground, 4.5f},
+    {"secondary text in the sidebar", &micronotes::ui::Theme::textSecondary, &micronotes::ui::Theme::surfaceBackground, 4.5f},
+    {"a tree row's label on the highlight", &micronotes::ui::Theme::textSecondary, &micronotes::ui::Theme::rowHighlight, 4.5f},
+    {"section labels in the sidebar", &micronotes::ui::Theme::textMuted, &micronotes::ui::Theme::surfaceBackground, 3.0f},
+    {"status bar text", &micronotes::ui::Theme::chromeText, &micronotes::ui::Theme::chromeBackground, 4.5f},
+    {"the active tab's label", &micronotes::ui::Theme::chromeActiveText, &micronotes::ui::Theme::chromeActive, 4.5f},
+    {"an inactive tab's glyphs", &micronotes::ui::Theme::chromeTextSecondary, &micronotes::ui::Theme::chromeBackground, 3.0f},
+    {"links on the page", &micronotes::ui::Theme::accent, &micronotes::ui::Theme::editorBackground, 3.0f},
+    {"links to a note not written yet", &micronotes::ui::Theme::linkPending, &micronotes::ui::Theme::editorBackground, 3.0f},
     {"text on an accent fill", &micronotes::ui::Theme::onAccent, &micronotes::ui::Theme::accent, 4.5f},
-    {"code on its own background", &micronotes::ui::Theme::text, &micronotes::ui::Theme::codeBg, 4.5f},
-    {"menu text", &micronotes::ui::Theme::text, &micronotes::ui::Theme::surfaceElevated, 4.5f},
-    {"input text", &micronotes::ui::Theme::text, &micronotes::ui::Theme::inputBg, 4.5f},
+    {"code on its own background", &micronotes::ui::Theme::textPrimary, &micronotes::ui::Theme::codeBackground, 4.5f},
+    {"menu text", &micronotes::ui::Theme::textPrimary, &micronotes::ui::Theme::overlayBackground, 4.5f},
+    {"the caret against the page", &micronotes::ui::Theme::cursor, &micronotes::ui::Theme::editorBackground, 3.0f},
+  };
+
+  // The grounds, which a flat interface leans on as heavily as it leans on the
+  // ink: with no shadow and no radius to separate them, two panels that differ
+  // by less than this read as one panel and the layout stops being legible.
+  struct Separation {
+    const char* what;
+    SDL_Color micronotes::ui::Theme::*surface;
+    SDL_Color micronotes::ui::Theme::*reference;
+  };
+  static constexpr Separation kSeparations[] = {
+    {"the chrome against the page it frames", &micronotes::ui::Theme::chromeBackground,
+     &micronotes::ui::Theme::editorBackground},
+    {"the active tab against its strip", &micronotes::ui::Theme::chromeActive,
+     &micronotes::ui::Theme::chromeBackground},
+    {"a raised control against its panel", &micronotes::ui::Theme::surfaceRaised,
+     &micronotes::ui::Theme::surfaceBackground},
+    {"a highlighted row against its panel", &micronotes::ui::Theme::rowHighlight,
+     &micronotes::ui::Theme::surfaceBackground},
   };
 
   for(const auto mode : {micronotes::ui::ThemeMode::Light, micronotes::ui::ThemeMode::Dark}) {
@@ -131,6 +152,19 @@ MICRONOTES_TEST(theme_palettes_stay_legible_in_both_modes) {
         ratio >= pairing.minimum - 0.05f,
         which + " theme: " + pairing.what + " is " + std::to_string(ratio) +
           ":1, under the " + std::to_string(pairing.minimum) + ":1 this pairing is held to");
+    }
+    for(const auto& separation : kSeparations) {
+      const float ratio = contrast(palette.*(separation.surface), palette.*(separation.reference));
+      micronotes::tests::require(
+        ratio >= micronotes::ui::kSurfaceSeparation - 0.005f,
+        which + " theme: " + separation.what + " differs by " + std::to_string(ratio) +
+          ":1, under the " + std::to_string(micronotes::ui::kSurfaceSeparation) +
+          ":1 two grounds need to read as two");
+      micronotes::tests::require(
+        micronotes::ui::samePolarity(palette.*(separation.surface), palette.*(separation.reference)),
+        std::string(which) + " theme: " + separation.what +
+          " crosses the light/dark threshold -- a panel that is a raised card in one theme and a "
+          "hole in the other is a palette nobody looked at");
     }
   }
 }

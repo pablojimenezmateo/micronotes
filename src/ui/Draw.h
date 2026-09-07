@@ -201,7 +201,7 @@ public:
     return width(value, styleFor(heading, mono, strong, emphasis));
   }
 
-  void draw(std::string_view value, float x, float y, SDL_Color color = theme().text, bool heading = false, bool mono = false, bool strong = false, bool emphasis = false) {
+  void draw(std::string_view value, float x, float y, SDL_Color color = theme().textPrimary, bool heading = false, bool mono = false, bool strong = false, bool emphasis = false) {
     draw(value, x, y, color, styleFor(heading, mono, strong, emphasis));
   }
 

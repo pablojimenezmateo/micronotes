@@ -49,6 +49,27 @@ bool isLight(SDL_Color color) {
   return relativeLuminance(color) >= 0.179f;
 }
 
+SDL_Color lighten(SDL_Color base, float amount) {
+  return blend(base, SDL_Color {255, 255, 255, base.a}, amount);
+}
+
+SDL_Color darken(SDL_Color base, float amount) {
+  return blend(base, SDL_Color {0, 0, 0, base.a}, amount);
+}
+
+bool samePolarity(SDL_Color a, SDL_Color b) {
+  return isLight(a) == isLight(b);
+}
+
+SDL_Color ensureBackgroundSeparation(SDL_Color background, SDL_Color reference,
+                                     float minimumContrast) {
+  if(contrast(background, reference) >= minimumContrast) return background;
+  // Away from the reference: a panel that is already lighter than the page gets
+  // lighter still. The step is the one microide settled on -- large enough to
+  // be visible on a dark palette, small enough not to turn a step into a jump.
+  return isLight(reference) ? darken(background, 0.12f) : lighten(background, 0.12f);
+}
+
 SDL_Color ensureContrast(SDL_Color foreground, SDL_Color background, float minimumContrast) {
   float best = contrast(foreground, background);
   if(best >= minimumContrast) return foreground;

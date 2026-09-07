@@ -183,8 +183,8 @@ void refreshLibraryViews(UiRuntime& ui) {
 }
 
 void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rect) {
-  ui::fill(renderer, rect, theme().sidebarBg);
-  ui::fill(renderer, {rect.x, rect.y, 1.0f, rect.h}, theme().hairline);
+  ui::fill(renderer, rect, theme().surfaceBackground);
+  ui::fill(renderer, {rect.x, rect.y, 1.0f, rect.h}, theme().border);
   ui::ClipGuard clip(renderer, rect);
 
   const auto& workspace = ui.state.workspace();
@@ -196,13 +196,13 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     const Rect tab = tabRect(rect, i, tabCount);
     const bool active = workspace.rightPanelView == kViews[i];
     const bool hot = ui::contains(tab, ui.mouseX, ui.mouseY);
-    if(active) ui::fillRounded(renderer, tab, theme().selectedBg, ui::kRadiusSmall);
-    else if(hot) ui::fillRounded(renderer, tab, theme().hoverBg, ui::kRadiusSmall);
+    if(active) ui::fillRounded(renderer, tab, theme().rowHighlight, ui::kRadiusSmall);
+    else if(hot) ui::fillRounded(renderer, tab, theme().rowHighlight, ui::kRadiusSmall);
     const auto label = viewLabel(kViews[i]);
     const float labelX = tab.x + (tab.w - static_cast<float>(text.width(label, tabStyle))) / 2.0f;
-    text.draw(label, labelX, ui::textTop(tab, text, tabStyle), active ? theme().text : theme().dim, tabStyle);
+    text.draw(label, labelX, ui::textTop(tab, text, tabStyle), active ? theme().textPrimary : theme().textMuted, tabStyle);
   }
-  ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + kHeaderHeight - 1.0f, theme().hairline);
+  ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + kHeaderHeight - 1.0f, theme().border);
 
   const Rect list = listRect(rect);
   resetScrollOnChange(ui);
@@ -256,7 +256,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       const float x = row.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
       // A top-level heading carries the note's structure and reads as the
       // strong row; anything nested under it is support.
-      const auto colour = here ? theme().text : (entry.depth == 0 ? theme().muted : theme().dim);
+      const auto colour = here ? theme().textPrimary : (entry.depth == 0 ? theme().textSecondary : theme().textMuted);
       text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(row.x + row.w - x - ui::kSpace2), rowStyle),
                 x, ui::textTop(row, text, rowStyle), colour, rowStyle);
     }
@@ -291,7 +291,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
         const float pairHeight = static_cast<float>(text.lineHeight(rowStyle) + text.lineHeight(lineStyle));
         const float titleY = std::round(y + std::max(0.0f, (pitch - pairHeight) / 2.0f));
         text.draw(ui::ellipsizeToWidth(text, link.title, room, rowStyle),
-                  row.x + kPadX, titleY, theme().text, rowStyle);
+                  row.x + kPadX, titleY, theme().textPrimary, rowStyle);
         // The line the link was written on, which is the whole difference
         // between a list of titles and a reason to click one.
         // The line as it reads, not as it is written: the source line is what
@@ -299,7 +299,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
         // that put this row here.
         text.draw(ui::ellipsizeToWidth(text, ui::plainWikiText(link.line), room, lineStyle),
                   row.x + kPadX, titleY + static_cast<float>(text.lineHeight(rowStyle)),
-                  theme().dim, lineStyle);
+                  theme().textMuted, lineStyle);
         ui.backlinkRows.push_back({row, link.id});
       }
       y += pitch;
@@ -334,7 +334,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       const std::string label = "#" + tag;
       text.draw(ui::ellipsizeToWidth(text, label, static_cast<int>(row.w - kPadX * 2.0f), rowStyle),
                 row.x + kPadX, ui::textTop(row, text, rowStyle),
-                selected ? theme().accent : theme().dim, rowStyle);
+                selected ? theme().accent : theme().textMuted, rowStyle);
       ui.tagRows.push_back({row, tag});
     }
     y += pitch;

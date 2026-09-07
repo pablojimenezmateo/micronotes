@@ -108,10 +108,10 @@ void drawTable(SDL_Renderer* renderer, TextRenderer& text, std::vector<LinkRegio
     for(int i = 0; i < cols; ++i) {
       const markdown::TableCell* cell = i < static_cast<int>(row.cells.size()) ? &row.cells[static_cast<std::size_t>(i)] : nullptr;
       Rect cellRect {x, y, cellW, rowH};
-      fill(renderer, cellRect, row.header ? theme().tableHeaderBg : theme().tableCellBg);
-      stroke(renderer, cellRect, theme().divider);
+      fill(renderer, cellRect, row.header ? theme().tableHeaderBackground : theme().editorBackground);
+      stroke(renderer, cellRect, theme().border);
       if(cell) {
-        auto runs = inlineRuns(cell->inlines, row.header ? theme().text : theme().muted);
+        auto runs = inlineRuns(cell->inlines, row.header ? theme().textPrimary : theme().textSecondary);
         const auto cellText = inlinePlainText(cell->inlines);
         float textX = x + 7.0f;
         if(cell->align == markdown::Align::Right) {
@@ -266,7 +266,7 @@ float measureComplexBlock(TextRenderer& text, UiRuntime& ui, const doc::SourceBl
     } else if(item.type == markdown::BlockType::BlankLine) {
       height += static_cast<float>(text.lineHeight());
     } else {
-      const auto runs = inlineRuns(item, theme().text);
+      const auto runs = inlineRuns(item, theme().textPrimary);
       const auto style = blockTextStyle(item);
       const float indent = footnoteLabelWidth(text, item);
       height += static_cast<float>(measureInlineLines(text, runs, static_cast<int>(width - indent), style.size) * blockLineStep(text, item)) + 6.0f;
@@ -284,7 +284,7 @@ void drawComplexBlock(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
     const int step = lineStepFor(text, mono, 1.5f);
     float y = rect.y + 10.0f;
     for(const auto& line : complexSourceLines(ui, block)) {
-      text.draw(ellipsizeToWidth(text, line, static_cast<int>(rect.w), mono), rect.x, y, theme().muted, mono);
+      text.draw(ellipsizeToWidth(text, line, static_cast<int>(rect.w), mono), rect.x, y, theme().textSecondary, mono);
       y += static_cast<float>(step);
     }
     return;
@@ -298,7 +298,7 @@ void drawComplexBlock(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
     } else if(item.type == markdown::BlockType::BlankLine) {
       y += static_cast<float>(text.lineHeight());
     } else {
-      const auto runs = inlineRuns(item, theme().text);
+      const auto runs = inlineRuns(item, theme().textPrimary);
       const auto style = blockTextStyle(item);
       const int step = blockLineStep(text, item);
       // A footnote definition wears its own label in the gutter, so a reader

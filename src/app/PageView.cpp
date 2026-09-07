@@ -82,23 +82,23 @@ namespace {
 // glyph in the gutter would read as a rendering bug.
 SDL_Color colorFor(doc::TextRole role) {
   switch(role) {
-    case doc::TextRole::Marker: return theme().dim;
+    case doc::TextRole::Marker: return theme().textMuted;
     case doc::TextRole::Link:
     case doc::TextRole::WikiLink: return theme().accent;
     case doc::TextRole::WikiLinkUnresolved: return theme().linkPending;
-    case doc::TextRole::ImageAlt: return theme().muted;
-    case doc::TextRole::Muted: return theme().muted;
-    case doc::TextRole::Code: return theme().text;
+    case doc::TextRole::ImageAlt: return theme().textSecondary;
+    case doc::TextRole::Muted: return theme().textSecondary;
+    case doc::TextRole::Code: return theme().textPrimary;
     case doc::TextRole::Body: break;
   }
-  return theme().text;
+  return theme().textPrimary;
 }
 
 // A quote reads as someone else's words, so its body sits a step back from the
 // page's own text. Markers and links keep their own roles.
 SDL_Color colorFor(doc::TextRole role, doc::BlockKind kind) {
   const bool quoted = kind == doc::BlockKind::Quote || kind == doc::BlockKind::Callout;
-  if(quoted && role == doc::TextRole::Body) return theme().muted;
+  if(quoted && role == doc::TextRole::Body) return theme().textSecondary;
   return colorFor(role);
 }
 
@@ -472,12 +472,12 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   gutter_.clear();
   foldHits_.clear();
   codeButtons_.clear();
-  fill(renderer, rect_, theme().editorBg);
+  fill(renderer, rect_, theme().editorBackground);
   // Flat, with no outline. The page used to be drawn as a bordered card that
   // turned accent-coloured when focused, which made the entire writing surface
   // read as a selected text field -- and the border was doing all the work,
   // because pageSurface and the pane behind it are the same colour.
-  ui::fill(renderer, page_, theme().pageSurface);
+  ui::fill(renderer, page_, theme().editorBackground);
 
   const float ox = originX();
   const float oy = originY();
@@ -497,7 +497,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     if(last < first) std::swap(first, last);
     for(std::size_t i = first; i <= last && i < blocks.size(); ++i) {
       const Rect band = blockRect(i);
-      fill(renderer, {band.x - 6.0f, band.y, band.w + 12.0f, std::max(2.0f, band.h)}, theme().selectionBg);
+      fill(renderer, {band.x - 6.0f, band.y, band.w + 12.0f, std::max(2.0f, band.h)}, theme().selectionFill);
     }
   } else if(selection.start != selection.end) {
     // Banded to the viewport, in document space. A selection reaching the whole
@@ -507,7 +507,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     document_.selectionRectsInto(selection.start, selection.end, bandTop, bandTop + page_.h,
                                  &selectionRects_);
     for(const auto& rect : selectionRects_) {
-      fill(renderer, toRect(rect, ox, oy), theme().selectionBg);
+      fill(renderer, toRect(rect, ox, oy), theme().selectionFill);
     }
   }
   const auto& blocks = document_.blocks();
@@ -546,12 +546,12 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
       if(block.kind == doc::BlockKind::Bullet) {
         ui::TextStyle style;
         style.size = ui::type().body;
-        text.draw("•", left + 6.0f, markerY, theme().muted, style);
+        text.draw("•", left + 6.0f, markerY, theme().textSecondary, style);
       } else if(block.kind == doc::BlockKind::Ordered) {
         ui::TextStyle style;
         style.size = ui::type().body;
         const auto label = std::to_string(block.ordinal > 0 ? block.ordinal : 1) + ".";
-        text.draw(label, left + 2.0f, markerY, theme().muted, style);
+        text.draw(label, left + 2.0f, markerY, theme().textSecondary, style);
       } else if(block.kind == doc::BlockKind::Todo) {
         Rect box {left + 3.0f, markerY + 4.0f, 14.0f, 14.0f};
         // A generous hit area: the drawn box is deliberately small.
@@ -569,7 +569,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         } else {
           // The box lights up under the pointer, because a control that never
           // reacts is one people do not learn is clickable.
-          ui::strokeRounded(renderer, box, hot ? theme().accent : theme().dim, ui::kRadiusSmall);
+          ui::strokeRounded(renderer, box, hot ? theme().accent : theme().textMuted, ui::kRadiusSmall);
         }
       }
     }
@@ -598,14 +598,14 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         const ui::TextStyle style = toTextStyle(run.style);
         const float x = ox + run.rect.x;
         if(run.role == doc::TextRole::Code && !run.isMarker) {
-          fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f}, theme().codeBg);
+          fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f}, theme().codeBackground);
         }
         SDL_Color ink = colorFor(run.role, block.kind);
         // A ticked task is done being read. The layout already struck it
         // through; muting the ink is the other half of saying so.
         if(block.kind == doc::BlockKind::Todo && block.checked && !layout.revealed &&
            run.role == doc::TextRole::Body) {
-          ink = theme().dim;
+          ink = theme().textMuted;
         }
         // A callout's head line is its name, so it is drawn in the kind's own
         // colour rather than in the muted ink the rest of a quote takes.
@@ -620,7 +620,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
           // No rule under an image's caption: the picture below it is the
           // affordance, and an underline there reads as a stray link.
           if(run.role != doc::TextRole::ImageAlt) {
-            hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accentDim);
+            hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accent);
           }
           const bool wiki = run.role == doc::TextRole::WikiLink ||
                             run.role == doc::TextRole::WikiLinkUnresolved;
@@ -720,8 +720,8 @@ void PageView::drawFindHighlights(SDL_Renderer* renderer, std::string_view findQ
                                  &selectionRects_);
     for(const auto& rect : selectionRects_) {
       const Rect hit = toRect(rect, ox, oy);
-      fill(renderer, hit, theme().findBg);
-      stroke(renderer, hit, theme().findBorder);
+      fill(renderer, hit, theme().searchMatch);
+      stroke(renderer, hit, theme().searchMatchActive);
     }
   }
 }
@@ -745,7 +745,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     if(block.kind == doc::BlockKind::Code) {
       if(layout.complex || top + layout.height < viewTop || top > viewBottom) continue;
       const Rect codeRect {left, top + 2.0f, columnWidth_ - layout.indent, std::max(8.0f, layout.height - 8.0f)};
-      fillRounded(renderer, codeRect, theme().codeBg, ui::kRadiusSmall);
+      fillRounded(renderer, codeRect, theme().codeBackground, ui::kRadiusSmall);
       continue;
     }
 
@@ -753,7 +753,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
       if(top + layout.height < viewTop || top > viewBottom) continue;
       // One rule, centred in the air the layout reserves for it.
       const float middle = std::round(top + layout.height / 2.0f);
-      hLine(renderer, left, ox + columnWidth_, middle, theme().divider);
+      hLine(renderer, left, ox + columnWidth_, middle, theme().border);
       continue;
     }
 
@@ -767,7 +767,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
     const float height = std::max(8.0f, bottom - top - 2.0f);
 
     if(block.kind == doc::BlockKind::Quote) {
-      fill(renderer, {left, top + 2.0f, 3.0f, height}, theme().divider);
+      fill(renderer, {left, top + 2.0f, 3.0f, height}, theme().border);
       continue;
     }
 
@@ -835,15 +835,15 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
       codeButtons_.push_back({button, block.start});
       const bool hot = ui::contains(button, pointerX_, pointerY_);
       // Drawn over the code, so it needs its own ground to stay readable.
-      ui::drawRoundedSurface(renderer, button, hot ? theme().surfaceElevated : theme().surface,
-                             hot ? theme().hairline : theme().surface, ui::kRadiusSmall);
-      text.draw(copy, button.x + 7.0f, button.y + 3.0f, hot ? theme().text : theme().muted, label);
+      ui::drawRoundedSurface(renderer, button, hot ? theme().overlayBackground : theme().surfaceRaised,
+                             hot ? theme().border : theme().surfaceRaised, ui::kRadiusSmall);
+      text.draw(copy, button.x + 7.0f, button.y + 3.0f, hot ? theme().textPrimary : theme().textSecondary, label);
     }
 
     if(!block.hasInfo()) continue;
     const std::string_view info = block.info(document_.source());
     text.draw(info, button.x - static_cast<float>(text.width(info, label)) - 10.0f, y + 3.0f,
-              theme().dim, label);
+              theme().textMuted, label);
   }
 }
 
@@ -876,8 +876,8 @@ void PageView::drawFoldControls(SDL_Renderer* renderer) {
     if(box.y + box.h < page_.y || box.y > page_.y + page_.h) continue;
     foldHits_.push_back({box, i, blocks[i].start, folded});
     const bool hot = ui::contains(box, pointerX_, pointerY_);
-    if(hot) ui::drawSurface(renderer, box, theme().surface, theme().hairline);
-    drawDisclosure(renderer, box, !folded, hot ? theme().text : (folded ? theme().muted : theme().dim));
+    if(hot) ui::drawSurface(renderer, box, theme().surfaceRaised, theme().border);
+    drawDisclosure(renderer, box, !folded, hot ? theme().textPrimary : (folded ? theme().textSecondary : theme().textMuted));
   }
 }
 
@@ -904,12 +904,12 @@ void PageView::drawGutter(SDL_Renderer* renderer, TextRenderer& text) {
 
   const bool overInsert = ui::contains(insertRect, pointerX_, pointerY_);
   const bool overHandle = ui::contains(handleRect, pointerX_, pointerY_);
-  if(overInsert) ui::drawSurface(renderer, insertRect, theme().surface, theme().hairline);
-  if(overHandle) ui::drawSurface(renderer, handleRect, theme().surface, theme().hairline);
+  if(overInsert) ui::drawSurface(renderer, insertRect, theme().surfaceRaised, theme().border);
+  if(overHandle) ui::drawSurface(renderer, handleRect, theme().surfaceRaised, theme().border);
 
   // Drawn, not typeset: the vendored UI face has no glyph for either mark, and
   // a missing glyph in the gutter would read as a rendering bug.
-  const SDL_Color ink = overInsert || overHandle ? theme().text : theme().dim;
+  const SDL_Color ink = overInsert || overHandle ? theme().textPrimary : theme().textMuted;
   SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a);
   const float cx = insertRect.x + insertRect.w / 2.0f;
   const float cy = insertRect.y + insertRect.h / 2.0f;
@@ -976,17 +976,17 @@ void PageView::drawToolbar(SDL_Renderer* renderer, TextRenderer& text, const Pag
   }
   if(y + height > page_.y + page_.h - 4.0f) return;
 
-  ui::drawSurface(renderer, {x, y, width, height}, theme().surfaceElevated, theme().hairline);
+  ui::drawSurface(renderer, {x, y, width, height}, theme().overlayBackground, theme().border);
   float cursorX = x + 3.0f;
   for(std::size_t i = 0; i < kButtons; ++i) {
     const Rect button {cursorX, y + 3.0f, widths[i], height - 6.0f};
-    if(ui::contains(button, pointerX_, pointerY_)) fill(renderer, button, theme().hoverBg);
+    if(ui::contains(button, pointerX_, pointerY_)) fill(renderer, button, theme().rowHighlight);
     ui::TextStyle label = style;
     label.strong = std::string_view(entries[i].id) == "bold";
     label.italic = std::string_view(entries[i].id) == "italic";
     if(std::string_view(entries[i].id) == "code") label.family = ui::FontFamily::Mono;
     const float labelX = button.x + (button.w - static_cast<float>(text.width(entries[i].label, label))) / 2.0f;
-    text.draw(entries[i].label, labelX, y + 7.0f, theme().text, label);
+    text.draw(entries[i].label, labelX, y + 7.0f, theme().textPrimary, label);
     toolbar_.push_back({button, entries[i].id, entries[i].label});
     cursorX += widths[i];
   }

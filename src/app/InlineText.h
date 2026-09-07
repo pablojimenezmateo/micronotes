@@ -28,7 +28,7 @@ namespace micronotes::app {
 struct InlineRun {
   std::string text;
   std::string target;
-  SDL_Color color = ui::theme().text;
+  SDL_Color color = ui::theme().textPrimary;
   bool mono = false;
   bool strong = false;
   bool emphasis = false;
@@ -54,9 +54,9 @@ using WikiResolver = std::function<bool(std::string_view)>;
 // this the pane that exists for *reading* a note showed the raw markup of every
 // link between notes and offered nothing to click.
 std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines,
-                                  SDL_Color baseColor = ui::theme().text,
+                                  SDL_Color baseColor = ui::theme().textPrimary,
                                   const WikiResolver& wikiResolves = {});
-std::vector<InlineRun> inlineRuns(const markdown::Block& block, SDL_Color baseColor = ui::theme().text,
+std::vector<InlineRun> inlineRuns(const markdown::Block& block, SDL_Color baseColor = ui::theme().textPrimary,
                                   const WikiResolver& wikiResolves = {});
 
 // How many wrapped lines these runs need at this width. The measure and the

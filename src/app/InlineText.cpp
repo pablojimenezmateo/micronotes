@@ -176,7 +176,7 @@ std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines, 
         // the colour a destructive action and an unsaved buffer are drawn in,
         // so the same `code` span read as ordinary text while being edited and
         // as a warning while being read.
-        run.color = theme().text;
+        run.color = theme().textPrimary;
         break;
       case markdown::InlineType::Emphasis:
         run.emphasis = true;
@@ -196,7 +196,7 @@ std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines, 
         run.color = theme().accent;
         break;
       case markdown::InlineType::Html:
-        run.color = theme().dim;
+        run.color = theme().textMuted;
         break;
       case markdown::InlineType::Text:
         splittable = true;
@@ -279,7 +279,7 @@ float drawInlineRuns(SDL_Renderer* renderer, TextRenderer& text, std::vector<Lin
     // one did not: `code` was distinguished only by being mono and orange.
     if(run.code) {
       fill(renderer, {cursorX - 2.0f, cursorY + 1.0f, static_cast<float>(wordW) + 4.0f,
-                      static_cast<float>(lineH) - 2.0f}, theme().codeBg);
+                      static_cast<float>(lineH) - 2.0f}, theme().codeBackground);
     }
     text.draw(word.text, cursorX, cursorY, run.color, style);
     if(run.strikethrough) {
@@ -289,7 +289,7 @@ float drawInlineRuns(SDL_Renderer* renderer, TextRenderer& text, std::vector<Lin
     if(!run.target.empty()) {
       const bool continues = previousRun == &run && std::abs(previousY - cursorY) < 0.5f;
       const float underlineFrom = continues ? previousEndX : cursorX;
-      hLine(renderer, underlineFrom, cursorX + static_cast<float>(wordW), cursorY + static_cast<float>(lineH - 2), theme().accentDim);
+      hLine(renderer, underlineFrom, cursorX + static_cast<float>(wordW), cursorY + static_cast<float>(lineH - 2), theme().accent);
       if(links) {
         links->push_back({{underlineFrom, cursorY, cursorX + static_cast<float>(wordW) - underlineFrom,
                            static_cast<float>(lineH)}, run.target, run.wiki});

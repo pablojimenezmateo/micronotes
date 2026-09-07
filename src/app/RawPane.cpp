@@ -62,8 +62,8 @@ void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRunt
     const float x = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
     const float w = static_cast<float>(std::max(6, text.width(needle, false, true)));
     if(x < writing.x + writing.w - 8) {
-      fill(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().findBg);
-      stroke(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().findBorder);
+      fill(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().searchMatch);
+      stroke(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().searchMatchActive);
     }
     pos = line.find(needle, pos + std::max<std::size_t>(1, needle.size()));
   }
@@ -86,9 +86,9 @@ void placeEditorCursor(TextRenderer& text, UiRuntime& ui, Rect rect, float x, fl
 
 
 void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  fill(renderer, rect, theme().editorBg);
+  fill(renderer, rect, theme().editorBackground);
   const Rect writing = editorWritingRect(rect);
-  drawSurface(renderer, writing, theme().pageSurface, ui.focus == FocusArea::Editor ? theme().accentDim : theme().hairline);
+  drawSurface(renderer, writing, theme().editorBackground, ui.focus == FocusArea::Editor ? theme().accent : theme().border);
   const int lineHeight = text.lineHeight();
   const auto& rows = editorRows(text, ui, rect);
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
@@ -114,11 +114,11 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
           const auto selected = std::string_view(line.data() + (selStart - row.start), selEnd - selStart);
           const float sx = writing.x + 12 + static_cast<float>(text.width(before, false, true));
           const float sw = static_cast<float>(text.width(selected, false, true));
-          fill(renderer, {sx, y - 2, std::min(sw, writing.x + writing.w - 8 - sx), static_cast<float>(lineHeight)}, theme().selectionBg);
+          fill(renderer, {sx, y - 2, std::min(sw, writing.x + writing.w - 8 - sx), static_cast<float>(lineHeight)}, theme().selectionFill);
         }
       }
       drawFindHighlights(renderer, text, ui, line, writing, y);
-      text.draw(line.empty() ? " " : line, writing.x + 12, y, theme().text, false, true);
+      text.draw(line.empty() ? " " : line, writing.x + 12, y, theme().textPrimary, false, true);
       y += lineHeight;
     }
     if(ui.focus == FocusArea::Editor && cursorRow >= ui.editorScroll && cursorRow < ui.editorScroll + maxLines) {
@@ -132,7 +132,7 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
       const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.editorScroll) * lineHeight);
       fill(renderer, {std::min(cursorX, writing.x + writing.w - 8), cursorY, 2, static_cast<float>(lineHeight - 2)}, theme().accent);
     }
-    if(ui.editor.text().empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, theme().muted);
+    if(ui.editor.text().empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, theme().textSecondary);
   }
   drawVerticalScrollbar(renderer, writing, ui.editorScroll, maxScroll);
 }

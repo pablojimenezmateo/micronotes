@@ -124,7 +124,7 @@ std::string controlTooltip(const ui::ActionSpec& spec) {
 void drawRibbon(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rect) {
   (void)text;
   if(rect.w <= 0.0f || rect.h <= 0.0f) return;
-  fill(renderer, rect, theme().sidebarBg);
+  fill(renderer, rect, theme().surfaceBackground);
   ui::ClipGuard clip(renderer, rect);
 
   for(const auto& placed : ribbonLayout(rect)) {
@@ -133,10 +133,10 @@ void drawRibbon(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, R
     const Rect box = placed.rect;
     const bool on = controlIsOn(ui, placed.control.action);
     const bool hot = ui.hovered(box);
-    if(hot) fillRounded(renderer, box, theme().hoverBg, ui::kRadiusSmall);
+    if(hot) fillRounded(renderer, box, theme().rowHighlight, ui::kRadiusSmall);
     // A toggle that is on stays lit with the pointer away from it; everything
     // else in the rail goes back to the muted ink once the pointer leaves.
-    const SDL_Color ink = hot ? theme().text : (on ? theme().accent : theme().muted);
+    const SDL_Color ink = hot ? theme().textPrimary : (on ? theme().accent : theme().textSecondary);
     const Rect mark {std::round(box.x + (box.w - ui::kRibbonIconSize) / 2.0f),
                      std::round(box.y + (box.h - ui::kRibbonIconSize) / 2.0f),
                      ui::kRibbonIconSize, ui::kRibbonIconSize};

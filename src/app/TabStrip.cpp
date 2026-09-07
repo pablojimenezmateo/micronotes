@@ -63,7 +63,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   // page's ground pushed up into it. That contrast is what makes the tab read
   // as continuous with the note under it, and it is why the strip no longer
   // needs a rule between one tab and the next.
-  ui::fill(renderer, rect, theme().sidebarBg);
+  ui::fill(renderer, rect, theme().surfaceBackground);
   ui::ClipGuard clip(renderer, rect);
   const auto& workspace = ui.state.workspace();
   const auto titles = tabTitles(ui);
@@ -85,18 +85,18 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
       // without a seam: the radius is drawn into a rect a corner taller than
       // the strip, and the strip's own clip takes the bottom corners off.
       ui::fillRounded(renderer, {slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h + ui::kRadiusMedium},
-                      theme().editorBg, ui::kRadiusMedium);
+                      theme().editorBackground, ui::kRadiusMedium);
     } else if(hot) {
       ui::fillRounded(renderer, {slot.rect.x + 2.0f, slot.rect.y + ui::kSpace1 - 1.0f,
                                  slot.rect.w - 4.0f, slot.rect.h - ui::kSpace1 + 1.0f},
-                      theme().hoverBg, ui::kRadiusSmall);
+                      theme().rowHighlight, ui::kRadiusSmall);
     }
 
     const float textLeft = slot.rect.x + ui::kTabClosePadding + ui::kSpace1;
     const int room = static_cast<int>(slot.close.x - textLeft - ui::kSpace1);
     const auto shown = ui::ellipsizeToWidth(text, titles[slot.index], room, style);
     text.draw(shown, textLeft, ui::textTop(slot.rect, text, style),
-              active ? theme().text : theme().muted, style);
+              active ? theme().textPrimary : theme().textSecondary, style);
     // A tab only says what it is when the title did not fit. Repeating a title
     // that is already legible is noise.
     if(shown != titles[slot.index]) ui.offerTooltip(slot.rect, titles[slot.index]);
@@ -104,7 +104,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     // you are reading; a strip of crosses is a strip that reads as a warning.
     if(active || hot) {
       const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.mouseX, ui.mouseY);
-      drawCross(renderer, slot.close, overClose ? theme().text : theme().dim);
+      drawCross(renderer, slot.close, overClose ? theme().textPrimary : theme().textMuted);
       // Offered after the tab's own, so the innermost control wins.
       ui.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
     }

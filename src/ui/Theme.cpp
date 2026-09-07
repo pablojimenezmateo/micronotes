@@ -17,63 +17,51 @@ constexpr SDL_Color rgb(unsigned value, Uint8 alpha = 255) {
   };
 }
 
+// The palette proper: the colours somebody chose, before anything derived from
+// them or corrected against them.
+//
+// Blue-slate rather than the neutral greys and purple accent this replaces, and
+// the values are the sibling microide tree's verbatim, because the point of the
+// exercise was that the two applications should look like the same family.
+// `codeBackground`, `tableHeaderBackground` and `linkPending` are the three
+// roles microide has no counterpart for, and they are derived below rather than
+// picked, so a change to the grounds carries them along.
 Theme makeDark() {
   Theme t;
   t.mode = ThemeMode::Dark;
 
-  t.text = rgb(0xDADADA);
-  t.muted = rgb(0x989898);
-  t.dim = rgb(0x707070);
-  t.onAccent = rgb(0xFFFFFF);
+  t.windowBackground = rgb(0x080B11);
+  t.chromeBackground = rgb(0x151922);
+  t.chromeActive = rgb(0x1D2431);
+  t.chromeText = rgb(0xD7DEEA);
+  t.chromeActiveText = rgb(0xF8FBFF);
+  t.chromeTextSecondary = rgb(0xA8B4C5);
 
-  // hsl(254, 80%, 68%). Obsidian's accent is one hue with the lightness moved
-  // per role rather than five unrelated purples, so the dim and soft variants
-  // below are that same hue darkened, not separate picks.
-  t.accent = rgb(0x8B6CEF);
-  // A link to a note that is not there yet stays in the accent's family and
-  // steps back from it, so "not written yet" reads as quieter rather than as a
-  // different kind of link.
-  t.linkPending = rgb(0x6F5CB0);
-  t.accentDim = rgb(0x4A3D7A);
-  t.accentSoft = rgb(0x272141);
-  t.warn = rgb(0xFB464C);
+  t.surfaceBackground = rgb(0x121722);
+  t.surfaceRaised = rgb(0x1A2130);
+  t.surfaceText = rgb(0xD7DEEA);
+  t.overlayBackground = rgb(0x1A2130, 0xF6);
+  t.overlayBackdrop = rgb(0x05070C, 0xAA);
 
-  // The page is the lightest thing on screen and the chrome steps away from it.
-  // This is the reverse of the palette this replaced, where the sidebar was
-  // lighter than the page it framed.
-  t.appBg = rgb(0x1E1E1E);
-  t.sidebarBg = rgb(0x161616);
-  t.notesBg = rgb(0x1A1A1A);
-  t.editorBg = rgb(0x1E1E1E);
-  t.viewerBg = rgb(0x1E1E1E);
-  t.statusBg = rgb(0x161616);
-  t.pageSurface = rgb(0x1E1E1E);
-  t.surface = rgb(0x262626);
-  t.surfaceElevated = rgb(0x2A2A2A);
-  // No sheen. A lit top edge is what makes a panel read as raised out of the
-  // page; these panels are meant to read as cut into it.
-  t.surfaceSheen = rgb(0xFFFFFF, 0);
-  t.inputBg = rgb(0x1E1E1E);
-  t.codeBg = rgb(0x171717);
-  t.calloutBg = rgb(0x232132);
-  t.chipBg = rgb(0x2A2A2A);
-  t.tableHeaderBg = rgb(0x242424);
-  t.tableCellBg = rgb(0x1E1E1E);
+  t.editorBackground = rgb(0x0F131B);
+  t.gutterBackground = rgb(0x0C1017);
 
-  t.divider = rgb(0x363636);
-  t.hairline = rgb(0x2A2A2A);
+  t.textPrimary = rgb(0xD7DEEA);
+  t.textSecondary = rgb(0xAEB9C8);
+  t.textMuted = rgb(0x8B98AB);
+  t.textDisabled = rgb(0x657386);
+  t.onAccent = rgb(0x080B11);
 
-  t.hoverBg = rgb(0x262626);
-  t.selectedBg = rgb(0x2F2F2F);
-  // Selected text is the accent laid over the page rather than a blue of its
-  // own, so a palette change carries the selection with it.
-  t.selectionBg = rgb(0x483A7C, 200);
-  t.findBg = rgb(0x5B4D23, 230);
-  t.findBorder = rgb(0xAA8E38, 220);
+  t.accent = rgb(0x729ED8);
+  t.warn = rgb(0xCD7A82);
+  t.cursor = rgb(0xF8FBFF);
 
-  t.scrollTrack = rgb(0x1E1E1E, 0);
-  t.scrollThumb = rgb(0x3A3A3A);
-  t.scrollThumbBorder = rgb(0x4A4A4A, 160);
+  t.border = rgb(0x2A3548);
+
+  t.rowHighlight = rgb(0x171F2B);
+  t.selectionFill = rgb(0x294F73, 0xA8);
+  t.searchMatch = rgb(0x3A435D, 0x68);
+  t.searchMatchActive = rgb(0x556891, 0x92);
   return t;
 }
 
@@ -81,91 +69,142 @@ Theme makeLight() {
   Theme t;
   t.mode = ThemeMode::Light;
 
-  t.text = rgb(0x222222);
-  t.muted = rgb(0x5C5C5C);
-  t.dim = rgb(0x8A8A8A);
+  t.windowBackground = rgb(0xE7EAF0);
+  t.chromeBackground = rgb(0xDCE1E9);
+  t.chromeActive = rgb(0xCCD4E0);
+  t.chromeText = rgb(0x232934);
+  t.chromeActiveText = rgb(0x0F141C);
+  t.chromeTextSecondary = rgb(0x525C6B);
+
+  t.surfaceBackground = rgb(0xF3F5F9);
+  t.surfaceRaised = rgb(0xFFFFFF);
+  t.surfaceText = rgb(0x232934);
+  t.overlayBackground = rgb(0xFFFFFF, 0xF8);
+  t.overlayBackdrop = rgb(0x374050, 0x44);
+
+  t.editorBackground = rgb(0xFBFCFE);
+  t.gutterBackground = rgb(0xEFF2F6);
+
+  t.textPrimary = rgb(0x232934);
+  t.textSecondary = rgb(0x495362);
+  t.textMuted = rgb(0x6B7687);
+  t.textDisabled = rgb(0x99A3B1);
   t.onAccent = rgb(0xFFFFFF);
 
-  // The same hue as dark mode, darkened until it carries text on white. The
-  // corrector below would have done it, but a palette that needs correcting to
-  // be legible is one nobody has actually looked at.
-  t.accent = rgb(0x6C4FD6);
-  t.linkPending = rgb(0x8F7CC4);
-  t.accentDim = rgb(0xC0B0F0);
-  t.accentSoft = rgb(0xEFEBFC);
-  t.warn = rgb(0xE93147);
+  t.accent = rgb(0x2F6FD6);
+  t.warn = rgb(0xC3414B);
+  t.cursor = rgb(0x11161D);
 
-  t.appBg = rgb(0xFFFFFF);
-  t.sidebarBg = rgb(0xF6F6F6);
-  t.notesBg = rgb(0xFAFAFA);
-  t.editorBg = rgb(0xFFFFFF);
-  t.viewerBg = rgb(0xFFFFFF);
-  t.statusBg = rgb(0xF6F6F6);
-  t.pageSurface = rgb(0xFFFFFF);
-  t.surface = rgb(0xFFFFFF);
-  t.surfaceElevated = rgb(0xFFFFFF);
-  t.surfaceSheen = rgb(0xFFFFFF, 0);
-  t.inputBg = rgb(0xFFFFFF);
-  t.codeBg = rgb(0xF2F2F2);
-  t.calloutBg = rgb(0xF0EDFB);
-  t.chipBg = rgb(0xEDEDED);
-  t.tableHeaderBg = rgb(0xF6F6F6);
-  t.tableCellBg = rgb(0xFFFFFF);
+  t.border = rgb(0xC3CBD7);
 
-  t.divider = rgb(0xD4D4D4);
-  t.hairline = rgb(0xE3E3E3);
+  t.rowHighlight = rgb(0xE5EBF6);
+  t.selectionFill = rgb(0x4A90E2, 0x55);
+  t.searchMatch = rgb(0xF2D96B, 0x82);
+  t.searchMatchActive = rgb(0xEFBE48, 0xB2);
+  return t;
+}
 
-  t.hoverBg = rgb(0xEBEBEB);
-  t.selectedBg = rgb(0xE4E4E4);
-  t.selectionBg = rgb(0xCFC2F5, 210);
-  t.findBg = rgb(0xFDECC8, 240);
-  t.findBorder = rgb(0xE0B65B, 220);
+// The roles nothing picks: each is a fixed step off a ground that was picked,
+// so moving a ground moves them with it.
+Theme derive(Theme t) {
+  const bool light = t.mode == ThemeMode::Light;
 
-  t.scrollTrack = rgb(0xFFFFFF, 0);
-  t.scrollThumb = rgb(0xC9C9C9);
-  t.scrollThumbBorder = rgb(0xB4B4B4, 160);
+  // Code sits one step *back* from the page in either palette -- darker on a
+  // dark one, and on a light one the page is already near white, so back means
+  // grey. The gutter is the same step, which is why code borrows it.
+  t.codeBackground = t.gutterBackground;
+  t.tableHeaderBackground = light ? darken(t.editorBackground, 0.05f)
+                                  : lighten(t.editorBackground, 0.05f);
+  // A link to a note that is not written yet: the accent, stepped back toward
+  // the page it is drawn on, so "not there yet" reads as quieter rather than as
+  // a second kind of link.
+  t.linkPending = blend(t.accent, t.editorBackground, 0.45f);
+  // Opaque, for the panels a translucent fill cannot be laid over: the sidebar
+  // draws a selected snippet's match on top of a row fill that is itself on top
+  // of the panel, and stacking two alphas there produced a third colour.
+  t.selectionStrong = compositeOver(t.selectionFill, t.surfaceBackground);
   return t;
 }
 
 // The palette as written, corrected so that nothing a reader has to make out
-// falls below the ratio it is held to.
+// falls below the ratio it is held to, and no two grounds meant to read as
+// separate end up the same.
 //
 // Correcting here rather than editing hex values by hand is the point: the
 // author picks the colour they mean, and the one pairing they did not think to
 // check cannot ship illegible. It also means a palette that arrives from
 // somewhere else -- a theme file -- gets the same guarantee as the built-ins.
-//
-// Only the text roles are moved. Surfaces, borders and fills are left exactly
-// as chosen, because nudging a background to satisfy one pairing changes every
-// other pairing that shares it.
-Theme correctContrast(Theme t) {
-  // Each text role against the darkest surface it is drawn on: fixing it there
-  // fixes it everywhere, since every other surface has more contrast to give.
-  const SDL_Color panels[] = {t.sidebarBg, t.notesBg, t.statusBg, t.pageSurface, t.editorBg};
+Theme correct(Theme t) {
+  // Every text role against the darkest ground it is drawn on: fixing it there
+  // fixes it everywhere, since every other ground has more contrast to give.
+  const SDL_Color grounds[] = {
+    t.windowBackground, t.chromeBackground, t.chromeActive, t.surfaceBackground,
+    t.surfaceRaised, t.editorBackground, t.gutterBackground, t.codeBackground,
+    t.rowHighlight,
+  };
   const auto worst = [&](SDL_Color foreground, float minimum) {
     SDL_Color result = foreground;
-    for(const SDL_Color panel : panels) result = ensureContrast(result, panel, minimum);
+    for(const SDL_Color ground : grounds) result = ensureContrast(result, ground, minimum);
     return result;
   };
-  t.text = worst(t.text, kTextContrast);
-  t.muted = worst(t.muted, kTextContrast);
-  // Section labels, counts and markers are incidental: holding them to the body
-  // ratio would flatten the whole hierarchy into one weight.
-  t.dim = worst(t.dim, kIncidentalContrast);
+
+  // The grounds first, because the text is corrected against them. A flat
+  // interface has no shadow and no radius to say where one surface stops, so
+  // two surfaces a fraction of a step apart are one surface.
+  //
+  // Only the *derived* separations are enforced: the chrome against the page it
+  // frames, the active tab against the strip it sits in, and a raised control
+  // against the panel under it. Nudging a picked ground would change every
+  // other pairing that shares it.
+  t.chromeBackground = ensureBackgroundSeparation(t.chromeBackground, t.editorBackground,
+                                                  kSurfaceSeparation);
+  t.chromeActive = ensureBackgroundSeparation(t.chromeActive, t.chromeBackground,
+                                              kSurfaceSeparation);
+  t.surfaceRaised = ensureBackgroundSeparation(t.surfaceRaised, t.surfaceBackground,
+                                               kSurfaceSeparation);
+  t.rowHighlight = ensureBackgroundSeparation(t.rowHighlight, t.surfaceBackground,
+                                              kSurfaceSeparation);
+  // A panel that reads as a raised card in one theme and as a hole in the other
+  // is a palette nobody checked. Both are legitimate designs; mixing them is
+  // not, and the polarity is what says which was meant.
+  if(!samePolarity(t.surfaceRaised, t.surfaceBackground)) {
+    t.surfaceRaised = t.mode == ThemeMode::Light ? darken(t.surfaceBackground, 0.06f)
+                                                 : lighten(t.surfaceBackground, 0.06f);
+  }
+  // The border has to be visible against the panels it separates without
+  // reading as text. Held to the separation ratio against the lightest ground
+  // rather than to a text ratio, because a 1px rule at full contrast turns a
+  // list of rows into a list of boxes.
+  t.border = ensureContrast(t.border, t.surfaceBackground, 1.5f);
+
+  t.textPrimary = worst(t.textPrimary, kTextContrast);
+  t.textSecondary = worst(t.textSecondary, kTextContrast);
+  t.surfaceText = worst(t.surfaceText, kTextContrast);
+  t.chromeText = ensureContrast(t.chromeText, t.chromeBackground, kTextContrast);
+  t.chromeActiveText = ensureContrast(t.chromeActiveText, t.chromeActive, kTextContrast);
+  // Section labels, counts, markers and the strip's inactive glyphs are
+  // incidental: holding them to the body ratio would flatten the whole
+  // hierarchy into one weight.
+  t.textMuted = worst(t.textMuted, kIncidentalContrast);
+  t.chromeTextSecondary = ensureContrast(t.chromeTextSecondary, t.chromeBackground,
+                                         kIncidentalContrast);
+  // Not corrected: `textDisabled` is meant to be hard to read. A control that
+  // will not answer should look like one.
   t.onAccent = ensureContrast(t.onAccent, t.accent, kTextContrast);
   t.accent = worst(t.accent, kIncidentalContrast);
   t.linkPending = worst(t.linkPending, kIncidentalContrast);
   t.warn = worst(t.warn, kIncidentalContrast);
+  t.cursor = worst(t.cursor, kIncidentalContrast);
   return t;
 }
 
 const Theme& darkTheme() {
-  static const Theme value = correctContrast(makeDark());
+  static const Theme value = correct(derive(makeDark()));
   return value;
 }
 
 const Theme& lightTheme() {
-  static const Theme value = correctContrast(makeLight());
+  static const Theme value = correct(derive(makeLight()));
   return value;
 }
 
@@ -183,19 +222,21 @@ CalloutStyle calloutStyle(std::string_view rawKind) {
   std::string kind;
   for(char c : rawKind) kind.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
   // GitHub's five alert kinds, which is what `> [!NOTE]` already means
-  // everywhere else these files are read, in the hues Obsidian gives each of
-  // them: note blue, tip cyan, important purple, warning orange, caution red.
-  unsigned hue = light ? 0x086DDD : 0x027AFF;
-  if(kind == "TIP") hue = light ? 0x00BFBC : 0x53DFDD;
-  else if(kind == "IMPORTANT") hue = light ? 0x7852EE : 0xA882FF;
-  else if(kind == "WARNING") hue = light ? 0xEC7500 : 0xE9973F;
-  else if(kind == "CAUTION") hue = light ? 0xE93147 : 0xFB464C;
+  // everywhere else these files are read. The hues are pulled toward the
+  // palette's own blue-slate family rather than Obsidian's: note takes the
+  // accent itself, and the other four are the hues that stay distinguishable
+  // from it -- teal, violet, amber, red.
+  unsigned hue = light ? 0x2F6FD6 : 0x729ED8;
+  if(kind == "TIP") hue = light ? 0x1D7F95 : 0x8ED4E6;
+  else if(kind == "IMPORTANT") hue = light ? 0x7B4CC3 : 0xCBA6FF;
+  else if(kind == "WARNING") hue = light ? 0xA86911 : 0xE4B77B;
+  else if(kind == "CAUTION") hue = light ? 0xC3414B : 0xCD7A82;
 
   CalloutStyle style;
   style.accent = rgb(hue);
   // The tint is the accent laid over the page rather than a second constant,
   // so a palette change carries it along.
-  const SDL_Color page = light ? lightTheme().pageSurface : darkTheme().pageSurface;
+  const SDL_Color page = light ? lightTheme().editorBackground : darkTheme().editorBackground;
   style.surface = blend(page, style.accent, light ? 0.09f : 0.14f);
   // The kind's name is drawn in the accent on that tint, so the accent has to
   // stay legible against the surface it just tinted.

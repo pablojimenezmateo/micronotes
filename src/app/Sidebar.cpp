@@ -48,20 +48,20 @@ static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRunt
   const SearchBoxParts parts = searchBoxParts(rect, text);
   const bool focused = ui.focus == FocusArea::Search;
   const ui::TextStyle style {};
-  ui::drawRoundedSurface(renderer, search, theme().inputBg, focused ? theme().accent : theme().hairline,
+  ui::drawRoundedSurface(renderer, search, theme().surfaceBackground, focused ? theme().accent : theme().border,
                          ui::kRadiusSmall);
   ui.searchScopeToggle = parts.scope;
   ui.offerTooltip(ui.searchScopeToggle,
                   "Searching " + std::string(ui::searchScopeName(ui.searchScope)) + " - click to change");
   text.draw(kSearchLabel, parts.label.x, ui::textTop(parts.label, text, style),
-            focused ? theme().accent : theme().dim, style);
+            focused ? theme().accent : theme().textMuted, style);
   drawTextField(renderer, text, ui, ui.search, parts.field, focused, "Search all notes");
-  ui::drawRoundedSurface(renderer, parts.scope, focused ? theme().accentSoft : theme().surface,
-                         focused ? theme().accentDim : theme().hairline, ui::kRadiusSmall);
+  ui::drawRoundedSurface(renderer, parts.scope, focused ? theme().surfaceRaised : theme().surfaceRaised,
+                         focused ? theme().accent : theme().border, ui::kRadiusSmall);
   const auto scopeLabel = ui::searchScopeLabel(ui.searchScope);
   text.draw(scopeLabel,
             std::round(parts.scope.x + (parts.scope.w - static_cast<float>(text.width(scopeLabel, style))) / 2.0f),
-            ui::textTop(parts.scope, text, style), focused ? theme().accent : theme().muted, style);
+            ui::textTop(parts.scope, text, style), focused ? theme().accent : theme().textSecondary, style);
 }
 
 // The face a search snippet is set in. Read by the draw and by the trim that
@@ -151,12 +151,12 @@ void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
   const float originX = box.x - view.scrollX;
   if(focused && view.hasSelection) {
     fill(renderer, {originX + view.selectionStartX, box.y - 2.0f,
-                    view.selectionEndX - view.selectionStartX, box.h + 4.0f}, theme().selectionBg);
+                    view.selectionEndX - view.selectionStartX, box.h + 4.0f}, theme().selectionFill);
   }
   if(field.empty() && !placeholder.empty()) {
-    text.draw(placeholder, box.x, box.y, theme().dim);
+    text.draw(placeholder, box.x, box.y, theme().textMuted);
   } else {
-    text.draw(field.text(), originX, box.y, theme().text);
+    text.draw(field.text(), originX, box.y, theme().textPrimary);
   }
   if(focused) {
     const float caretX = originX + view.caretX;
@@ -177,7 +177,7 @@ std::size_t fieldOffsetAtX(const TextRenderer& text, const editor::TextField& fi
 }
 
 void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  fill(renderer, rect, theme().sidebarBg);
+  fill(renderer, rect, theme().surfaceBackground);
   ClipGuard clip(renderer, rect);
   drawSidebarSearch(renderer, text, ui, rect);
 
@@ -227,12 +227,12 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
       drawSelection(renderer, row.rect, selected, hot);
       if(!selected && !hot) {
         hLine(renderer, row.rect.x + ui::kSpace2, row.rect.x + row.rect.w - ui::kSpace2,
-              row.rect.y + row.rect.h, theme().hairline);
+              row.rect.y + row.rect.h, theme().border);
       }
       const Rect titleRow {row.rect.x, row.rect.y, row.rect.w, metrics.resultTitle};
       text.draw(ellipsizeToWidth(text, row.title, static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace2), rowStyle),
                 row.rect.x + kSidebarLabelX, ui::textTop(titleRow, text, rowStyle),
-                selected ? theme().text : theme().muted, rowStyle);
+                selected ? theme().textPrimary : theme().textSecondary, rowStyle);
       float snippetY = row.rect.y + metrics.resultTitle;
       for(const auto& line : row.matchLines) {
         // The match, marked with the same fill find-in-note uses, so a match is
@@ -245,9 +245,9 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
           const float to = static_cast<float>(text.width(shown.substr(0, line.start + line.length), snippetStyle));
           ui::fillRounded(renderer, {snippetX + from, snippetY,
                                      std::max(2.0f, to - from), metrics.snippet - 1.0f},
-                          theme().findBg, ui::kRadiusSmall / 2.0f);
+                          theme().searchMatch, ui::kRadiusSmall / 2.0f);
         }
-        text.draw(line.text, snippetX, snippetY, selected ? theme().accent : theme().dim, snippetStyle);
+        text.draw(line.text, snippetX, snippetY, selected ? theme().accent : theme().textMuted, snippetStyle);
         snippetY += metrics.snippet;
       }
       continue;
@@ -257,7 +257,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
       drawSelection(renderer, row.rect, selected, hot);
       text.draw("#" + ellipsizeToWidth(text, row.tag, static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace4), rowStyle),
                 row.rect.x + kSidebarLabelX, ui::textTop(row.rect, text, rowStyle),
-                selected ? theme().accent : theme().dim, rowStyle);
+                selected ? theme().accent : theme().textMuted, rowStyle);
       continue;
     }
 
@@ -272,7 +272,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     const bool selected = isNote && row.tree.noteId == selection.noteId;
     const bool current = !isNote && selection.tag.empty() && selection.folder == row.tree.folder;
     const bool dropTarget = ui.sidebarDropRow && *ui.sidebarDropRow == i;
-    if(current) fill(renderer, row.rect, theme().hoverBg);
+    if(current) fill(renderer, row.rect, theme().rowHighlight);
     drawSelection(renderer, row.rect, selected, hot || dropTarget);
     if(dropTarget) stroke(renderer, row.rect, theme().accent);
 
@@ -281,27 +281,27 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     for(int depth = 0; depth < row.tree.depth; ++depth) {
       const float guideX = std::round(row.rect.x + kSidebarGutterX + kSidebarGutterWidth / 2.0f
                                       + static_cast<float>(depth) * kSidebarIndent);
-      fill(renderer, {guideX, row.rect.y, ui::kTreeGuideWidth, row.rect.h}, theme().hairline);
+      fill(renderer, {guideX, row.rect.y, ui::kTreeGuideWidth, row.rect.h}, theme().border);
     }
 
     if(row.disclosure.w > 0.0f) {
       drawDisclosure(renderer, row.disclosure, row.tree.expanded,
-                     ui.hovered(row.disclosure) ? theme().text : theme().dim);
+                     ui.hovered(row.disclosure) ? theme().textPrimary : theme().textMuted);
     }
     if(isNote) {
       drawNoteIcon(renderer, text, row.tree.icon,
                    {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
                     kSidebarGutterWidth, kSidebarGutterWidth},
-                   selected ? theme().accent : theme().dim);
+                   selected ? theme().accent : theme().textMuted);
     }
     const float labelY = ui::textTop(row.rect, text, rowStyle);
     const float countW = row.tree.noteCount > 0 && !isNote ? kCountColumnWidth : ui::kSpace2;
     text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), rowStyle),
-              labelX, labelY, selected || current ? theme().text : (isNote ? theme().muted : theme().text), rowStyle);
+              labelX, labelY, selected || current ? theme().textPrimary : (isNote ? theme().textSecondary : theme().textPrimary), rowStyle);
     if(!isNote && row.tree.noteCount > 0) {
       const auto count = std::to_string(row.tree.noteCount);
       text.draw(count, row.rect.x + row.rect.w - static_cast<float>(text.width(count, rowStyle)) - ui::kSpace2,
-                labelY, current ? theme().accent : theme().dim, rowStyle);
+                labelY, current ? theme().accent : theme().textMuted, rowStyle);
     }
   }
   drawVerticalScrollbar(renderer, list, ui.sidebarScroll, ui.sidebarMaxScroll);
