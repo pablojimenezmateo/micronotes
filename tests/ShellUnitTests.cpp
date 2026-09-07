@@ -488,3 +488,65 @@ MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_splice
     MICRONOTES_REQUIRE(borrows == 0);
   }
 }
+
+// Opening a note has to move the *sidebar* to it, not just the breadcrumb.
+//
+// `selectFolder` and `tree.reveal` are one action -- make this folder the
+// context and open the tree onto it -- and they were said as two statements at
+// four call sites. The fifth, the one a click on a RECENT, FAVORITES or search
+// row goes through, said only the first half. So clicking a recent note filed
+// in a collapsed notebook left the note showing nowhere in the tree: the only
+// row for it was the flat one that had just been clicked, sitting at the top
+// level, outside the folder the breadcrumb had that instant started naming.
+//
+// `showFolder` is the pair, and this is the property it exists for.
+MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-showfolder";
+  std::filesystem::remove_all(root);
+  // A space in the name, because that is what a real notebook is called and it
+  // is the shape a path used as a map key gets wrong.
+  const std::filesystem::path folder = "General information";
+  std::filesystem::create_directories(root / folder);
+  {
+    std::ofstream note(root / folder / "Alpha.md");
+    note << "---\nid: gi-alpha\ntitle: Alpha\n---\n\nBody.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  // Collapsed to start with, which is the state the bug needed: the folder is
+  // shut, so nothing in it is on screen.
+  ui.tree.setExpanded(folder, false);
+  MICRONOTES_REQUIRE(!ui.tree.expanded(folder));
+
+  const auto* alpha = ui.state.noteById("gi-alpha");
+  MICRONOTES_REQUIRE(alpha != nullptr);
+  MICRONOTES_REQUIRE(alpha->folder == folder);
+
+  micronotes::app::showFolder(ui, alpha->folder);
+
+  // Both halves: the context moved, and the tree opened.
+  MICRONOTES_REQUIRE(ui.state.selection().folder == folder);
+  MICRONOTES_REQUIRE(ui.tree.expanded(folder));
+  MICRONOTES_REQUIRE(ui.tree.expanded({}));  // and every ancestor of it
+
+  // And the note is now a row inside that folder rather than only in a flat
+  // list above it -- which is the thing the user was looking for.
+  const auto rows = ui.tree.rows(ui.state.folders(), ui.state.allNotes(), ui.state.libraryRoot());
+  bool folderRow = false;
+  bool noteUnderIt = false;
+  for(const auto& row : rows) {
+    if(row.kind == micronotes::ui::TreeRowKind::Folder && row.folder == folder) {
+      folderRow = true;
+      continue;
+    }
+    if(folderRow && row.kind == micronotes::ui::TreeRowKind::Note && row.noteId == "gi-alpha") {
+      noteUnderIt = row.folder == folder;
+      break;
+    }
+  }
+  MICRONOTES_REQUIRE(folderRow);
+  MICRONOTES_REQUIRE(noteUnderIt);
+  std::filesystem::remove_all(root);
+}

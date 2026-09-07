@@ -767,18 +767,19 @@ static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expand
   if(row.kind != SidebarRow::Kind::Tree) return;
   if(row.tree.kind == ui::TreeRowKind::Note) {
     selectNoteById(ui, row.tree.noteId);
-    // Opening a note from the tree moves the context to its folder too, so the
-    // breadcrumb agrees with what is on screen. A search owns the row list
-    // while it is running, so it is left alone.
+    // Opening a note moves the context to its folder *and* opens the tree onto
+    // it, so the breadcrumb and the sidebar agree about where the note is. A
+    // search owns the row list while it is running, so it is left alone.
     if(ui.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
-      ui.state.selectFolder(row.tree.folder);
+      showFolder(ui, row.tree.folder);
     }
     return;
   }
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectFolder(row.tree.folder);
   // Clicking a notebook opens it; arrowing onto one only selects it, or holding
-  // Down would unfold the whole library on the way past.
+  // Down would unfold the whole library on the way past. Not `showFolder`: a
+  // row you can click is a row whose ancestors are already open.
   if(expandFolder) ui.tree.setExpanded(row.tree.folder, true);
   selectNoteAt(ui, 0);
 }
@@ -1481,11 +1482,9 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
   } else if(result.overlayId == "jump-note") {
     selectNoteById(ui, result.itemId);
     if(const auto note = ui.state.findNote(result.itemId)) {
-      const auto folder = note->folder;
       ui.search.reset();
-      ui.state.selectFolder(folder);
+      showFolder(ui, note->folder);
       ui.state.selectNote(result.itemId);
-      ui.tree.reveal(folder);
     }
     ui.focus = FocusArea::Editor;
   } else if(result.overlayId == "move-blocks-target") {
@@ -2126,8 +2125,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     for(const auto& [rect, folder] : ui.crumbs) {
       if(!contains(rect, x, y)) continue;
       if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-      ui.state.selectFolder(folder);
-      ui.tree.reveal(folder);
+      showFolder(ui, folder);
       ui.search.reset();
       selectNoteAt(ui, 0);
       return;
@@ -2383,6 +2381,7 @@ int run(ApplicationOptions options) {
       for(const auto& note : ui.state.allNotes()) {
         if(note.title.find(title) == std::string::npos) continue;
         ui.state.selectNote(note.id, !first);
+        showFolder(ui, note.folder);
         loadSelectedIntoEditor(ui);
         first = false;
         break;

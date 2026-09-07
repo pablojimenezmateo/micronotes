@@ -73,6 +73,11 @@ void selectTag(UiRuntime& ui, const std::string& tag) {
   selectNoteAt(ui, 0);
 }
 
+void showFolder(UiRuntime& ui, const std::filesystem::path& folder) {
+  ui.state.selectFolder(folder);
+  ui.tree.reveal(folder);
+}
+
 void selectNoteById(UiRuntime& ui, const std::string& noteId) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectNote(noteId);

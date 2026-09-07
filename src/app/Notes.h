@@ -17,6 +17,16 @@ void selectNoteAt(UiRuntime& ui, int index);
 // Opens a note by id.
 void selectNoteById(UiRuntime& ui, const std::string& noteId);
 
+// Makes `folder` the context *and* opens the tree down to it.
+//
+// The two halves are one action and were said separately at four call sites,
+// which is what let the fifth say only half. A note opened from a flat list --
+// RECENT, FAVORITES, a search hit -- selected its folder without opening it, so
+// the note the user had just clicked appeared nowhere in the tree: the only row
+// showing it was the flat one they clicked, sitting at the top level, outside
+// the folder the breadcrumb had just started naming.
+void showFolder(UiRuntime& ui, const std::filesystem::path& folder);
+
 // Filters the library to one tag and opens the first note under it.
 //
 // Two surfaces do this -- the sidebar's TAGS section and the right panel's Tags
