@@ -482,7 +482,12 @@ void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, std::stri
 StripTabColors stripTabColors() {
   return {
     theme().chromeActive,
-    theme().chromeBackground,
+    // A step *up* from the strip's own ground, not level with it. An inactive
+    // tab filled with the strip's colour is not a tab: with two of them side by
+    // side the only thing saying where one ended was the 1px rule between them,
+    // so a strip of three notes read as one wide empty band with some words in
+    // it. The active tab is then a further step up, plus its accent lid.
+    theme().surfaceRaised,
     theme().rowHighlight,
     theme().chromeActiveText,
     theme().chromeTextSecondary,
