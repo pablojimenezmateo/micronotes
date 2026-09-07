@@ -73,7 +73,7 @@ static std::string sequenceItem(std::string_view line) {
 }
 
 static void readTags(NoteMetadata& metadata, std::string_view inlineValue,
-                     const std::vector<std::string>& lines, std::size_t from, std::size_t to) {
+                     const std::vector<std::string_view>& lines, std::size_t from, std::size_t to) {
   const auto value = trim(inlineValue);
   if(value.starts_with("[")) {
     metadata.tagForm = NoteMetadata::TagForm::Flow;
@@ -93,9 +93,16 @@ static void readTags(NoteMetadata& metadata, std::string_view inlineValue,
   }
   if(!value.empty()) {
     metadata.tagForm = NoteMetadata::TagForm::Inline;
-    std::istringstream tags {value};
-    std::string tag;
-    while(tags >> tag) metadata.tags.push_back(tag);
+    // Split on runs of whitespace, over the value itself. This used to build an
+    // `istringstream` around a copy of it and extract a `std::string` per tag.
+    const std::string_view rest = value;
+    std::size_t i = 0;
+    while(i < rest.size()) {
+      while(i < rest.size() && (rest[i] == ' ' || rest[i] == '\t')) ++i;
+      const std::size_t start = i;
+      while(i < rest.size() && rest[i] != ' ' && rest[i] != '\t') ++i;
+      if(i > start) metadata.tags.emplace_back(rest.substr(start, i - start));
+    }
     return;
   }
   // An empty inline value with `- item` lines under it is YAML's block form,
@@ -160,27 +167,35 @@ NoteMetadata parseMetadata(std::string_view markdown) {
   if(!markdown.starts_with("---\n")) return metadata;
   const auto end = findClosingFence(markdown);
   if(end == std::string_view::npos) return metadata;
-  std::string header(markdown.substr(4, end - 4));
-  std::vector<std::string> lines;
-  {
-    std::istringstream in {header};
-    std::string line;
-    while(std::getline(in, line)) {
-      if(!line.empty() && line.back() == '\r') line.pop_back();
-      lines.push_back(std::move(line));
-    }
+  const std::string_view header = markdown.substr(4, end - 4);
+
+  // Split as views into `markdown`. This used to copy the header out, wrap an
+  // `istringstream` round the copy and allocate a `std::string` per line --
+  // three allocations plus one per line for every note the library reads, to
+  // extract at most four short fields. Only the fields kept allocate now, and
+  // `extra` is the only one that keeps a whole line.
+  std::vector<std::string_view> lines;
+  for(std::size_t at = 0; at <= header.size();) {
+    const auto newline = header.find('\n', at);
+    const std::size_t stop = newline == std::string_view::npos ? header.size() : newline;
+    std::string_view line = header.substr(at, stop - at);
+    // A file written on Windows ends its lines with CR; it belongs to no field.
+    if(!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    lines.push_back(line);
+    if(newline == std::string_view::npos) break;
+    at = newline + 1;
   }
 
   for(std::size_t i = 0; i < lines.size();) {
-    const std::string& line = lines[i];
+    const std::string_view line = lines[i];
     std::size_t next = i + 1;
     while(next < lines.size() && continuesValue(lines[next])) ++next;
     if(line.starts_with("id: ")) metadata.id = line.substr(4);
     else if(line.starts_with("title: ")) metadata.title = line.substr(7);
-    else if(line.starts_with("icon: ")) metadata.icon = trim(std::string_view(line).substr(6));
-    else if(line.starts_with("tags:")) readTags(metadata, std::string_view(line).substr(5), lines, i + 1, next);
+    else if(line.starts_with("icon: ")) metadata.icon = trim(line.substr(6));
+    else if(line.starts_with("tags:")) readTags(metadata, line.substr(5), lines, i + 1, next);
     else if(!trim(line).empty()) {
-      for(std::size_t j = i; j < next; ++j) metadata.extra.push_back(lines[j]);
+      for(std::size_t j = i; j < next; ++j) metadata.extra.emplace_back(lines[j]);
     }
     i = next;
   }
@@ -201,14 +216,14 @@ std::size_t titleHeadingLength(std::string_view body, std::string_view title) {
   return length;
 }
 
-std::string stripMetadataHeader(std::string_view markdown) {
-  if(!markdown.starts_with("---\n")) return std::string(markdown);
+std::size_t metadataHeaderLength(std::string_view markdown) {
+  if(!markdown.starts_with("---\n")) return 0;
   const auto end = findClosingFence(markdown);
-  if(end == std::string_view::npos) return std::string(markdown);
+  if(end == std::string_view::npos) return 0;
   auto bodyStart = end + 4;
   if(bodyStart < markdown.size() && markdown[bodyStart] == '\n') ++bodyStart;
   if(bodyStart < markdown.size() && markdown[bodyStart] == '\n') ++bodyStart;
-  return std::string(markdown.substr(bodyStart));
+  return bodyStart;
 }
 
 }

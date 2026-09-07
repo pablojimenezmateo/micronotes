@@ -2,6 +2,7 @@
 
 #include "CoreAliases.h"
 
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -52,7 +53,17 @@ std::string generateNoteId();
 std::string fallbackNoteId(std::string_view relativePath);
 std::string metadataHeader(const NoteMetadata& metadata);
 NoteMetadata parseMetadata(std::string_view markdown);
-std::string stripMetadataHeader(std::string_view markdown);
+
+// How many bytes at the front of `markdown` are the front matter block and the
+// blank line under it -- that is, where the body starts. Zero when the file
+// carries no front matter.
+//
+// An offset rather than the body itself. This used to hand back a fresh
+// `std::string` of everything after the header, which for the one caller --
+// `Library::loadNote`, which is already holding the whole file -- was a second
+// copy of every byte of every note read, on the path a library refresh walks a
+// thousand times.
+std::size_t metadataHeaderLength(std::string_view markdown);
 
 // How many bytes at the front of `body` are a `# <title>` heading repeating the
 // note's own name, plus the blank line under it. Zero when the body does not

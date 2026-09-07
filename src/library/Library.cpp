@@ -30,10 +30,27 @@ static std::filesystem::path uniqueMarkdownPath(const std::filesystem::path& des
   }
 }
 
-static std::string readAll(std::ifstream& in) {
-  std::ostringstream buffer;
-  buffer << in.rdbuf();
-  return buffer.str();
+// The whole file, in one read into one right-sized buffer.
+//
+// This used to stream `in.rdbuf()` into an `ostringstream` and return
+// `buffer.str()`. That is three costs stacked on a path a library refresh walks
+// once per note: the stream buffer grows by doubling, so a 200 KB note is a
+// dozen reallocations and copies; `str()` on an lvalue hands back a *copy* of
+// what it grew; and an `ostringstream` drags a locale and a sentry along for a
+// job that is one `read`.
+static std::string readAll(std::istream& in) {
+  std::string out;
+  if(!in) return out;
+  in.seekg(0, std::ios::end);
+  const auto size = in.tellg();
+  if(size < 0) return out;
+  in.seekg(0, std::ios::beg);
+  out.resize(static_cast<std::size_t>(size));
+  if(!out.empty()) in.read(out.data(), static_cast<std::streamsize>(out.size()));
+  // A file that shrank between the two seeks reads short; the count is what
+  // actually arrived, not what the size said.
+  out.resize(static_cast<std::size_t>(in.gcount()));
+  return out;
 }
 
 static std::string readMetadataHeader(std::ifstream& in) {
@@ -207,10 +224,15 @@ std::filesystem::path Library::createNote(const NoteMetadata& metadata, std::str
 
 LoadedNote Library::loadNote(const std::filesystem::path& path) const {
   const auto safePath = platform::normalizeInsideRoot(root_, path);
-  std::ifstream in(safePath);
-  const auto markdown = readAll(in);
-  auto metadata = parseMetadata(markdown);
-  auto body = stripMetadataHeader(markdown);
+  std::ifstream in(safePath, std::ios::binary);
+  std::string text = readAll(in);
+  auto metadata = parseMetadata(text);
+  // Both prefixes are measured before either is removed, so the buffer that was
+  // just read becomes the body by one erase rather than being cut out into a
+  // fresh string -- which, for the one caller that matters, was a second copy of
+  // every byte of every note a library refresh reads.
+  std::size_t bodyStart = metadataHeaderLength(text);
+  const std::string_view body = std::string_view(text).substr(bodyStart);
   // A `# <name>` first line is the note's own header rather than the first
   // thing it says, so it comes off with the front matter and goes back on with
   // it. The name is read the way every other reader of the library reads it:
@@ -218,9 +240,10 @@ LoadedNote Library::loadNote(const std::filesystem::path& path) const {
   const auto title = metadata.title.empty() ? safePath.stem().string() : metadata.title;
   if(const std::size_t heading = titleHeadingLength(body, title); heading > 0) {
     metadata.titleHeading = true;
-    body.erase(0, heading);
+    bodyStart += heading;
   }
-  return {std::move(metadata), std::move(body)};
+  text.erase(0, bodyStart);
+  return {std::move(metadata), std::move(text)};
 }
 
 NoteMetadata Library::loadNoteMetadata(const std::filesystem::path& path) const {

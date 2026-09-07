@@ -169,7 +169,9 @@ const OpenNote& AppState::loadOpenNote(std::string* body) const {
   const library::NoteListItem* item = noteById(selection_.noteId);
   if(!item) return kNone;
   auto note = library_->loadNote(item->path);
-  if(body) *body = note.body;
+  // Moved, not copied: `note.body` is a local that is discarded on the next
+  // line but one, so the copy was a whole note per read for nobody.
+  if(body) *body = std::move(note.body);
   OpenNote open;
   open.noteId = selection_.noteId;
   open.path = item->path;
@@ -385,7 +387,7 @@ bool AppState::appendToNote(std::string_view noteId, std::string_view text) {
   auto note = library_->loadNote(item->path);
   // A blank line between what was there and what arrives, or the last paragraph
   // of one note and the first of the other would become a single block.
-  std::string body = note.body;
+  std::string body = std::move(note.body);
   while(!body.empty() && body.back() == '\n') body.pop_back();
   if(!body.empty()) body += "\n\n";
   body += text;
