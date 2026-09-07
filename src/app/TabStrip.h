@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/Draw.h"
+#include "ui/Overlay.h"
 #include "ui/Rect.h"
 
 #include <SDL3/SDL.h>
@@ -24,5 +25,11 @@ bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, f
 // Moving between tabs and closing them.
 void stepTab(UiRuntime& ui, int delta);
 void closeActiveTab(UiRuntime& ui);
+
+// Carries out a choice from a tab's own menu, and says whether it was one of
+// its. The tab travels in the result's `value`, so a menu opened on one tab
+// cannot act on another -- which is the whole point of not switching to a tab
+// in order to right-click it.
+bool handleTabMenuResult(UiRuntime& ui, const ui::OverlayResult& result);
 
 }

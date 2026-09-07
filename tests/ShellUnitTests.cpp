@@ -1218,3 +1218,73 @@ MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
 
   std::filesystem::remove_all(root);
 }
+
+// "Copy relative path" / "Copy absolute path" / "Show on disk", ported from the
+// sibling microide, whose file tree and tab strip both carry them.
+//
+// The relative one is the one worth having and the one with a way to be wrong:
+// it is the spelling that means the same thing to somebody else looking at the
+// same library, so it has to be relative to the library root and it has to
+// refuse rather than quietly hand back an absolute path when it cannot be.
+MICRONOTES_TEST(shell_a_note_reports_both_spellings_of_its_path) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-note-paths";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "deep");
+  const auto note = [&](const std::filesystem::path& relative, const char* id) {
+    std::ofstream out(root / relative, std::ios::binary | std::ios::trunc);
+    out << "---\nid: " << id << "\ntitle: " << id << "\n---\n\nBody.\n";
+  };
+  note("top.md", "np-top");
+  note("work/deep/buried.md", "np-buried");
+  note("a note with spaces.md", "np-spaced");
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  const auto paths = [&](const char* id) { return micronotes::app::notePathsFor(ui, id); };
+
+  // Relative to the library root, in generic separators -- the spelling that
+  // goes into a note or a message rather than the platform's own.
+  MICRONOTES_REQUIRE(paths("np-top").relative == "top.md");
+  MICRONOTES_REQUIRE(paths("np-buried").relative == "work/deep/buried.md");
+  MICRONOTES_REQUIRE(paths("np-spaced").relative == "a note with spaces.md");
+  // And the absolute one is the whole path, so it ends with the relative one.
+  for(const char* id : {"np-top", "np-buried", "np-spaced"}) {
+    const auto both = paths(id);
+    micronotes::tests::require(both.absolute.size() > both.relative.size(),
+                               std::string(id) + ": the absolute path is not longer than the "
+                                                 "relative one");
+    micronotes::tests::require(both.absolute.ends_with(both.relative),
+                               std::string(id) + ": " + both.absolute + " does not end with " +
+                                 both.relative);
+    MICRONOTES_REQUIRE(both.absolute.front() == '/');
+  }
+
+  // A note nothing names has neither. Empty rather than a guess, so the command
+  // can say "no note to locate" instead of copying something arbitrary.
+  MICRONOTES_REQUIRE(paths("no-such-note").absolute.empty());
+  MICRONOTES_REQUIRE(paths("no-such-note").relative.empty());
+
+  // Empty means "the note on the page", which is what the palette and the menu
+  // bar mean by "the note".
+  micronotes::app::selectNoteById(ui, "np-buried");
+  MICRONOTES_REQUIRE(micronotes::app::notePathsFor(ui, {}).relative == "work/deep/buried.md");
+  // And naming one overrides that, which is what lets a right click on a tab or
+  // a sidebar row answer about *that* one rather than about whatever is open.
+  MICRONOTES_REQUIRE(paths("np-top").relative == "top.md");
+
+  // The commands themselves answer to their action names and to nothing else,
+  // so a name added to a menu without a branch here is caught by
+  // `architecture_every_offered_action_is_dispatched` rather than silently
+  // doing nothing.
+  MICRONOTES_REQUIRE(micronotes::app::handleNotePathCommand(ui, "copy-relative-path", {}));
+  MICRONOTES_REQUIRE(micronotes::app::handleNotePathCommand(ui, "copy-absolute-path", {}));
+  MICRONOTES_REQUIRE(micronotes::app::handleNotePathCommand(ui, "show-on-disk", {}));
+  MICRONOTES_REQUIRE(!micronotes::app::handleNotePathCommand(ui, "rename", {}));
+  MICRONOTES_REQUIRE(!micronotes::app::handleNotePathCommand(ui, "", {}));
+  // A note nothing names is reported rather than passed over.
+  MICRONOTES_REQUIRE(micronotes::app::handleNotePathCommand(ui, "copy-absolute-path", "no-such"));
+  MICRONOTES_REQUIRE(ui.status == "No note to locate");
+
+  std::filesystem::remove_all(root);
+}

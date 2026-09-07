@@ -236,7 +236,7 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // moves behaviour out of the file lowers it in the same commit, and nothing
 // raises it. If this fails, the fix is a named unit under src/ -- not a bigger
 // budget.
-constexpr int kApplicationLineBudget = 2434;
+constexpr int kApplicationLineBudget = 2419;
 
 MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
   const auto path = repoRoot() / "src" / "app" / "Application.cpp";
@@ -330,10 +330,24 @@ MICRONOTES_TEST(architecture_key_names_are_formatted_not_typed) {
 // nothing else exercised the missing branch.
 //
 // A source scan rather than a call, because the dispatch needs a whole running
-// shell to call. It is enough: what is being checked is that a branch for the
-// name exists, and the branch is spelt one way.
+// shell to call. It is enough: what is being checked is that *something*
+// compares the name.
+//
+// Every `src/app/` source, not just `Application.cpp`. It used to read that one
+// file and look for `id == "name"`, on the reasoning that the chain is spelt one
+// way -- which was true until the file's shrinking budget started pushing
+// branches out of it. A group of related commands now goes to a named unit and
+// `performCommand` delegates (`handleNotePathCommand`), so the chain is spelt
+// three ways in three files: `id ==`, `command ==`, `result.itemId ==`. What
+// they have in common is the comparison, so that is what this looks for -- and
+// a menu table's `{"name", "Label", ...}` entry deliberately does not match it,
+// because being *offered* is the thing whose dispatch is in question.
 MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
-  const std::string dispatch = readText(repoRoot() / "src" / "app" / "Application.cpp");
+  std::string dispatch;
+  for(const auto& entry : std::filesystem::directory_iterator(repoRoot() / "src" / "app")) {
+    if(entry.path().extension() != ".cpp") continue;
+    dispatch += readText(entry.path());
+  }
   // Anchor on the chain itself. Were performCommand rewritten into a table,
   // this test would otherwise scan for a spelling nothing uses any more and
   // pass forever.
@@ -361,12 +375,12 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
 
   std::string missing;
   for(const auto& name : offered) {
-    if(dispatch.find("id == \"" + name + "\"") != std::string::npos) continue;
+    if(dispatch.find("== \"" + name + "\"") != std::string::npos) continue;
     if(!missing.empty()) missing += ", ";
     missing += name;
   }
   micronotes::tests::require(
     missing.empty(),
-    "actions the palette or the menu bar offer but performCommand does not handle: " + missing +
+    "actions the palette or the menu bar offer but nothing under src/app/ dispatches: " + missing +
     " -- clicking one of these does nothing at all, and nothing else notices");
 }

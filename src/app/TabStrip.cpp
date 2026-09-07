@@ -1,5 +1,6 @@
 #include "app/TabStrip.h"
 
+#include "app/ContextMenus.h"
 #include "app/Notes.h"
 #include "app/Shell.h"
 
@@ -132,6 +133,14 @@ bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float
       loadSelectedIntoEditor(ui);
       return true;
     }
+    // A right click is about *this* tab and does not switch to it: a menu that
+    // moved the reader somewhere before they had chosen anything would be
+    // acting before it was asked to.
+    if(button == SDL_BUTTON_RIGHT) {
+      const auto& tabs = ui.state.workspace().tabs;
+      if(slot.index < tabs.size()) openTabMenu(ui, tabs[slot.index].noteId, x, y);
+      return true;
+    }
     if(button != SDL_BUTTON_LEFT) return true;
     if(ctrl) {
       // Ctrl+click pins, which is how a tab stops being the one that gets
@@ -150,6 +159,27 @@ bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float
   return true;
 }
 
+
+bool handleTabMenuResult(UiRuntime& ui, const ui::OverlayResult& result) {
+  if(result.overlayId != "tab-menu") return false;
+  auto& workspace = ui.state.workspace();
+  const auto index = workspace.findTab(result.value);
+  if(result.itemId == "close") {
+    if(index == std::string::npos) return true;
+    if(!saveCurrent(ui, true)) return true;
+    ui.state.closeTab(index);
+    loadSelectedIntoEditor(ui);
+    return true;
+  }
+  if(result.itemId == "pin") {
+    if(index != std::string::npos) workspace.tabs[index].pinned = !workspace.tabs[index].pinned;
+    ui.status = index != std::string::npos && workspace.tabs[index].pinned ? "Pinned tab"
+                                                                           : "Unpinned tab";
+    return true;
+  }
+  // The three path commands, about this tab's note rather than the open one.
+  return handleNotePathCommand(ui, result.itemId, result.value);
+}
 
 // Moving between tabs and closing them. Both write the note that is open
 // first, so switching can never lose an edit.

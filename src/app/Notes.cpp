@@ -1,6 +1,7 @@
 #include "app/Notes.h"
 
 #include "app/ContextMenus.h"
+#include "app/Desktop.h"
 #include "app/Shell.h"
 #include "app/WikiLinks.h"
 
@@ -116,6 +117,55 @@ void clearTagColor(UiRuntime& ui, std::string_view tag) {
   if(tag.empty()) return;
   ui.state.workspace().tagColors.clear(tag);
   ui.status = std::string(tag) + " back to its automatic colour";
+}
+
+NotePaths notePathsFor(const UiRuntime& ui, std::string_view noteId) {
+  // The note named, or the one on the page. Off the note list rather than off
+  // `openNote()`, so a right click on a sidebar row or a tab answers about
+  // *that* one and not about whatever happens to be open.
+  const auto* note = ui.state.noteById(noteId.empty() ? ui.state.selection().noteId : noteId);
+  if(!note || note->path.empty()) return {};
+
+  NotePaths paths;
+  const auto path = note->path.lexically_normal();
+  paths.absolute = path.string();
+  // `lexically_relative` rather than trimming a string prefix, so a root
+  // spelled with a trailing slash, a `.` or a `..` in it still gives the same
+  // answer. Generic separators, because a relative path is the spelling that
+  // goes into a note or a message to somebody else.
+  const auto relative = path.lexically_relative(ui.state.libraryRoot().lexically_normal());
+  const auto text = relative.generic_string();
+  // Empty, "." or climbing out with ".." all mean the note is not under the
+  // root. Left empty rather than falling back to the absolute path: a
+  // "relative path" that is absolute is the wrong answer given confidently.
+  if(!text.empty() && text != "." && !text.starts_with("..")) paths.relative = text;
+  return paths;
+}
+
+bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId) {
+  const bool onDisk = command == "show-on-disk";
+  const bool relative = command == "copy-relative-path";
+  const bool absolute = command == "copy-absolute-path";
+  if(!onDisk && !relative && !absolute) return false;
+
+  const NotePaths paths = notePathsFor(ui, noteId);
+  if(paths.absolute.empty()) {
+    ui.status = "No note to locate";
+    return true;
+  }
+  const std::filesystem::path path = paths.absolute;
+  if(onDisk) {
+    ui.status = revealInFileManager(path) ? "Showing " + path.filename().string() + " on disk"
+                                          : "Could not open the file manager";
+    return true;
+  }
+  if(relative && paths.relative.empty()) {
+    ui.status = "That note is not inside the library";
+    return true;
+  }
+  const std::string& text = relative ? paths.relative : paths.absolute;
+  ui.status = setClipboardText(text) ? "Copied " + text : "Clipboard unavailable";
+  return true;
 }
 
 const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative) {

@@ -93,6 +93,13 @@ constexpr MenuItemSpec kNoteItems[] {
   item(ActionId::MoveNote, "Move to notebook..."),
   item(ActionId::MoveBlocks, "Move blocks to note..."),
   sep(),
+  // The note as a file. A reader who wants the path to hand -- to paste into
+  // another note, a commit message or a message to somebody -- should not have
+  // to know that a right click on the tab has it.
+  item(ActionId::ShowOnDisk, "Show on disk"),
+  item(ActionId::CopyRelativePath, "Copy relative path"),
+  item(ActionId::CopyAbsolutePath, "Copy absolute path"),
+  sep(),
   item(ActionId::DeleteNote, "Delete note..."),
   sep(),
   item(ActionId::RenameFolder, "Rename notebook..."),

@@ -26,7 +26,45 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false},
     {"favorite", "Toggle favorite", "", "", hasNote, false},
     {"move", "Move to notebook", "", "", hasNote, false},
+    // A note is a file, and these are the questions a reader asks about one.
+    // The ids are the action names, so the menu row, the palette row and any
+    // future key binding are one entry -- which is the rule the whole action
+    // table exists to keep.
+    {"show-on-disk", "Show on disk", "", "", hasNote, false},
+    {"copy-relative-path", "Copy relative path", "", "", hasNote, false},
+    {"copy-absolute-path", "Copy absolute path", "", "", hasNote, false},
     {"delete", "Delete", "", "", hasNote, true},
+  };
+  ui.overlays.open(std::move(overlay));
+}
+
+void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
+  if(noteId.empty()) return;
+  const auto* note = ui.state.noteById(noteId);
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::List;
+  overlay.id = "tab-menu";
+  overlay.anchored = true;
+  overlay.anchorX = x;
+  overlay.anchorY = y;
+  overlay.width = 240.0f;
+  // The tab's own note names the menu, because the menu is about that tab and
+  // not about whichever one is showing.
+  overlay.title = note ? note->title : std::string("Missing note");
+  // And travels in `value`: a result names the item chosen, and which tab it
+  // was about is the other half of the answer.
+  overlay.value.beginWith(std::string(noteId), false);
+  const auto& tabs = ui.state.workspace().tabs;
+  const auto index = ui.state.workspace().findTab(noteId);
+  const bool pinned = index != std::string::npos && tabs[index].pinned;
+  overlay.items = {
+    {"close", "Close", "", ui::keysFor(ui::ActionId::CloseTab), true, false},
+    // Ctrl+click already pins, and nothing said so. A tab that is never
+    // replaced by the next note opened is worth knowing about.
+    {"pin", pinned ? "Unpin" : "Pin", "", "", true, false},
+    {"show-on-disk", "Show on disk", "", "", note != nullptr, false},
+    {"copy-relative-path", "Copy relative path", "", "", note != nullptr, false},
+    {"copy-absolute-path", "Copy absolute path", "", "", note != nullptr, false},
   };
   ui.overlays.open(std::move(overlay));
 }

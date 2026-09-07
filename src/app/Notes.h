@@ -79,6 +79,38 @@ void clearTagColor(UiRuntime& ui, std::string_view tag);
 // which tag it was about is the other half of the answer.
 bool handleTagOverlayResult(UiRuntime& ui, const ui::OverlayResult& result);
 
+// The two spellings of a note's path, as the copy commands put them on the
+// clipboard. Empty `absolute` means there is no such note.
+//
+// Split from the commands so the part with the reasoning in it can be checked
+// without a clipboard: writing to one needs an initialized video subsystem and
+// a cooperating compositor, neither of which a unit test has, so a test that
+// went through the command could only ever assert "the clipboard refused".
+struct NotePaths {
+  std::string absolute;
+  // Relative to the library root. Empty when the note is not under it, which
+  // is the one case "relative path" has no honest answer for.
+  std::string relative;
+};
+
+NotePaths notePathsFor(const UiRuntime& ui, std::string_view noteId);
+
+// Carries out "show on disk", "copy relative path" or "copy absolute path" for
+// the note `noteId` names, and reports whether `command` was one of the three.
+//
+// `noteId` empty means the note on the page, which is what the palette and the
+// menu bar mean by "the note"; the sidebar's and the tab strip's menus name
+// theirs, because a right click there is about the row or the tab under the
+// pointer rather than about whatever happens to be open.
+//
+// A relative path is relative to the library root, which is what makes it worth
+// having: it is the path that means the same thing to somebody else looking at
+// the same library, and so the one that can go in a note, a commit message or a
+// message to a colleague. It is refused rather than silently falling back to
+// the absolute one when the note somehow sits outside the library, because a
+// "relative path" that is absolute is the wrong answer given confidently.
+bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId);
+
 // The note a Markdown link's path names, or null when it names something that
 // is not a note in this library.
 //

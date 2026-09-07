@@ -30,6 +30,13 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::EditTags,        "tags",           "Edit tags...",                    "Ctrl+T",       "",              S::Notes, true,  true, ""},
   {ActionId::ToggleFavorite,  "favorite",       "Toggle favorite",                 "",             "",              S::Notes, true,  true, ""},
   {ActionId::MoveNote,        "move-note",      "Move note to notebook...",        "",             "",              S::Notes, true,  true, ""},
+  // The note is a file, and these three are the questions a reader asks about
+  // one. Ported from the sibling microide, whose file tree and tab strip both
+  // carry them; there is no chord because none of the three is something you
+  // reach for mid-sentence, and inventing one would spend a key nobody wanted.
+  {ActionId::ShowOnDisk,      "show-on-disk",   "Show on disk",                    "",             "",              S::Notes, true,  true, ""},
+  {ActionId::CopyRelativePath, "copy-relative-path", "Copy relative path",         "",             "",              S::Notes, true,  true, ""},
+  {ActionId::CopyAbsolutePath, "copy-absolute-path", "Copy absolute path",         "",             "",              S::Notes, true,  true, ""},
   {ActionId::MoveBlocks,      "move-blocks",    "Move selected blocks to note...", "",             "",              S::Notes, true,  true, ""},
   {ActionId::DeleteNote,      "delete-note",    "Delete note...",                  "",             "",              S::Notes, true,  true, ""},
   {ActionId::RenameFolder,    "rename-folder",  "Rename notebook...",              "",             "",              S::Notes, false, true, ""},

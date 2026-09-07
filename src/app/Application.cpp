@@ -11,6 +11,7 @@
 #include "app/ReadingPage.h"
 #include "app/SessionState.h"
 #include "app/Breadcrumb.h"
+#include "app/Desktop.h"
 #include "app/Dismiss.h"
 #include "app/EditCommands.h"
 #include "app/MenuBar.h"
@@ -121,26 +122,6 @@ using micronotes::ui::theme;
 static void openDeleteNoteConfirm(UiRuntime& ui);
 static void updateFindStatus(UiRuntime& ui);
 // The shell's geometry, as a pure function of the window and the shell model.
-static bool setClipboardText(std::string_view value) {
-  const std::string text {value};
-  SDL_ClearError();
-  const bool clipboardOk = SDL_SetClipboardText(text.c_str());
-  const std::string clipboardError = SDL_GetError();
-  SDL_ClearError();
-  SDL_SetPrimarySelectionText(text.c_str());
-  const bool clipboardHasText = SDL_HasClipboardText();
-  const bool primaryHasText = SDL_HasPrimarySelectionText();
-  if(inputDebugEnabled()) {
-    std::cerr << "clipboard set"
-              << " bytes=" << text.size()
-              << " clipboard_ok=" << clipboardOk
-              << " clipboard_has_text=" << clipboardHasText
-              << " primary_has_text=" << primaryHasText;
-    if(!clipboardOk) std::cerr << " error=\"" << clipboardError << "\"";
-    std::cerr << "\n";
-  }
-  return clipboardOk;
-}
 
 static bool publishEditorPrimarySelection(UiRuntime& ui) {
   if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
@@ -1086,6 +1067,8 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
     if(noteId.empty()) ui.status = "No note selected";
     else ui.status = ui.state.toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
   }
+  // Show on disk / copy relative / copy absolute, about the note on the page.
+  else if(handleNotePathCommand(ui, id, {})) {}
   else if(id == "move-note") openFolderPalette(ui);
   else if(id == "move-blocks") {
     if(!ui.blockSelectActive) ui.status = "Select blocks first with Esc";
@@ -1213,6 +1196,8 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     // The rest are the palette's, so the menu and the palette cannot drift.
     else if(result.itemId == "move") performCommand(ui, "move-note");
     else performCommand(ui, result.itemId);
+  } else if(handleTabMenuResult(ui, result)) {
+    // Close, pin, and the three path commands, about the tab it was opened on.
   } else if(handleTagOverlayResult(ui, result)) {
     // Filter, colour, un-colour: all three are verbs on the tag, so they live
     // with the others in `app/Notes.h`.

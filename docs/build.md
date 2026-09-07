@@ -323,7 +323,24 @@ Useful runtime controls:
 - `/`: focus search when the editor is not focused.
 - Click in the editor to place the cursor.
 - Right-click a note anywhere in the sidebar - in the tree or in a list of
-  search results - for Rename, Set icon, Edit tags, Move and Delete.
+  search results - for Rename, Set icon, Edit tags, Move, Delete, and the three
+  questions about the note as a *file*: Show on disk, Copy relative path, Copy
+  absolute path. The same three are on the menu bar's Note menu and in the
+  command palette. A relative path is relative to the library root, which is
+  what makes it the one worth having: it is the spelling that means the same
+  thing to somebody else looking at the same library.
+- Right-click a tab for Close, Pin and those same three path commands. The menu
+  is about the tab under the pointer rather than the note on the page, and
+  opening it does not switch to that tab. `Ctrl+click` a tab also pins it; a
+  pinned tab is never the one replaced by the next note opened.
+- Right-click a tag - on its row in the sidebar's Tags band, or on any coloured
+  dot at the trailing edge of a note's row - to filter by it or to choose its
+  colour from a palette of twelve. Hovering a dot names its tag; clicking one
+  filters by it.
+- Click a section band - Notebooks, Favorites, Tags, Recent - to shut it, or
+  arrow onto it and use `Left`/`Right`. `Enter` on a sidebar row chooses it,
+  which is how a tag or a band is acted on from the keyboard; arrowing over one
+  deliberately does not, since either would replace the list being walked.
 - The search field sits at the top of the sidebar, above the navigation it
   filters. `Ctrl+Shift+F` focuses it, and the `A`/`T`/`C` button at its right
   cycles the scope between all, title only and content only. While a query is

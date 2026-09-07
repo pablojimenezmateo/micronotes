@@ -1,40 +1,17 @@
 #include "app/PageChrome.h"
 
+#include "app/Desktop.h"
 #include "app/Notes.h"
 #include "app/WikiLinks.h"
 #include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
 #include "ui/TextUtil.h"
 
-#include <sys/types.h>
-#include <unistd.h>
-
 #include <exception>
 #include <filesystem>
 #include <vector>
 
 namespace micronotes::app {
-namespace {
-
-// A desktop program, launched and let go of. `fork` + `execvp` rather than
-// `system`, so a target with a space or a quote in its name is an argument
-// rather than shell input.
-bool spawnDetached(const std::vector<std::string>& command) {
-  if(command.empty()) return false;
-  const pid_t pid = fork();
-  if(pid < 0) return false;
-  if(pid == 0) {
-    std::vector<char*> argv;
-    argv.reserve(command.size() + 1);
-    for(const auto& part : command) argv.push_back(const_cast<char*>(part.c_str()));
-    argv.push_back(nullptr);
-    execvp(argv[0], argv.data());
-    _exit(127);
-  }
-  return true;
-}
-
-}
 
 std::optional<std::string> codeUnderCopyButton(const PageView& page, std::string_view source,
                                                float x, float y) {
@@ -70,7 +47,7 @@ bool followLinkAt(UiRuntime& ui, float x, float y) {
       return true;
     }
     if(ui::isRemoteTarget(target)) {
-      ui.status = spawnDetached({"xdg-open", target}) ? "Opened " + target : "Open failed";
+      ui.status = openWithDesktop(target) ? "Opened " + target : "Open failed";
       return true;
     }
     if(!ui.state.hasLibrary()) {

@@ -11,6 +11,15 @@ struct UiRuntime;
 void openNoteMenu(UiRuntime& ui, float x, float y);
 void openFolderMenu(UiRuntime& ui, float x, float y);
 
+// A tab's menu. `noteId` is the tab under the pointer, not the note on the
+// page: a right click on a tab is about that tab, and switching to it first
+// would be the menu acting before it was asked to.
+//
+// Right-clicking a tab did nothing at all before. The strip answered a left
+// click and a middle click and ignored the third button, which on a tab strip
+// is where every application puts exactly this.
+void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y);
+
 // A tag's own menu: filter by it, and choose what colour it is.
 //
 // Right click rather than a control on the row, because a tag row's whole width

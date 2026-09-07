@@ -225,6 +225,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Breadcrumb.cpp
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
+  src/app/Desktop.cpp
   src/app/Dismiss.cpp
   src/app/Folds.cpp
   src/app/InlineText.cpp
