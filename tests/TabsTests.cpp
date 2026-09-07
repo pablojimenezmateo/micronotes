@@ -178,3 +178,80 @@ MICRONOTES_TEST(tabs_hit_test_agrees_with_the_layout_it_was_drawn_from) {
     }
   }
 }
+
+// Every note opening in its own tab means the strip routinely holds more tabs
+// than fit, so a tab past the right edge has to be reachable.
+//
+// It was not. Slots past the edge were laid out and then simply not drawn, on a
+// comment saying that scrolling "is a matter of which slots are drawn rather
+// than a second layout" -- which was the right plan and was never finished. So
+// with more than about ten notes open, the newest tab existed, was active, and
+// could not be seen or clicked; only Ctrl+Tab reached it.
+//
+// The window is derived from the active tab rather than stored, so there is no
+// scroll state for the draw and the hit test to disagree about.
+MICRONOTES_TEST(tabs_scroll_to_keep_the_active_tab_on_screen) {
+  const auto names = titles(30);
+  const auto visibleIndices = [](const std::vector<TabSlot>& slots) {
+    std::vector<std::size_t> out;
+    for(const auto& slot : slots) {
+      if(slot.visible) out.push_back(slot.index);
+    }
+    return out;
+  };
+
+  // Whichever tab is active, it is on screen.
+  for(std::size_t active = 0; active < names.size(); ++active) {
+    const auto slots = layoutTabs(names, kStrip, measure, active);
+    MICRONOTES_REQUIRE(slots.size() == names.size());
+    MICRONOTES_REQUIRE(slots[active].visible);
+
+    const auto shown = visibleIndices(slots);
+    MICRONOTES_REQUIRE(!shown.empty());
+    // A contiguous run, in order: the strip is a window over the tabs, never a
+    // set of them with holes.
+    for(std::size_t i = 1; i < shown.size(); ++i) {
+      MICRONOTES_REQUIRE(shown[i] == shown[i - 1] + 1);
+    }
+    // Every visible tab sits inside the strip, and they tile it left to right
+    // starting at its left edge.
+    MICRONOTES_REQUIRE(slots[shown.front()].rect.x == kStrip.x);
+    for(const auto index : shown) {
+      const Rect box = slots[index].rect;
+      MICRONOTES_REQUIRE(box.x >= kStrip.x);
+      MICRONOTES_REQUIRE(box.x + box.w <= kStrip.x + kStrip.w + 0.5f);
+      // And its close button came with it, inside its own tab.
+      MICRONOTES_REQUIRE(inside(box, slots[index].close));
+    }
+  }
+
+  // A tab scrolled off to the left is not merely undrawn: its rect is outside
+  // the strip, so a hit test that forgot to check `visible` misses it rather
+  // than quietly matching a tab nobody can see.
+  const auto slots = layoutTabs(names, kStrip, measure, names.size() - 1);
+  MICRONOTES_REQUIRE(!slots.front().visible);
+  MICRONOTES_REQUIRE(slots.front().rect.x + slots.front().rect.w <= kStrip.x);
+}
+
+// The narrowest strip still shows the tab you are on: one cramped tab beats
+// none, and a strip showing none of them looks broken rather than tight.
+MICRONOTES_TEST(tabs_show_the_active_one_however_narrow_the_strip) {
+  const Rect sliver {0.0f, 0.0f, 40.0f, 34.0f};
+  const auto names = titles(12);
+  for(const std::size_t active : {std::size_t {0}, std::size_t {5}, std::size_t {11}}) {
+    const auto slots = layoutTabs(names, sliver, measure, active);
+    MICRONOTES_REQUIRE(slots[active].visible);
+    int shown = 0;
+    for(const auto& slot : slots) {
+      if(slot.visible) ++shown;
+    }
+    MICRONOTES_REQUIRE(shown == 1);
+  }
+}
+
+// An out-of-range active index must not walk off the end of the title list.
+MICRONOTES_TEST(tabs_survive_an_active_index_past_the_end) {
+  const auto slots = layoutTabs(titles(3), kStrip, measure, 99);
+  MICRONOTES_REQUIRE(slots.size() == 3);
+  MICRONOTES_REQUIRE(slots.back().visible);
+}

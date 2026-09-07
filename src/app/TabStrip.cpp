@@ -32,7 +32,7 @@ std::vector<std::string> tabTitles(const UiRuntime& ui) {
 // draw as well, and building them twice a frame is a vector of strings and a
 // `findNote` per tab, twice, to lay out the handful of tabs a strip can show.
 std::vector<ui::TabSlot> slotsFor(const std::vector<std::string>& titles, ui::TextRenderer* text,
-                                  Rect rect) {
+                                  Rect rect, std::size_t activeTab) {
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().ui};
   std::function<int(std::string_view)> measure;
   if(text) {
@@ -40,7 +40,7 @@ std::vector<ui::TabSlot> slotsFor(const std::vector<std::string>& titles, ui::Te
       return text->width(value, style);
     };
   }
-  return ui::layoutTabs(titles, rect, measure);
+  return ui::layoutTabs(titles, rect, measure, activeTab);
 }
 
 // Drawn rather than typeset: the UI face has no glyph for a close cross that
@@ -67,11 +67,17 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   ui::ClipGuard clip(renderer, rect);
   const auto& workspace = ui.state.workspace();
   const auto titles = tabTitles(ui);
-  const auto slots = slotsFor(titles, &text, rect);
+  const auto slots = slotsFor(titles, &text, rect, workspace.activeTab);
   const ui::TextStyle style {ui::FontFamily::Sans, false, false, ui::type().ui};
 
   for(const auto& slot : slots) {
-    if(!slot.visible) break;
+    // `continue`, not `break`. Under the old layout the only invisible tabs
+    // were the ones past the right edge, so stopping at the first was the same
+    // thing; a strip that scrolls is invisible at *both* ends, and breaking on
+    // the tab scrolled off the left drew nothing at all from the first time the
+    // strip overflowed. The hit test beside it already used `continue`, so the
+    // two disagreed about the same list -- see TD-20.
+    if(!slot.visible) continue;
     const bool active = slot.index == workspace.activeTab;
     const bool hot = ui::contains(slot.rect, ui.mouseX, ui.mouseY);
     if(active) {
@@ -119,7 +125,7 @@ bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float
   // on the second tab landed in the first one's rect and activated it, a click
   // past the last drawn tab still hit one, and the close cross's target sat in
   // empty strip well to the right of the cross. The strip looked inert.
-  const auto slots = slotsFor(tabTitles(ui), &text, rect);
+  const auto slots = slotsFor(tabTitles(ui), &text, rect, ui.state.workspace().activeTab);
   for(const auto& slot : slots) {
     if(!slot.visible || !ui::contains(slot.rect, x, y)) continue;
     // Middle click closes, as it does in every tab strip; so does the cross.
