@@ -348,12 +348,22 @@ Useful runtime controls:
 - Favorites sit above the tree and the notes you opened most recently below it;
   tags are a filter at the bottom rather than a second way to organise notes.
   Both lists are stored in `.micronotes/ui.state` and name notes by id.
-- The window draws its own title bar rather than wearing the compositor's: a
-  breadcrumb naming the notebooks down to the open note (click one to go there),
-  the star that pins the note to Favorites, and minimize / maximize / close at
-  the right. Dragging the empty part of the strip moves the window, and the
-  window's edges resize it. On a platform that refuses a hit test the ordinary
-  decorations come back and the drawn buttons stand down.
+- The window draws its own menu bar rather than wearing the compositor's title
+  bar: File, Edit, View, Go, Note and Help, the application's name centred when
+  there is room for it, and minimize / maximize / close at the right. Menus that
+  do not fit a narrow window hide behind a chevron rather than being dropped.
+  Sliding along the bar with one open switches menus without a click; the arrow
+  keys walk an open menu and Escape shuts it. Dragging the empty part of the bar
+  moves the window, and the window's edges resize it. On a platform that refuses
+  a hit test the ordinary decorations come back and the drawn buttons stand down.
+- Every menu item is an entry in `ui::Actions` and nothing else, so an item, its
+  palette row and its keyboard chord cannot drift apart -- they are one row in
+  one table, drawn three ways. `ArchitectureTests` proves every action the menus
+  or the palette offer actually reaches a command.
+- Under the tab strip, over the page, a breadcrumb band names the notebooks down
+  to the open note (click one to go there) and carries the star that pins it to
+  Favorites. It belongs to the page's own column rather than spanning the window,
+  so the trail sits directly over the note it describes rather than over the tree.
 - Deleting a note or a notebook moves it to the library's own
   `.micronotes/trash/`, not the desktop trash, so "Restore from trash..." in the
   command palette can put it back - with its attachments, and under a new name

@@ -457,10 +457,16 @@ same number for a frame that did nothing. Splitting the sample at
 Nothing else in this section would have been visible without that split, and
 nothing in it would have been *attributable* without the second half of the same
 change: `page.draw` was the only timed part of a frame, so a frame spent in the
-sidebar or the chrome showed up as time that went nowhere. `shell.title_bar`,
-`shell.ribbon`, `shell.sidebar`, `shell.right_panel`, `shell.tab_strip`,
-`shell.content`, `shell.status`, `shell.overlays` and `shell.present` now cover
-it end to end.
+sidebar or the chrome showed up as time that went nowhere. `shell.menu_bar`,
+`shell.sidebar`, `shell.tab_strip`, `shell.breadcrumb`, `shell.content`,
+`shell.right_panel`, `shell.status`, `shell.menu`, `shell.overlays` and
+`shell.present` now cover it end to end.
+
+The tables further down this file predate the shell overhaul and still carry
+`shell.title_bar` and `shell.ribbon` rows. Those two surfaces no longer exist:
+the icon rail and the self-drawn title bar became the menu bar and the
+breadcrumb band. Read the old rows as the cost of the chrome that was there,
+not as a budget anything still enforces.
 
 ### Resolved: the sidebar rebuilt the library on every frame
 

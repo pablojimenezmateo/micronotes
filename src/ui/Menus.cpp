@@ -1,5 +1,8 @@
 #include "ui/Menus.h"
 
+#include "AppPerfCounters.h"
+#include "CoreAliases.h"
+#include "core/perf/PerformanceCounters.h"
 #include "ui/Metrics.h"
 
 #include <algorithm>
@@ -130,6 +133,7 @@ std::span<const float> menuLabelWidths(const MenuMeasureFn& measure) {
   if(std::abs(current - probe) > 0.01f) {
     probe = current;
     for(std::size_t i = 0; i < std::size(kMenus); ++i) {
+      perf::addCounter(perf::CounterId::MenuBarLabelMeasures);
       widths[i] = static_cast<float>(measure(kMenus[i].label));
     }
   }
@@ -174,6 +178,7 @@ Rect windowButtonHitRect(Rect button) {
 
 MenuBarLayout menuBarLayout(Rect menuBar, MenuId openMenu, bool customChrome,
                             const MenuMeasureFn& measure) {
+  perf::addCounter(perf::CounterId::MenuBarLayouts);
   MenuBarLayout layout;
   if(menuBar.w <= 0.0f || menuBar.h <= 0.0f) return layout;
 
@@ -231,6 +236,7 @@ MenuBarLayout menuBarLayout(Rect menuBar, MenuId openMenu, bool customChrome,
 Rect menuPopupRect(Rect anchor, std::span<const MenuItemSpec> items, Rect bounds,
                    const MenuMeasureFn& measure) {
   if(items.empty()) return {};
+  perf::addCounter(perf::CounterId::MenuPopupLayouts);
 
   float wanted = kMenuPopupMinWidth;
   float height = kMenuPopupPadY * 2.0f;

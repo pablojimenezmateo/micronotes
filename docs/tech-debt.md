@@ -190,17 +190,31 @@ That one is fixed -- the hit test takes the same `TextRenderer` the draw does,
 and `tabs_need_the_measurer_the_draw_used` pins the disagreement so a future
 `nullptr` fails rather than misroutes. The *debt* is the shape, which is still
 here: a draw and a hit test that each call the layout function again, with no
-compiler check that they called it the same way. The sidebar avoids it by
-building `ui.sidebarRows` once and hit-testing the stored rects; the tab strip
-lays out twice a click, and the ribbon and the window controls each derive their
-own boxes in two places too.
+compiler check that they called it the same way.
 
-**Why it has not been paid.** The fix is to make "lay out" and "hit test" one
-thing: build the slots once per frame into `UiRuntime` -- as the sidebar already
-does -- and have the click walk what was drawn. That is small for the tab strip
-alone and worth doing across the four surfaces at once, which is a wider change
-than the bug warranted. Passing the measurer closes the hole; storing the
-geometry is what stops the next surface from opening it.
+**Partly paid by the shell overhaul.** Three of the five surfaces it named are
+gone or closed:
+
+- The scrollbars had *four* spellings of their geometry, one of them a private
+  copy inside `PageView` that painted the live page's bar while ui's was
+  hit-tested against it -- identical only by luck. There is one
+  `ui::scrollbarGeometry` now, and the paint, the hit test, the cursor shape and
+  the drag all ask it.
+- The window controls derived their boxes in the paint and again in the hit
+  test. `ui::menuBarLayout` answers for the whole bar, and the borderless
+  window's hit test -- which runs on the platform's callback with no renderer to
+  measure a label with -- reads the band the draw recorded, the way it already
+  read the buttons.
+- The icon rail is gone, so its two derivations went with it.
+
+What is left is the original pair: the tab strip lays out twice per click, and
+the sidebar builds `ui.sidebarRows` once and hit-tests the stored rects. The
+sidebar is the shape the strip should take.
+
+**Why it has not been paid.** The remaining fix is to make "lay out" and "hit
+test" one thing for the strip: build `TabStripLayout` once per frame into
+`UiRuntime` and have the click walk what was drawn. Small, and now genuinely
+small -- the surfaces that made it a wide change have been dealt with.
 
 ## TD-21 — a capture waits half a second no matter what it is capturing
 
@@ -226,3 +240,29 @@ watch for is finally a moment the code chooses — before that the map raced
 everything and the sleep was standing in for a signal nobody had. Not done here
 because the capture path is used by tooling rather than by the app, and this
 change was about the app's first frame.
+
+## TD-22 — the menu bar has no keyboard mnemonics
+
+`src/app/MenuBar.cpp`, `src/ui/Menus.h`.
+
+An open menu is fully navigable from the keyboard -- the arrows walk it, Left
+and Right step to the neighbouring menu, Enter chooses and Escape shuts it --
+but there is no way to *open* one without the pointer. `Alt+F` does not reach
+File, and neither does F10.
+
+**What it costs today.** Not much on its own: every item in every menu is also
+an `ActionId` with a chord or a palette row, so nothing is unreachable. What it
+costs is the claim the menu bar is there to make. The bar exists because a shell
+whose only routes to a command are a chord and a palette is one where every
+command has to be learnt before it can be used -- and a bar you can only reach
+by taking a hand off the keyboard is half of that argument given back.
+
+**Why it has not been paid.** Mnemonics are not one change but three. The label
+needs to carry which letter is the mnemonic (microide's `MenuSpec` does not
+model this either, so there is nothing to copy); the draw needs to underline
+that letter, which means measuring a prefix and a substring rather than a label;
+and `Alt` has to stop being an ordinary modifier in the key chain -- micronotes
+binds `Ctrl+Alt+Left`/`Right` to the panel toggles, so a bare `Alt` press has to
+be distinguished from `Alt` held as part of a chord, which is a keyup-driven
+state machine rather than a branch. F10 alone would be a third of a fix and
+would sit oddly next to a bar that does not underline anything.

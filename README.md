@@ -26,18 +26,25 @@ keystroke away.
   rename.
 - Blocks with hover handles: drag to reorder, `/` to insert, `Esc` to select,
   and a menu for turn-into, duplicate, delete and move.
-- An icon rail down the left edge: new note, go to note, search, commands, and
-  at its foot the two panel toggles and settings. It does not hide, so putting
-  every panel away is something you can undo without knowing a shortcut.
+- A menu bar along the top: File, Edit, View, Go, Note and Help. Every item in
+  it is the same entry as the palette row and the keyboard chord that do the
+  same thing, so the three cannot drift apart -- and it is the one surface you
+  can *read* rather than having to already know. Menus that do not fit a narrow
+  window hide behind a chevron rather than being dropped.
 - One sidebar with the search field on top of it: a tree of notebooks and notes
   with drag to re-parent, favorites, recents, and tags as a filter rather than a
   second hierarchy. Typing a query replaces the tree with the matching notes and
   the lines that matched, each marked where it matched and trimmed around the
   match rather than cut off before it; `Esc` brings the tree back.
-- A borderless window with drawn chrome: the top strip is the breadcrumb, the
-  favorite star and minimize / maximize / close, and dragging it moves the
-  window. If the platform will not take a hit test, the decorations come back.
-  The bar at the foot carries the word and character count.
+- A borderless window with drawn chrome: the menu bar carries minimize /
+  maximize / close at its right, and dragging its empty part moves the window.
+  If the platform will not take a hit test, the decorations come back. Under the
+  tab strip sits the breadcrumb down to the open note and the star that pins it;
+  the bar at the foot carries the word and character count.
+- Chrome in one monospaced face at one size -- the menu bar, the tree, the tabs,
+  the panels, the status bar -- and the note itself in a proportional one with a
+  heading scale. The split is the design: a tree of proportional labels has no
+  vertical rhythm, and prose set in a programming face is not prose.
 - `Ctrl+P` or `Ctrl+O` jumps to any note; `Ctrl+Shift+P` is every command; `F1`
   is every shortcut; `Ctrl+,` is theme, text size, page width and which folder
   to open.

@@ -166,6 +166,17 @@
   /* shaping passes; measures is what says whether that is still true.           */    \
   X(ShellEllipsizeCalls, "shell.ellipsize_calls")                                      \
   X(ShellEllipsizeMeasures, "shell.ellipsize_measures")                                \
+  /* The menu bar's geometry. Laid out by the paint, by the hit test and by the  */    \
+  /* cursor-shape pass, so a single pointer motion over the window asks three    */    \
+  /* times -- which is why one function answers the whole bar rather than three   */   \
+  /* answering a third of it each. `label_measures` is the one that matters: the */    \
+  /* labels are static and the table is fixed, so the memo behind them should    */    \
+  /* miss once at startup and again only when the text size moves. A count that  */    \
+  /* tracks `layouts` means the probe stopped discriminating and every motion    */    \
+  /* event is re-shaping six strings for nothing.                                */    \
+  X(MenuBarLayouts, "menu.bar_layouts")                                                \
+  X(MenuBarLabelMeasures, "menu.bar_label_measures")                                   \
+  X(MenuPopupLayouts, "menu.popup_layouts")                                            \
   /* --- document layout ---------------------------------------------------- */      \
   /* The live surface re-lays the note out once per frame, so everything here is */    \
   /* per-frame cost. update_calls is the rate; the rest say what each call did.  */    \

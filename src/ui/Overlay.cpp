@@ -12,8 +12,12 @@
 namespace micronotes::ui {
 namespace {
 
-constexpr float kRowHeight = 34.0f;
-constexpr float kFieldHeight = 36.0f;
+// A row, and the field over it. The row is the menu popup's row: the palette,
+// the context menus and the menu bar's popups are the same object -- a list of
+// commands with their accelerators -- and they were three heights, so a context
+// menu and the palette that can run the same command looked unrelated.
+constexpr float kRowHeight = kMenuPopupItemHeight;
+constexpr float kFieldHeight = 26.0f;
 constexpr float kPadding = 10.0f;
 // Inside a row, and between the two trailing pieces of one: the shortcut and
 // the detail. Written out as 10, 20 and 12 at seven sites.
@@ -353,19 +357,25 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   // renderer blends for its whole life, set once where it is created; this used
   // to turn blending on here and leave it on, which is how a shell that had
   // opened a palette painted differently from one that had not.
+  // The palette's own backdrop role, rather than a black wash at a hand-picked
+  // alpha per theme: the light theme wants a cooler, lighter dim than the dark
+  // one, and picking two numbers here is how the two drifted apart from the
+  // rest of the palette.
   fill(renderer, {0, 0, static_cast<float>(windowWidth), static_cast<float>(windowHeight)},
-       SDL_Color {0, 0, 0, static_cast<Uint8>(themeMode() == ThemeMode::Dark ? 120 : 60)});
+       theme().overlayBackdrop);
 
   const auto layout = layoutFor(*overlay, text, windowWidth, windowHeight);
   lastLayout_ = layout;
 
-  // Rounded, like every other floating surface: a square-cornered card over a
-  // page of rounded blocks reads as a screenshot pasted on top of the window.
   drawSurface(renderer, layout.panel, theme().overlayBackground, theme().border);
 
-  const TextStyle titleStyle {FontFamily::Sans, true, false, type().small};
-  const TextStyle bodyStyle {FontFamily::Sans, false, false, type().ui};
-  const TextStyle hintStyle {FontFamily::Sans, false, false, type().tiny};
+  // The chrome face, like every other surface that is not the note. A palette
+  // set in the text face reads as a document about commands rather than as a
+  // list of them, and its accelerators -- which are keys, not words -- have to
+  // line up in a column to be scanned at all.
+  const TextStyle titleStyle {FontFamily::Mono, true, false, type().chrome};
+  const TextStyle bodyStyle = chromeStyle();
+  const TextStyle hintStyle = chromeSmallStyle();
 
   float y = layout.panel.y + kPadding;
   if(!overlay->title.empty()) {
@@ -374,7 +384,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   }
 
   if(usesField(*overlay)) {
-    drawSurface(renderer, layout.field, theme().surfaceBackground, theme().accent);
+    drawTextFieldFrame(renderer, layout.field, true);
     // `textTop`, like every other centred line in the shell. These four sites
     // each centred by hand and none of them rounded, so the palette's text
     // landed on half pixels and its glyph stems smeared.
@@ -392,12 +402,13 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       const float left = layout.field.x + kRowPadX - view.scrollX;
       ClipGuard clip(renderer, layout.field);
       if(view.hasSelection) {
-        fill(renderer, {left + view.selectionStartX, layout.field.y + 6.0f,
-                        view.selectionEndX - view.selectionStartX, layout.field.h - 12.0f},
+        fill(renderer, {left + view.selectionStartX, layout.field.y + 3.0f,
+                        view.selectionEndX - view.selectionStartX, layout.field.h - 6.0f},
              theme().selectionFill);
       }
       text.draw(overlay->value.text(), left, textY, theme().textPrimary, bodyStyle);
-      fill(renderer, {left + view.caretX, layout.field.y + 8.0f, 2.0f, layout.field.h - 16.0f}, theme().accent);
+      fill(renderer, {left + view.caretX, layout.field.y + 4.0f, 2.0f, layout.field.h - 8.0f},
+           theme().accent);
     }
   }
 
@@ -410,12 +421,8 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       // Confirm wears the destructive colour: every Confirm overlay in the shell
       // asks about a deletion, and a button that is about to delete something
       // should not look like the one beside it that will not.
-      drawSurface(renderer, rect, isConfirm ? theme().warn : (hot ? theme().rowHighlight : theme().surfaceRaised),
-                         isConfirm ? theme().warn : theme().border);
-      const auto label = isConfirm ? overlay->confirmLabel : std::string("Cancel");
-      const int labelW = text.width(label, bodyStyle);
-      text.draw(label, std::round(rect.x + (rect.w - static_cast<float>(labelW)) / 2.0f),
-                textTop(rect, text, bodyStyle), isConfirm ? theme().onAccent : theme().textPrimary, bodyStyle);
+      drawButton(renderer, text, rect, isConfirm ? overlay->confirmLabel : std::string("Cancel"),
+                 true, hot, isConfirm ? ButtonTone::Destructive : ButtonTone::Neutral);
       continue;
     }
 
@@ -426,18 +433,24 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     } else if(contains(rect, mouseX_, mouseY_) && item.enabled) {
       fill(renderer, rect, theme().rowHighlight);
     }
-    const SDL_Color label = !item.enabled ? theme().textMuted : (item.destructive ? theme().warn : theme().textPrimary);
+    const SDL_Color label = !item.enabled ? theme().textDisabled
+                          : item.destructive ? theme().warn
+                          : selected ? theme().textPrimary
+                                     : theme().textSecondary;
     const float labelY = textTop(rect, text, bodyStyle);
-    const float labelX = rect.x + kRowPadX;
-    int available = static_cast<int>(rect.w - kRowPadX * 2.0f);
+    // The label starts where a menu row's does, so a palette row and a menu row
+    // for the same command put their text in the same column.
+    const float labelX = rect.x + kMenuPopupLabelInset;
+    int available = static_cast<int>(rect.w - kMenuPopupLabelInset - kMenuPopupAcceleratorInset);
     // Both trailing pieces are laid out right to left against a running edge:
     // a fixed gap between them only works while the shortcut is short, and a
     // deletion timestamp is not.
-    float right = rect.x + rect.w - kRowPadX;
+    float right = rect.x + rect.w - kMenuPopupAcceleratorInset;
     const float hintY = textTop(rect, text, hintStyle);
     if(!item.shortcut.empty()) {
       const int shortcutW = text.width(item.shortcut, hintStyle);
-      text.draw(item.shortcut, right - static_cast<float>(shortcutW), hintY, theme().textMuted, hintStyle);
+      text.draw(item.shortcut, right - static_cast<float>(shortcutW), hintY,
+                item.enabled ? theme().textMuted : theme().textDisabled, hintStyle);
       right -= static_cast<float>(shortcutW) + kRowGap;
       available -= shortcutW + static_cast<int>(kRowGap);
     }
