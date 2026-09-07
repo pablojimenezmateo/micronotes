@@ -468,6 +468,42 @@ the icon rail and the self-drawn title bar became the menu bar and the
 breadcrumb band. Read the old rows as the cost of the chrome that was there,
 not as a budget anything still enforces.
 
+### The shell overhaul cost, measured
+
+The overhaul was a visual change rather than a performance one, but it added a
+surface -- a menu bar that lays itself out on every frame -- so it was measured
+rather than assumed. Interleaved headless sessions, before and after, twice
+each on the same library and window (`1600x1000`, sidebar and right panel open,
+live pane):
+
+| | p50 | p95 |
+| --- | --- | --- |
+| before | 0.34 ms, 0.28 ms | 0.37 ms, 0.37 ms |
+| after | 0.29 ms, 0.32 ms | 0.32 ms, 0.79 ms |
+
+Inside the run-to-run spread either way, which is what the interleaving is for.
+`frame.draw_micros` is *not* comparable across these runs and is the reason to
+read the percentiles instead: it is dominated by the first frame's window map
+and glyph-cache warm, and it moved 514k -> 233k -> 85k -> 51k across the four in
+run order, which is a cache warming up rather than anything either build did.
+
+The counters are the attributable part, and they are identical either side
+except for three rows and the two new ones:
+
+```
+render.text_cache_queries    9180 -> 9480   (+5 per frame)
+render.text_measure_calls    5399 -> 5945   (+9 per frame)
+render.text_rasterizations    106 ->  113   (+7, once)
+menu.bar_layouts                     60     (one per frame)
+menu.bar_label_measures               6     (once, for six menus)
+```
+
+So the whole bar is five cached text draws and nine cached measures a frame,
+plus seven rasterizations it pays once. `menu.bar_label_measures` staying at six
+across sixty frames is the thing to watch: the labels are static and the table
+is fixed, so a count that tracks `bar_layouts` means the memo's probe stopped
+discriminating and every pointer motion is re-shaping six strings for nothing.
+
 ### Resolved: the sidebar rebuilt the library on every frame
 
 `shell.sidebar` was 0.68 ms of a 0.99 ms frame -- most of a frame, to draw the
