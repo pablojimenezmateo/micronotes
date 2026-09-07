@@ -166,6 +166,51 @@ MICRONOTES_TEST(edits_continue_lists_on_enter) {
   MICRONOTES_REQUIRE(!micronotes::doc::continueList("plain\n", 5).valid);
 }
 
+MICRONOTES_TEST(edits_continue_a_list_with_the_marker_it_was_written_with) {
+  // Markdown has three bullet characters and two ordered delimiters, and the
+  // one on screen is the one the author chose. Continuing `* a` with `- ` also
+  // *ends* the list as far as the file is concerned -- a different bullet
+  // character starts a new list -- so this was a correctness bug, not a
+  // cosmetic one.
+  const std::string star = "* one\n";
+  MICRONOTES_REQUIRE(applied(star, micronotes::doc::continueList(star, 5)) == "* one\n* \n");
+
+  const std::string plus = "+ one\n";
+  MICRONOTES_REQUIRE(applied(plus, micronotes::doc::continueList(plus, 5)) == "+ one\n+ \n");
+
+  const std::string paren = "1) one\n";
+  MICRONOTES_REQUIRE(applied(paren, micronotes::doc::continueList(paren, 6)) == "1) one\n2) \n");
+
+  const std::string task = "* [x] one\n";
+  MICRONOTES_REQUIRE(applied(task, micronotes::doc::continueList(task, 9)) == "* [x] one\n* [ ] \n");
+
+  // And a nested item, where the indentation is written by the same call.
+  const std::string nested = "* one\n  * two\n";
+  MICRONOTES_REQUIRE(applied(nested, micronotes::doc::continueList(nested, 13)) ==
+                     "* one\n  * two\n  * \n");
+}
+
+MICRONOTES_TEST(edits_keep_the_bullet_character_across_a_list_kind_change) {
+  using micronotes::doc::BlockKind;
+  const std::string star = "* one\n";
+  MICRONOTES_REQUIRE(applied(star, micronotes::doc::turnInto(star, 2, BlockKind::Todo, 0)) ==
+                     "* [ ] one\n");
+
+  // Ordered and unordered share no punctuation, so each falls back to its own
+  // default rather than carrying the other's over.
+  const std::string paren = "1) one\n";
+  MICRONOTES_REQUIRE(applied(paren, micronotes::doc::turnInto(paren, 3, BlockKind::Bullet, 0)) ==
+                     "- one\n");
+  const std::string plus = "+ one\n";
+  MICRONOTES_REQUIRE(applied(plus, micronotes::doc::turnInto(plus, 2, BlockKind::Ordered, 0)) ==
+                     "1. one\n");
+
+  // A paragraph has no marker of its own to keep.
+  const std::string plain = "one\n";
+  MICRONOTES_REQUIRE(applied(plain, micronotes::doc::turnInto(plain, 1, BlockKind::Bullet, 0)) ==
+                     "- one\n");
+}
+
 MICRONOTES_TEST(edits_leave_the_list_on_an_empty_item) {
   // The blank line is the point: "- one\ntext" is a lazy continuation, so
   // dropping the marker alone would leave what is typed next inside the item.

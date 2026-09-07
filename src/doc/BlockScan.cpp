@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
+#include <charconv>
 
 namespace micronotes::doc {
 namespace {
@@ -91,6 +91,7 @@ struct Marker {
   bool matched = false;
   std::size_t contentStart = 0;  // absolute
   int ordinal = 0;
+  char punctuation = 0;  // the bullet char, or the ordered item's `.` / `)`
   bool ordered = false;
   bool todo = false;
   bool checked = false;
@@ -102,14 +103,20 @@ Marker matchListMarker(std::string_view source, const Line& line, std::size_t bo
   std::string_view body = source.substr(bodyStart, line.end - bodyStart);
   std::size_t used = 0;
   if(!body.empty() && (body[0] == '-' || body[0] == '*' || body[0] == '+')) {
+    marker.punctuation = body[0];
     used = 1;
   } else {
     std::size_t digits = 0;
     while(digits < body.size() && digits < 9 && std::isdigit(static_cast<unsigned char>(body[digits]))) ++digits;
     if(digits == 0 || digits >= body.size()) return marker;
     if(body[digits] != '.' && body[digits] != ')') return marker;
+    marker.punctuation = body[digits];
     marker.ordered = true;
-    marker.ordinal = std::atoi(std::string(body.substr(0, digits)).c_str());
+    // `from_chars` rather than `atoi`: the digits are already in front of us,
+    // and `atoi` wants a NUL-terminated string, which meant one `std::string`
+    // allocation per ordered item on a scan that runs on every keystroke. At
+    // most nine digits, so it cannot overflow the `int` and cannot fail.
+    std::from_chars(body.data(), body.data() + digits, marker.ordinal);
     used = digits + 1;
   }
   // A marker must be followed by a space, or stand alone as an empty item.
@@ -362,7 +369,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
 
     if(const Marker& marker = leadingMarker; marker.matched) {
       block.kind = marker.todo ? BlockKind::Todo : (marker.ordered ? BlockKind::Ordered : BlockKind::Bullet);
-      block.ordered = marker.ordered;
+      block.listMarker = marker.punctuation;
       block.ordinal = marker.ordinal;
       block.checked = marker.checked;
       payloadStart = std::min(marker.contentStart, line.end);

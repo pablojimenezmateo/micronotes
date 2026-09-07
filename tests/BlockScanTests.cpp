@@ -177,7 +177,7 @@ MICRONOTES_TEST(blockscan_resuming_at_every_boundary_matches_a_full_scan) {
     return a.kind == b.kind && a.start == b.start && a.end() == b.end() &&
            a.contentStart() == b.contentStart() && a.contentEnd() == b.contentEnd() &&
            a.level == b.level && a.listDepth == b.listDepth && a.ordinal == b.ordinal &&
-           a.ordered == b.ordered && a.checked == b.checked && a.info(text) == b.info(text);
+           a.listMarker == b.listMarker && a.checked == b.checked && a.info(text) == b.info(text);
   };
 
   for(const std::string& source :

@@ -69,7 +69,13 @@ struct SourceBlock {
   std::int16_t listDepth = 0;  // nesting level derived from leading indentation
   std::uint8_t level = 0;      // heading level, 1-6
   BlockKind kind = BlockKind::Paragraph;
-  bool ordered = false;
+  // The punctuation a list item was written with: `-`, `*` or `+` for a bullet
+  // or a to-do, `.` or `)` for an ordered item, zero for everything else. It is
+  // what lets a continuation keep the marker the author chose instead of
+  // imposing one -- pressing Return under `* a` owes them `* `, not `- `. It
+  // sits in what was `bool ordered`, which said nothing `kind == Ordered` did
+  // not already say, so the struct is the same 40 bytes it was.
+  char listMarker = 0;
   bool checked = false;
 
   std::size_t end() const {

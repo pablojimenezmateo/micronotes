@@ -115,6 +115,10 @@ Edit outdentOrUnwrap(std::string_view source, std::size_t caret, BlockSpan block
 Edit applyMarkdownShortcut(std::string_view source, std::size_t caret, BlockSpan blocks = {});
 
 // The marker text a block of this shape is written with, indentation included.
-std::string blockMarker(BlockKind kind, int level, int listDepth, int ordinal, bool checked);
+// `listMarker` is the punctuation a list item carries -- `SourceBlock::listMarker`
+// -- so a marker written next to an existing item can match it; zero asks for
+// this app's own default, `-` for a bullet and `.` for an ordered item.
+std::string blockMarker(BlockKind kind, int level, int listDepth, int ordinal, bool checked,
+                        char listMarker = 0);
 
 }

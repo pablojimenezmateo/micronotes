@@ -170,17 +170,24 @@ Range rangeAt(std::string_view source, std::size_t from, std::size_t to, BlockSp
 
 }
 
-std::string blockMarker(BlockKind kind, int level, int listDepth, int ordinal, bool checked) {
+std::string blockMarker(BlockKind kind, int level, int listDepth, int ordinal, bool checked,
+                        char listMarker) {
   const std::string pad(static_cast<std::size_t>(std::max(0, listDepth)) * 2, ' ');
+  // A marker inherited from a neighbouring item is trusted only if it is one of
+  // the shapes the scanner recognises for that kind; anything else -- a zero, or
+  // an ordered item's `)` asked of a bullet -- falls back to the default.
+  const auto punctuation = [listMarker](std::string_view allowed, char fallback) {
+    return allowed.find(listMarker) == std::string_view::npos ? fallback : listMarker;
+  };
   switch(kind) {
     case BlockKind::Heading:
       return std::string(static_cast<std::size_t>(std::clamp(level, 1, 6)), '#') + " ";
     case BlockKind::Bullet:
-      return pad + "- ";
+      return pad + punctuation("-*+", '-') + " ";
     case BlockKind::Todo:
-      return pad + (checked ? "- [x] " : "- [ ] ");
+      return pad + punctuation("-*+", '-') + (checked ? " [x] " : " [ ] ");
     case BlockKind::Ordered:
-      return pad + std::to_string(ordinal > 0 ? ordinal : 1) + ". ";
+      return pad + std::to_string(ordinal > 0 ? ordinal : 1) + punctuation(".)", '.') + " ";
     case BlockKind::Quote:
       return "> ";
     case BlockKind::Callout: {
@@ -206,7 +213,8 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
   if(block.kind == kind && kind != BlockKind::Heading && kind != BlockKind::Callout) return edit;
   if(block.kind == kind &&
      source.substr(block.start, block.contentStart() - block.start) ==
-         blockMarker(kind, level, block.listDepth, block.ordinal, block.checked)) {
+         blockMarker(kind, level, block.listDepth, block.ordinal, block.checked,
+                     block.listMarker)) {
     return edit;
   }
 
@@ -236,10 +244,16 @@ Edit turnInto(std::string_view source, std::size_t caret, BlockKind kind, int le
     return edit;
   }
 
-  const int depth = isListKind(kind) && isListKind(block.kind) ? block.listDepth : 0;
+  const bool fromList = isListKind(kind) && isListKind(block.kind);
+  const int depth = fromList ? block.listDepth : 0;
   const int ordinal = kind == BlockKind::Ordered ? block.ordinal : 0;
   const bool checked = kind == BlockKind::Todo && block.kind == BlockKind::Todo && block.checked;
-  const std::string marker = blockMarker(kind, level, depth, ordinal, checked);
+  // One list kind turning into another keeps the punctuation the author typed,
+  // so a `* ` list turned into to-dos comes back as `* [ ] ` rather than losing
+  // the bullet it was written with. Ordered and unordered do not share a
+  // punctuation, and `blockMarker` drops one that does not fit the kind.
+  const std::string marker =
+      blockMarker(kind, level, depth, ordinal, checked, fromList ? block.listMarker : 0);
 
   edit.valid = true;
   if(block.kind == BlockKind::Code) {
@@ -647,7 +661,8 @@ Edit continueList(std::string_view source, std::size_t caret, BlockSpan blocks) 
   edit.valid = true;
   edit.start = caret;
   edit.end = caret;
-  edit.text = "\n" + (list ? blockMarker(block.kind, 0, block.listDepth, block.ordinal + 1, false)
+  edit.text = "\n" + (list ? blockMarker(block.kind, 0, block.listDepth, block.ordinal + 1, false,
+                                        block.listMarker)
                            : std::string("> "));
   edit.cursor = caret + edit.text.size();
   return edit;
@@ -717,7 +732,7 @@ Edit applyMarkdownShortcut(std::string_view source, std::size_t caret, BlockSpan
   // task marker. Every other Markdown shortcut is already what the user typed.
   std::string replacement;
   if(block.kind == BlockKind::Bullet) replacement = checked ? "[x] " : "[ ] ";
-  else if(block.kind == BlockKind::Paragraph) replacement = checked ? "- [x] " : "- [ ] ";
+  else if(block.kind == BlockKind::Paragraph) replacement = blockMarker(BlockKind::Todo, 0, 0, 0, checked);
   else return edit;
 
   edit.valid = true;
