@@ -121,4 +121,27 @@ std::pair<std::size_t, std::size_t> sidebarRowRange(const std::vector<SidebarRow
 // The row under the pointer, or nothing when the pointer is off the list.
 std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, ui::Rect sidebar, float x, float y);
 
+// How a sidebar row was reached. It decides two things that move together, and
+// which used to be two separate booleans passed side by side:
+//
+//   * a notebook opens when you *click* it, and only becomes the selection when
+//     you arrow onto it -- holding Down would otherwise unfold the whole
+//     library on the way past;
+//   * a note gets a tab of its own when you click it, and takes over the tab
+//     showing when you arrow onto it -- holding Down would otherwise open a
+//     tab per note in the library.
+//
+// Both distinctions are the same distinction: did the reader ask for this note,
+// or are they passing over it. One parameter says so; two booleans invited a
+// call site to get one right and the other wrong.
+enum class RowActivation { Click, Cursor };
+
+// The one place a sidebar row turns into a selection, so a click, an arrow key
+// and a drop can never disagree about what selecting a row means.
+//
+// Here rather than in Application.cpp, where it was `static` and therefore
+// untestable, because it is the sidebar's model half: it reads a row and moves
+// the selection, and touches no renderer.
+void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how);
+
 }

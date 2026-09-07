@@ -46,7 +46,7 @@ std::size_t WorkspaceModel::findTab(std::string_view noteId) const {
   return std::string::npos;
 }
 
-void WorkspaceModel::openNote(const std::string& noteId, bool inNewTab) {
+void WorkspaceModel::openNote(const std::string& noteId, TabPolicy policy) {
   if(noteId.empty()) return;
   // Already open: go to it. Opening a second tab on the same note is never what
   // was meant by clicking its name.
@@ -60,13 +60,35 @@ void WorkspaceModel::openNote(const std::string& noteId, bool inNewTab) {
   // works in the reading view stays in it.
   tab.paneMode = paneMode();
   auto* active = activeTab_();
-  if(!inNewTab && active && !active->pinned) {
+  if(policy == TabPolicy::Reuse && active && !active->pinned) {
     *active = tab;
     return;
   }
   tabs.insert(tabs.begin() + static_cast<std::ptrdiff_t>(std::min(activeTab + 1, tabs.size())), tab);
   activeTab = std::min(activeTab + 1, tabs.size() - 1);
   if(tabs.size() == 1) activeTab = 0;
+  trimTabs();
+}
+
+// Brings the strip back inside `kMaxTabs`, oldest first.
+//
+// Pinned tabs and the tab showing are never taken: between them they are every
+// tab the reader has said something about. If they are the only ones left the
+// strip stays over the ceiling rather than closing something somebody asked to
+// keep -- a ceiling that overrides a pin is a ceiling that loses work.
+void WorkspaceModel::trimTabs() {
+  while(tabs.size() > kMaxTabs) {
+    std::size_t victim = tabs.size();
+    for(std::size_t i = 0; i < tabs.size(); ++i) {
+      if(i == activeTab || tabs[i].pinned) continue;
+      victim = i;
+      break;
+    }
+    if(victim == tabs.size()) return;
+    tabs.erase(tabs.begin() + static_cast<std::ptrdiff_t>(victim));
+    if(victim < activeTab) --activeTab;
+    if(activeTab >= tabs.size()) activeTab = tabs.size() - 1;
+  }
 }
 
 void WorkspaceModel::renameNote(std::string_view from, const std::string& to) {

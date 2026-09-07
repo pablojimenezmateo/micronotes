@@ -84,9 +84,10 @@ public:
 
   void selectFolder(std::filesystem::path folder);
   void selectTag(std::string tag);
-  // Opening a note is opening a tab on it. `inNewTab` keeps whatever was open
-  // instead of replacing it, which is what a middle click or Ctrl+click means.
-  void selectNote(std::string noteId, bool inNewTab = false);
+  // Opening a note is opening a tab on it, and the note being read stays open.
+  // `TabPolicy::Reuse` takes over the tab showing instead, which only the
+  // keyboard cursor walking the sidebar wants; see `ui::TabPolicy`.
+  void selectNote(std::string noteId, ui::TabPolicy policy = ui::TabPolicy::NewTab);
   // Closes a tab and selects whatever is left showing.
   void closeTab(std::size_t index);
   // Moves to the next or previous tab, wrapping.
@@ -123,7 +124,14 @@ public:
   // take this: `findNote` copies a path and three strings out of a list the
   // caller already holds a reference to.
   const library::NoteListItem* noteById(std::string_view noteId) const;
-  std::optional<library::NoteListItem> createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body = "");
+  // A note created here opens in a tab of its own like any other, which is what
+  // hardcoding the old `false` got wrong: following a dead `[[wikilink]]`
+  // created the note and then replaced the note that linked to it, losing the
+  // context the link was followed from.
+  std::optional<library::NoteListItem> createNote(const std::string& title,
+                                                  const std::filesystem::path& folder,
+                                                  std::string_view body = "",
+                                                  ui::TabPolicy policy = ui::TabPolicy::NewTab);
   // Writes `body` to the open note.
   //
   // Refuses to destroy an external change: when the file no longer matches what

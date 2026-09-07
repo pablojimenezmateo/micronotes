@@ -78,9 +78,9 @@ void showFolder(UiRuntime& ui, const std::filesystem::path& folder) {
   ui.tree.reveal(folder);
 }
 
-void selectNoteById(UiRuntime& ui, const std::string& noteId) {
+void selectNoteById(UiRuntime& ui, const std::string& noteId, ui::TabPolicy policy) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-  ui.state.selectNote(noteId);
+  ui.state.selectNote(noteId, policy);
   loadSelectedBuffer(ui, /*resetView=*/true);
 }
 

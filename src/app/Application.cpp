@@ -753,36 +753,6 @@ static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
           std::abs(x - layout.rightPanel.x) <= ui::kResizeGutterInflate + 1.0f);
 }
 
-// One place where a sidebar row turns into a selection, so a click, an arrow
-// key and a drop can never disagree about what selecting a row means.
-static void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, bool expandFolder) {
-  if(row.kind == SidebarRow::Kind::SearchResult) {
-    selectNoteById(ui, row.noteId);
-    return;
-  }
-  if(row.kind == SidebarRow::Kind::Tag) {
-    selectTag(ui, row.tag);
-    return;
-  }
-  if(row.kind != SidebarRow::Kind::Tree) return;
-  if(row.tree.kind == ui::TreeRowKind::Note) {
-    selectNoteById(ui, row.tree.noteId);
-    // Opening a note moves the context to its folder *and* opens the tree onto
-    // it, so the breadcrumb and the sidebar agree about where the note is. A
-    // search owns the row list while it is running, so it is left alone.
-    if(ui.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
-      showFolder(ui, row.tree.folder);
-    }
-    return;
-  }
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-  ui.state.selectFolder(row.tree.folder);
-  // Clicking a notebook opens it; arrowing onto one only selects it, or holding
-  // Down would unfold the whole library on the way past. Not `showFolder`: a
-  // row you can click is a row whose ancestors are already open.
-  if(expandFolder) ui.tree.setExpanded(row.tree.folder, true);
-  selectNoteAt(ui, 0);
-}
 
 // Scrolls the cursor row into view using last frame's geometry, which is all
 // that is needed to know whether it is off an edge and by how much.
@@ -807,7 +777,9 @@ static void moveTreeCursor(UiRuntime& ui, int delta) {
   if(index < 0 || index >= static_cast<int>(ui.sidebarRows.size())) return;
   ui.folderCursor = index;
   revealSidebarRow(ui, static_cast<std::size_t>(index));
-  activateSidebarRow(ui, ui.sidebarRows[static_cast<std::size_t>(index)], false);
+  // Cursor, not Click: arrowing through the tree shows each note it passes
+  // over, and must neither unfold the library nor open a tab per note.
+  activateSidebarRow(ui, ui.sidebarRows[static_cast<std::size_t>(index)], RowActivation::Cursor);
 }
 
 // Right opens a folder, or steps into it when it is already open; Left closes
@@ -1476,7 +1448,7 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     performCommand(ui, result.itemId);
   } else if(result.overlayId == "jump-note-new") {
     if(saveCurrent(ui, true)) {
-      ui.state.selectNote(result.itemId, true);
+      ui.state.selectNote(result.itemId);
       loadSelectedIntoEditor(ui);
     }
   } else if(result.overlayId == "jump-note") {
@@ -1946,12 +1918,19 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
   // The right panel owns everything inside it, including its own background:
   // without that, a click between two outline rows would fall through to the
   // page and move the caret somewhere the reader never pointed at.
-  if(button == SDL_BUTTON_LEFT && !ui::empty(layout.rightPanel) &&
+  if((button == SDL_BUTTON_LEFT || button == SDL_BUTTON_MIDDLE) && !ui::empty(layout.rightPanel) &&
      handleRightPanelClick(ui, text, layout.rightPanel, x, y)) {
     return;
   }
 
-  if(button == SDL_BUTTON_MIDDLE) {
+  // A middle click pastes the primary selection into anything that takes text,
+  // which is the X11 convention this app deliberately follows. A sidebar row
+  // and a link take none -- and the block below returned for *every* middle
+  // click, so one on a note either did nothing or pasted into whatever field
+  // still had focus, and could not mean "open in a new tab" anywhere.
+  const bool middleOpensATab = button == SDL_BUTTON_MIDDLE &&
+    (contains(sidebarListRect(layout.sidebar), x, y) || pointOnLink(ui, x, y));
+  if(button == SDL_BUTTON_MIDDLE && !middleOpensATab) {
     if(contains(searchBoxRect(layout.sidebar), x, y)) {
       ui.focus = FocusArea::Search;
       // Middle-click pastes at the point pressed, like every other X11 text
@@ -2097,7 +2076,7 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
       ui.tree.toggle(row.tree.folder);
       return;
     }
-    activateSidebarRow(ui, row, true);
+    activateSidebarRow(ui, row, RowActivation::Click);
     if(button == SDL_BUTTON_RIGHT) {
       if(row.kind == SidebarRow::Kind::SearchResult) openNoteMenu(ui, x, y);
       else if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::Note) openNoteMenu(ui, x, y);
@@ -2371,19 +2350,19 @@ int run(ApplicationOptions options) {
     }
   }
   if(!options.selectTitle.empty()) {
-    // Comma-separated: each title after the first opens in a tab of its own, so
-    // a capture can show a strip without having to know any note's id.
+    // Comma-separated: each title opens in a tab of its own, so a capture can
+    // show a strip without having to know any note's id. It no longer has to
+    // ask for that -- opening a note is opening a tab now -- so the `first`
+    // flag this used to keep is gone.
     std::string_view rest = options.selectTitle;
-    bool first = true;
     while(!rest.empty()) {
       const auto comma = rest.find(',');
       const auto title = rest.substr(0, comma);
       for(const auto& note : ui.state.allNotes()) {
         if(note.title.find(title) == std::string::npos) continue;
-        ui.state.selectNote(note.id, !first);
+        ui.state.selectNote(note.id);
         showFolder(ui, note.folder);
         loadSelectedIntoEditor(ui);
-        first = false;
         break;
       }
       if(comma == std::string_view::npos) break;

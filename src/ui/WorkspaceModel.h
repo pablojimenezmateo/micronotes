@@ -70,11 +70,16 @@ struct WorkspaceModel {
   // The tab showing `noteId`, or npos.
   std::size_t findTab(std::string_view noteId) const;
 
-  // Opens a note. Without `inNewTab` it replaces the active tab -- which is
-  // what a single click in the sidebar means -- unless that tab is pinned, in
-  // which case a new one is opened rather than the pin being ignored. A note
-  // that is already open is switched to rather than opened twice.
-  void openNote(const std::string& noteId, bool inNewTab);
+  // Opens a note in a tab of its own, beside the one showing. A note that is
+  // already open is switched to rather than opened twice -- clicking a name is
+  // never a request for a duplicate.
+  //
+  // `TabPolicy::Reuse` takes over the tab showing instead, unless it is pinned.
+  // Exactly one caller wants it: walking the keyboard cursor through the
+  // sidebar, which opens each note it passes over. See `TabPolicy`.
+  //
+  // At `kMaxTabs` the leftmost tab that is neither pinned nor active gives way.
+  void openNote(const std::string& noteId, TabPolicy policy = TabPolicy::NewTab);
 
   // Re-points every tab showing `from` at `to`. A note's id changes exactly
   // once in its life: the first time micronotes saves a file that arrived
@@ -91,6 +96,10 @@ struct WorkspaceModel {
   // Moves `delta` tabs along, wrapping. Doing nothing when fewer than two are
   // open keeps the shortcut from looking broken.
   void stepTab(int delta);
+
+  // Brings the strip back inside `kMaxTabs`. Called by `openNote`; exposed so a
+  // test can drive the ceiling without guessing how many opens reach it.
+  void trimTabs();
 
   // The window is the only thing the model does not already know.
   ShellLayoutInputs layoutInputs(float windowWidth, float windowHeight, LayoutMode previousMode) const;

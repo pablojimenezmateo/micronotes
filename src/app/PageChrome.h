@@ -33,6 +33,13 @@ std::optional<std::string> codeUnderCopyButton(const PageView& page, std::string
 // `[[wikilink]]` opens (or creates) a note, a bare `#anchor` scrolls the page
 // showing this one, a URL goes to the desktop, and anything else is a file in
 // the library opened with whatever the desktop uses for it.
+// Whether there is a link under the pointer at all, without following it.
+//
+// The middle-click handler needs to know before it decides what the click
+// meant: on a link it is "open in a new tab", and on text it is an X11
+// primary-selection paste.
+bool pointOnLink(const UiRuntime& ui, float x, float y);
+
 bool followLinkAt(UiRuntime& ui, float x, float y);
 
 }

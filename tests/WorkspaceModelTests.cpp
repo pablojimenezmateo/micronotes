@@ -95,25 +95,32 @@ WorkspaceModel withTabs(std::initializer_list<const char*> ids) {
 
 }
 
-// A single click in the sidebar reuses the tab you are in. That is what stops
-// an afternoon of reading from leaving thirty tabs behind.
-MICRONOTES_TEST(workspace_opening_a_note_replaces_the_active_tab) {
+// Opening a note gives it a tab of its own, and the note you were reading stays
+// open beside it.
+MICRONOTES_TEST(workspace_opening_a_note_opens_a_tab_on_it) {
   WorkspaceModel workspace;
-  workspace.openNote("a", false);
+  workspace.openNote("a");
   MICRONOTES_REQUIRE(workspace.tabs.size() == 1);
-  workspace.openNote("b", false);
-  MICRONOTES_REQUIRE(workspace.tabs.size() == 1);
-  MICRONOTES_REQUIRE(workspace.tabs[0].noteId == "b");
-}
-
-MICRONOTES_TEST(workspace_opening_in_a_new_tab_keeps_the_old_one) {
-  WorkspaceModel workspace;
-  workspace.openNote("a", false);
-  workspace.openNote("b", true);
+  workspace.openNote("b");
   MICRONOTES_REQUIRE(workspace.tabs.size() == 2);
   MICRONOTES_REQUIRE(workspace.tabs[0].noteId == "a");
   MICRONOTES_REQUIRE(workspace.tabs[1].noteId == "b");
+  // Beside the one it came from rather than at the end, so a strip stays in the
+  // order the reader built it.
   MICRONOTES_REQUIRE(workspace.activeTab == 1);
+}
+
+// The one exception, and the reason it exists: the keyboard cursor walking the
+// sidebar opens every note it passes over, so arrowing through a library would
+// otherwise be one tab per note in it.
+MICRONOTES_TEST(workspace_a_cursor_move_takes_over_the_tab_showing) {
+  WorkspaceModel workspace;
+  workspace.openNote("a");
+  for(const char* id : {"b", "c", "d", "e"}) {
+    workspace.openNote(id, micronotes::ui::TabPolicy::Reuse);
+  }
+  MICRONOTES_REQUIRE(workspace.tabs.size() == 1);
+  MICRONOTES_REQUIRE(workspace.tabs[0].noteId == "e");
 }
 
 // Clicking a note that is already open is a request to go to it, never to open
@@ -121,25 +128,68 @@ MICRONOTES_TEST(workspace_opening_in_a_new_tab_keeps_the_old_one) {
 MICRONOTES_TEST(workspace_opening_a_note_that_is_open_goes_to_it) {
   auto workspace = withTabs({"a", "b", "c"});
   workspace.activeTab = 2;
-  workspace.openNote("a", false);
+  workspace.openNote("a");
   MICRONOTES_REQUIRE(workspace.tabs.size() == 3);
   MICRONOTES_REQUIRE(workspace.activeTab == 0);
-  // Even when a new tab was asked for.
-  workspace.openNote("b", true);
+  // And a cursor move onto an open note goes to it rather than taking over the
+  // tab showing, which would leave the note listed twice.
+  workspace.openNote("b", micronotes::ui::TabPolicy::Reuse);
   MICRONOTES_REQUIRE(workspace.tabs.size() == 3);
   MICRONOTES_REQUIRE(workspace.activeTab == 1);
 }
 
 // A pin is a promise that this tab stays; honouring it means opening a new one
-// rather than quietly ignoring the pin.
+// rather than quietly ignoring the pin. That holds for the cursor too, which is
+// the only thing that takes a tab over.
 MICRONOTES_TEST(workspace_a_pinned_tab_is_never_replaced) {
   WorkspaceModel workspace;
-  workspace.openNote("a", false);
+  workspace.openNote("a");
   workspace.tabs[0].pinned = true;
-  workspace.openNote("b", false);
+  workspace.openNote("b", micronotes::ui::TabPolicy::Reuse);
   MICRONOTES_REQUIRE(workspace.tabs.size() == 2);
   MICRONOTES_REQUIRE(workspace.tabs[0].noteId == "a");
   MICRONOTES_REQUIRE(workspace.tabs[1].noteId == "b");
+}
+
+// Every note in its own tab means the strip grows as you read, so it has to
+// stop somewhere. The ceiling takes the oldest tab that nobody has said
+// anything about -- never a pinned one, never the one on screen.
+MICRONOTES_TEST(workspace_the_strip_stops_growing_at_the_ceiling) {
+  WorkspaceModel workspace;
+  for(std::size_t i = 0; i < micronotes::ui::kMaxTabs + 10; ++i) {
+    workspace.openNote("n" + std::to_string(i));
+  }
+  MICRONOTES_REQUIRE(workspace.tabs.size() == micronotes::ui::kMaxTabs);
+  // The newest survived and is showing; the oldest are the ones that went.
+  MICRONOTES_REQUIRE(workspace.tabs.back().noteId == "n" + std::to_string(micronotes::ui::kMaxTabs + 9));
+  MICRONOTES_REQUIRE(workspace.activeTab == workspace.tabs.size() - 1);
+  MICRONOTES_REQUIRE(workspace.findTab("n0") == std::string::npos);
+}
+
+// A pin survives the ceiling, which is what makes pinning the way to keep a
+// tab through an afternoon of reading.
+MICRONOTES_TEST(workspace_the_ceiling_never_takes_a_pinned_tab) {
+  WorkspaceModel workspace;
+  workspace.openNote("keep");
+  workspace.tabs[0].pinned = true;
+  for(std::size_t i = 0; i < micronotes::ui::kMaxTabs + 10; ++i) {
+    workspace.openNote("n" + std::to_string(i));
+  }
+  MICRONOTES_REQUIRE(workspace.tabs.size() == micronotes::ui::kMaxTabs);
+  MICRONOTES_REQUIRE(workspace.findTab("keep") != std::string::npos);
+  MICRONOTES_REQUIRE(workspace.tabs[workspace.findTab("keep")].pinned);
+}
+
+// And a strip of nothing but pins does not get emptied to satisfy the ceiling:
+// a ceiling that overrides a pin is a ceiling that loses what was kept.
+MICRONOTES_TEST(workspace_a_strip_of_pins_stays_over_the_ceiling) {
+  WorkspaceModel workspace;
+  for(std::size_t i = 0; i < micronotes::ui::kMaxTabs + 5; ++i) {
+    workspace.openNote("p" + std::to_string(i));
+    workspace.tabs[workspace.activeTab].pinned = true;
+  }
+  MICRONOTES_REQUIRE(workspace.tabs.size() == micronotes::ui::kMaxTabs + 5);
+  for(const auto& tab : workspace.tabs) MICRONOTES_REQUIRE(tab.pinned);
 }
 
 // Closing to the left of what you are reading must not change what you are
@@ -209,8 +259,8 @@ MICRONOTES_TEST(workspace_pane_mode_belongs_to_the_tab) {
 // A new tab inherits how you were reading the last one.
 MICRONOTES_TEST(workspace_a_new_tab_inherits_the_pane_mode) {
   WorkspaceModel workspace;
-  workspace.openNote("a", false);
+  workspace.openNote("a");
   workspace.setPaneMode(micronotes::ui::PaneMode::Viewer);
-  workspace.openNote("b", true);
+  workspace.openNote("b");
   MICRONOTES_REQUIRE(workspace.paneMode() == micronotes::ui::PaneMode::Viewer);
 }

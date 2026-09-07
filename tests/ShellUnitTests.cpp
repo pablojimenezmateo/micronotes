@@ -2,6 +2,7 @@
 
 #include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
+#include "app/PageChrome.h"
 #include "app/PageView.h"
 #include "app/RightPanel.h"
 #include "app/Shell.h"
@@ -11,6 +12,7 @@
 #include "app/SidebarModel.h"
 #include "app/Notes.h"
 #include "app/SessionState.h"
+#include "app/WikiLinks.h"
 #include "ui/Draw.h"
 
 #include <chrono>
@@ -549,4 +551,161 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
   MICRONOTES_REQUIRE(folderRow);
   MICRONOTES_REQUIRE(noteUnderIt);
   std::filesystem::remove_all(root);
+}
+
+// Nothing in the app could open a note in a second tab.
+//
+// `WorkspaceModel::openNote` took an `inNewTab` flag and honoured it, and its
+// own unit test passed -- but exactly one caller in the whole app ever passed
+// `true`, the Ctrl+Shift+T palette. Every other route to a note (the sidebar
+// tree, RECENT, FAVORITES, a search hit, a backlink, a wiki link) went through
+// `selectNoteById`, which had no such parameter, so every one of them replaced
+// the note being read.
+//
+// So the model was right, the model's test was right, and the behaviour was
+// missing anyway: **a flag nothing sets is a feature nothing has.**
+MICRONOTES_TEST(shell_opening_a_note_opens_a_tab_on_it) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-newtab";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  for(const char* name : {"Alpha", "Beta", "Gamma"}) {
+    std::ofstream note(root / (std::string(name) + ".md"));
+    note << "---\nid: nt-" << name << "\ntitle: " << name << "\n---\n\nBody.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  const auto& tabs = ui.state.workspace().tabs;
+
+  micronotes::app::selectNoteById(ui, "nt-Alpha");
+  MICRONOTES_REQUIRE(tabs.size() == 1);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "nt-Alpha");
+
+  // Each note gets its own tab, and what was open stays open.
+  micronotes::app::selectNoteById(ui, "nt-Beta");
+  MICRONOTES_REQUIRE(tabs.size() == 2);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "nt-Beta");
+  MICRONOTES_REQUIRE(ui.state.workspace().findTab("nt-Alpha") != std::string::npos);
+
+  micronotes::app::selectNoteById(ui, "nt-Gamma");
+  MICRONOTES_REQUIRE(tabs.size() == 3);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "nt-Gamma");
+  // Beside the one it came from, not at the end of the strip.
+  MICRONOTES_REQUIRE(ui.state.workspace().activeTab == 2);
+
+  // A note already open is gone to rather than opened twice -- clicking a name
+  // is never a request for a duplicate tab.
+  micronotes::app::selectNoteById(ui, "nt-Beta");
+  MICRONOTES_REQUIRE(tabs.size() == 3);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "nt-Beta");
+
+  // The cursor's policy is the exception, and it is what keeps arrowing through
+  // the sidebar from opening a tab per note in the library.
+  micronotes::app::selectNoteById(ui, "nt-Alpha", micronotes::ui::TabPolicy::Reuse);
+  MICRONOTES_REQUIRE(tabs.size() == 3);
+  std::filesystem::remove_all(root);
+}
+
+// The same through a sidebar row, and the distinction that matters most: a
+// *click* on a row opens a tab, and the keyboard *cursor* passing over one does
+// not. `moveTreeCursor` activates every row it steps onto, so without this
+// holding Down in a thousand-note library would open a thousand tabs.
+MICRONOTES_TEST(shell_a_sidebar_click_opens_a_tab_and_the_cursor_does_not) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-rownewtab";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "Notebook");
+  for(const char* name : {"One", "Two"}) {
+    std::ofstream note(root / "Notebook" / (std::string(name) + ".md"));
+    note << "---\nid: rn-" << name << "\ntitle: " << name << "\n---\n\nBody.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  const auto noteRow = [](const char* id) {
+    SidebarRow row;
+    row.kind = SidebarRow::Kind::Tree;
+    row.tree.kind = micronotes::ui::TreeRowKind::Note;
+    row.tree.noteId = id;
+    row.tree.folder = "Notebook";
+    return row;
+  };
+
+  using micronotes::app::RowActivation;
+  micronotes::app::activateSidebarRow(ui, noteRow("rn-One"), RowActivation::Click);
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 1);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "rn-One");
+
+  micronotes::app::activateSidebarRow(ui, noteRow("rn-Two"), RowActivation::Click);
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 2);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "rn-Two");
+  MICRONOTES_REQUIRE(ui.state.workspace().findTab("rn-One") != std::string::npos);
+  // And it still moved the context to the note's folder, which is the other
+  // half of opening a note from a row.
+  MICRONOTES_REQUIRE(ui.state.selection().folder == std::filesystem::path("Notebook"));
+
+  // Arrowing across both notes leaves the strip where it was: the cursor takes
+  // over the tab it is showing in rather than adding to the strip.
+  const std::size_t before = ui.state.workspace().tabs.size();
+  micronotes::app::activateSidebarRow(ui, noteRow("rn-One"), RowActivation::Cursor);
+  micronotes::app::activateSidebarRow(ui, noteRow("rn-Two"), RowActivation::Cursor);
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == before);
+  std::filesystem::remove_all(root);
+}
+
+// Following a `[[wikilink]]` is the other way into a note, and it took the same
+// route through selectNoteById -- so following a link replaced the note the
+// link was written in, losing the very context you followed it from.
+MICRONOTES_TEST(shell_a_wiki_link_opens_a_tab_and_keeps_its_source) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-wikitab";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  {
+    std::ofstream from(root / "From.md");
+    from << "---\nid: wt-from\ntitle: From\n---\n\nSee [[Target]].\n";
+    std::ofstream to(root / "Target.md");
+    to << "---\nid: wt-target\ntitle: Target\n---\n\nArrived.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  micronotes::app::selectNoteById(ui, "wt-from");
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 1);
+
+  micronotes::app::openWikiLink(ui, "Target");
+  MICRONOTES_REQUIRE(ui.state.selection().noteId == "wt-target");
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 2);
+  // The note the link was written in is still open, which is the whole point.
+  MICRONOTES_REQUIRE(ui.state.workspace().findTab("wt-from") != std::string::npos);
+
+  // A link naming nothing creates the note, and that one opens beside its
+  // source too rather than replacing it -- `createNote` used to hardcode the
+  // replacement, so writing a link and following it lost the note you wrote it
+  // in.
+  micronotes::app::openWikiLink(ui, "Brand New");
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 3);
+  MICRONOTES_REQUIRE(ui.state.workspace().findTab("wt-from") != std::string::npos);
+  std::filesystem::remove_all(root);
+}
+
+// What the middle-click handler asks before deciding what the click meant.
+//
+// Middle click is an X11 primary-selection paste on anything that takes text,
+// which this app follows deliberately -- and its handler returned for *every*
+// middle click, so one on a note row or a link either did nothing or pasted
+// into whatever field still had focus. Neither of those takes text, so the
+// click is free to mean "open in a new tab" there, and this predicate is how
+// the two are told apart.
+MICRONOTES_TEST(shell_a_link_region_is_found_under_the_pointer) {
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 10.0f, 10.0f));
+
+  ui.linkRegions.push_back({{100.0f, 200.0f, 60.0f, 18.0f}, "Target", true});
+  MICRONOTES_REQUIRE(micronotes::app::pointOnLink(ui, 130.0f, 209.0f));
+  // Just outside, on all four edges: a paste that lands next to a link must
+  // still be a paste.
+  MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 99.0f, 209.0f));
+  MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 161.0f, 209.0f));
+  MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 130.0f, 199.0f));
+  MICRONOTES_REQUIRE(!micronotes::app::pointOnLink(ui, 130.0f, 219.0f));
 }

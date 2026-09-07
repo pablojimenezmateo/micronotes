@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/Tabs.h"
+
 #include <filesystem>
 #include <string>
 
@@ -14,8 +16,18 @@ struct UiRuntime;
 // Opens the note at `index` in the current list.
 void selectNoteAt(UiRuntime& ui, int index);
 
-// Opens a note by id.
-void selectNoteById(UiRuntime& ui, const std::string& noteId);
+// Opens a note by id, in a tab of its own.
+//
+// Nothing in the app could open a second tab before this: `openNote` took a
+// flag and honoured it, and exactly one caller in the whole app ever set it --
+// one command palette. Every other route to a note went through here, which had
+// no such parameter, so the sidebar, a search hit, a backlink and a wiki link
+// all replaced the note you were reading.
+//
+// `TabPolicy::Reuse` is for the keyboard cursor walking the sidebar; see
+// `ui::TabPolicy`.
+void selectNoteById(UiRuntime& ui, const std::string& noteId,
+                    ui::TabPolicy policy = ui::TabPolicy::NewTab);
 
 // Makes `folder` the context *and* opens the tree down to it.
 //

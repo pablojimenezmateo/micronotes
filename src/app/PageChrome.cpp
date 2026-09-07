@@ -46,6 +46,13 @@ std::optional<std::string> codeUnderCopyButton(const PageView& page, std::string
 }
 
 
+bool pointOnLink(const UiRuntime& ui, float x, float y) {
+  for(const auto& link : ui.linkRegions) {
+    if(ui::contains(link.rect, x, y)) return true;
+  }
+  return false;
+}
+
 bool followLinkAt(UiRuntime& ui, float x, float y) {
   for(const auto& link : ui.linkRegions) {
     if(!ui::contains(link.rect, x, y)) continue;

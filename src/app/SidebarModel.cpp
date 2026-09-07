@@ -1,5 +1,7 @@
 #include "app/SidebarModel.h"
 
+#include "app/Notes.h"
+
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
@@ -309,6 +311,37 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   key.originY = rect.y;
   // Read back rather than remembered: finish() clamps it.
   key.scroll = ui.sidebarScroll;
+}
+
+void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how) {
+  // Passing over a note takes over the tab showing; asking for one gives it a
+  // tab of its own.
+  const auto policy = how == RowActivation::Click ? ui::TabPolicy::NewTab : ui::TabPolicy::Reuse;
+  if(row.kind == SidebarRow::Kind::SearchResult) {
+    selectNoteById(ui, row.noteId, policy);
+    return;
+  }
+  if(row.kind == SidebarRow::Kind::Tag) {
+    selectTag(ui, row.tag);
+    return;
+  }
+  if(row.kind != SidebarRow::Kind::Tree) return;
+  if(row.tree.kind == ui::TreeRowKind::Note) {
+    selectNoteById(ui, row.tree.noteId, policy);
+    // Opening a note moves the context to its folder *and* opens the tree onto
+    // it, so the breadcrumb and the sidebar agree about where the note is. A
+    // search owns the row list while it is running, so it is left alone.
+    if(ui.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
+      showFolder(ui, row.tree.folder);
+    }
+    return;
+  }
+  // A notebook has no note to open in a tab of its own; it opens the first note
+  // in it, which is a move of the selection rather than opening anything new.
+  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  ui.state.selectFolder(row.tree.folder);
+  if(how == RowActivation::Click) ui.tree.setExpanded(row.tree.folder, true);
+  selectNoteAt(ui, 0);
 }
 
 void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,

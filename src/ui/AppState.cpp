@@ -87,10 +87,10 @@ void AppState::selectTag(std::string tag) {
   selection_.search.clear();
 }
 
-void AppState::selectNote(std::string noteId, bool inNewTab) {
+void AppState::selectNote(std::string noteId, ui::TabPolicy policy) {
   // The tab list and the selection are one thing said twice, so they are kept
   // in step here rather than at each of the dozen call sites that open a note.
-  workspace_.openNote(noteId, inNewTab);
+  workspace_.openNote(noteId, policy);
   selection_.noteId = std::move(noteId);
 }
 
@@ -223,7 +223,10 @@ const library::NoteListItem* AppState::noteById(std::string_view noteId) const {
   return organization_ ? organization_->noteById(noteId) : nullptr;
 }
 
-std::optional<library::NoteListItem> AppState::createNote(const std::string& title, const std::filesystem::path& folder, std::string_view body) {
+std::optional<library::NoteListItem> AppState::createNote(const std::string& title,
+                                                          const std::filesystem::path& folder,
+                                                          std::string_view body,
+                                                          ui::TabPolicy policy) {
   if(!library_) return std::nullopt;
   library::NoteMetadata metadata;
   metadata.id = library::generateNoteId();
@@ -236,7 +239,7 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
   selection_.tag.clear();
   selection_.search.clear();
   selection_.noteId = metadata.id;
-  workspace_.openNote(metadata.id, false);
+  workspace_.openNote(metadata.id, policy);
   return library::NoteListItem {metadata.id,   path,          metadata.title,
                                 metadata.tags, metadata.icon,
                                 path.lexically_relative(library_->root()).parent_path()};
