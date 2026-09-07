@@ -31,11 +31,19 @@ keystroke away.
   same thing, so the three cannot drift apart -- and it is the one surface you
   can *read* rather than having to already know. Menus that do not fit a narrow
   window hide behind a chevron rather than being dropped.
-- One sidebar with the search field on top of it: a tree of notebooks and notes
-  with drag to re-parent, favorites, recents, and tags as a filter rather than a
-  second hierarchy. Typing a query replaces the tree with the matching notes and
-  the lines that matched, each marked where it matched and trimmed around the
-  match rather than cut off before it; `Esc` brings the tree back.
+- One sidebar with the search field on top of it, divided into bands that can be
+  shut -- notebooks, favorites, tags, recents -- each carrying a count, so a
+  band tells you what is under it even when it is closed. The tree takes drag to
+  re-parent; typing a query replaces it with the matching notes and the lines
+  that matched, each marked where it matched and trimmed around the match rather
+  than cut off before it. `Esc` unwinds one narrowing at a time -- the query,
+  then the tag filter -- and brings the tree back.
+- Tags are a filter across the tree rather than a second hierarchy, and each has
+  a colour: a dot at the trailing edge of every note that carries it, in the
+  same colour as the tag's own row, so what a note is tagged with is visible
+  from the tree. Hovering a dot names the tag and clicking one filters by it;
+  right-clicking any tag picks its colour. The colour is stored as a choice from
+  a palette rather than as an RGB, so one pick reads correctly in both themes.
 - A borderless window with drawn chrome: the menu bar carries minimize /
   maximize / close at its right, and dragging its empty part moves the window.
   If the platform will not take a hit test, the decorations come back. Under the

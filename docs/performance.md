@@ -525,8 +525,9 @@ allocates a `TreeRow` -- a path and two strings -- per row. It ran every frame.
 value**, so each frame deep-copied the whole note list to read it.
 
 Neither had anything to recompute. The row list is a pure function of the
-library revision, what the tree has open, the query, the tag filter, the
-shortcut lists and the panel's size; only the scroll and the panel origin move
+library revision, what the tree has open, the query, the tag filter, which
+bands are shut, the shortcut lists and the panel's size; only the scroll and
+the panel origin move
 on a normal frame, and both are an offset over a list already built.
 `SidebarModel.cpp` -- a new unit, since `Application.cpp` is under a shrinking
 budget -- holds the build and the memo in front of it, and `sidebar.rows_reused`

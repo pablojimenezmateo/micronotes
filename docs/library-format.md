@@ -28,9 +28,10 @@ to is saved, so one being present at startup means the last session did not end
 cleanly -- and micronotes offers it back rather than the older text on disk.
 
 `ui.state` carries the appearance settings - theme, text size, page width -
-along with the pane widths, the selection, the favorites and the recents;
-`tree.state` which notebooks the sidebar has open; `folds.state` which sections
-each note has collapsed. None of it is ever written into a note.
+along with the pane widths, the selection, the favorites and the recents, which
+sidebar bands are shut, and what colour each tag is; `tree.state` which
+notebooks the sidebar has open; `folds.state` which sections each note has
+collapsed. None of it is ever written into a note.
 
 `ui.state` is `key=value`, one per line, and unknown keys are ignored, so a file
 written by a newer version still opens. `text_size` is `small`, `medium` or
@@ -39,6 +40,28 @@ written by a newer version still opens. `text_size` is `small`, `medium` or
 a size nobody can read. Because these live beside the library, two libraries can
 be typeset differently - which is the point on a machine where one of them is
 read on an external monitor.
+
+`collapsed=<band>` names a sidebar band that is shut - `notebooks`,
+`favorites`, `tags` or `recent` - and only shut bands are written, so the usual
+state costs nothing and a file from before bands existed reads as all four
+open.
+
+`tag_color=<swatch>|<tag>` is a tag's colour, and the swatch **index** comes
+first because the tag name is the only field that could contain the separator.
+It is an index into a fixed palette rather than an RGB: the light and dark
+themes are different colours, so storing the pixels would mean a colour that
+was legible on the theme it was picked in and possibly invisible on the other.
+Only tags somebody actually chose a colour for are written - the rest take one
+derived from the name, which is why a library's dots mean something before
+anybody has opened a picker. An index the palette has no swatch for wraps, and
+a line whose index will not parse is dropped rather than defaulted, so a
+hand-edited file cannot silently repaint a tag.
+
+Neither is part of the library. What colour somebody finds `work` easiest to
+spot, and whether they keep the tags band shut because their library has sixty
+of them, are facts about a reader rather than about a note - so writing either
+into front matter would make a preference a library-wide edit, and would put it
+in everyone's history.
 
 The SQLite database is a rebuildable index/cache. If it is deleted, micronotes rebuilds it from Markdown files and metadata.
 
