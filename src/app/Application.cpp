@@ -2402,21 +2402,21 @@ int run(ApplicationOptions options) {
   // is well inside budget.
   SDL_SetRenderVSync(renderer, 1);
 
-  // Every layout number in this file is in logical (density-independent) units,
-  // and SDL_GetWindowSize reports the same. Scaling the renderer by the window's
-  // pixel density is therefore all that is needed to make HIGH_PIXEL_DENSITY
-  // produce a sharper image rather than a bigger one. Expressed as a density
-  // rather than a ratio against a fixed window size, it stays correct across
-  // resizes; the display-changed event below re-reads it when the window moves
-  // to a monitor with a different scale.
-  const auto applyPixelDensity = [renderer, window]() {
-    const float density = SDL_GetWindowPixelDensity(window);
-    SDL_SetRenderScale(renderer, density, density);
-  };
-  applyPixelDensity();
   SDL_StartTextInput(window);
   installWatcherWake(ui);
   TextRenderer text(renderer);
+  // Every layout number in this file is in logical (density-independent) units,
+  // and SDL_GetWindowSize reports the same, so one render scale is all that
+  // HIGH_PIXEL_DENSITY needs to produce a sharper image rather than a bigger
+  // one. Layout stays logical, SDL scales it up, and glyph textures are drawn at
+  // their own physical size so they stay sharp. Expressed as a scale rather than
+  // a ratio against a fixed window size, it stays correct across resizes; the
+  // display-changed event below re-reads it when the window moves to a monitor
+  // with a different scale.
+  //
+  // A second lambda used to seed the same render scale from the window's pixel
+  // density just above here; nothing called it twice and this one overwrote it
+  // unconditionally, so it was a density that never reached a frame.
   float appliedScale = 0.0f;
   auto applyDisplayScale = [&]() {
     float scale = options.scale > 0.0f ? options.scale : SDL_GetWindowDisplayScale(window);
@@ -2424,8 +2424,6 @@ int run(ApplicationOptions options) {
     if(std::abs(scale - appliedScale) < 0.01f) return;
     appliedScale = scale;
     text.setDisplayScale(scale);
-    // Layout stays in logical units; SDL scales it up, and glyph textures are
-    // drawn at their own physical size so they stay sharp.
     SDL_SetRenderScale(renderer, scale, scale);
   };
   applyDisplayScale();
