@@ -2648,6 +2648,62 @@ where bytes are what runs out.** There are two ceilings now -- the count for
 small notes, 8 MB for large ones, and a floor of 8 steps whatever the size --
 and the tests drive them at 200 KB and at 12 MB.
 
+### Resolved: a step was still a copy of the whole note, and a small note paid for it
+
+Capping the bytes stopped the history being the largest thing in the process. It
+did not make a step cost what the *edit* cost, and the ratio a ceiling hides is
+the one a small note feels: a long session on a **2 KB** note retained 214.6 KB,
+**107 times the note it belonged to**, and no ceiling was anywhere near tripping.
+The count governed, 100 steps was the answer, and 100 copies of a small note is
+a hundred copies of a small note.
+
+The harness could not see it, for a reason worth naming: every lane in the file
+measures a *rate* -- what a keystroke, a frame or a save costs -- and undo is a
+**ceiling**, a thing held for as long as the note is open. The only number of
+that shape in the harness was `peak_rss`, which covers a 1,000-note fixture and
+an SQLite index too and so cannot attribute anything to the editor. So the undo
+lane is new, and it reports retained bytes *next to the size of the note they
+belong to*, because the ratio is the finding and the absolute figure is not.
+
+A step is the splice that reverses the edit now -- an offset, the bytes that came
+out, the length of the bytes that went in -- so it costs the *edit* rather than
+the document, and the same record type describes its own inverse, which is what
+makes undo and redo one function reading different stacks.
+
+| | before | after |
+|---|---:|---:|
+| 2 KB note, 200 edits | 214.6 KB (**107x** the note) | **8.5 KB** (4.25x) |
+| 200 KB note, 400 edits | 8,014.8 KB, 40 steps | **8.5 KB, 100 steps** |
+| one Ctrl+Z on a 200 KB note | 97 us, 1 alloc, 200.3 KB | **3 us, 0 allocs, 0.3 KB** |
+
+Three things fell out that were not the point:
+
+- **the large note now keeps its full 100 steps** and still retains less than the
+  small note used to. The byte ceiling was trading depth away to pay for copies.
+- **undo went through `splice`**, so it carries the word count across the edit
+  instead of recounting the note, and `lastChange` reports the span that
+  actually moved instead of the whole buffer. Ctrl+Z used to tell the live
+  layout every byte had changed, which is the one claim that bounds nothing.
+- **`snapshot` compared `undo_.back().text != text_`** before pushing, to avoid a
+  duplicate. That was a whole-buffer `memcmp` on every non-coalesced keystroke,
+  and it went away with the snapshots: the five edit sites already reject a
+  no-op, so every step is a real change by construction.
+
+The one case that still retains bytes is the honest one -- deleting text, where
+the history holds the only remaining copy of what came out -- and the byte
+ceiling is now *for* that case rather than for ordinary typing. 80 whole-note
+replacements of a 200 KB note sit at 8,002.8 KB and keep 40 steps.
+
+What coalescing cost is worth recording, because it was the one thing a snapshot
+history got for free: folding a keystroke into the open step used to mean
+*declining to push*, since the pre-edit buffer was already there. A splice has to
+be widened, and typing, Backspace and Delete widen it in three different
+directions -- tail, head, and tail-of-the-removed-text respectively. Each branch
+re-checks the shape of the step it is folding into rather than trusting the group
+bookkeeping, and returns false to open a fresh step when it cannot prove the two
+are one splice: an extra Ctrl+Z is a cost, guessing wrong corrupts the buffer the
+user gets back.
+
 ### What this pass says about the instruments
 
 Three of the five findings above were invisible to every lane in the harness,
@@ -2660,7 +2716,10 @@ The pattern is worth naming, because it is the same one each time:
   edit"; only an incremental algorithm turns "per edit" into "per edit's size".
 - **the undo bound** and **the word count's own counters** were both real
   instruments reading correct values for the question they were written to ask,
-  next to a much bigger version of the same question nobody had asked.
+  next to a much bigger version of the same question nobody had asked. The undo
+  bound then did it a second time: capping the bytes answered "is this history
+  unbounded" correctly and said nothing about a step costing the whole document,
+  which is the question a 2 KB note needed asked. **A ceiling hides a ratio.**
 
 The harness now has a search lane. It still has no lane for **a keystroke
 through the shell** -- see `TD-19` -- which is what both of the first two

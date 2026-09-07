@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace microcore::editor {
 
@@ -24,6 +25,15 @@ namespace microcore::editor {
 //    the caret wherever it happened to be rather than where the edit was.
 //    Records now coalesce over a run of typing, are bounded, and restore the
 //    selection they were taken with.
+//
+//  * A step then stayed a copy of the whole document for a while longer, which
+//    made the history cost the note's size times its depth: a long session on a
+//    *2 KB* note retained 214.6 KB, a hundred and seven times the note it
+//    belonged to, and Ctrl+Z charged a 200 KB copy and a full word recount.
+//    A step is the splice that reverses the edit now -- an offset, the bytes
+//    that came out, and the length of the bytes that went in -- so the history
+//    costs what was *edited* rather than what was open, and undo is an edit
+//    like any other rather than a whole-buffer replacement.
 class MarkdownEditor {
 public:
   void setText(std::string text);
@@ -111,7 +121,9 @@ public:
   void markDirty();
   void markSaved();
 
-  // Retained undo bytes and record count, exposed for tests and the harness.
+  // Bytes the undo and redo histories retain, and the number of steps in the
+  // undo one. Exposed for tests and for the harness's undo lane, which gates on
+  // the first against the size of the note it belongs to.
   std::size_t undoBytes() const;
   // Whitespace-delimited words in the buffer. O(1): maintained by every edit.
   std::size_t wordCount() const;
@@ -122,10 +134,22 @@ private:
   // step; anything else opens a new one.
   enum class EditKind { Structural, Insert, Erase };
 
-  // The selection rides along with the text so Ctrl+Z puts the caret and the
-  // highlight back where they were, not just the characters.
-  struct Snapshot {
-    std::string text;
+  // One undo step: the splice that puts the buffer back. Applying it means
+  // "restore `removed` at `start`, taking out the `insertedLen` bytes standing
+  // there now" -- which is a complete description of the reverse of any edit,
+  // because every edit here is one splice.
+  //
+  // It is also its own inverse's shape: applying a record yields another record
+  // that undoes it, so one type and one function serve both stacks.
+  //
+  // The selection rides along so Ctrl+Z puts the caret and the highlight back
+  // where they were, not just the characters. These are the values from
+  // *before* the edit, captured when the step opened, so a coalesced run of
+  // typing rewinds to where the run started.
+  struct EditRecord {
+    std::string removed;
+    std::size_t start = 0;
+    std::size_t insertedLen = 0;
     std::size_t cursor = 0;
     std::size_t anchor = 0;
     bool selecting = false;
@@ -154,10 +178,31 @@ private:
   // to carry: `setText`, undo and redo.
   void recountWords();
 
-  void snapshot(EditKind kind);
+  // The single path every text mutation takes. It records the step, applies the
+  // splice, puts the caret at the end of what went in and reports the span --
+  // in that order, because the record needs the bytes the splice is about to
+  // overwrite. The five editing entry points used to do those things each in
+  // their own order, which is five chances to get one of them wrong.
+  //
+  // The caret lands at `start + text.size()` for all five: an insertion ends
+  // after what it inserted, and an erase inserts nothing, so that is `start`.
+  void applyEdit(EditKind kind, std::size_t start, std::size_t oldEnd, std::string_view text);
+  // Opens a new undo step for this edit, or folds it into the open one.
+  void recordEdit(EditKind kind, std::size_t start, std::size_t oldEnd, std::string_view text);
+  // Folds a contiguous edit into the step already on the stack. False when the
+  // two cannot be described as one splice, which opens a fresh step instead.
+  bool extendOpenStep(std::size_t start, std::size_t oldEnd, std::string_view text);
+  // Applies a record's splice and returns the record that undoes it, so undo
+  // and redo are the same operation reading from different stacks.
+  EditRecord applyRecord(const EditRecord& record);
+  // Pushes a step and brings the history back inside its ceilings.
+  void pushStep(EditRecord record);
   // Brings the undo history back inside its count and byte ceilings.
   void trimUndo();
-  void closeEdit();
+  // What one step costs the process, by the same measure `undoBytes` reports
+  // and `trimUndo` enforces -- so the ceiling is expressed in the thing it
+  // actually bounds.
+  static std::size_t stepBytes(const EditRecord& record);
 
   std::string text_;
   std::size_t cursor_ = 0;
@@ -171,8 +216,12 @@ private:
   // walking a 200 KB note to answer took 247 us -- seventeen times the cost of
   // that keystroke's own layout update.
   std::size_t words_ = 0;
-  std::vector<Snapshot> undo_;
-  std::vector<Snapshot> redo_;
+  std::vector<EditRecord> undo_;
+  std::vector<EditRecord> redo_;
+  // Running totals, so `undoBytes` is O(1) and `trimUndo` costs what it drops
+  // rather than re-summing the whole history on every keystroke.
+  std::size_t undoBytes_ = 0;
+  std::size_t redoBytes_ = 0;
   EditKind groupKind_ = EditKind::Structural;
   bool groupOpen_ = false;
   std::size_t groupEnd_ = 0;

@@ -9,23 +9,29 @@
 namespace microcore::editor {
 namespace {
 
-// Two ceilings, because one of them cannot bound the thing that matters.
+// Two ceilings, and which of the two does the work changed completely when a
+// step stopped being a copy of the buffer.
 //
-// The count alone was the whole policy, and a snapshot is the *whole buffer*:
-// 100 of them on a 200 KB note is 19.6 MB of undo history for one open note,
-// against a whole-process peak RSS of about 30 MB on the perf fixture. The test
-// that was meant to guard this asserted a byte figure but drove it with a 4 KB
-// buffer, so it measured 400 KB and passed with room to spare.
+// While it was, the count was the only policy and could not bound the thing
+// that mattered: 100 whole-buffer snapshots of a 200 KB note is 19.6 MB of undo
+// for one open note, against a whole-process peak RSS of about 30 MB on the
+// perf fixture, and a long session on a *2 KB* note still retained 214.6 KB --
+// a hundred and seven times the note. The test meant to guard it asserted a
+// byte figure but drove a 4 KB buffer, so it measured 400 KB and passed easily.
 //
-// So the count governs small notes -- where 100 steps is cheap and worth having
-// -- and the byte budget governs large ones, where it is the count that has to
-// give. A 200 KB note keeps about 40 steps under this, a 1 MB note about 8.
-constexpr std::size_t kMaxUndoSnapshots = 100;
+// A step is a splice now, so it costs a few dozen bytes plus whatever text the
+// edit *deleted*. That makes the count the ordinary ceiling -- 100 steps of
+// typing is about 7 KB whatever the note's size -- and leaves the byte budget
+// for the one case that genuinely retains bytes: deleting a lot of text, where
+// the history holds the only remaining copy of what came out. A hundred steps
+// is a policy choice about how far back Ctrl+Z should reach, not a concession
+// to memory, which is what it used to be.
+constexpr std::size_t kMaxUndoSteps = 100;
 constexpr std::size_t kMaxUndoBytes = 8u * 1024u * 1024u;
-// However big the note, this many steps survive the byte budget. An editor that
-// can undo once is not an editor with undo, and a note large enough to blow the
-// budget on a single snapshot must not end up there.
-constexpr std::size_t kMinUndoSnapshots = 8;
+// However big the deletions, this many steps survive the byte budget. An editor
+// that can undo once is not an editor with undo, and one paste over a whole
+// 12 MB note must not be the thing that empties the history.
+constexpr std::size_t kMinUndoSteps = 8;
 // Typing pauses longer than this start a new undo step, so a burst of keys is
 // one Ctrl+Z but a considered edit minutes later is its own.
 constexpr std::chrono::milliseconds kCoalesceWindow {600};
@@ -139,7 +145,8 @@ void MarkdownEditor::splice(std::size_t start, std::size_t oldEnd, std::string_v
   words_ = words_ + wordStartsIn(start, to) - before;
 }
 
-// Every byte is new, so there is nothing to carry: `setText`, undo and redo.
+// Every byte is new, so there is nothing to carry. Only `setText` now: undo and
+// redo go through `splice` like any other edit and carry the count across.
 void MarkdownEditor::recountWords() {
   perf::addCounter(perf::CounterId::EditorWordCountRebuilds);
   perf::addCounter(perf::CounterId::EditorWordCountBytesScanned, text_.size());
@@ -163,6 +170,8 @@ void MarkdownEditor::setText(std::string text) {
   ++revision_;
   undo_.clear();
   redo_.clear();
+  undoBytes_ = 0;
+  redoBytes_ = 0;
   breakUndoGroup();
 }
 
@@ -172,14 +181,9 @@ void MarkdownEditor::insert(std::string_view text) {
   // Replacing a selection, or typing a line break, is a boundary worth undoing
   // on its own.
   const bool structural = hasSelection() || text.find('\n') != std::string_view::npos;
-  snapshot(structural ? EditKind::Structural : EditKind::Insert);
   const std::size_t from = hasSelection() ? selectionStart() : cursor_;
   const std::size_t replaced = hasSelection() ? selectionEnd() : cursor_;
-  splice(from, replaced, text);
-  cursor_ = from + text.size();
-  clearSelection();
-  markChanged(from, replaced, from + text.size());
-  closeEdit();
+  applyEdit(structural ? EditKind::Structural : EditKind::Insert, from, replaced, text);
 }
 
 void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::string_view text) {
@@ -187,12 +191,7 @@ void MarkdownEditor::replaceRange(std::size_t start, std::size_t end, std::strin
   end = std::clamp(end, start, text_.size());
   if(start == end && text.empty()) return;
   perf::addCounter(perf::CounterId::EditorEraseCalls);
-  snapshot(EditKind::Structural);
-  splice(start, end, text);
-  cursor_ = start + text.size();
-  clearSelection();
-  markChanged(start, end, start + text.size());
-  closeEdit();
+  applyEdit(EditKind::Structural, start, end, text);
 }
 
 void MarkdownEditor::erasePrevious() {
@@ -201,14 +200,7 @@ void MarkdownEditor::erasePrevious() {
     return;
   }
   if(cursor_ == 0) return;
-  snapshot(EditKind::Erase);
-  const auto previous = previousCodepoint(text_, cursor_);
-  const auto was = cursor_;
-  splice(previous, cursor_, {});
-  cursor_ = previous;
-  clearSelection();
-  markChanged(previous, was, previous);
-  closeEdit();
+  applyEdit(EditKind::Erase, previousCodepoint(text_, cursor_), cursor_, {});
 }
 
 void MarkdownEditor::eraseNext() {
@@ -217,12 +209,7 @@ void MarkdownEditor::eraseNext() {
     return;
   }
   if(cursor_ >= text_.size()) return;
-  snapshot(EditKind::Erase);
-  const auto next = nextCodepoint(text_, cursor_);
-  splice(cursor_, next, {});
-  clearSelection();
-  markChanged(cursor_, next, cursor_);
-  closeEdit();
+  applyEdit(EditKind::Erase, cursor_, nextCodepoint(text_, cursor_), {});
 }
 
 void MarkdownEditor::erasePreviousWord() {
@@ -303,14 +290,7 @@ std::string MarkdownEditor::selectedText() const {
 
 void MarkdownEditor::eraseSelection() {
   if(!hasSelection()) return;
-  snapshot(EditKind::Structural);
-  const auto start = selectionStart();
-  const auto end = selectionEnd();
-  splice(start, end, {});
-  cursor_ = start;
-  clearSelection();
-  markChanged(start, end, start);
-  closeEdit();
+  applyEdit(EditKind::Structural, selectionStart(), selectionEnd(), {});
 }
 
 void MarkdownEditor::moveLeft(bool keepSelection) {
@@ -413,49 +393,80 @@ std::size_t MarkdownEditor::undoDepth() const {
   return undo_.size();
 }
 
-std::size_t MarkdownEditor::undoBytes() const {
-  std::size_t bytes = 0;
-  for(const auto& record : undo_) bytes += record.text.size();
-  for(const auto& record : redo_) bytes += record.text.size();
-  return bytes;
+// What a step costs the process. `capacity` rather than `size` so the figure
+// never understates the ceiling it is used to enforce; for a short string the
+// capacity is already inside `sizeof(EditRecord)`, which over-counts by a few
+// bytes a step, and that is the direction a ceiling should err in.
+//
+// The vectors' own capacity is deliberately not in here: it is one allocation
+// bounded by `kMaxUndoSteps` entries, and folding it in would make the figure
+// jump on a `push_back` that retained nothing.
+std::size_t MarkdownEditor::stepBytes(const EditRecord& record) {
+  return sizeof(EditRecord) + record.removed.capacity();
 }
 
-bool MarkdownEditor::undo() {
-  if(undo_.empty()) return false;
-  const std::size_t was = text_.size();
-  redo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
-  text_ = std::move(undo_.back().text);
-  recountWords();
-  cursor_ = std::min(undo_.back().cursor, text_.size());
-  if(undo_.back().selecting) {
-    selectionAnchor_ = std::min(undo_.back().anchor, text_.size());
+std::size_t MarkdownEditor::undoBytes() const {
+  return undoBytes_ + redoBytes_;
+}
+
+// Applies a record's splice and hands back the record that reverses it.
+//
+// The inverse is built *before* the splice, because the bytes it has to keep in
+// order to redo -- the ones the record is about to displace -- are sitting in
+// the buffer right now and nowhere else. That symmetry is the whole reason one
+// function serves both directions: undo pops from `undo_` and pushes the
+// inverse to `redo_`, redo does the same the other way round, and neither knows
+// which it is.
+//
+// Going through `splice` rather than replacing the buffer is what makes undo an
+// ordinary edit: the word count is carried across it instead of recounted, and
+// `markChanged` reports the span that actually moved instead of the whole note.
+// Ctrl+Z on a 200 KB note used to charge a full buffer copy onto the redo stack
+// plus a 200 KB word recount, and then tell the layout every byte had changed.
+MarkdownEditor::EditRecord MarkdownEditor::applyRecord(const EditRecord& record) {
+  const std::size_t start = std::min(record.start, text_.size());
+  const std::size_t oldEnd = std::min(start + record.insertedLen, text_.size());
+
+  EditRecord inverse;
+  inverse.start = start;
+  inverse.removed.assign(text_, start, oldEnd - start);
+  inverse.insertedLen = record.removed.size();
+  inverse.cursor = cursor_;
+  inverse.anchor = selectionAnchor_;
+  inverse.selecting = selecting_;
+
+  splice(start, oldEnd, record.removed);
+  cursor_ = std::min(record.cursor, text_.size());
+  if(record.selecting) {
+    selectionAnchor_ = std::min(record.anchor, text_.size());
     selecting_ = true;
   } else {
     clearSelection();
   }
+  markChanged(start, oldEnd, start + record.removed.size());
+  return inverse;
+}
+
+bool MarkdownEditor::undo() {
+  if(undo_.empty()) return false;
+  undoBytes_ -= stepBytes(undo_.back());
+  const EditRecord record = std::move(undo_.back());
   undo_.pop_back();
-  // A snapshot restore is the whole buffer. It could be narrowed by comparing
-  // the two, and comparing the two is exactly the work this exists to avoid.
-  markChanged(0, was, text_.size());
+  EditRecord inverse = applyRecord(record);
+  redoBytes_ += stepBytes(inverse);
+  redo_.push_back(std::move(inverse));
   breakUndoGroup();
   return true;
 }
 
 bool MarkdownEditor::redo() {
   if(redo_.empty()) return false;
-  const std::size_t was = text_.size();
-  undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
-  text_ = std::move(redo_.back().text);
-  recountWords();
-  cursor_ = std::min(redo_.back().cursor, text_.size());
-  if(redo_.back().selecting) {
-    selectionAnchor_ = std::min(redo_.back().anchor, text_.size());
-    selecting_ = true;
-  } else {
-    clearSelection();
-  }
+  redoBytes_ -= stepBytes(redo_.back());
+  const EditRecord record = std::move(redo_.back());
   redo_.pop_back();
-  markChanged(0, was, text_.size());
+  EditRecord inverse = applyRecord(record);
+  undoBytes_ += stepBytes(inverse);
+  undo_.push_back(std::move(inverse));
   breakUndoGroup();
   return true;
 }
@@ -507,51 +518,119 @@ void MarkdownEditor::markSaved() {
   breakUndoGroup();
 }
 
-void MarkdownEditor::snapshot(EditKind kind) {
+void MarkdownEditor::applyEdit(EditKind kind, std::size_t start, std::size_t oldEnd,
+                               std::string_view text) {
+  recordEdit(kind, start, oldEnd, text);
+  splice(start, oldEnd, text);
+  cursor_ = start + text.size();
+  clearSelection();
+  markChanged(start, oldEnd, cursor_);
+  groupEnd_ = cursor_;
+  groupAt_ = std::chrono::steady_clock::now();
+}
+
+void MarkdownEditor::recordEdit(EditKind kind, std::size_t start, std::size_t oldEnd,
+                                std::string_view text) {
   const auto now = std::chrono::steady_clock::now();
   const bool contiguous = groupOpen_ && kind == groupKind_ && cursor_ == groupEnd_ &&
                           now - groupAt_ <= kCoalesceWindow;
-  if(kind != EditKind::Structural && contiguous) {
-    // Fold into the open step: the pre-edit text is already on the stack.
+  // Editing forwards discards the redo branch, whether or not this edit opens a
+  // new step.
+  redo_.clear();
+  redoBytes_ = 0;
+  if(kind != EditKind::Structural && contiguous && extendOpenStep(start, oldEnd, text)) {
     perf::addCounter(perf::CounterId::EditorUndoRecordsCoalesced);
     groupAt_ = now;
-    redo_.clear();
     return;
   }
-  if(undo_.empty() || undo_.back().text != text_) {
-    perf::addCounter(perf::CounterId::EditorUndoRecords);
-    perf::addCounter(perf::CounterId::EditorUndoBytesRetained, text_.size());
-    undo_.push_back({text_, cursor_, selectionAnchor_, selecting_});
-    trimUndo();
-  }
-  redo_.clear();
+
+  EditRecord record;
+  record.start = start;
+  record.removed.assign(text_, start, oldEnd - start);
+  record.insertedLen = text.size();
+  record.cursor = cursor_;
+  record.anchor = selectionAnchor_;
+  record.selecting = selecting_;
+  pushStep(std::move(record));
+
   groupOpen_ = kind != EditKind::Structural;
   groupKind_ = kind;
   groupAt_ = now;
 }
 
+// A snapshot history got coalescing for free: the pre-edit buffer was already on
+// the stack, so folding a keystroke into the open step meant declining to push
+// anything. A splice has to actually be widened, and the two directions a run
+// can grow are not the same shape:
+//
+//   * typing extends the run's tail -- `insertedLen` grows and there is nothing
+//     deleted to keep;
+//   * Backspace walks left, each key taking the bytes immediately *before* the
+//     ones already taken, so the step's start moves back and the new bytes go on
+//     the front of what it has to put back;
+//   * Delete eats forwards from a caret that stands still, so those bytes go on
+//     the *end* of the same string.
+//
+// Each branch also re-checks the shape of the step it is folding into rather
+// than trusting the group bookkeeping to have kept it: an Insert run's steps
+// delete nothing and an Erase run's insert nothing, and if that ever stops
+// holding the answer is a fresh step, not a flattened one. Returning false is
+// always correct -- it costs one extra Ctrl+Z, where guessing wrong corrupts the
+// buffer the user gets back.
+bool MarkdownEditor::extendOpenStep(std::size_t start, std::size_t oldEnd, std::string_view text) {
+  if(undo_.empty()) return false;
+  EditRecord& step = undo_.back();
+  const std::size_t was = stepBytes(step);
+  const std::size_t insertedEnd = step.start + step.insertedLen;
+  bool folded = false;
+  if(!text.empty() && start == oldEnd && start == insertedEnd && step.removed.empty()) {
+    step.insertedLen += text.size();
+    folded = true;
+  } else if(text.empty() && step.insertedLen == 0 && oldEnd == step.start) {
+    step.removed.insert(0, text_, start, oldEnd - start);
+    step.start = start;
+    folded = true;
+  } else if(text.empty() && step.insertedLen == 0 && start == step.start) {
+    step.removed.append(text_, start, oldEnd - start);
+    folded = true;
+  }
+  if(!folded) return false;
+  undoBytes_ = undoBytes_ - was + stepBytes(step);
+  perf::addCounter(perf::CounterId::EditorUndoBytesRetained, oldEnd - start);
+  return true;
+}
+
+void MarkdownEditor::pushStep(EditRecord record) {
+  perf::addCounter(perf::CounterId::EditorUndoRecords);
+  perf::addCounter(perf::CounterId::EditorUndoBytesRetained, record.removed.size());
+  undoBytes_ += stepBytes(record);
+  undo_.push_back(std::move(record));
+  trimUndo();
+}
+
 // Drops the oldest steps until the history is inside both ceilings, in one
 // erase rather than one per step: removing from the front of a vector shifts
-// everything above it, and a note that has just gone over the byte budget can
-// drop several at once.
+// everything above it, and one edit that deletes a lot of text can push several
+// out at once.
+//
+// The byte figure is the running total rather than a fresh sum over the stack.
+// Summing it here was O(depth) on every keystroke to answer a question that is
+// almost always "no" -- and on the path where the answer is no, a hundred
+// `size()` reads over a vector nobody is about to touch.
 void MarkdownEditor::trimUndo() {
-  std::size_t drop = undo_.size() > kMaxUndoSnapshots ? undo_.size() - kMaxUndoSnapshots : 0;
-  std::size_t bytes = 0;
-  for(const auto& record : undo_) bytes += record.text.size();
+  std::size_t drop = undo_.size() > kMaxUndoSteps ? undo_.size() - kMaxUndoSteps : 0;
+  std::size_t bytes = undoBytes_;
+  for(std::size_t i = 0; i < drop; ++i) bytes -= stepBytes(undo_[i]);
   // Newest first, keeping what fits: the oldest steps are the ones nobody
   // reaches for, and they are what the budget spends its bytes on.
-  while(bytes > kMaxUndoBytes && undo_.size() - drop > kMinUndoSnapshots) {
-    bytes -= undo_[drop].text.size();
+  while(bytes + redoBytes_ > kMaxUndoBytes && undo_.size() - drop > kMinUndoSteps) {
+    bytes -= stepBytes(undo_[drop]);
     ++drop;
   }
   if(drop == 0) return;
   perf::addCounter(perf::CounterId::EditorUndoRecordsDropped, drop);
+  undoBytes_ = bytes;
   undo_.erase(undo_.begin(), undo_.begin() + static_cast<std::ptrdiff_t>(drop));
-}
-
-void MarkdownEditor::closeEdit() {
-  groupEnd_ = cursor_;
-  groupAt_ = std::chrono::steady_clock::now();
 }
 
 }
