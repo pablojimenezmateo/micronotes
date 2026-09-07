@@ -421,6 +421,11 @@ focus each draw a frame and none touches the text. It is now memoised on
 `MarkdownEditor::revision()`, a counter bumped by every mutation and nothing
 else.
 
+> The ninth pass took this further and both counters are gone with it: a memo on
+> the revision cannot help on the one event that always moves the revision, so
+> the count is carried across each edit instead and there is nothing left to
+> memoise. See *the status bar recounted the whole note on every keystroke*.
+
 The pattern in all three is worth naming, because it is the one the counters are
 good at and a profiler is not: **the cache was fine and the work around the
 cache was the cost**. Nothing was slow per call. Everything ran more often than
@@ -2502,3 +2507,161 @@ needs to: a re-index whose stat matches its row writes no rows, and a reload
 whose signature agrees does not happen. Comparing the disk is what makes echo
 suppression free, where remembering who wrote what would have been a second
 piece of state to get wrong.
+
+## The ninth pass: the two things a keystroke did that nobody had counted
+
+The eighth pass ended on a rule: *a lane the harness does not have is a budget
+nothing enforces*. This pass is that rule applied twice more, in the same place
+-- a keystroke -- and the two findings it turned up were each larger than the
+layout work every existing budget measures.
+
+Every edit lane here measures `doc::Layout` directly. That is the right thing
+for a core benchmark and it is also the reason both of these were invisible: the
+harness has no shell in it, so what a keystroke costs *the surfaces around the
+page* had never been measured at all. Both were found by asking the plain
+question "what else runs when the editor's revision moves?" and then timing the
+answers.
+
+Measured on a 200 KB note, which is what the rest of the file uses, against a
+keystroke whose own layout update is **14 us**:
+
+| what runs on a keystroke | before | after |
+|---|---:|---:|
+| the outline panel's rebuild | 239.9 us | **~18 us** |
+| the status bar's word count | 247.4 us | **~0** (3 bytes read) |
+
+### Resolved: the outline panel rescanned the note on every keystroke
+
+`outlineFor` is memoised on the editor's revision, and the comment above it said
+"rebuilt only when the buffer has moved". Both true, and together they hide the
+problem: the buffer moves on every character. Each rebuild called `outlineOf`,
+which derives the block partition from scratch -- a pass over every byte plus a
+fresh `vector<SourceBlock>`, 199 us of the 240 us.
+
+The partition already existed. The live page splices one incrementally during
+its own update, and `app::editorBlocks` is the borrow that hands it over -- the
+block edits in `doc/Edits.h` were moved onto it for exactly this reason, and the
+outline was the caller left behind.
+
+**The interesting part is why the fix did not work at first.** `blocksAt`
+answers only for the revision the partition was built from, which is what makes
+the borrow safe. The right panel was drawn *before* the content, so it asked one
+revision early, was correctly refused, and rescanned every time -- the borrow was
+in the code and never once hit. Drawing the panel after the content is the whole
+difference, and nothing could see it: identical pixels in all three panes, a
+green suite, and the only evidence a counter in a session nobody was running.
+
+That is now guarded at both halves, because they break independently:
+`shell_outline_borrows_the_partition_the_live_page_already_spliced` pins the
+borrow through the counters, and
+`architecture_the_right_panel_is_drawn_after_the_content` pins the order. The
+first still passes with the order wrong, which is why the second exists.
+
+### Resolved: the status bar recounted the whole note on every keystroke
+
+The same shape, one file over. The word count was memoised on the buffer's
+revision, and that memo was added by an earlier pass to stop it running per
+*frame* -- a scroll, a hover and a window focus all draw one and none of them
+touches the text. It did that. What a revision key cannot do is stop the work
+running per *keystroke*, because that is precisely when the revision moves.
+
+The counters beside it read exactly right throughout: `status.word_counts`
+against `status.word_counts_reused` was built to catch the per-frame version,
+and it did, and it had nothing to say about the per-keystroke one underneath.
+**A counter answers the question it was written to ask.**
+
+`MarkdownEditor` carries the count across each edit now. The window is the
+replaced span plus one byte, which is the exact extent of what an edit can
+change: positions below the splice are decided by two bytes that did not move,
+the position at the far end holds an unchanged byte but its *predecessor* moved,
+and past that both deciding bytes come from the untouched suffix.
+`editor.word_count_bytes_scanned` reads **3 bytes per keystroke** where a
+recount is 204,832.
+
+The first version of that window widened to the nearest whitespace on each side.
+Also exact, and O(document) on a buffer with no whitespace in it -- a minified
+file, a base64 blob -- which is the exact shape the change existed to remove. It
+was caught by the undo tests, which drive a 12 MB run of `x`: the suite went
+from 3.0 s to 9.7 s and stayed green, because the answers were right and only
+the cost was wrong. **A correctness suite that says nothing about cost will let
+an O(n) fix for an O(n) problem straight through.**
+
+### Resolved: reading a note spent longer checking the path than reading it
+
+`platform::normalizeInsideRoot` is the containment check every path into the
+library goes through, and it canonicalized *both* sides on every call --
+a `stat` per component. The root's half is the same answer every time, because a
+library's root does not move while it is open.
+
+| root depth | `Library::loadNote` before | after |
+|---|---:|---:|
+| `/tmp/mn-probe` (2 components) | 12.28 us | **5.81 us** |
+| `~/.../Documents/notes` (6 components) | 23.83 us | **13.43 us** |
+
+Reading a note was spending more time deciding the path was allowed than
+reading, parsing and splitting the file put together -- and the saving grows
+with the depth of the root, so it is worst on the paths people actually keep
+notes in and least visible on the shallow fixture the harness uses. Through the
+harness, `library_index.refresh.read_file` over 1,001 notes went 5.603 ms ->
+4.693 ms as a minimum of eight interleaved rounds.
+
+`platform::SafeRoot` resolves the root once and the candidate per call, which
+puts the invariant in the type rather than in seventeen call sites' discipline.
+The check also had no test at all, which is a poor state for the one function
+here whose failure is a security failure; there are two now, and they pin the
+case a prefix comparison gets wrong (`/…/library-backup` shares the root's
+characters and is not inside it).
+
+### Resolved: a search copied the library to look at it
+
+`collectRows` read every result row's `body` column into a `std::string`. The
+result set is capped at 200 rows, the body is the largest thing in a row by
+three orders of magnitude, and what the copy is *for* is finding at most three
+lines of one note.
+
+Search also had no lane, so `searchBudgets` is new: a query that matches
+everything, one that matches nothing and so falls through fts5 to the `LIKE`
+scan over every row, and a titles-only control that shares the whole path except
+the bodies.
+
+| scenario | allocations | bytes |
+|---|---:|---:|
+| `search.query_hits_everything` | 3,173 -> **2,972** | 781.9 KB -> **485.7 KB** |
+| `search.query_titles_only` | 2,973 -> **2,772** | 707.3 KB -> **413.6 KB** |
+
+The medians sit inside the run-to-run band with no counter behind them, so the
+allocations are the result and the timings are not. The bytes fall by 38% on a
+fixture whose notes are 1.5 KB, and the saving is one body per row -- so it
+grows with the size of the notes rather than staying put.
+
+### Resolved: the undo history was bounded in steps, on a snapshot of the buffer
+
+An undo snapshot is the whole buffer and the only ceiling was a count of 100. On
+a 200 KB note that is **19.6 MB of undo for one open note**, against a
+whole-process peak RSS of about 30 MB. The editor's history was the largest
+thing in the process.
+
+`editor_undo_history_is_bounded` was the guard and could not have failed: it
+asserted `undoBytes() <= 32 MB` while driving a **4 KB** buffer, so what it
+measured was 400 KB. **A bound expressed in bytes has to be driven at a size
+where bytes are what runs out.** There are two ceilings now -- the count for
+small notes, 8 MB for large ones, and a floor of 8 steps whatever the size --
+and the tests drive them at 200 KB and at 12 MB.
+
+### What this pass says about the instruments
+
+Three of the five findings above were invisible to every lane in the harness,
+and the other two were invisible to the lane that was supposed to see them.
+The pattern is worth naming, because it is the same one each time:
+
+- **the outline and the word count** were memoised on the editor's revision, and
+  both memos worked. What neither could do is make the underlying work cheap on
+  the one event that always invalidates them. A memo turns "per frame" into "per
+  edit"; only an incremental algorithm turns "per edit" into "per edit's size".
+- **the undo bound** and **the word count's own counters** were both real
+  instruments reading correct values for the question they were written to ask,
+  next to a much bigger version of the same question nobody had asked.
+
+The harness now has a search lane. It still has no lane for **a keystroke
+through the shell** -- see `TD-19` -- which is what both of the first two
+findings would have needed, and is the largest hole left in it.

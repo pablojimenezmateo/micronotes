@@ -45,6 +45,23 @@ is two decisions rather than one. That is down from three, and the one that is
 left is the one furthest from the others: the raw pane deliberately shows the
 file as bytes, so its line breaks are the file's and not the layout's.
 
+It also costs the one thing the live surface no longer does: the raw pane's
+`editorRows` re-wraps the **whole note on every keystroke**, because its cache
+is keyed on a copy of the source rather than on the editor's revision and
+`editor::softWrap` has no incremental form. Measured on a 200 KB note:
+
+| | per |
+|---|---:|
+| full soft wrap | **807 us** per keystroke |
+| whole-note copy into the cache key | 17.6 us per keystroke |
+| whole-note compare against the cache key | 9.8 us per frame |
+
+That is three times what the ninth pass removed from the outline panel and the
+status bar put together, on the same event. It is not fixed here because the two
+cheap rows are 3% of the total and fixing them alone would be noise: what the
+807 us needs is an incremental soft wrap, which is the second engine this entry
+is about. If the pane goes, the number goes with it.
+
 **Why it is still here.** `RawPane`'s own header says it is "kept apart so that
 replacing it is a matter of deleting one file", which is the right plan. What it
 is waiting for is a decision rather than a refactor: whether a pane that shows
@@ -124,3 +141,31 @@ tree-changes-shape test asserts it -- so what is untested is the two triggers
 rather than the response to them. `SetEntryBudget`-style injection (a testing
 seam that lowers the budget) is the obvious way in, and is worth adding the next
 time this file is opened.
+
+## TD-19 — the harness has no lane for a keystroke through the shell
+
+`tools/PerfMain.cpp`. Every edit lane drives `doc::Layout` directly.
+
+**What it costs today.** It cost two findings in the ninth pass, each larger
+than the layout work the existing budgets do measure: the outline panel rebuilt
+its block partition on every keystroke (240 us on a 200 KB note) and the status
+bar recounted the whole note on every keystroke (247 us), against a keystroke
+whose layout update is 14 us. Both shipped, both were invisible, and both were
+found by reading code rather than by any instrument. `TD-14` names a third of
+the same kind, still open at 807 us.
+
+The shape is specific and it will recur: anything memoised on
+`ui.editor.revision()` is *by construction* recomputed on every keystroke, and
+the memo makes it look handled. There are five such memos on `UiRuntime` today.
+
+**Why it has not been paid.** The lane needs a `UiRuntime` and a `TextRenderer`
+driven through a real key handler, and the pieces are all there now -- the shell
+is a library, the test binary already builds a `UiRuntime`, and
+`ui.editor.insert()` plus the surfaces' own entry points is most of a keystroke.
+What is missing is a decision about what it measures: `drawApp` needs a renderer,
+so either the lane stops short of the paint (and measures the models, which is
+where all three findings were) or the harness grows a headless window and stops
+being the thing that runs in three seconds with no display. The first is
+worth doing and is an afternoon; it was not done in the same pass that found the
+bugs, because a lane written to catch the bug you already know about is the one
+that catches nothing else.
