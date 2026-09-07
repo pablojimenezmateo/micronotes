@@ -59,6 +59,13 @@ bool samePolarity(SDL_Color a, SDL_Color b);
 // fraction of a step apart say nothing at all. One nudge rather than a search:
 // the surfaces are derived from each other, so correcting one by a known amount
 // keeps the family recognisable, where hunting for a ratio would not.
+//
+// **Not for a palette somebody picked.** A single 0.12 nudge is a whole step on
+// a dark ground, so applying it to a hand-chosen colour that misses the floor
+// by a hair replaces the decision rather than correcting it -- see `Theme`'s
+// `correct`, which used to do exactly that to the chrome and turned the menu
+// bar into a mid grey. This is for grounds *derived* from a palette that
+// arrived from outside, where there was no decision to override.
 SDL_Color ensureBackgroundSeparation(SDL_Color background, SDL_Color reference,
                                      float minimumContrast);
 
@@ -69,8 +76,20 @@ inline constexpr float kTextContrast = 4.5f;
 inline constexpr float kIncidentalContrast = 3.0f;
 
 // What two grounds have to differ by to read as two grounds. Far below the text
-// ratios -- a panel one step off the page is a panel, not illegible text -- and
-// the number microide arrived at for the same job.
-inline constexpr float kSurfaceSeparation = 1.08f;
+// ratios: a panel one step off the page is a panel, not illegible text.
+//
+// A floor that *describes* the palette rather than one the palette is bent to
+// meet. microide, whose values these are, has no single number for this -- it
+// asks 1.04 of a panel against the page, 1.08 of a raised control, and 1.12 of
+// the active tab against its strip, each at the one site that derives that
+// ground. 1.05 is the floor common to all of them, and the one the built-in
+// palette's tightest deliberate pairing clears: the chrome against the page it
+// frames, at 1.057 on the dark theme.
+//
+// It was 1.08, which that pairing misses, and the corrector duly "fixed" it.
+// The lesson is in which direction the disagreement got resolved: a constant
+// that a carefully chosen palette fails is a wrong constant, not a wrong
+// palette.
+inline constexpr float kSurfaceSeparation = 1.05f;
 
 }

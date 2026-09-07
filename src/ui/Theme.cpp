@@ -127,13 +127,30 @@ Theme derive(Theme t) {
 }
 
 // The palette as written, corrected so that nothing a reader has to make out
-// falls below the ratio it is held to, and no two grounds meant to read as
-// separate end up the same.
+// falls below the ratio it is held to.
 //
 // Correcting here rather than editing hex values by hand is the point: the
 // author picks the colour they mean, and the one pairing they did not think to
 // check cannot ship illegible. It also means a palette that arrives from
 // somewhere else -- a theme file -- gets the same guarantee as the built-ins.
+//
+// The *inks* are corrected and the **grounds are not**. This used to push every
+// ground a fixed step away from the one it frames whenever the pair fell under
+// `kSurfaceSeparation`, and on this palette the chrome and the page are a
+// deliberately quiet step apart -- 0x151922 over 0x0F131B, 1.057, against a
+// floor then written as 1.08. One nudge of 0.12 toward white took the menu bar,
+// the tab strip, the breadcrumb and the status bar from 0x151922 to 0x31353D: a
+// mid grey nothing in the palette asked for, four times the step that was
+// intended, and light enough that the tabs sitting on it read as floating
+// rather than as cut out of it.
+//
+// The sibling microide, whose values these are, only ever ran this pass over a
+// colourscheme *file* -- a palette nobody vetted, whose grounds it derives from
+// a syntax `default` background rather than picks. Its own two built-ins are
+// used exactly as written. So are these: a hand-picked ground is a decision,
+// and a corrector that overrides decisions is not checking the palette, it is
+// replacing it. `ensureBackgroundSeparation` stays for the day a theme file
+// arrives; nothing built in goes through it.
 Theme correct(Theme t) {
   // Every text role against the darkest ground it is drawn on: fixing it there
   // fixes it everywhere, since every other ground has more contrast to give.
@@ -148,35 +165,24 @@ Theme correct(Theme t) {
     return result;
   };
 
-  // The grounds first, because the text is corrected against them. A flat
-  // interface has no shadow and no radius to say where one surface stops, so
-  // two surfaces a fraction of a step apart are one surface.
-  //
-  // Only the *derived* separations are enforced: the chrome against the page it
-  // frames, the active tab against the strip it sits in, and a raised control
-  // against the panel under it. Nudging a picked ground would change every
-  // other pairing that shares it.
-  t.chromeBackground = ensureBackgroundSeparation(t.chromeBackground, t.editorBackground,
-                                                  kSurfaceSeparation);
-  t.chromeActive = ensureBackgroundSeparation(t.chromeActive, t.chromeBackground,
-                                              kSurfaceSeparation);
-  t.surfaceRaised = ensureBackgroundSeparation(t.surfaceRaised, t.surfaceBackground,
-                                               kSurfaceSeparation);
-  t.rowHighlight = ensureBackgroundSeparation(t.rowHighlight, t.surfaceBackground,
-                                              kSurfaceSeparation);
   // A panel that reads as a raised card in one theme and as a hole in the other
   // is a palette nobody checked. Both are legitimate designs; mixing them is
   // not, and the polarity is what says which was meant.
+  //
+  // The one ground rule left, and it stays because it is a question about the
+  // palette's *intent* rather than about a ratio: it fires only when a role has
+  // ended up on the wrong side of the light/dark threshold, which no amount of
+  // careful picking makes correct. It does not fire on either built-in.
   if(!samePolarity(t.surfaceRaised, t.surfaceBackground)) {
     t.surfaceRaised = t.mode == ThemeMode::Light ? darken(t.surfaceBackground, 0.06f)
                                                  : lighten(t.surfaceBackground, 0.06f);
   }
-  // The border has to be visible against the panels it separates without
-  // reading as text. Held to the separation ratio against the lightest ground
-  // rather than to a text ratio, because a 1px rule at full contrast turns a
-  // list of rows into a list of boxes.
-  t.border = ensureContrast(t.border, t.surfaceBackground, 1.5f);
-
+  // The border is not corrected either, for the reason the grounds are not: a
+  // 1px rule is a boundary between two surfaces, not something anybody reads,
+  // so a contrast floor is the wrong instrument on it. Holding it to 1.5
+  // against the panel took the picked 0x2A3548 to 0x333D50, which is a rule
+  // dark enough to turn a list of rows into a list of boxes -- the failure the
+  // rule's own comment said it was avoiding.
   t.textPrimary = worst(t.textPrimary, kTextContrast);
   t.textSecondary = worst(t.textSecondary, kTextContrast);
   t.surfaceText = worst(t.surfaceText, kTextContrast);

@@ -21,6 +21,15 @@ bool near(float a, float b, float tolerance = 0.01f) {
   return (a > b ? a - b : b - a) <= tolerance;
 }
 
+// A colour as it would be written in the palette, for a failure message that
+// can be compared against the source by eye.
+std::string hex(unsigned packed) {
+  static constexpr char kDigits[] = "0123456789ABCDEF";
+  std::string out = "0x";
+  for(int shift = 20; shift >= 0; shift -= 4) out.push_back(kDigits[(packed >> shift) & 0xF]);
+  return out;
+}
+
 // A small deterministic sequence, so "lots of pairs" is reproducible.
 Uint8 nextByte(unsigned& state) {
   state = state * 1664525u + 1013904223u;
@@ -167,4 +176,60 @@ MICRONOTES_TEST(theme_palettes_stay_legible_in_both_modes) {
           "hole in the other is a palette nobody looked at");
     }
   }
+}
+
+// The built-in palettes reach the screen as they were written.
+//
+// The corrector used to run over them, and its ground pass rewrote four roles
+// that somebody had chosen: the chrome came out 0x31353D rather than the
+// 0x151922 in `makeDark`, because that pairing sits 1.057 off the page and the
+// floor was written as 1.08. A palette that arrives from a theme file still
+// gets corrected -- it has grounds nobody vetted -- but a value in this tree is
+// a decision, and this is what says so.
+//
+// Spelled out as literals on purpose. Comparing the corrected palette against
+// `makeDark()` would pass just as happily if both drifted, and the point of the
+// test is that these exact bytes -- the sibling microide's, so the two
+// applications look like one family -- survive the trip.
+MICRONOTES_TEST(theme_built_in_grounds_reach_the_screen_as_written) {
+  struct Ground {
+    const char* what;
+    SDL_Color micronotes::ui::Theme::*role;
+    unsigned dark;
+    unsigned light;
+  };
+  static constexpr Ground kGrounds[] = {
+    {"windowBackground", &micronotes::ui::Theme::windowBackground, 0x080B11, 0xE7EAF0},
+    {"chromeBackground", &micronotes::ui::Theme::chromeBackground, 0x151922, 0xDCE1E9},
+    {"chromeActive", &micronotes::ui::Theme::chromeActive, 0x1D2431, 0xCCD4E0},
+    {"surfaceBackground", &micronotes::ui::Theme::surfaceBackground, 0x121722, 0xF3F5F9},
+    {"surfaceRaised", &micronotes::ui::Theme::surfaceRaised, 0x1A2130, 0xFFFFFF},
+    {"editorBackground", &micronotes::ui::Theme::editorBackground, 0x0F131B, 0xFBFCFE},
+    {"gutterBackground", &micronotes::ui::Theme::gutterBackground, 0x0C1017, 0xEFF2F6},
+    {"rowHighlight", &micronotes::ui::Theme::rowHighlight, 0x171F2B, 0xE5EBF6},
+    // The one rule weight the shell draws. Held to a text-ish ratio it came out
+    // 0x333D50, which is a rule dark enough to turn a list of rows into a list
+    // of boxes -- so it is picked, not corrected, like the grounds it separates.
+    {"border", &micronotes::ui::Theme::border, 0x2A3548, 0xC3CBD7},
+  };
+
+  for(const auto mode : {micronotes::ui::ThemeMode::Dark, micronotes::ui::ThemeMode::Light}) {
+    micronotes::ui::setThemeMode(mode);
+    const auto& palette = micronotes::ui::theme();
+    const bool dark = mode == micronotes::ui::ThemeMode::Dark;
+    const std::string which = dark ? "dark" : "light";
+    for(const auto& ground : kGrounds) {
+      const unsigned want = dark ? ground.dark : ground.light;
+      const SDL_Color got = palette.*(ground.role);
+      const unsigned packed = (static_cast<unsigned>(got.r) << 16) |
+                              (static_cast<unsigned>(got.g) << 8) | static_cast<unsigned>(got.b);
+      micronotes::tests::require(
+        packed == want,
+        which + " theme: " + ground.what + " reaches the screen as " + hex(packed) +
+          " but was written as " + hex(want) + " -- something is correcting a picked ground");
+      micronotes::tests::require(got.a == 255,
+                                 which + " theme: " + ground.what + " lost its opacity");
+    }
+  }
+  micronotes::ui::setThemeMode(micronotes::ui::ThemeMode::Dark);
 }
