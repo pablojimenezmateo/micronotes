@@ -52,13 +52,20 @@ public:
   TextTextureCache(const TextTextureCache&) = delete;
   TextTextureCache& operator=(const TextTextureCache&) = delete;
 
+  // The key for a run. Exposed, like `TextMeasureCache`'s, so a caller can hash
+  // once and use the key for both the lookup and the insert: a miss used to
+  // hash the whole run twice, and a miss is exactly the path that then goes on
+  // to rasterize.
+  using Key = std::uint64_t;
+  static Key makeKey(std::string_view text, SDL_Color color, Style style);
+
   // Returns the cached entry, or nullptr when absent. On a hit the entry is
   // promoted to most-recently-used.
-  const Entry* find(std::string_view text, SDL_Color color, Style style);
+  const Entry* find(Key key);
 
   // Takes ownership of `texture`. Evicts the least recently used entry when
   // over capacity.
-  const Entry* insert(std::string_view text, SDL_Color color, Style style, Entry entry);
+  const Entry* insert(Key key, Entry entry);
 
   // Destroys every texture. Used when the font changes, which invalidates all
   // of them at once -- the one case a full flush is actually correct.
@@ -67,10 +74,6 @@ public:
   std::size_t size() const { return entries_.size(); }
 
 private:
-  using Key = std::uint64_t;
-
-  static Key makeKey(std::string_view text, SDL_Color color, Style style);
-
   struct Node {
     Key key;
     Entry entry;

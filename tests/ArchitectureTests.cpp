@@ -168,21 +168,24 @@ MICRONOTES_TEST(text_texture_cache_evicts_least_recently_used_not_everything) {
   // Null textures: the cache only ever destroys a non-null one, so this
   // exercises the eviction policy without needing a live renderer.
   const microcore::render::TextTextureCache::Entry entry {nullptr, 10, 10};
+  const auto key = [&](std::string_view text) {
+    return microcore::render::TextTextureCache::makeKey(text, color, style);
+  };
 
-  cache.insert("a", color, style, entry);
-  cache.insert("b", color, style, entry);
-  cache.insert("c", color, style, entry);
+  cache.insert(key("a"), entry);
+  cache.insert(key("b"), entry);
+  cache.insert(key("c"), entry);
   MICRONOTES_REQUIRE(cache.size() == 3);
 
   // Touch "a" so "b" becomes the coldest entry.
-  MICRONOTES_REQUIRE(cache.find("a", color, style) != nullptr);
-  cache.insert("d", color, style, entry);
+  MICRONOTES_REQUIRE(cache.find(key("a")) != nullptr);
+  cache.insert(key("d"), entry);
 
   MICRONOTES_REQUIRE(cache.size() == 3);
-  MICRONOTES_REQUIRE(cache.find("b", color, style) == nullptr);  // evicted
-  MICRONOTES_REQUIRE(cache.find("a", color, style) != nullptr);  // kept: recently used
-  MICRONOTES_REQUIRE(cache.find("c", color, style) != nullptr);
-  MICRONOTES_REQUIRE(cache.find("d", color, style) != nullptr);
+  MICRONOTES_REQUIRE(cache.find(key("b")) == nullptr);  // evicted
+  MICRONOTES_REQUIRE(cache.find(key("a")) != nullptr);  // kept: recently used
+  MICRONOTES_REQUIRE(cache.find(key("c")) != nullptr);
+  MICRONOTES_REQUIRE(cache.find(key("d")) != nullptr);
 }
 
 MICRONOTES_TEST(text_texture_cache_distinguishes_colour_and_style) {
@@ -191,10 +194,11 @@ MICRONOTES_TEST(text_texture_cache_distinguishes_colour_and_style) {
   const SDL_Color white {255, 255, 255, 255};
   const SDL_Color red {255, 0, 0, 255};
 
-  cache.insert("x", white, {}, entry);
-  MICRONOTES_REQUIRE(cache.find("x", red, {}) == nullptr);
-  MICRONOTES_REQUIRE(cache.find("x", white, {true, false, false, false}) == nullptr);
-  MICRONOTES_REQUIRE(cache.find("x", white, {}) != nullptr);
+  using Cache = microcore::render::TextTextureCache;
+  cache.insert(Cache::makeKey("x", white, {}), entry);
+  MICRONOTES_REQUIRE(cache.find(Cache::makeKey("x", red, {})) == nullptr);
+  MICRONOTES_REQUIRE(cache.find(Cache::makeKey("x", white, {true, false, false, false})) == nullptr);
+  MICRONOTES_REQUIRE(cache.find(Cache::makeKey("x", white, {})) != nullptr);
 }
 
 // Opening a connection outside SqliteDb bypasses two things at once: the

@@ -5,6 +5,8 @@
 #include "core/perf/PerformanceCounters.h"
 #include "doc/Fold.h"
 
+#include "core/util/Hash.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -15,31 +17,12 @@
 namespace micronotes::doc {
 namespace {
 
-constexpr std::uint64_t kFnvOffset = 1469598103934665603ull;
-constexpr std::uint64_t kFnvPrime = 1099511628211ull;
-
-// FNV-1a widened to a machine word: a block's fingerprint is recomputed for
-// every block on every keystroke, so the byte-at-a-time loop is worth avoiding.
-std::uint64_t hashBytes(std::uint64_t seed, const void* data, std::size_t size) {
-  const auto* bytes = static_cast<const unsigned char*>(data);
-  std::size_t i = 0;
-  for(; i + sizeof(std::uint64_t) <= size; i += sizeof(std::uint64_t)) {
-    std::uint64_t word = 0;
-    std::memcpy(&word, bytes + i, sizeof(word));
-    seed = (seed ^ word) * kFnvPrime;
-    seed ^= seed >> 29;
-  }
-  for(; i < size; ++i) {
-    seed ^= bytes[i];
-    seed *= kFnvPrime;
-  }
-  return seed;
-}
-
-template <typename T>
-std::uint64_t hashValue(std::uint64_t seed, const T& value) {
-  return hashBytes(seed, &value, sizeof(T));
-}
+// A block's fingerprint is recomputed for every block on every keystroke, so
+// the word-at-a-time loop matters here; it lives in core because three other
+// caches want the same one.
+using microcore::util::hashBytes;
+using microcore::util::hashValue;
+using microcore::util::kFnvOffset;
 
 std::size_t utf8Next(std::string_view text, std::size_t index) {
   if(index >= text.size()) return text.size();

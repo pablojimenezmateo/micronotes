@@ -1,28 +1,15 @@
 #include "ui/TextMeasureCache.h"
 
+#include "core/util/Hash.h"
+
 #include <bit>
 #include <cstring>
 
 namespace micronotes::ui {
 namespace {
 
-constexpr std::uint64_t kFnvOffset = 1469598103934665603ull;
-constexpr std::uint64_t kFnvPrime = 1099511628211ull;
-
-std::uint64_t hashBytes(std::uint64_t seed, const void* data, std::size_t size) {
-  const auto* bytes = static_cast<const unsigned char*>(data);
-  std::size_t i = 0;
-  for(; i + sizeof(std::uint64_t) <= size; i += sizeof(std::uint64_t)) {
-    std::uint64_t word = 0;
-    std::memcpy(&word, bytes + i, sizeof(word));
-    seed = (seed ^ word) * kFnvPrime;
-    seed ^= seed >> 29;
-  }
-  for(; i < size; ++i) {
-    seed = (seed ^ bytes[i]) * kFnvPrime;
-  }
-  return seed;
-}
+using microcore::util::hashBytes;
+using microcore::util::kFnvOffset;
 
 }
 

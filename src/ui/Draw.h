@@ -253,7 +253,8 @@ private:
   }
 
   const CachedText* iconTexture(std::string_view text, SDL_Color color) {
-    if(const auto* hit = iconCache_.find(text, color, render::TextTextureCache::Style {})) return hit;
+    const auto key = render::TextTextureCache::makeKey(text, color, render::TextTextureCache::Style {});
+    if(const auto* hit = iconCache_.find(key)) return hit;
     SDL_Surface* surface = fonts_.renderIcon(text, color);
     if(!surface) return nullptr;
     // Cached at one size for every caller, because the display scale is in the
@@ -264,12 +265,13 @@ private:
     CachedText entry {created, surface->w, surface->h};
     SDL_DestroySurface(surface);
     if(!created) return nullptr;
-    return iconCache_.insert(text, color, render::TextTextureCache::Style {}, entry);
+    return iconCache_.insert(key, entry);
   }
 
   const CachedText* texture(std::string_view text, SDL_Color color, const ui::TextStyle& style) {
-    const auto key = cacheStyle(style);
-    if(const auto* hit = cache_.find(text, color, key)) return hit;
+    // Hashed once and used for both the probe and the insert below.
+    const auto key = render::TextTextureCache::makeKey(text, color, cacheStyle(style));
+    if(const auto* hit = cache_.find(key)) return hit;
     perf::addCounter(perf::CounterId::RenderTextRasterizations);
     SDL_Surface* surface = fonts_.render(text, style, color);
     if(!surface) return nullptr;
@@ -277,7 +279,7 @@ private:
     CachedText entry {created, surface->w, surface->h};
     SDL_DestroySurface(surface);
     if(!created) return nullptr;
-    return cache_.insert(text, color, key, entry);
+    return cache_.insert(key, entry);
   }
 
 

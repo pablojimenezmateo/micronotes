@@ -1,19 +1,19 @@
 #include "core/render/TextTextureCache.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/Hash.h"
+
+#include <cstring>
 
 namespace microcore::render {
 namespace {
 
-// FNV-1a. Cheap, no allocation, and good enough to key a texture cache: a
-// collision would show the wrong glyph run, but at 64 bits over the few
-// thousand live entries this cache holds, that is not a practical concern.
-constexpr std::uint64_t kFnvOffset = 1469598103934665603ull;
-constexpr std::uint64_t kFnvPrime = 1099511628211ull;
-
-inline std::uint64_t fnvByte(std::uint64_t hash, unsigned char value) {
-  return (hash ^ value) * kFnvPrime;
-}
+// FNV-1a from `core/util/Hash.h`. Cheap, no allocation, and good enough to key
+// a texture cache: a collision would show the wrong glyph run, but at 64 bits
+// over the few thousand live entries this cache holds, that is not a practical
+// concern.
+using util::hashBytes;
+using util::kFnvOffset;
 
 }
 
@@ -25,25 +25,31 @@ TextTextureCache::~TextTextureCache() {
 }
 
 TextTextureCache::Key TextTextureCache::makeKey(std::string_view text, SDL_Color color, Style style) {
-  std::uint64_t hash = kFnvOffset;
-  for(const char c : text) hash = fnvByte(hash, static_cast<unsigned char>(c));
-  hash = fnvByte(hash, color.r);
-  hash = fnvByte(hash, color.g);
-  hash = fnvByte(hash, color.b);
-  hash = fnvByte(hash, color.a);
-  const auto styleBits = static_cast<unsigned char>(
-    (style.heading ? 1 : 0) | (style.mono ? 2 : 0) | (style.strong ? 4 : 0) | (style.emphasis ? 8 : 0));
-  hash = fnvByte(hash, styleBits);
+  // The text a word at a time rather than a byte at a time. This runs once per
+  // drawn run of every frame, which makes it the hottest hash in the tree; it
+  // was the one copy of FNV-1a that never picked up the wide loop.
+  std::uint64_t hash = hashBytes(kFnvOffset, text);
+  // The colour and the style packed into a fixed byte array and hashed in one
+  // pass, every byte of it written here. Hashing the `Style` struct directly
+  // would mix in the padding between `emphasis` and `size`, which aggregate
+  // initialisation leaves indeterminate -- the same run would then key two ways
+  // depending on what the stack held, and the cache would quietly stop hitting.
+  unsigned char fields[4 + 1 + sizeof(std::uint32_t)];
+  fields[0] = color.r;
+  fields[1] = color.g;
+  fields[2] = color.b;
+  fields[3] = color.a;
+  fields[4] = static_cast<unsigned char>((style.heading ? 1 : 0) | (style.mono ? 2 : 0) |
+                                         (style.strong ? 4 : 0) | (style.emphasis ? 8 : 0));
+  // Quantised rather than hashed as a float, so two sizes a rounding error
+  // apart share a texture instead of each rasterizing their own.
   const auto size = static_cast<std::uint32_t>(style.size * 64.0f);
-  for(int shift = 0; shift < 32; shift += 8) {
-    hash = fnvByte(hash, static_cast<unsigned char>((size >> shift) & 0xFF));
-  }
-  return hash;
+  std::memcpy(fields + 5, &size, sizeof(size));
+  return hashBytes(hash, fields, sizeof(fields));
 }
 
-const TextTextureCache::Entry* TextTextureCache::find(std::string_view text, SDL_Color color, Style style) {
+const TextTextureCache::Entry* TextTextureCache::find(Key key) {
   perf::addCounter(perf::CounterId::RenderTextCacheQueries);
-  const auto key = makeKey(text, color, style);
   const auto found = entries_.find(key);
   if(found == entries_.end()) return nullptr;
   perf::addCounter(perf::CounterId::RenderTextCacheHits);
@@ -53,9 +59,7 @@ const TextTextureCache::Entry* TextTextureCache::find(std::string_view text, SDL
   return &found->second->entry;
 }
 
-const TextTextureCache::Entry* TextTextureCache::insert(std::string_view text, SDL_Color color,
-                                                        Style style, Entry entry) {
-  const auto key = makeKey(text, color, style);
+const TextTextureCache::Entry* TextTextureCache::insert(Key key, Entry entry) {
   const auto existing = entries_.find(key);
   if(existing != entries_.end()) {
     // Same key rendered twice before the first insert landed; keep one texture.
