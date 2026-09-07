@@ -197,7 +197,8 @@ static std::vector<std::string> splitFields(const std::string& line) {
 
 }
 
-Library::Library(std::filesystem::path root) : root_(std::move(root)) {}
+Library::Library(std::filesystem::path root)
+  : root_(std::move(root)), safeRoot_(root_) {}
 
 const std::filesystem::path& Library::root() const {
   return root_;
@@ -214,7 +215,7 @@ std::filesystem::path Library::notePath(const std::string& title) const {
 
 std::filesystem::path Library::createNote(const NoteMetadata& metadata, std::string_view body) const {
   ensureLayout();
-  const auto path = uniqueMarkdownPath(platform::normalizeInsideRoot(root_, notePath(metadata.title)));
+  const auto path = uniqueMarkdownPath(safeRoot_.normalize(notePath(metadata.title)));
   const auto header = metadataHeader(metadata);
   if(!platform::writeFileDurably(path, {header, body})) {
     throw std::runtime_error("failed to create note");
@@ -223,7 +224,7 @@ std::filesystem::path Library::createNote(const NoteMetadata& metadata, std::str
 }
 
 LoadedNote Library::loadNote(const std::filesystem::path& path) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   std::ifstream in(safePath, std::ios::binary);
   std::string text = readAll(in);
   auto metadata = parseMetadata(text);
@@ -247,13 +248,13 @@ LoadedNote Library::loadNote(const std::filesystem::path& path) const {
 }
 
 NoteMetadata Library::loadNoteMetadata(const std::filesystem::path& path) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   std::ifstream in(safePath);
   return parseMetadata(readMetadataHeader(in));
 }
 
 bool Library::saveNote(const std::filesystem::path& path, const NoteMetadata& metadata, std::string_view body) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   // Two pieces rather than one concatenated buffer: the body is the whole note,
   // and gluing a hundred-byte header to the front of it cost an allocation and
   // a copy of every byte of the note on every autosave.
@@ -262,7 +263,7 @@ bool Library::saveNote(const std::filesystem::path& path, const NoteMetadata& me
 }
 
 std::string Library::preserveExternalVersion(const std::filesystem::path& path) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   if(!std::filesystem::exists(safePath)) return {};
   auto note = loadNote(safePath);
   const auto stem = safePath.stem().string();
@@ -277,7 +278,7 @@ std::string Library::preserveExternalVersion(const std::filesystem::path& path) 
 }
 
 std::filesystem::path Library::createFolder(const std::filesystem::path& relativeFolder) const {
-  const auto target = platform::normalizeInsideRoot(root_, root_ / relativeFolder);
+  const auto target = safeRoot_.normalize(root_ / relativeFolder);
   std::filesystem::create_directories(target);
   return target;
 }
@@ -285,9 +286,9 @@ std::filesystem::path Library::createFolder(const std::filesystem::path& relativ
 std::filesystem::path Library::saveNoteAs(const std::filesystem::path& path,
                                           const NoteMetadata& metadata,
                                           std::string_view body) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   const auto target = uniqueMarkdownPath(
-    platform::normalizeInsideRoot(root_, safePath.parent_path() /
+    safeRoot_.normalize(safePath.parent_path() /
                                            (platform::sanitizeFileStem(metadata.title) + ".md")),
     safePath);
   if(!saveNote(target, metadata, body)) return {};
@@ -299,7 +300,7 @@ std::filesystem::path Library::saveNoteAs(const std::filesystem::path& path,
 }
 
 std::filesystem::path Library::renameNote(const std::filesystem::path& path, const std::string& newTitle) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   auto note = loadNote(safePath);
   note.metadata.title = newTitle;
   const auto target = saveNoteAs(safePath, note.metadata, note.body);
@@ -307,18 +308,18 @@ std::filesystem::path Library::renameNote(const std::filesystem::path& path, con
 }
 
 std::filesystem::path Library::moveNote(const std::filesystem::path& path, const std::filesystem::path& relativeFolder) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
-  const auto targetDir = platform::normalizeInsideRoot(root_, root_ / relativeFolder);
+  const auto safePath = safeRoot_.normalize(path);
+  const auto targetDir = safeRoot_.normalize(root_ / relativeFolder);
   std::filesystem::create_directories(targetDir);
-  const auto target = uniqueMarkdownPath(platform::normalizeInsideRoot(root_, targetDir / safePath.filename()), safePath);
+  const auto target = uniqueMarkdownPath(safeRoot_.normalize(targetDir / safePath.filename()), safePath);
   if(target == safePath) return target;
   std::filesystem::rename(safePath, target);
   return target;
 }
 
 std::filesystem::path Library::renameFolder(const std::filesystem::path& relativeFolder, const std::filesystem::path& newRelativeFolder) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, root_ / relativeFolder);
-  const auto target = platform::normalizeInsideRoot(root_, root_ / newRelativeFolder);
+  const auto safePath = safeRoot_.normalize(root_ / relativeFolder);
+  const auto target = safeRoot_.normalize(root_ / newRelativeFolder);
   if(safePath == root_ || target == root_) return safePath;
   std::filesystem::create_directories(target.parent_path());
   std::filesystem::rename(safePath, target);
@@ -326,7 +327,7 @@ std::filesystem::path Library::renameFolder(const std::filesystem::path& relativ
 }
 
 void Library::deleteFolder(const std::filesystem::path& relativeFolder) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, root_ / relativeFolder);
+  const auto safePath = safeRoot_.normalize(root_ / relativeFolder);
   if(safePath == root_) return;
   // The whole folder goes as one entry, so restoring it brings back everything
   // that was inside. Attachments live outside it and are filed alongside.
@@ -375,7 +376,7 @@ void Library::deleteFolder(const std::filesystem::path& relativeFolder) const {
 }
 
 void Library::deleteNote(const std::filesystem::path& path) const {
-  const auto safePath = platform::normalizeInsideRoot(root_, path);
+  const auto safePath = safeRoot_.normalize(path);
   if(!std::filesystem::exists(safePath)) return;
   const auto metadata = loadNoteMetadata(safePath);
   const auto attachmentDir = metadata.id.empty() ? std::filesystem::path {}
@@ -460,7 +461,7 @@ bool Library::restoreFromTrash(const std::string& name) const {
     if(trashName.empty()) return false;
     const auto source = trashFiles(root_) / trashName;
     if(!std::filesystem::exists(source)) return false;
-    auto target = platform::normalizeInsideRoot(root_, root_ / relative);
+    auto target = safeRoot_.normalize(root_ / relative);
     // Something may have taken the name back in the meantime; the restored copy
     // gets a new one rather than overwriting it. Written out here rather than
     // reusing the note path helper, which assumes a `.md` file and would give a

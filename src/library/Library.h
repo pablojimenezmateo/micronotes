@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/platform/PathUtils.h"
 #include "CoreAliases.h"
 
 #include "library/Metadata.h"
@@ -105,6 +106,10 @@ public:
 
 private:
   std::filesystem::path root_;
+  // The same root, canonicalized once. Every path this class is handed is
+  // checked against it, and resolving the root's half per call was the largest
+  // single cost in reading a note -- see `platform::SafeRoot`.
+  platform::SafeRoot safeRoot_;
 };
 
 }

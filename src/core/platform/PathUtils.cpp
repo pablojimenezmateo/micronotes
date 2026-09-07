@@ -25,17 +25,23 @@ RuntimePaths resolveRuntimePaths() {
   };
 }
 
-std::filesystem::path normalizeInsideRoot(const std::filesystem::path& root, const std::filesystem::path& candidate) {
-  const auto rootAbs = std::filesystem::weakly_canonical(root);
+SafeRoot::SafeRoot(const std::filesystem::path& root)
+  : canonical_(std::filesystem::weakly_canonical(root)) {}
+
+std::filesystem::path SafeRoot::normalize(const std::filesystem::path& candidate) const {
   const auto candidateAbs = std::filesystem::weakly_canonical(candidate);
-  auto rootIt = rootAbs.begin();
+  auto rootIt = canonical_.begin();
   auto candidateIt = candidateAbs.begin();
-  for(; rootIt != rootAbs.end(); ++rootIt, ++candidateIt) {
+  for(; rootIt != canonical_.end(); ++rootIt, ++candidateIt) {
     if(candidateIt == candidateAbs.end() || *rootIt != *candidateIt) {
       throw std::runtime_error("path escapes library root");
     }
   }
   return candidateAbs;
+}
+
+std::filesystem::path normalizeInsideRoot(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+  return SafeRoot(root).normalize(candidate);
 }
 
 std::string sanitizeFileStem(std::string title) {
