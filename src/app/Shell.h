@@ -135,6 +135,10 @@ struct ButtonRegion {
 struct SidebarRow {
   enum class Kind {
     Tree,
+    // A band across the panel heading the rows under it. Two sorts: one that
+    // names a `SidebarSection` and can be shut, and one that is a caption on
+    // what the list is currently showing -- the result count, the tag being
+    // filtered by -- which has nothing to shut.
     SectionLabel,
     Tag,
     // A note that matched the query, with the lines that matched under it.
@@ -146,8 +150,18 @@ struct SidebarRow {
   Kind kind = Kind::Tree;
   Rect rect;
   std::string label;   // section labels only
-  // Only folder rows with something inside them get one; an empty rect means
-  // the whole row selects rather than expands.
+  // Section labels only: which band this is, when it is one the reader can
+  // shut. Absent on a caption, which is what tells the draw not to give it a
+  // chevron and the click not to look for one.
+  std::optional<ui::SidebarSection> section;
+  bool collapsed = false;
+  // Drawn right-aligned in a band: how many rows are under it. It is worth
+  // most on a band that is *shut*, which is the one case where the rows cannot
+  // be counted by looking.
+  std::string trailing;
+  // A folder row with something inside it, and a band that can be shut, both
+  // get one -- they are the same control doing the same job. An empty rect
+  // means the whole row acts rather than expanding.
   Rect disclosure;
   ui::TreeRow tree;
   std::string tag;
@@ -465,6 +479,12 @@ struct UiRuntime {
     std::string tag;
     std::vector<std::string> favorites;
     std::vector<std::string> recents;
+    // Which bands are shut. Every row below a shut band moves, so this is
+    // geometry like the panel's width is -- and a key rather than a flag, for
+    // the reason the comment above gives: a flag has to be raised at every site
+    // that shuts a band, and the one that forgets leaves the panel hit-testing
+    // rows it is no longer drawing.
+    std::array<bool, 4> collapsedSections {};
     float width = 0.0f;
     float height = 0.0f;
     // The rhythm the rows were laid out at. Every height in the list derives

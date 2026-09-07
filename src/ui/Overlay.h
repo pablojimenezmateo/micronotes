@@ -19,7 +19,11 @@ enum class OverlayKind {
   // menus, the slash menu, and the command palette.
   List,
   // A destructive-action confirmation.
-  Confirm
+  Confirm,
+  // A grid of colour swatches. A list would do the job with one swatch a row,
+  // and would be the wrong shape: choosing a colour is comparing colours, and
+  // twelve of them in a column are never all in the eye at once.
+  ColorPicker
 };
 
 struct OverlayItem {
@@ -54,6 +58,13 @@ struct Overlay {
   int maxRows = 12;
 
   std::string confirmLabel = "Confirm";
+
+  // The choice already in force, as an index into `items`, or -1 for none.
+  //
+  // Distinct from `highlighted`, which is where the pointer or the keyboard is:
+  // a picker has to show both at once -- what the tag is now, and what it would
+  // become -- and they are only the same on the frame the picker opens.
+  int current = -1;
 
   // Whether dismissing this overlay is worth telling the caller about.
   //

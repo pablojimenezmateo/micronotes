@@ -1,6 +1,7 @@
 #include "ui/WorkspaceModel.h"
 
 #include <algorithm>
+#include <iterator>
 
 namespace micronotes::ui {
 
@@ -130,6 +131,40 @@ ShellLayoutInputs WorkspaceModel::layoutInputs(float windowWidth, float windowHe
   inputs.rightPanelWidth = rightPanelWidth;
   inputs.previousMode = previousMode;
   return inputs;
+}
+
+std::string_view sidebarSectionName(SidebarSection section) {
+  switch(section) {
+    case SidebarSection::Notebooks: return "notebooks";
+    case SidebarSection::Favorites: return "favorites";
+    case SidebarSection::Tags: return "tags";
+    case SidebarSection::Recent: return "recent";
+  }
+  return "notebooks";
+}
+
+const SidebarSection* sidebarSections(std::size_t* count) {
+  // In the order the sidebar stacks them, which is the order the persistence
+  // writes them and the order a test walks them.
+  static constexpr SidebarSection kSections[] = {
+    SidebarSection::Notebooks, SidebarSection::Favorites, SidebarSection::Tags,
+    SidebarSection::Recent,
+  };
+  if(count) *count = std::size(kSections);
+  return kSections;
+}
+
+bool WorkspaceModel::sectionCollapsed(SidebarSection section) const {
+  return collapsedSections[static_cast<std::size_t>(section)];
+}
+
+void WorkspaceModel::setSectionCollapsed(SidebarSection section, bool collapsed) {
+  collapsedSections[static_cast<std::size_t>(section)] = collapsed;
+}
+
+void WorkspaceModel::toggleSection(SidebarSection section) {
+  const auto index = static_cast<std::size_t>(section);
+  collapsedSections[index] = !collapsedSections[index];
 }
 
 bool WorkspaceModel::togglePanel(bool WorkspaceModel::*panel) {

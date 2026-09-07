@@ -3,11 +3,13 @@
 #include "app/EditorBlocks.h"
 #include "app/Notes.h"
 #include "app/Shell.h"
+#include "app/SidebarModel.h"
 
 #include "core/perf/PerformanceCounters.h"
 
 #include "ui/Metrics.h"
 #include "ui/Outline.h"
+#include "ui/TagColors.h"
 #include "ui/Theme.h"
 #include "ui/WikiLink.h"
 
@@ -342,10 +344,17 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       const Rect row = rowRect(list, y, pitch);
       const bool selected = activeTag == tag;
       ui::drawRow(renderer, row, selected, ui::contains(row, ui.mouseX, ui.mouseY));
-      const std::string label = "#" + tag;
-      text.draw(ui::ellipsizeToWidth(text, label, static_cast<int>(row.w - kPadX * 2.0f), rowStyle),
-                row.x + kPadX, ui::textTop(row, text, rowStyle),
-                selected ? theme().accent : theme().textMuted, rowStyle);
+      // The tag's colour, and no `#`. Exactly the sidebar's tag row: this is
+      // the same object with the same affordance, so it has to be the same mark
+      // -- and a dot beside the name is what says "tag" now.
+      ui::drawTagDot(renderer,
+                     {row.x + kPadX, std::round(row.y + (row.h - kTagDotSize) / 2.0f),
+                      kTagDotSize, kTagDotSize},
+                     ui::tagColor(ui.state.workspace().tagColors, tag));
+      const float labelX = row.x + kPadX + kTagDotSize + ui::kTreeLabelGap;
+      text.draw(ui::ellipsizeToWidth(text, tag, static_cast<int>(row.x + row.w - labelX - kPadX), rowStyle),
+                labelX, ui::textTop(row, text, rowStyle),
+                selected ? theme().textPrimary : theme().textSecondary, rowStyle);
       ui.tagRows.push_back({row, tag});
     }
     y += pitch;

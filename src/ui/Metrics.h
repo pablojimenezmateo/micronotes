@@ -150,6 +150,25 @@ inline constexpr float kSpace3 = 12.0f;
 inline constexpr float kSpace4 = 16.0f;
 inline constexpr float kSpace6 = 24.0f;
 
+// A section band's two columns, which are deliberately *not* the row columns
+// above: a band spans the panel where a row is inset, and its chevron and label
+// sit an indent step ahead of the column the rows use.
+//
+// That outdent is the whole visual difference between a heading and one of the
+// rows it heads. The sidebar's headings used to start on the rows' own label
+// column, in the rows' own ground, in the rows' own ink -- so the panel read as
+// one long list with some words in it, and where TAGS stopped and RECENT began
+// was something the reader had to infer from the shape of the entries.
+//
+// Here rather than in the sidebar because both the row builder and `Draw`'s
+// band primitive lay out against them, and a heading whose chevron and label
+// are placed by two different files is a heading with two geometries.
+inline constexpr float kSectionChevronX = kSpace1;
+inline constexpr float kSectionLabelX = kSectionChevronX + kTreeChevronSlotWidth + kTreeLabelGap;
+// Reserved at a band's trailing edge for its count, so a long section name is
+// ellipsized before it reaches the number rather than over it.
+inline constexpr float kSectionCountWidth = 30.0f;
+
 // A tooltip sits this far off the control it describes.
 inline constexpr float kTooltipGap = 6.0f;
 inline constexpr float kTooltipPadX = 10.0f;

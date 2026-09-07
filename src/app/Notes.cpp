@@ -4,6 +4,7 @@
 #include "app/WikiLinks.h"
 
 #include <algorithm>
+#include <charconv>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,25 @@ void selectTag(UiRuntime& ui, const std::string& tag) {
   }
   ui.state.selectTag(tag);
   selectNoteAt(ui, 0);
+}
+
+void setTagColor(UiRuntime& ui, std::string_view tag, std::string_view swatch) {
+  if(tag.empty()) return;
+  int index = 0;
+  const auto* first = swatch.data();
+  const auto [ptr, ec] = std::from_chars(first, first + swatch.size(), index);
+  // Refused rather than defaulted to the first swatch. The id comes from a
+  // picker that built it, so a value that will not parse means the two have
+  // drifted apart -- and silently painting the tag blue would hide that.
+  if(ec != std::errc {} || ptr != first + swatch.size()) return;
+  ui.state.workspace().tagColors.set(std::string(tag), index);
+  ui.status = "Coloured " + std::string(tag);
+}
+
+void clearTagColor(UiRuntime& ui, std::string_view tag) {
+  if(tag.empty()) return;
+  ui.state.workspace().tagColors.clear(tag);
+  ui.status = std::string(tag) + " back to its automatic colour";
 }
 
 const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative) {

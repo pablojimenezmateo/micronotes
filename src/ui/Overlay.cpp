@@ -5,6 +5,7 @@
 
 #include "ui/Fuzzy.h"
 #include "ui/Metrics.h"
+#include "ui/TagColors.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,6 +28,12 @@ constexpr float kRowGap = kSpace3;
 // question and the wider of two buttons reads as the recommended one -- which
 // on a deletion is the wrong recommendation to make by accident.
 constexpr float kButtonWidth = 96.0f;
+// A colour picker's grid. Six across so twelve swatches are two rows -- both in
+// the eye at once, which is the whole reason it is a grid and not a list -- and
+// a cell big enough to be a colour rather than a pixel.
+constexpr int kSwatchColumns = 6;
+constexpr float kSwatchCell = 30.0f;
+constexpr float kSwatchGap = 4.0f;
 
 bool usesField(const Overlay& overlay) {
   return overlay.kind == OverlayKind::TextPrompt || (overlay.kind == OverlayKind::List && overlay.filterable);
@@ -47,10 +54,16 @@ Overlay* OverlayStack::top() {
 }
 
 void OverlayStack::open(Overlay overlay) {
-  overlay.highlighted = 0;
   overlay.scroll = 0;
+  // An overlay that opens on a choice already in force starts *there* rather
+  // than at the top: a colour picker whose keyboard cursor begins on the first
+  // swatch has thrown away the one piece of context it had, and the reader has
+  // to find their own colour again before they can step off it.
+  const bool startOnCurrent = overlay.current >= 0 &&
+    overlay.current < static_cast<int>(overlay.items.size());
+  overlay.highlighted = startOnCurrent ? overlay.current : 0;
   stack_.push_back(std::move(overlay));
-  resetHighlight();
+  if(!startOnCurrent) resetHighlight();
 }
 
 void OverlayStack::close() {
@@ -115,11 +128,24 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   lastRows_ = std::min(std::max(1, overlay.maxRows), fits);
   const float rows = static_cast<float>(rowsShown);
   const float listH = overlay.kind == OverlayKind::List ? rows * kRowHeight : 0.0f;
+  // The grid's own height, from how many rows the swatches fill.
+  const int swatchRows = overlay.kind == OverlayKind::ColorPicker
+                           ? static_cast<int>((indices.size() + kSwatchColumns - 1) / kSwatchColumns)
+                           : 0;
+  const float gridH = swatchRows > 0
+                        ? static_cast<float>(swatchRows) * (kSwatchCell + kSwatchGap) - kSwatchGap
+                        : 0.0f;
   const float confirmH = overlay.kind == OverlayKind::Confirm ? kRowHeight + kPadding : 0.0f;
   const float hintH = overlay.hint.empty() ? 0.0f : static_cast<float>(text.lineHeight(TextStyle {FontFamily::Sans, false, false, type().tiny})) + 8.0f;
 
-  const float width = std::min(overlay.width, static_cast<float>(windowWidth) - 40.0f);
-  const float height = kPadding * 2.0f + titleH + fieldH + listH + confirmH + hintH;
+  // A grid asks for exactly the width its columns need, rather than being
+  // stretched to whatever the caller guessed: a swatch grid with a ragged right
+  // edge reads as a list of colours that failed to line up.
+  const float gridW = static_cast<float>(kSwatchColumns) * (kSwatchCell + kSwatchGap) - kSwatchGap;
+  const float asked = overlay.kind == OverlayKind::ColorPicker ? gridW + kPadding * 2.0f
+                                                               : overlay.width;
+  const float width = std::min(asked, static_cast<float>(windowWidth) - 40.0f);
+  const float height = kPadding * 2.0f + titleH + fieldH + listH + gridH + confirmH + hintH;
 
   float x = 0.0f;
   float y = 0.0f;
@@ -138,6 +164,21 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   if(field) {
     layout.field = {x + kPadding, cursorY, width - kPadding * 2.0f, kFieldHeight};
     cursorY += fieldH;
+  }
+  if(overlay.kind == OverlayKind::ColorPicker) {
+    for(std::size_t i = 0; i < indices.size(); ++i) {
+      const auto column = static_cast<float>(i % kSwatchColumns);
+      const auto gridRow = static_cast<float>(i / kSwatchColumns);
+      layout.itemRects.push_back({x + kPadding + column * (kSwatchCell + kSwatchGap),
+                                  cursorY + gridRow * (kSwatchCell + kSwatchGap),
+                                  kSwatchCell, kSwatchCell});
+      layout.itemIndices.push_back(indices[i]);
+    }
+    cursorY += gridH;
+    if(hintH > 0.0f) {
+      layout.hint = {x + kPadding, y + height - kPadding - hintH, width - kPadding * 2.0f, hintH};
+    }
+    return layout;
   }
   const int first = std::clamp(overlay.scroll, 0, std::max(0, static_cast<int>(indices.size()) - rowsShown));
   for(std::size_t i = static_cast<std::size_t>(first);
@@ -237,7 +278,11 @@ std::optional<OverlayResult> OverlayStack::commit() {
   OverlayResult result;
   result.overlayId = overlay->id;
   result.value = overlay->value.text();
-  if(overlay->kind == OverlayKind::List) {
+  // A picker commits the same way a list does: both are "the highlighted item
+  // is the answer", and the only difference between them is how they are laid
+  // out. Leaving the picker out of this branch was how it came to have a grid
+  // that could be pointed at and no way to choose anything on it.
+  if(overlay->kind == OverlayKind::List || overlay->kind == OverlayKind::ColorPicker) {
     const auto indices = visibleIndices(*overlay);
     if(indices.empty()) return std::nullopt;
     int chosen = overlay->highlighted;
@@ -410,6 +455,37 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
       fill(renderer, {left + view.caretX, layout.field.y + 4.0f, 2.0f, layout.field.h - 8.0f},
            theme().accent);
     }
+  }
+
+  if(overlay->kind == OverlayKind::ColorPicker) {
+    for(std::size_t i = 0; i < layout.itemRects.size(); ++i) {
+      const auto rect = layout.itemRects[i];
+      const int index = layout.itemIndices[i];
+      if(index < 0 || index >= static_cast<int>(overlay->items.size())) continue;
+      const bool highlighted = index == overlay->highlighted || contains(rect, mouseX_, mouseY_);
+      const bool inForce = index == overlay->current;
+      // The swatch fills its cell, so the thing being chosen is the thing being
+      // pointed at. A colour shown as a chip inside a row would be competing
+      // with the row's own ground for what the eye reads as "this colour".
+      fill(renderer, rect, tagSwatch(index));
+      // Two marks, and they say different things: a tick for the colour the tag
+      // already has, an outline for the one the pointer is on. A picker that
+      // shows only one of them cannot answer "what is it now" and "what would
+      // this do" at the same time, which is the only question being asked.
+      if(inForce) {
+        drawCheckGlyph(renderer, {rect.x + rect.w / 2.0f - 6.0f, rect.y + rect.h / 2.0f - 6.0f,
+                                  12.0f, 12.0f},
+                       theme().onAccent);
+      }
+      if(highlighted) {
+        stroke(renderer, rect, theme().cursor);
+        stroke(renderer, {rect.x - 1.0f, rect.y - 1.0f, rect.w + 2.0f, rect.h + 2.0f},
+               theme().overlayBackground);
+      }
+    }
+    if(!layout.hint.w) return;
+    text.draw(overlay->hint, layout.hint.x, layout.hint.y, theme().textMuted, hintStyle);
+    return;
   }
 
   for(std::size_t i = 0; i < layout.itemRects.size(); ++i) {

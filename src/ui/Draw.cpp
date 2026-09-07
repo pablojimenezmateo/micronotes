@@ -377,8 +377,56 @@ std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth
 }
 
 
-void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y) {
-  text.draw(label, x, y, theme().textMuted);
+void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect chevron,
+                     std::string_view label, std::string_view trailing, bool collapsed,
+                     bool hovered) {
+  const bool collapsible = chevron.w > 0.0f;
+  // A step up out of the panel, which is what makes it a band. Hover lifts it
+  // one further, but only when there is something to shut: a caption that
+  // brightens under the pointer is a caption promising a click it will not
+  // honour.
+  fill(renderer, band, hovered && collapsible ? theme().rowHighlight : theme().surfaceRaised);
+  // The rule goes along the *top*, so it separates this band from the group
+  // above rather than from the rows it heads -- those belong to it.
+  fill(renderer, {band.x, band.y, band.w, kDividerThickness}, theme().border);
+
+  const TextStyle style = chromeSmallStyle();
+  float right = band.x + band.w - kSidebarInset;
+  if(!trailing.empty()) {
+    const float width = static_cast<float>(text.width(trailing, style));
+    text.draw(trailing, right - width, textTop(band, text, style), theme().textMuted, style);
+    right -= width + kSpace2;
+  }
+  // Outdented an indent step ahead of the rows under it. See `kSectionLabelX`.
+  const float labelX = band.x + kSectionLabelX;
+  text.draw(ellipsizeToWidth(text, std::string(label), static_cast<int>(std::max(0.0f, right - labelX)), style),
+            labelX, textTop(band, text, style),
+            hovered && collapsible ? theme().textPrimary : theme().textSecondary, style);
+  if(collapsible) {
+    drawChevron(renderer, chevron.x, chevron.y + chevron.h / 2.0f, !collapsed,
+                hovered ? theme().textPrimary : theme().textMuted);
+  }
+}
+
+void drawTagDot(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  // A solid disc, drawn as spans rather than as a texture: at seven pixels a
+  // circle is a handful of rows and the arithmetic is cheaper than a cache
+  // lookup.
+  //
+  // Solid, and not an outline for one state and a fill for another. That was
+  // tried, to mark the tag being filtered by, and at this size the ring's hole
+  // was over half the dot -- so the mark read as a small "0" rather than as a
+  // dot, in every row, to distinguish a state the row's own accent strip
+  // already says. Two pixels is not enough room for two states.
+  const float radius = std::min(box.w, box.h) / 2.0f;
+  const float cx = box.x + box.w / 2.0f;
+  const float cy = box.y + box.h / 2.0f;
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  for(float dy = -radius; dy <= radius; dy += 1.0f) {
+    const float half = std::sqrt(std::max(0.0f, radius * radius - dy * dy));
+    if(half <= 0.0f) continue;
+    SDL_RenderLine(renderer, cx - half, cy + dy, cx + half, cy + dy);
+  }
 }
 
 float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_view detail,

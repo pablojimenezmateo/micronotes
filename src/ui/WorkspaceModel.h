@@ -2,9 +2,12 @@
 
 #include "core/ui/ShellModel.h"
 #include "ui/Metrics.h"
+#include "ui/TagColors.h"
 #include "ui/ShellLayout.h"
 #include "ui/Tabs.h"
 
+#include <array>
+#include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,6 +30,30 @@ enum class RightPanelView {
 
 std::string_view rightPanelViewName(RightPanelView view);
 RightPanelView rightPanelViewFromName(std::string_view name);
+
+// The bands the sidebar's row list is divided into.
+//
+// They were four headings in one uninterrupted column -- FAVORITES, the tree,
+// TAGS, RECENT -- set in the same muted ink and on the same ground as the rows
+// they headed, and the tree had no heading at all. So the panel read as one
+// long list with some words in it, and where TAGS stopped and RECENT began was
+// something the reader had to work out from the shape of the entries. Each is a
+// band of its own now, and each can be shut.
+//
+// The tree is one of them. Without a band of its own it was an unlabelled
+// section between two labelled ones, which is most of what made the division
+// unclear: naming three of four groups is worse than naming none.
+enum class SidebarSection {
+  Notebooks,
+  Favorites,
+  Tags,
+  Recent
+};
+
+std::string_view sidebarSectionName(SidebarSection section);
+// Every section, in the order the sidebar stacks them. For the persistence and
+// the tests, so neither has to restate the list.
+const SidebarSection* sidebarSections(std::size_t* count);
 
 // The arrangement of the window: which panels are showing, how wide they are,
 // and what the reader keeps to hand.
@@ -57,6 +84,19 @@ struct WorkspaceModel {
   // someone keeps to hand is a view preference, not part of the note.
   std::vector<std::string> favorites;
   std::vector<std::string> recents;
+
+  // A colour per tag, which is what joins a note's row to the tags it carries.
+  // A view preference like the two above and, like them, never written into a
+  // note: what colour somebody finds `#work` easiest to spot is not part of the
+  // library. See `ui::TagColors`.
+  TagColors tagColors;
+
+  // Which sidebar bands are shut. A view preference too, and the reason it is
+  // on the model rather than on the runtime: a reader who shuts TAGS because
+  // their library has sixty of them wants it shut again next time.
+  bool sectionCollapsed(SidebarSection section) const;
+  void setSectionCollapsed(SidebarSection section, bool collapsed);
+  void toggleSection(SidebarSection section);
 
   // How the note on screen is being looked at. Reads the active tab, and falls
   // back to the default when nothing is open, so callers never have to ask
@@ -107,6 +147,12 @@ struct WorkspaceModel {
   // Hiding every panel would leave no way back to another note but the palette,
   // so the last one standing refuses to go. Returns whether anything changed.
   bool togglePanel(bool WorkspaceModel::*panel);
+
+  // One flag per `SidebarSection`, indexed by it. A fixed array rather than a
+  // set of named bools so that adding a band does not mean touching the
+  // persistence, the sidebar and four accessors -- and so `sidebarSections`
+  // above can be walked over both.
+  std::array<bool, 4> collapsedSections {};
 };
 
 }

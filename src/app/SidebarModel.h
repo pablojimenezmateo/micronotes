@@ -47,6 +47,50 @@ inline constexpr float kSidebarGutterX = ui::kSidebarInset;
 inline constexpr float kSidebarGutterWidth = ui::kTreeChevronSlotWidth;
 inline constexpr float kSidebarLabelX = kSidebarGutterX + kSidebarGutterWidth + ui::kTreeLabelGap;
 
+// How many rows the two shortcut lists show. A shortcut list is a way back to
+// something recent, not a second library: past a handful it stops being faster
+// to read than the tree it sits above. Named because the count on the band has
+// to be the count of what is under it, and those were two numbers written out
+// at two sites.
+inline constexpr std::size_t kMaxFavoriteRows = 8;
+inline constexpr std::size_t kMaxRecentRows = 5;
+
+// The coloured dots at the trailing edge of a note's row, one per tag.
+//
+// This is what connects the two halves of the sidebar. A note's row named its
+// folder and said nothing about its tags; the TAGS band listed tags and said
+// nothing about which notes carried them. So the one way of organising a
+// library that cuts across the tree was invisible from the tree.
+//
+// Capped, because a row is one line tall and a note with nine tags would push
+// its own name off the panel. Past the cap the last dot is a marker rather than
+// a tag, and its tooltip names the ones that did not fit -- hiding them
+// silently would be worse than not drawing any.
+inline constexpr std::size_t kMaxTagDots = 4;
+inline constexpr float kTagDotSize = 7.0f;
+inline constexpr float kTagDotGap = 4.0f;
+// What a row with dots reserves at its trailing edge, so a long note title is
+// ellipsized before it reaches them.
+inline constexpr float kTagDotColumnWidth =
+  static_cast<float>(kMaxTagDots) * (kTagDotSize + kTagDotGap) + ui::kSpace1;
+
+// Where row `row`'s tag dots go, in the order the tags are listed, and at most
+// `kMaxTagDots` of them. Laid out right to left from the row's trailing edge.
+//
+// One function for the draw and the two hit tests -- what the pointer is over
+// and what a click chose -- because a dot is 7 pixels wide and three
+// independent spellings of "the third dot from the right" is three chances to
+// be off by one, on a target that small.
+std::vector<ui::Rect> tagDotRects(ui::Rect row, std::size_t tagCount);
+
+// The tag whose dot is under the pointer on `row`, or nothing.
+//
+// Answers for the overflow marker too: it stands for the tags past the cap, and
+// the first of those is the one it filters by, because a marker that names four
+// tags in a tooltip and then filters by none is a marker that looks broken.
+std::optional<std::string> sidebarTagDotAt(const UiRuntime& ui, const SidebarRow& row,
+                                           float x, float y);
+
 // The sidebar's vertical rhythm.
 //
 // Every row holds a line of text, and text grows with the reader's text size
@@ -141,6 +185,17 @@ std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, ui::Rect sidebar, f
 // or are they passing over it. One parameter says so; two booleans invited a
 // call site to get one right and the other wrong.
 enum class RowActivation { Click, Cursor };
+
+// What a press on a sidebar row means: which of the things drawn on it the
+// pointer was actually on, and what that one does.
+//
+// Beside `activateSidebarRow` because it is the outer half of the same
+// question. A row is not one target -- a note row carries a disclosure
+// triangle, an icon, a name and a dot per tag, and each is a different answer
+// -- and the order they are tested in *is* the design: the innermost control
+// wins, or the row underneath swallows it. Spelled out in the shell's key
+// handler, that order was invisible next to a dozen unrelated branches.
+void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uint8 button);
 
 // The one place a sidebar row turns into a selection, so a click, an arrow key
 // and a drop can never disagree about what selecting a row means.

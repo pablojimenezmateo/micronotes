@@ -58,6 +58,17 @@ void selectTag(UiRuntime& ui, const std::string& tag);
 // means when no filter is running.
 bool clearTagFilter(UiRuntime& ui);
 
+// Gives `tag` the swatch named by `swatch` -- the id a colour picker's result
+// carries, so a decimal string -- and puts `tag` back on its derived colour.
+//
+// Beside `selectTag` because they are the same handful of verbs about the same
+// thing, and all three have to write the ui state that carries the answer.
+// Nothing here touches a note: what colour somebody finds a tag easiest to spot
+// is a view preference, and writing it into every note carrying the tag would
+// be a library-wide edit to record a preference. See `ui::TagColors`.
+void setTagColor(UiRuntime& ui, std::string_view tag, std::string_view swatch);
+void clearTagColor(UiRuntime& ui, std::string_view tag);
+
 // The note a Markdown link's path names, or null when it names something that
 // is not a note in this library.
 //

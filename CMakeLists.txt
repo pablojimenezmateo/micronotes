@@ -188,6 +188,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
+  src/ui/TagColors.cpp
   src/ui/Tabs.cpp
   src/ui/TextUtil.cpp
   src/ui/Tooltip.cpp
@@ -307,6 +308,7 @@ add_executable(micronotes_tests
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp
   tests/TextUtilTests.cpp
+  tests/TagColorTests.cpp
   tests/ThemeTests.cpp
   tests/TextFieldTests.cpp
   tests/WheelTests.cpp

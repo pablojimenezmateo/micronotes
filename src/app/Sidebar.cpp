@@ -6,6 +6,7 @@
 #include "ui/Metrics.h"
 #include "ui/SearchScope.h"
 #include "ui/TextUtil.h"
+#include "ui/TagColors.h"
 #include "ui/Theme.h"
 #include "ui/TreeModel.h"
 
@@ -20,7 +21,6 @@ using ui::Rect;
 using ui::TextRenderer;
 using ui::drawChevron;
 using ui::drawEmptyMessage;
-using ui::drawSectionLabel;
 using ui::drawRow;
 using ui::ellipsizeToWidth;
 using ui::fill;
@@ -86,8 +86,9 @@ static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
     drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.search.text() + "\".",
                      x, y, width, "Esc  clear the search");
   } else if(!ui.state.selection().tag.empty()) {
-    drawEmptyMessage(text, "No notes with this tag", "Nothing carries #" + ui.state.selection().tag + " any more.",
-                     x, y, width, "click the tag again to clear the filter");
+    drawEmptyMessage(text, "No notes with this tag",
+                     "Nothing carries " + ui.state.selection().tag + " any more.",
+                     x, y, width, "Esc  back to the tree");
   } else {
     drawEmptyMessage(text, "No notes yet", "Notes here are plain .md files.",
                      x, y, width, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
@@ -223,10 +224,11 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     const float labelX = row.rect.x + kSidebarLabelX + static_cast<float>(row.tree.depth) * kSidebarIndent;
 
     if(row.kind == SidebarRow::Kind::SectionLabel) {
-      // Sits on the label column of the rows it heads, and on the baseline the
-      // row's own height gives rather than a fixed drop into it.
-      drawSectionLabel(text, row.label, row.rect.x + kSidebarLabelX,
-                       row.rect.y + row.rect.h - static_cast<float>(text.lineHeight(snippetStyle)) - ui::kSpace1);
+      ui::drawSectionBand(renderer, text, row.rect, row.disclosure, row.label, row.trailing,
+                          row.collapsed, hot);
+      if(row.section) {
+        ui.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
+      }
       continue;
     }
     if(row.kind == SidebarRow::Kind::SearchResult) {
@@ -262,9 +264,22 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     if(row.kind == SidebarRow::Kind::Tag) {
       const bool selected = selection.tag == row.tag;
       drawRow(renderer, row.rect, selected, hot);
-      text.draw("#" + ellipsizeToWidth(text, row.tag, static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace4), rowStyle),
+      // The tag's own colour where a note row has its icon, so a tag row and
+      // the dots on the notes carrying it are visibly the same mark. This is
+      // the whole of what the `#` used to be doing -- saying "this is a tag" --
+      // and a colour says it while also saying *which* tag.
+      ui::drawTagDot(renderer,
+                     {row.rect.x + kSidebarGutterX,
+                      std::round(row.rect.y + (row.rect.h - kTagDotSize) / 2.0f),
+                      kTagDotSize, kTagDotSize},
+                     ui::tagColor(ui.state.workspace().tagColors, row.tag));
+      // No `#`. It was a sigil in front of every row in a section already
+      // headed TAGS, so it said nothing the position did not, and it cost the
+      // first character of every name in the column.
+      const int room = static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace4);
+      text.draw(ellipsizeToWidth(text, row.tag, room, rowStyle),
                 row.rect.x + kSidebarLabelX, ui::textTop(row.rect, text, rowStyle),
-                selected ? theme().accent : theme().textMuted, rowStyle);
+                selected ? theme().textPrimary : theme().textSecondary, rowStyle);
       continue;
     }
 
@@ -293,8 +308,25 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
                     kSidebarGutterWidth, kSidebarGutterWidth},
                    selected ? theme().accent : theme().textMuted);
     }
+    // A dot per tag at the trailing edge, which is what joins a note's row to
+    // the TAGS band below: the row named a folder and said nothing at all about
+    // the tags on it, so the one way of organising a library that cuts across
+    // the tree was invisible from the tree.
+    //
+    // The tags come off the note list rather than off the row. The row list is
+    // O(library) and is built once per change; copying every note's tag names
+    // into it would be a vector of strings per note to draw the three dozen
+    // rows a panel can show. This is one hash lookup on a row about to be
+    // painted.
+    const library::NoteListItem* tagged =
+      isNote ? ui.state.noteById(row.tree.noteId) : nullptr;
+    const std::size_t tagCount = tagged ? tagged->tags.size() : 0;
+    const float dotsW = tagCount > 0 ? kTagDotColumnWidth : 0.0f;
+
     const float labelY = ui::textTop(row.rect, text, rowStyle);
-    const float countW = row.tree.noteCount > 0 && !isNote ? kCountColumnWidth : ui::kSpace2;
+    const float countW = row.tree.noteCount > 0 && !isNote ? kCountColumnWidth
+                       : dotsW > 0.0f                      ? dotsW
+                                                           : ui::kSpace2;
     // A folder is a container and a note is a leaf, so the folder's name is the
     // brighter of the two -- the file tree's rule in every IDE, and the reverse
     // of what a list of documents would do.
@@ -304,9 +336,36 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), rowStyle),
               labelX, labelY, ink, rowStyle);
     if(!isNote && row.tree.noteCount > 0) {
-      const auto count = std::to_string(row.tree.noteCount);
-      text.draw(count, row.rect.x + row.rect.w - static_cast<float>(text.width(count, rowStyle)) - ui::kSpace2,
+      text.draw(std::to_string(row.tree.noteCount),
+                row.rect.x + row.rect.w -
+                  static_cast<float>(text.width(std::to_string(row.tree.noteCount), rowStyle)) - ui::kSpace2,
                 labelY, current ? theme().accent : theme().textMuted, rowStyle);
+    }
+    if(tagCount > 0) {
+      const auto& colors = ui.state.workspace().tagColors;
+      const auto dots = tagDotRects(row.rect, tagCount);
+      for(std::size_t d = 0; d < dots.size(); ++d) {
+        // Past the cap the last dot stands for the tags that did not fit, so it
+        // is drawn in the muted ink rather than in any one tag's colour -- a
+        // marker, not a tag -- and its tooltip names them. Hiding them without
+        // saying so would be worse than not drawing dots at all.
+        const bool overflow = dots.size() < tagCount && d + 1 == dots.size();
+        if(overflow) {
+          ui::drawTagDot(renderer, dots[d], theme().textMuted);
+          std::string rest;
+          for(std::size_t t = d; t < tagged->tags.size(); ++t) {
+            rest += (rest.empty() ? "" : ", ") + tagged->tags[t];
+          }
+          ui.offerTooltip(dots[d], std::to_string(tagged->tags.size() - d) + " more: " + rest);
+          continue;
+        }
+        const auto& tag = tagged->tags[d];
+        ui::drawTagDot(renderer, dots[d], ui::tagColor(colors, tag));
+        // The dot is a control: it says which tags a note has, and clicking one
+        // filters by it. So it names itself under the pointer -- a 7px disc
+        // with no label is a colour until something tells you what it means.
+        ui.offerTooltip(dots[d], "Filter by " + tag);
+      }
     }
   }
   drawVerticalScrollbar(renderer, list, ui.sidebarScroll, ui.sidebarMaxScroll,

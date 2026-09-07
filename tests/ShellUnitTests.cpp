@@ -16,6 +16,7 @@
 #include "app/WikiLinks.h"
 #include "ui/Draw.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -937,4 +938,218 @@ MICRONOTES_TEST(shell_a_cross_note_anchor_waits_for_the_layout) {
   ui.status = "untouched";
   micronotes::app::applyQueuedAnchorJump(ui);
   MICRONOTES_REQUIRE(ui.status == "untouched");
+}
+
+// The sidebar's four groups are bands that can be shut, and a shut band emits
+// no rows at all.
+//
+// This is the geometry half of the fix. The headings used to be four words in
+// the panel's own ground on the rows' own label column, with the tree carrying
+// no heading whatever -- so where TAGS stopped and RECENT began was something
+// the reader inferred from the shape of the entries. A band that hit-tests, a
+// count, and rows that actually disappear are what make the division real
+// rather than a treatment.
+MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
+  using micronotes::ui::SidebarSection;
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-sections";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work");
+  const auto note = [&](const std::filesystem::path& relative, const char* id, const char* title,
+                        const char* tags) {
+    std::ofstream out(root / relative, std::ios::binary | std::ios::trunc);
+    out << "---\nid: " << id << "\ntitle: " << title << "\ntags: " << tags << "\n---\n\nBody.\n";
+  };
+  note("hub.md", "sc-hub", "Hub", "work fast");
+  note("work/plan.md", "sc-plan", "Plan", "work");
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  micronotes::app::selectNoteById(ui, "sc-hub");
+  ui.tree.setExpanded({}, true);
+  ui.tree.setExpanded(std::filesystem::path("work"), true);
+
+  const micronotes::app::SidebarMetrics metrics = micronotes::app::sidebarMetrics(16, 13);
+  const micronotes::ui::Rect list {0.0f, 0.0f, 260.0f, 900.0f};
+  const auto rebuild = [&] {
+    // The key holds the collapsed set, so shutting a band rebuilds rather than
+    // shifting a list laid out at the old heights. Invalidated here because the
+    // test drives the model directly rather than through a frame.
+    ui.sidebarRowsKey.valid = false;
+    micronotes::app::buildSidebarRows(ui, list, metrics);
+  };
+  const auto bandFor = [&](SidebarSection section) -> const micronotes::app::SidebarRow* {
+    for(const auto& row : ui.sidebarRows) {
+      if(row.kind == micronotes::app::SidebarRow::Kind::SectionLabel && row.section &&
+         *row.section == section) {
+        return &row;
+      }
+    }
+    return nullptr;
+  };
+  const auto tagRows = [&] {
+    return std::count_if(ui.sidebarRows.begin(), ui.sidebarRows.end(), [](const auto& row) {
+      return row.kind == micronotes::app::SidebarRow::Kind::Tag;
+    });
+  };
+
+  rebuild();
+  // The tree has a band of its own now. Naming three of four groups is worse
+  // than naming none: an unlabelled group between two labelled ones reads as
+  // the tail of the one above it.
+  const auto* notebooks = bandFor(SidebarSection::Notebooks);
+  MICRONOTES_REQUIRE(notebooks != nullptr);
+  MICRONOTES_REQUIRE(notebooks->label == "NOTEBOOKS");
+  // A band spans the panel where the rows it heads are inset, which is what
+  // makes it a division of the list rather than a card sitting in it.
+  MICRONOTES_REQUIRE(notebooks->rect.x == list.x);
+  MICRONOTES_REQUIRE(notebooks->rect.w == list.w);
+  // And it carries a count, which is worth most on a band that is shut -- the
+  // one case where what is under it cannot be counted by looking.
+  MICRONOTES_REQUIRE(notebooks->trailing == "2");
+  // A collapsible band wears the same disclosure control a folder row does.
+  MICRONOTES_REQUIRE(notebooks->disclosure.w > 0.0f);
+  MICRONOTES_REQUIRE(!notebooks->collapsed);
+
+  const auto* tags = bandFor(SidebarSection::Tags);
+  MICRONOTES_REQUIRE(tags != nullptr);
+  MICRONOTES_REQUIRE(tags->trailing == "2");   // work, fast
+  MICRONOTES_REQUIRE(tagRows() == 2);
+
+  // Shut it: the rows go, the band stays, and the count stays with it.
+  ui.state.workspace().setSectionCollapsed(SidebarSection::Tags, true);
+  rebuild();
+  MICRONOTES_REQUIRE(tagRows() == 0);
+  MICRONOTES_REQUIRE(bandFor(SidebarSection::Tags) != nullptr);
+  MICRONOTES_REQUIRE(bandFor(SidebarSection::Tags)->collapsed);
+  MICRONOTES_REQUIRE(bandFor(SidebarSection::Tags)->trailing == "2");
+  // Everything below it moves up, which is the point of shutting it.
+  MICRONOTES_REQUIRE(bandFor(SidebarSection::Recent) != nullptr);
+  MICRONOTES_REQUIRE(bandFor(SidebarSection::Recent)->rect.y <
+                     bandFor(SidebarSection::Tags)->rect.y + 200.0f);
+
+  // A band is findable under the pointer, because the whole band is its
+  // control. `sidebarRowAt` used to skip every section label, which is why the
+  // old headings could not have been made clickable.
+  const auto* band = bandFor(SidebarSection::Tags);
+  const auto hit = micronotes::app::sidebarRowAt(ui, list, band->rect.x + band->rect.w / 2.0f,
+                                                 band->rect.y + band->rect.h / 2.0f);
+  MICRONOTES_REQUIRE(hit.has_value());
+  MICRONOTES_REQUIRE(ui.sidebarRows[*hit].section.has_value());
+  // And activating it toggles, from anywhere on the band rather than only on
+  // the 12px triangle.
+  micronotes::app::activateSidebarRow(ui, ui.sidebarRows[*hit],
+                                      micronotes::app::RowActivation::Click);
+  MICRONOTES_REQUIRE(!ui.state.workspace().sectionCollapsed(SidebarSection::Tags));
+
+  // A *caption* is not a control: a result count and the name of the tag being
+  // filtered by head the list the same way but have nothing under them to shut,
+  // so they get no chevron and the pointer finds nothing there.
+  micronotes::app::selectTag(ui, "work");
+  rebuild();
+  bool sawCaption = false;
+  for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
+    const auto& row = ui.sidebarRows[i];
+    if(row.kind != micronotes::app::SidebarRow::Kind::SectionLabel) continue;
+    sawCaption = true;
+    MICRONOTES_REQUIRE(!row.section.has_value());
+    MICRONOTES_REQUIRE(row.disclosure.w == 0.0f);
+    // And with no `#` in front of it: the sidebar draws a tag's colour beside
+    // its name everywhere else, so a sigil as well says the same thing twice.
+    MICRONOTES_REQUIRE(row.label == "work");
+    const auto missed = micronotes::app::sidebarRowAt(ui, list, row.rect.x + 4.0f,
+                                                      row.rect.y + row.rect.h / 2.0f);
+    MICRONOTES_REQUIRE(!missed || *missed != i);
+  }
+  MICRONOTES_REQUIRE(sawCaption);
+
+  std::filesystem::remove_all(root);
+}
+
+// The dots at a note row's trailing edge, which are what join the row to the
+// TAGS band: the row named a folder and said nothing about the tags on it, so
+// the one way of organising a library that cuts across the tree was invisible
+// from the tree.
+MICRONOTES_TEST(shell_tag_dots_are_laid_out_once_for_the_draw_and_the_hit_test) {
+  const micronotes::ui::Rect row {8.0f, 100.0f, 240.0f, 20.0f};
+  MICRONOTES_REQUIRE(micronotes::app::tagDotRects(row, 0).empty());
+
+  const auto one = micronotes::app::tagDotRects(row, 1);
+  MICRONOTES_REQUIRE(one.size() == 1);
+  // Inside the row, and clear of its trailing edge.
+  MICRONOTES_REQUIRE(one[0].x + one[0].w <= row.x + row.w);
+  MICRONOTES_REQUIRE(one[0].y >= row.y && one[0].y + one[0].h <= row.y + row.h);
+
+  // Laid out right to left, so a note with one tag puts its dot where a note
+  // with four puts its last: the column reads as a column whatever is in it,
+  // rather than shifting with each row's tag count.
+  const auto four = micronotes::app::tagDotRects(row, 4);
+  MICRONOTES_REQUIRE(four.size() == 4);
+  MICRONOTES_REQUIRE(four.back().x == one[0].x);
+  // Returned in tag order even though they are placed in reverse, so no caller
+  // has to reverse an index.
+  for(std::size_t i = 1; i < four.size(); ++i) {
+    MICRONOTES_REQUIRE(four[i].x > four[i - 1].x);
+  }
+  // And they do not overlap, or two dots would be one target.
+  for(std::size_t i = 1; i < four.size(); ++i) {
+    MICRONOTES_REQUIRE(four[i].x >= four[i - 1].x + four[i - 1].w);
+  }
+
+  // Capped. A row is one line tall, and a note with nine tags would otherwise
+  // push its own name off the panel.
+  const auto many = micronotes::app::tagDotRects(row, 9);
+  MICRONOTES_REQUIRE(many.size() == micronotes::app::kMaxTagDots);
+  // The column the row reserves has to hold what the layout puts in it.
+  MICRONOTES_REQUIRE(many.front().x >= row.x + row.w - micronotes::app::kTagDotColumnWidth);
+}
+
+// And the dot answers a click, which is the half that makes it a control rather
+// than decoration.
+MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-tag-dots";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  {
+    std::ofstream out(root / "hub.md", std::ios::binary | std::ios::trunc);
+    out << "---\nid: td-hub\ntitle: Hub\ntags: alpha beta gamma\n---\n\nBody.\n";
+  }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  micronotes::app::selectNoteById(ui, "td-hub");
+  ui.tree.setExpanded({}, true);
+
+  const micronotes::app::SidebarMetrics metrics = micronotes::app::sidebarMetrics(16, 13);
+  const micronotes::ui::Rect list {0.0f, 0.0f, 260.0f, 900.0f};
+  ui.sidebarRowsKey.valid = false;
+  micronotes::app::buildSidebarRows(ui, list, metrics);
+
+  const micronotes::app::SidebarRow* noteRow = nullptr;
+  for(const auto& row : ui.sidebarRows) {
+    if(row.kind == micronotes::app::SidebarRow::Kind::Tree &&
+       row.tree.kind == micronotes::ui::TreeRowKind::Note) {
+      noteRow = &row;
+      break;
+    }
+  }
+  MICRONOTES_REQUIRE(noteRow != nullptr);
+
+  const auto dots = micronotes::app::tagDotRects(noteRow->rect, 3);
+  MICRONOTES_REQUIRE(dots.size() == 3);
+  // Each dot names its own tag, in the order the note lists them.
+  const char* expected[] = {"alpha", "beta", "gamma"};
+  for(std::size_t i = 0; i < dots.size(); ++i) {
+    const auto tag = micronotes::app::sidebarTagDotAt(ui, *noteRow,
+                                                      dots[i].x + dots[i].w / 2.0f,
+                                                      dots[i].y + dots[i].h / 2.0f);
+    MICRONOTES_REQUIRE(tag.has_value());
+    micronotes::tests::require(*tag == expected[i],
+                               "dot " + std::to_string(i) + " named " + *tag + ", not " +
+                                 expected[i]);
+  }
+  // The label is not a dot: a click on the note's name opens the note.
+  MICRONOTES_REQUIRE(!micronotes::app::sidebarTagDotAt(ui, *noteRow, noteRow->rect.x + 40.0f,
+                                                       noteRow->rect.y + 10.0f));
+
+  std::filesystem::remove_all(root);
 }

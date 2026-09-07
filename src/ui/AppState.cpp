@@ -626,6 +626,23 @@ bool AppState::saveUiState(const std::filesystem::path& path) const {
   // newline, and any other separator would eventually appear inside one.
   for(const auto& id : workspace_.favorites) out << "favorite=" << id << "\n";
   for(const auto& id : workspace_.recents) out << "recent=" << id << "\n";
+  // Only the sections that are shut, so the common state -- all four open --
+  // writes nothing and an older file reads as all four open, which is the
+  // arrangement it was written under.
+  std::size_t sectionCount = 0;
+  const auto* sections = sidebarSections(&sectionCount);
+  for(std::size_t i = 0; i < sectionCount; ++i) {
+    if(workspace_.sectionCollapsed(sections[i])) {
+      out << "collapsed=" << sidebarSectionName(sections[i]) << "\n";
+    }
+  }
+  // "<swatch index>|<tag>", the index first because a tag name is the only
+  // field that could contain a separator. Only picked colours are written: a
+  // tag following `defaultTagSwatch` has made no choice to persist, and
+  // writing the default out would freeze it against a future palette.
+  for(const auto& [tag, swatch] : workspace_.tagColors.choices()) {
+    out << "tag_color=" << swatch << "|" << tag << "\n";
+  }
   return platform::writeFileDurably(path, out.str());
 }
 
@@ -635,6 +652,8 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
   // not inherit the favorites and the open note of the one before it.
   workspace_.favorites.clear();
   workspace_.recents.clear();
+  workspace_.tagColors.clearAll();
+  workspace_.collapsedSections = {};
   // A file written before panels could be hidden says nothing about them, and
   // the arrangement it was written under is the one the defaults describe.
   workspace_.sidebarVisible = true;
@@ -697,6 +716,22 @@ bool AppState::loadUiState(const std::filesystem::path& path) {
     else if(key == "page_width") setPageWidth(pageWidthFromName(value));
     else if(key == "favorite" && !value.empty()) workspace_.favorites.push_back(value);
     else if(key == "recent" && !value.empty()) workspace_.recents.push_back(value);
+    else if(key == "collapsed") {
+      std::size_t sectionCount = 0;
+      const auto* sections = sidebarSections(&sectionCount);
+      for(std::size_t i = 0; i < sectionCount; ++i) {
+        if(sidebarSectionName(sections[i]) == value) workspace_.setSectionCollapsed(sections[i], true);
+      }
+    }
+    else if(key == "tag_color") {
+      const auto bar = value.find('|');
+      if(bar == std::string::npos || bar + 1 >= value.size()) continue;
+      // A line whose index will not parse is dropped rather than defaulted to
+      // swatch 0: a hand-edited file must not be able to silently repaint a
+      // tag, and dropping it leaves that tag on its derived colour.
+      const int swatch = parseInt(value.substr(0, bar), -1);
+      if(swatch >= 0) workspace_.tagColors.set(value.substr(bar + 1), swatch);
+    }
     else if(key == "search_scope") {
       const int scope = parseInt(value, static_cast<int>(selection_.searchScope));
       if(scope >= static_cast<int>(library::SearchScope::All) && scope <= static_cast<int>(library::SearchScope::Content)) {

@@ -103,7 +103,6 @@ using micronotes::ui::clipRect;
 using micronotes::ui::contains;
 using micronotes::ui::drawRow;
 using micronotes::ui::drawEmptyMessage;
-using micronotes::ui::drawSectionLabel;
 using micronotes::ui::drawSurface;
 using micronotes::ui::drawTooltip;
 using micronotes::ui::ellipsizeToWidth;
@@ -1253,6 +1252,14 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
     // The rest are the palette's, so the menu and the palette cannot drift.
     else if(result.itemId == "move") performCommand(ui, "move-note");
     else performCommand(ui, result.itemId);
+  } else if(result.overlayId == "tag-menu") {
+    // The tag travels in `value`: a result names the item chosen, and which tag
+    // it was about is the other half of the answer.
+    if(result.itemId == "filter") selectTag(ui, result.value);
+    else if(result.itemId == "color") openTagColorPicker(ui, result.value);
+    else if(result.itemId == "auto-color") clearTagColor(ui, result.value);
+  } else if(result.overlayId == "tag-color") {
+    setTagColor(ui, result.value, result.itemId);
   } else if(result.overlayId == "block-menu") {
     if(result.itemId == "turn") openTurnIntoMenu(ui, ui.mouseX, ui.mouseY);
     else performBlockCommand(ui, result.itemId);
@@ -1886,29 +1893,8 @@ static void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uin
     }
     const SidebarRow row = ui.sidebarRows[*index];
     ui.folderCursor = static_cast<int>(*index);
-    // The disclosure triangle opens a notebook without making it the selection:
-    // looking inside one is not the same as switching to it.
-    if(row.kind == SidebarRow::Kind::Tree && row.disclosure.w > 0.0f && contains(row.disclosure, x, y) &&
-       button == SDL_BUTTON_LEFT) {
-      ui.tree.toggle(row.tree.folder);
-      return;
-    }
-    activateSidebarRow(ui, row, RowActivation::Click);
-    if(button == SDL_BUTTON_RIGHT) {
-      if(row.kind == SidebarRow::Kind::SearchResult) openNoteMenu(ui, x, y);
-      else if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::Note) openNoteMenu(ui, x, y);
-      else if(row.kind == SidebarRow::Kind::Tree) openFolderMenu(ui, x, y);
-      return;
-    }
-    if(button == SDL_BUTTON_LEFT && row.kind == SidebarRow::Kind::Tree) {
-      if(row.tree.kind == ui::TreeRowKind::Note) {
-        ui.draggingNote = true;
-        ui.draggingNoteId = row.tree.noteId;
-      } else if(!row.tree.folder.empty()) {
-        ui.draggingFolder = true;
-        ui.draggingFolderPath = row.tree.folder;
-      }
-    }
+    // What a press on a row means lives with the rows. See `pressSidebarRow`.
+    pressSidebarRow(ui, row, x, y, button);
     return;
   }
   if(contains(layout.menuBar, x, y)) {

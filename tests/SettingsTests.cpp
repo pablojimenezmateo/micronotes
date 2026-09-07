@@ -6,6 +6,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <set>
 #include <string>
 
 using micronotes::ui::AppState;
@@ -112,4 +114,108 @@ MICRONOTES_TEST(ui_state_load_does_not_inherit_the_previous_library) {
   MICRONOTES_REQUIRE(state.selection().noteId.empty());
 
   std::filesystem::remove_all(dir);
+}
+
+// Tag colours and shut bands are view preferences, so they live in the ui state
+// beside the library and never touch a note.
+//
+// The point of them being *there* rather than in front matter: what colour
+// somebody finds `work` easiest to spot, and whether they keep TAGS shut
+// because their library has sixty of them, are facts about a reader and not
+// about a note. Writing either into the notes would make a preference a
+// library-wide edit -- and would put it in everyone's git history.
+MICRONOTES_TEST(ui_state_carries_tag_colours_and_shut_bands) {
+  using micronotes::ui::SidebarSection;
+  const auto dir = scratchDir("tag-colours");
+  const auto statePath = dir / "ui.state";
+
+  AppState saved;
+  saved.workspace().tagColors.set("work", 7);
+  saved.workspace().tagColors.set("a tag with spaces", 2);
+  // Deliberately not picked, so the file has nothing to say about it and the
+  // load leaves it on its derived colour.
+  saved.workspace().setSectionCollapsed(SidebarSection::Tags, true);
+  saved.workspace().setSectionCollapsed(SidebarSection::Recent, true);
+  MICRONOTES_REQUIRE(saved.saveUiState(statePath));
+
+  AppState loaded;
+  MICRONOTES_REQUIRE(loaded.loadUiState(statePath));
+  MICRONOTES_REQUIRE(loaded.workspace().tagColors.swatchOf("work") == 7);
+  // A name with a space in it survives, which is why the swatch index is
+  // written first: the tag is the only field that could hold the separator.
+  MICRONOTES_REQUIRE(loaded.workspace().tagColors.swatchOf("a tag with spaces") == 2);
+  MICRONOTES_REQUIRE(loaded.workspace().tagColors.choices().size() == 2);
+  MICRONOTES_REQUIRE(!loaded.workspace().tagColors.picked("personal"));
+  MICRONOTES_REQUIRE(loaded.workspace().sectionCollapsed(SidebarSection::Tags));
+  MICRONOTES_REQUIRE(loaded.workspace().sectionCollapsed(SidebarSection::Recent));
+  MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Notebooks));
+  MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Favorites));
+
+  // Only shut bands are written, so the common state -- all four open -- costs
+  // nothing, and a file from before bands existed reads as all four open,
+  // which is the arrangement it was written under.
+  AppState allOpen;
+  MICRONOTES_REQUIRE(allOpen.saveUiState(dir / "open.state"));
+  std::ifstream in(dir / "open.state");
+  const std::string text {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  MICRONOTES_REQUIRE(text.find("collapsed=") == std::string::npos);
+  MICRONOTES_REQUIRE(text.find("tag_color=") == std::string::npos);
+
+  // And a library with no state file of its own does not inherit the last
+  // one's colours or its shut bands, for the reason it does not inherit its
+  // favorites: this is "the view state is now whatever that file says".
+  MICRONOTES_REQUIRE(!loaded.loadUiState(dir / "missing.state"));
+  MICRONOTES_REQUIRE(loaded.workspace().tagColors.choices().empty());
+  MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Tags));
+
+  std::filesystem::remove_all(dir);
+}
+
+// A hand-edited state file must not be able to repaint a tag by accident.
+MICRONOTES_TEST(ui_state_drops_a_tag_colour_line_it_cannot_read) {
+  const auto dir = scratchDir("tag-colours-bad");
+  const auto statePath = dir / "ui.state";
+  {
+    std::ofstream out(statePath, std::ios::binary | std::ios::trunc);
+    out << "tag_color=notanumber|work\n"     // unparseable index
+        << "tag_color=|orphan\n"             // no index at all
+        << "tag_color=3\n"                   // no tag
+        << "tag_color=4|\n"                  // no tag name
+        << "tag_color=2|keeper\n"            // and one good line
+        << "collapsed=nosuchsection\n";
+  }
+
+  AppState state;
+  MICRONOTES_REQUIRE(state.loadUiState(statePath));
+  // The good line took, and every bad one was dropped rather than defaulted --
+  // silently painting `work` swatch 0 would hide the fact that the file and the
+  // reader disagree.
+  MICRONOTES_REQUIRE(state.workspace().tagColors.swatchOf("keeper") == 2);
+  MICRONOTES_REQUIRE(state.workspace().tagColors.choices().size() == 1);
+  MICRONOTES_REQUIRE(!state.workspace().tagColors.picked("work"));
+  MICRONOTES_REQUIRE(!state.workspace().tagColors.picked("orphan"));
+  // An unknown section name shuts nothing, rather than shutting the first one.
+  std::size_t count = 0;
+  const auto* sections = micronotes::ui::sidebarSections(&count);
+  for(std::size_t i = 0; i < count; ++i) {
+    MICRONOTES_REQUIRE(!state.workspace().sectionCollapsed(sections[i]));
+  }
+
+  std::filesystem::remove_all(dir);
+}
+
+// The names in the file are the names the file is read back with.
+MICRONOTES_TEST(sidebar_section_names_round_trip) {
+  std::size_t count = 0;
+  const auto* sections = micronotes::ui::sidebarSections(&count);
+  MICRONOTES_REQUIRE(count == 4);
+  std::set<std::string> names;
+  for(std::size_t i = 0; i < count; ++i) {
+    const auto name = micronotes::ui::sidebarSectionName(sections[i]);
+    MICRONOTES_REQUIRE(!name.empty());
+    names.insert(std::string(name));
+  }
+  // Four distinct names, or two bands would share a line in the state file and
+  // shutting one would shut the other.
+  MICRONOTES_REQUIRE(names.size() == count);
 }

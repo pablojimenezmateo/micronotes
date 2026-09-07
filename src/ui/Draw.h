@@ -421,8 +421,34 @@ inline float textTop(Rect row, const TextRenderer& text, const TextStyle& style)
   return std::round(row.y + std::max(0.0f, (row.h - static_cast<float>(text.lineHeight(style))) / 2.0f));
 }
 
-// A section heading over a list of rows: FAVORITES, TAGS, RECENT.
-void drawSectionLabel(TextRenderer& text, std::string_view label, float x, float y);
+// A band across a panel heading the rows under it: NOTEBOOKS, TAGS, RECENT.
+//
+// A *band*, not a label. These were four words set in the panel's own ground,
+// in the panel's own muted ink, on the panel's own label column -- so the
+// sidebar read as one long list with some words in it, and where one group
+// ended and the next began was something the reader had to infer from the shape
+// of the entries. The tree had no heading at all, which made it worse: naming
+// three of four groups reads as one unnamed group running into a named one.
+//
+// The treatment is the sibling microide's, from the git sidebar's Staged /
+// Unstaged / Untracked groups, and it is three things at once -- a raised
+// ground, a hairline rule along the top, and the label outdented an indent step
+// ahead of the rows. Any one of them alone is a hint; the three together are a
+// division nobody has to look for.
+//
+// `chevron` empty means a **caption** rather than a band: a result count or the
+// name of the tag being filtered by, which head the list the same way but have
+// nothing under them to shut. A caption gets no control and no hover.
+// `trailing` is a count, right-aligned, and is worth most on a band that is
+// shut -- the one case where what is under it cannot be counted by looking.
+void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect chevron,
+                     std::string_view label, std::string_view trailing, bool collapsed,
+                     bool hovered);
+
+// A tag's colour, as the dot drawn beside its name and at the trailing edge of
+// every note carrying it. Always a solid disc: see the note on the definition
+// for why there is no second state.
+void drawTagDot(SDL_Renderer* renderer, Rect box, SDL_Color color);
 
 // An empty place says what it is, what to do about it, and which keys do that.
 // The third line is what turns a dead end into an offer, so it is dimmer than
