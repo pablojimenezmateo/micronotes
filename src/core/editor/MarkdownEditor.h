@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/editor/TextEdit.h"
+
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
@@ -91,15 +93,10 @@ public:
   // honestly reports the whole buffer, which bounds nothing and so needs no
   // special case at either end.
   //
-  // Zero for `toRevision` means nothing has changed yet.
-  struct TextChange {
-    std::uint64_t fromRevision = 0;
-    std::uint64_t toRevision = 0;
-    std::size_t start = 0;
-    std::size_t oldEnd = 0;
-    std::size_t newEnd = 0;
-  };
-  const TextChange& lastChange() const;
+  // See `editor::TextEdit`, which is the type: it was declared here and again
+  // as `editor::TextEdit`, five fields at a time, with the
+  // contract written out in both places.
+  const TextEdit& lastChange() const;
   // Ends the open typing run, so the next edit starts a fresh undo step.
   // Called on focus changes, saves, and anything structural.
   void breakUndoGroup();
@@ -210,7 +207,7 @@ private:
   bool selecting_ = false;
   bool dirty_ = false;
   std::uint64_t revision_ = 0;
-  TextChange lastChange_;
+  TextEdit lastChange_;
   // Whitespace-delimited words in `text_`, carried across every edit rather
   // than recounted. The status bar asks for this on every keystroke, and
   // walking a 200 KB note to answer took 247 us -- seventeen times the cost of

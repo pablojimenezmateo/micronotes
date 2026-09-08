@@ -165,6 +165,11 @@ public:
   void setCaretVisible(bool visible) { caretVisible_ = visible; }
 
 private:
+  // Shutting the top overlay: Escape and a click outside are the same event
+  // here, and the order of what it does matters. See the definition.
+  std::optional<OverlayResult> dismissTop();
+
+
   struct Layout {
     Rect panel;
     // The header band, empty when the overlay has no title. Recorded rather

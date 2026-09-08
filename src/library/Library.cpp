@@ -18,18 +18,6 @@
 namespace micronotes::library {
 namespace {
 
-static std::filesystem::path uniqueMarkdownPath(const std::filesystem::path& desired, const std::filesystem::path& current = {}) {
-  if(!std::filesystem::exists(desired) || (!current.empty() && std::filesystem::equivalent(desired, current))) return desired;
-  const auto parent = desired.parent_path();
-  const auto stem = desired.stem().string();
-  const auto ext = desired.extension().empty() ? ".md" : desired.extension().string();
-  int suffix = 2;
-  while(true) {
-    auto candidate = parent / (stem + "-" + std::to_string(suffix++) + ext);
-    if(!std::filesystem::exists(candidate)) return candidate;
-  }
-}
-
 // The whole file, in one read into one right-sized buffer.
 //
 // This used to stream `in.rdbuf()` into an `ostringstream` and return
@@ -215,7 +203,7 @@ std::filesystem::path Library::notePath(const std::string& title) const {
 
 std::filesystem::path Library::createNote(const NoteMetadata& metadata, std::string_view body) const {
   ensureLayout();
-  const auto path = uniqueMarkdownPath(safeRoot_.normalize(notePath(metadata.title)));
+  const auto path = platform::uniquePath(safeRoot_.normalize(notePath(metadata.title)));
   const auto header = metadataHeader(metadata);
   if(!platform::writeFileDurably(path, {header, body})) {
     throw std::runtime_error("failed to create note");
@@ -271,7 +259,7 @@ std::string Library::preserveExternalVersion(const std::filesystem::path& path) 
                      " (external change " + timestampNow() + ")";
   note.metadata.id = generateNoteId();
   note.metadata.title = title;
-  const auto target = uniqueMarkdownPath(
+  const auto target = platform::uniquePath(
     safePath.parent_path() / (platform::sanitizeFileStem(title) + ".md"));
   if(!saveNote(target, note.metadata, note.body)) return {};
   return target.filename().string();
@@ -287,7 +275,7 @@ std::filesystem::path Library::saveNoteAs(const std::filesystem::path& path,
                                           const NoteMetadata& metadata,
                                           std::string_view body) const {
   const auto safePath = safeRoot_.normalize(path);
-  const auto target = uniqueMarkdownPath(
+  const auto target = platform::uniquePath(
     safeRoot_.normalize(safePath.parent_path() /
                                            (platform::sanitizeFileStem(metadata.title) + ".md")),
     safePath);
@@ -311,7 +299,7 @@ std::filesystem::path Library::moveNote(const std::filesystem::path& path, const
   const auto safePath = safeRoot_.normalize(path);
   const auto targetDir = safeRoot_.normalize(root_ / relativeFolder);
   std::filesystem::create_directories(targetDir);
-  const auto target = uniqueMarkdownPath(safeRoot_.normalize(targetDir / safePath.filename()), safePath);
+  const auto target = platform::uniquePath(safeRoot_.normalize(targetDir / safePath.filename()), safePath);
   if(target == safePath) return target;
   std::filesystem::rename(safePath, target);
   return target;
@@ -408,7 +396,16 @@ void Library::deleteNote(const std::filesystem::path& path) const {
   if(hasAttachments) moveIntoTrashAs(root_, attachmentDir, entry.attachmentName);
 }
 
-std::vector<TrashEntry> Library::trashEntries() const {
+// Every line of the trash index, parsed. Both readers of it -- the list a person
+// is offered and the restore that has to rewrite the file -- walked it
+// themselves, and each had its own copy of which field is which and of the
+// optional attachment columns that came later.
+//
+// The two differ in what they *keep*, not in how they read: the offer drops
+// entries whose file has gone and entries with no title, and the restore needs
+// every row because it rewrites the whole file. So the filtering stays with
+// each caller and only the parse is shared.
+std::vector<TrashEntry> Library::readTrashIndex() const {
   std::vector<TrashEntry> entries;
   std::ifstream in(trashIndex(root_));
   std::string line;
@@ -423,37 +420,28 @@ std::vector<TrashEntry> Library::trashEntries() const {
     entry.deletedAt = fields[3];
     if(fields.size() > 4) entry.attachmentName = fields[4];
     if(fields.size() > 5) entry.attachmentOriginalRelative = fields[5];
-    // An entry whose file is gone - emptied by hand, or already restored - is
-    // history, not an offer.
-    if(!std::filesystem::exists(trashFiles(root_) / entry.name)) continue;
-    // Attachment directories are filed on their own so a folder restore can
-    // find them, but they are not something to offer a person.
-    if(entry.title.empty()) continue;
     entries.push_back(std::move(entry));
   }
+  return entries;
+}
+
+std::vector<TrashEntry> Library::trashEntries() const {
+  auto entries = readTrashIndex();
+  const auto gone = [&](const TrashEntry& entry) {
+    // An entry whose file is gone -- emptied by hand, or already restored -- is
+    // history, not an offer. Attachment directories are filed on their own so a
+    // folder restore can find them, but they are not something to offer a
+    // person, and they are the entries with no title.
+    return entry.title.empty() || !std::filesystem::exists(trashFiles(root_) / entry.name);
+  };
+  entries.erase(std::remove_if(entries.begin(), entries.end(), gone), entries.end());
+  // Newest first: the thing just deleted is the thing most likely wanted back.
   std::reverse(entries.begin(), entries.end());
   return entries;
 }
 
 bool Library::restoreFromTrash(const std::string& name) const {
-  std::vector<TrashEntry> all;
-  {
-    std::ifstream in(trashIndex(root_));
-    std::string line;
-    while(std::getline(in, line)) {
-      if(line.empty()) continue;
-      const auto fields = splitFields(line);
-      if(fields.size() < 4) continue;
-      TrashEntry entry;
-      entry.name = fields[0];
-      entry.originalRelative = fields[1];
-      entry.title = fields[2];
-      entry.deletedAt = fields[3];
-      if(fields.size() > 4) entry.attachmentName = fields[4];
-      if(fields.size() > 5) entry.attachmentOriginalRelative = fields[5];
-      all.push_back(std::move(entry));
-    }
-  }
+  const std::vector<TrashEntry> all = readTrashIndex();
   const auto found = std::find_if(all.begin(), all.end(), [&](const auto& entry) { return entry.name == name; });
   if(found == all.end()) return false;
 
@@ -463,19 +451,10 @@ bool Library::restoreFromTrash(const std::string& name) const {
     if(!std::filesystem::exists(source)) return false;
     auto target = safeRoot_.normalize(root_ / relative);
     // Something may have taken the name back in the meantime; the restored copy
-    // gets a new one rather than overwriting it. Written out here rather than
-    // reusing the note path helper, which assumes a `.md` file and would give a
-    // restored folder an extension.
-    if(std::filesystem::exists(target)) {
-      const auto stem = target.stem().string();
-      const auto ext = target.extension().string();
-      int suffix = 2;
-      std::filesystem::path candidate;
-      do {
-        candidate = target.parent_path() / (stem + "-" + std::to_string(suffix++) + ext);
-      } while(std::filesystem::exists(candidate));
-      target = candidate;
-    }
+    // gets a new one rather than overwriting it. A restored *folder* has no
+    // extension and must not be given one, which is why `uniquePath` invents
+    // none.
+    target = platform::uniquePath(target);
     std::error_code ec;
     std::filesystem::create_directories(target.parent_path(), ec);
     std::filesystem::rename(source, target, ec);

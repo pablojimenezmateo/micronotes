@@ -166,7 +166,15 @@ public:
   // makes over the whole note to find the edit; a stamp that does not line up
   // with what the layout holds is discarded there, so a stale one costs the
   // comparison rather than the answer.
-  void setEditedSpan(doc::LayoutOptions::EditedSpan span);
+  // Where the last edit landed, in the *editor's* revision space.
+  //
+  // Shifted into the page's here rather than at the call sites: the page stamps
+  // its layouts with `revision + 1`, because zero is its "cannot say", and a
+  // claim about the editor's revisions has to be moved into that space before
+  // the layout can check it. The live page and the reading page each applied
+  // the `+1` themselves, which is two copies of an off-by-one and two copies of
+  // the "nothing to say" check.
+  void setEditedSpan(const editor::TextEdit& editorSpan);
   void draw(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t caret, const PageSelection& selection,
             bool focused, std::string_view findQuery);
 
@@ -294,7 +302,7 @@ private:
   bool caretVisible_ = true;
   std::uint64_t sourceRevision_ = 0;
   std::uint64_t foldRevision_ = 0;
-  doc::LayoutOptions::EditedSpan editedSpan_;
+  editor::TextEdit editedSpan_;
   // Where the find query matches, found once and kept until the query or the
   // buffer moves. Recomputing it per frame made an open find bar cost a pass
   // over the note at frame rate; drawing all of it made the highlight cost the

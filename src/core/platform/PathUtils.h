@@ -50,4 +50,21 @@ std::string sanitizeFileStem(std::string title);
 // for anything that then opens the file.
 std::string displayPath(const std::filesystem::path& path);
 
+// `desired`, or the first `name-2`, `name-3`... beside it that nothing holds.
+//
+// `keep` is a path that does not count as taken: a rename to a name the file
+// already has must not suffix itself. Compared by `equivalent`, so a
+// case-insensitive or symlinked filesystem answers correctly.
+//
+// The extension is preserved exactly, *including* an absent one -- which is
+// what the three hand-written copies of this could not agree on. One defaulted
+// to `.md` when there was none, on the reasoning that a note is a Markdown
+// file; the restore path then had to spell the whole loop out again, on a
+// comment saying it could not use the note helper because it "assumes a `.md`
+// file and would give a restored folder an extension". The default was the
+// problem, so it is gone: a caller that wants `.md` is the caller that knows
+// it, and says so in the path it asks for.
+std::filesystem::path uniquePath(const std::filesystem::path& desired,
+                                 const std::filesystem::path& keep = {});
+
 }

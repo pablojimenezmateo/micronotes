@@ -141,8 +141,8 @@ void PageView::setFoldsActive(bool active) {
   foldsActive_ = active;
 }
 
-void PageView::setEditedSpan(doc::LayoutOptions::EditedSpan span) {
-  editedSpan_ = span;
+void PageView::setEditedSpan(const editor::TextEdit& editorSpan) {
+  editedSpan_ = editorSpan.shiftedBy(1);
 }
 
 const doc::DocumentLayout& PageView::document() const {

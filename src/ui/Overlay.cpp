@@ -348,19 +348,30 @@ std::optional<OverlayResult> OverlayStack::commit() {
   return result;
 }
 
+// Shutting the top overlay, and what that answers with.
+//
+// Escape and a click outside are the same event as far as the stack is
+// concerned, and both had this written out: read the flag, build the result,
+// close, and hand the result back only if the overlay asked to hear about
+// being dismissed. Two copies of a four-line sequence whose *order* matters --
+// the result has to be built before `close()` destroys the overlay it reads.
+std::optional<OverlayResult> OverlayStack::dismissTop() {
+  Overlay* overlay = top();
+  if(!overlay) return std::nullopt;
+  const bool report = overlay->reportDismissal;
+  OverlayResult dismissal {overlay->id, {}, overlay->value.text()};
+  close();
+  if(report) return dismissal;
+  return std::nullopt;
+}
+
 std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl, bool shift, bool& handled) {
   handled = false;
   Overlay* overlay = top();
   if(!overlay) return std::nullopt;
   handled = true;
 
-  if(key == SDLK_ESCAPE) {
-    const bool report = overlay->reportDismissal;
-    OverlayResult dismissal {overlay->id, {}, overlay->value.text()};
-    close();
-    if(report) return dismissal;
-    return std::nullopt;
-  }
+  if(key == SDLK_ESCAPE) return dismissTop();
   if(key == SDLK_RETURN || key == SDLK_KP_ENTER) return commit();
   // In a grid, down is a row and right is a cell. A list has no left and right,
   // and its rows are one cell wide, so both come to the same thing there.
@@ -427,14 +438,8 @@ std::optional<OverlayResult> OverlayStack::handleClick(float x, float y, bool& h
   if(!overlay) return std::nullopt;
   handled = true;
 
-  if(!contains(lastLayout_.panel, x, y)) {
-    // A click outside dismisses, and does not fall through to what is behind.
-    const bool report = overlay->reportDismissal;
-    OverlayResult dismissal {overlay->id, {}, overlay->value.text()};
-    close();
-    if(report) return dismissal;
-    return std::nullopt;
-  }
+  // A click outside dismisses, and does not fall through to what is behind.
+  if(!contains(lastLayout_.panel, x, y)) return dismissTop();
   for(std::size_t i = 0; i < lastLayout_.itemRects.size(); ++i) {
     if(!contains(lastLayout_.itemRects[i], x, y)) continue;
     const int index = lastLayout_.itemIndices[i];
@@ -468,6 +473,15 @@ void OverlayStack::handleMotion(float x, float y) {
     if(index >= 0 && overlay->items[static_cast<std::size_t>(index)].enabled) overlay->highlighted = index;
     return;
   }
+}
+
+// The ring around the cell the keyboard is on: the cursor colour, and a second
+// stroke in the panel's own ground just outside it so the ring reads as a ring
+// against any swatch it lands on rather than merging into a light one.
+void drawHighlightRing(SDL_Renderer* renderer, Rect rect) {
+  stroke(renderer, rect, theme().cursor);
+  stroke(renderer, {rect.x - 1.0f, rect.y - 1.0f, rect.w + 2.0f, rect.h + 2.0f},
+         theme().overlayBackground);
 }
 
 void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWidth, int windowHeight) {
@@ -567,11 +581,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
         if(!drawNoteGlyph(renderer, id, rect, ink)) {
           fill(renderer, {rect.x + rect.w / 2.0f - 5.0f, rect.y + rect.h / 2.0f, 10.0f, 1.0f}, ink);
         }
-        if(highlighted) {
-          stroke(renderer, rect, theme().cursor);
-          stroke(renderer, {rect.x - 1.0f, rect.y - 1.0f, rect.w + 2.0f, rect.h + 2.0f},
-                 theme().overlayBackground);
-        }
+        if(highlighted) drawHighlightRing(renderer, rect);
         continue;
       }
       // The swatch fills its cell, so the thing being chosen is the thing being
@@ -587,11 +597,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
                                   12.0f, 12.0f},
                        theme().onAccent);
       }
-      if(highlighted) {
-        stroke(renderer, rect, theme().cursor);
-        stroke(renderer, {rect.x - 1.0f, rect.y - 1.0f, rect.w + 2.0f, rect.h + 2.0f},
-               theme().overlayBackground);
-      }
+      if(highlighted) drawHighlightRing(renderer, rect);
     }
     if(!layout.hint.w) return;
     text.draw(overlay->hint, layout.hint.x, layout.hint.y, theme().textMuted, hintStyle);

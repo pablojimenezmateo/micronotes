@@ -9,6 +9,12 @@ _CPack_Packages/
 # Packaged artifacts
 *.deb
 
+# Agent worktrees. `session-compare.sh` and the parity work both build a
+# baseline in a git worktree under here; a worktree's `.git` file makes it look
+# like an embedded repository, and `git add -A` will happily track it as a
+# gitlink pointing at a path that exists on one machine.
+.claude/worktrees/
+
 # OS / editor cruft
 .DS_Store
 *.swp

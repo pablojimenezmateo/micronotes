@@ -80,13 +80,7 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
   // the whole note to find the edit. It checks the stamps against the buffer it
   // holds, so a claim from a frame that handled two keystrokes is discarded
   // there rather than believed here.
-  const auto& change = ui.editor.lastChange();
-  ui.livePage.setEditedSpan(change.toRevision == 0
-                              ? doc::LayoutOptions::EditedSpan {}
-                              : doc::LayoutOptions::EditedSpan {change.fromRevision + 1ull,
-                                                               change.toRevision + 1ull,
-                                                               change.start, change.oldEnd,
-                                                               change.newEnd});
+  ui.livePage.setEditedSpan(ui.editor.lastChange());
   ui.livePage.setPointer(ui.pointer.x, ui.pointer.y);
   ui.livePage.setBlockSelection({ui.blockSelection.active, ui.blockSelection.anchor, ui.blockSelection.focus});
   ui.livePage.setDropOffset(ui.blockDrag.active ? ui.blockDrag.dropOffset : std::nullopt);

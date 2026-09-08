@@ -3,7 +3,10 @@
 #include "core/AppIdentity.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <stdexcept>
+#include <string>
+#include <system_error>
 
 namespace microcore::platform {
 
@@ -73,6 +76,21 @@ std::string displayPath(const std::filesystem::path& path) {
   if(text.size() == prefix.size()) return "~";
   if(text[prefix.size()] != '/') return text;
   return "~" + text.substr(prefix.size());
+}
+
+
+std::filesystem::path uniquePath(const std::filesystem::path& desired,
+                                 const std::filesystem::path& keep) {
+  std::error_code ec;
+  if(!std::filesystem::exists(desired)) return desired;
+  if(!keep.empty() && std::filesystem::equivalent(desired, keep, ec) && !ec) return desired;
+  const auto parent = desired.parent_path();
+  const auto stem = desired.stem().string();
+  const auto extension = desired.extension().string();
+  for(int suffix = 2;; ++suffix) {
+    auto candidate = parent / (stem + "-" + std::to_string(suffix) + extension);
+    if(!std::filesystem::exists(candidate)) return candidate;
+  }
 }
 
 }

@@ -427,18 +427,18 @@ std::size_t DocumentLayout::lastRelaidBlocks() const {
   return lastRelaid_;
 }
 
-bool DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
-                                  const LayoutOptions& options,
-                                  std::vector<std::uint8_t>* out) const {
-  // Fold ranges come from the block structure, so they can only be resolved
-  // once the scan is in: the caller names the heads, the layout names the
-  // blocks each head swallows.
-  std::vector<std::uint8_t>& hidden = *out;
-  hidden.assign(blocks.size(), 0);
-  if(!options.folded) return false;
-  perf::addCounter(perf::CounterId::LayoutFoldBlocksResolved, blocks.size());
+// The fold walk itself: from `from` onward, mark every block that a collapsed
+// head hides, and report whether it hid any.
+//
+// One loop, because the two resolvers differ only in where they start and what
+// they already know -- and the loop is where both the counters and the
+// nested-fold rule live, so two copies is two places for either to drift.
+bool DocumentLayout::hideFoldedFrom(const std::vector<SourceBlock>& blocks,
+                                    const LayoutOptions& options, std::size_t from,
+                                    std::vector<std::uint8_t>& hidden) const {
+  perf::addCounter(perf::CounterId::LayoutFoldBlocksResolved, blocks.size() - from);
   bool any = false;
-  for(std::size_t i = 0; i < blocks.size(); ++i) {
+  for(std::size_t i = from; i < blocks.size(); ++i) {
     // A fold nested inside a collapsed one is already hidden, and costs
     // nothing to resolve again.
     if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
@@ -449,6 +449,18 @@ bool DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
     any = any || end > i + 1;
   }
   return any;
+}
+
+bool DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
+                                  const LayoutOptions& options,
+                                  std::vector<std::uint8_t>* out) const {
+  // Fold ranges come from the block structure, so they can only be resolved
+  // once the scan is in: the caller names the heads, the layout names the
+  // blocks each head swallows.
+  std::vector<std::uint8_t>& hidden = *out;
+  hidden.assign(blocks.size(), 0);
+  if(!options.folded) return false;
+  return hideFoldedFrom(blocks, options, 0, hidden);
 }
 
 bool DocumentLayout::resolveFoldsAfter(const std::vector<SourceBlock>& blocks,
@@ -479,17 +491,10 @@ bool DocumentLayout::resolveFoldsAfter(const std::vector<SourceBlock>& blocks,
   // hidden any more, and the one thing that reads it (`foldsAbsent`) also
   // requires the caller to have withdrawn its predicate -- at which point the
   // resolution is a full one and answers exactly.
-  bool any = anyHidden_;
-  perf::addCounter(perf::CounterId::LayoutFoldBlocksResolved, blocks.size() - from);
-  for(std::size_t i = from; i < blocks.size(); ++i) {
-    if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
-    perf::addCounter(perf::CounterId::LayoutFoldQueries);
-    if(!options.folded(blocks[i])) continue;
-    const std::size_t end = foldEnd(blocks, i);
-    for(std::size_t j = i + 1; j < end; ++j) hidden[j] = 1;
-    any = any || end > i + 1;
-  }
-  return any;
+  // Called first, not short-circuited: the walk *is* the work, and `||` would
+  // skip it whenever the carried answer already said something was hidden.
+  const bool hidAny = hideFoldedFrom(blocks, options, from, hidden);
+  return anyHidden_ || hidAny;
 }
 
 // The first and last index at which two byte spans differ, or `{kNone, kNone}`
@@ -507,7 +512,7 @@ static std::pair<std::size_t, std::size_t> diffSpan(const std::uint8_t* a, const
   return {low, high};
 }
 
-LayoutOptions::EditedSpan DocumentLayout::claimFor(const LayoutOptions& options) const {
+editor::TextEdit DocumentLayout::claimFor(const LayoutOptions& options) const {
   const auto& claim = options.editedSpan;
   if(claim.fromRevision == 0 || claim.toRevision == 0) return {};
   if(sourceRevision_ == 0 || options.sourceRevision == 0) return {};
@@ -517,7 +522,7 @@ LayoutOptions::EditedSpan DocumentLayout::claimFor(const LayoutOptions& options)
 
 DocumentLayout::EditWindow DocumentLayout::matchEdges(std::string_view oldSource,
                                                      std::string_view newSource,
-                                                     const LayoutOptions::EditedSpan& claim) {
+                                                     const editor::TextEdit& claim) {
   // A block at a time through `memcmp`, which is vectorised, then a byte at a
   // time to land exactly. Byte-at-a-time throughout was 70 microseconds over a
   // 200 KB note -- as much as the walk this whole comparison exists to shorten.

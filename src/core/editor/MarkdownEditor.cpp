@@ -496,7 +496,7 @@ void MarkdownEditor::markDirty() {
 }
 
 void MarkdownEditor::recordChange(std::size_t start, std::size_t oldEnd, std::size_t newEnd) {
-  lastChange_ = TextChange {revision_, revision_ + 1, start, oldEnd, newEnd};
+  lastChange_ = TextEdit {revision_, revision_ + 1, start, oldEnd, newEnd};
 }
 
 void MarkdownEditor::markChanged(std::size_t start, std::size_t oldEnd, std::size_t newEnd) {
@@ -505,7 +505,7 @@ void MarkdownEditor::markChanged(std::size_t start, std::size_t oldEnd, std::siz
   ++revision_;
 }
 
-const MarkdownEditor::TextChange& MarkdownEditor::lastChange() const {
+const TextEdit& MarkdownEditor::lastChange() const {
   return lastChange_;
 }
 

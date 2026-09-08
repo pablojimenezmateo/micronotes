@@ -105,6 +105,10 @@ public:
             std::vector<std::filesystem::path>* directories) const;
 
 private:
+  // Every row of the trash index. The two readers of it differ in what they
+  // keep, not in how they read; see the definition.
+  std::vector<TrashEntry> readTrashIndex() const;
+
   std::filesystem::path root_;
   // The same root, canonicalized once. Every path this class is handed is
   // checked against it, and resolving the root's half per call was the largest

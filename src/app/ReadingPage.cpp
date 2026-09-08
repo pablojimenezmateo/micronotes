@@ -57,13 +57,7 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
   // stamp is therefore constant, which is what tells the layout the fold state
   // never moves here.
   ui.readingPage.setRevisions(ui.editor.revision() + 1ull, 1);
-  const auto& change = ui.editor.lastChange();
-  ui.readingPage.setEditedSpan(change.toRevision == 0
-                                 ? doc::LayoutOptions::EditedSpan {}
-                                 : doc::LayoutOptions::EditedSpan {change.fromRevision + 1ull,
-                                                                   change.toRevision + 1ull,
-                                                                   change.start, change.oldEnd,
-                                                                   change.newEnd});
+  ui.readingPage.setEditedSpan(ui.editor.lastChange());
   ui.readingPage.setPointer(ui.pointer.x, ui.pointer.y);
   // Measured before the layout: the header is room the page reserves at the top
   // of its scrolling space rather than a banner the note passes under.

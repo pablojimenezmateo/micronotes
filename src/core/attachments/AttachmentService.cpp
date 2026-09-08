@@ -14,18 +14,6 @@
 namespace microcore::attachments {
 namespace {
 
-static std::filesystem::path uniqueManagedPath(const std::filesystem::path& desired) {
-  if(!std::filesystem::exists(desired)) return desired;
-  const auto parent = desired.parent_path();
-  const auto stem = desired.stem().string();
-  const auto ext = desired.extension().string();
-  int suffix = 2;
-  while(true) {
-    auto candidate = parent / (stem + "-" + std::to_string(suffix++) + ext);
-    if(!std::filesystem::exists(candidate)) return candidate;
-  }
-}
-
 static std::string markdownFor(const std::filesystem::path& libraryRoot, const std::filesystem::path& managed, bool image) {
   const auto relative = managed.lexically_relative(libraryRoot).generic_string();
   const auto label = managed.filename().generic_string();
@@ -36,7 +24,7 @@ static std::string markdownFor(const std::filesystem::path& libraryRoot, const s
 
 AttachmentLink AttachmentService::makeLink(const std::filesystem::path& libraryRoot, const std::string& noteId, const std::filesystem::path& fileName) const {
   const auto desired = libraryRoot / kAppDotDir / "attachments" / noteId / fileName.filename();
-  const auto managed = uniqueManagedPath(desired);
+  const auto managed = platform::uniquePath(desired);
   platform::normalizeInsideRoot(libraryRoot, managed);
   const bool image = isSupportedImage(managed);
   return {managed, markdownFor(libraryRoot, managed, image), image};

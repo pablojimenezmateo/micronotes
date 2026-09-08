@@ -1179,7 +1179,7 @@ void walkRandomEdits(std::uint64_t seed, int steps) {
   // it against the buffer it holds and fall back to comparing bytes when the
   // stamps do not line up, and a step that changes the width or the caret
   // rather than the text is exactly that case.
-  LayoutOptions::EditedSpan claim;
+  microcore::editor::TextEdit claim;
   const auto settle = [&](bool stamped) {
     options.sourceRevision = stamped ? revision : 0;
     options.editedSpan = claim;
@@ -1315,7 +1315,7 @@ MICRONOTES_TEST(layout_uses_the_callers_edited_span_instead_of_comparing_the_not
 // buffers are both discarded, and the full comparison runs.
 MICRONOTES_TEST(layout_discards_an_edited_span_that_describes_another_pair_of_buffers) {
   using microcore::perf::CounterId;
-  const auto run = [](const LayoutOptions::EditedSpan& claim, const std::string& expectedNote) {
+  const auto run = [](const microcore::editor::TextEdit& claim, const std::string& expectedNote) {
     std::string source = manyBlocks(200);
     DocumentLayout layout;
     layout.setMetrics(stubMetrics());

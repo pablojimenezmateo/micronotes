@@ -203,6 +203,29 @@ namespace {
 // blocks a scan from the top of the buffer would have produced there.
 // `blockscan_resuming_at_every_boundary_matches_a_full_scan` is the test that
 // holds a future construct to it.
+// How far a block's text runs when it absorbs the lines that continue it:
+// everything up to a blank line or to something that starts a block of its own.
+//
+// A list item and a paragraph do this identically, and both spelled it out.
+// Without it a hand-wrapped item is several blocks, and the surface shows a
+// break and the continuation's indent where the file means one flowing item.
+struct Continuation {
+  std::size_t contentEnd;  // last byte of text
+  std::size_t blockEnd;    // where the next block starts
+};
+
+Continuation absorbContinuation(std::string_view source, const Line& line) {
+  std::size_t scan = line.next;
+  std::size_t contentEnd = line.end;
+  while(scan < source.size()) {
+    const Line inner = lineAt(source, scan);
+    if(startsBlock(source, inner)) break;
+    contentEnd = inner.end;
+    scan = inner.next;
+  }
+  return {contentEnd, scan};
+}
+
 SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
   {
     const Line line = lineAt(source, pos);
@@ -378,16 +401,9 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       // block of its own, which a nested item does. Without this a hand-wrapped
       // item is several blocks, and the surface shows a break and the
       // continuation's indent where the file means one flowing item.
-      std::size_t scan = line.next;
-      std::size_t contentEnd = line.end;
-      while(scan < source.size()) {
-        const Line inner = lineAt(source, scan);
-        if(startsBlock(source, inner)) break;
-        contentEnd = inner.end;
-        scan = inner.next;
-      }
-      payloadEnd = contentEnd;
-      blockEnd = scan;
+      const auto run = absorbContinuation(source, line);
+      payloadEnd = run.contentEnd;
+      blockEnd = run.blockEnd;
       block.setEnd(blockEnd);
       block.setContent(payloadStart, payloadEnd);
       return block;
@@ -396,16 +412,9 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
     // A paragraph absorbs following lines until something else starts.
     block.kind = BlockKind::Paragraph;
     payloadStart = line.start;
-    std::size_t scan = line.next;
-    std::size_t contentEnd = line.end;
-    while(scan < source.size()) {
-      const Line inner = lineAt(source, scan);
-      if(startsBlock(source, inner)) break;
-      contentEnd = inner.end;
-      scan = inner.next;
-    }
-    payloadEnd = contentEnd;
-    blockEnd = scan;
+    const auto run = absorbContinuation(source, line);
+    payloadEnd = run.contentEnd;
+    blockEnd = run.blockEnd;
     block.setEnd(blockEnd);
     block.setContent(payloadStart, payloadEnd);
     return block;

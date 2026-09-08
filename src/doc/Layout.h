@@ -1,5 +1,9 @@
 #pragma once
 
+#include "CoreAliases.h"
+
+#include "core/editor/TextEdit.h"
+
 #include "doc/BlockScan.h"
 #include "doc/InlineScan.h"
 
@@ -280,14 +284,7 @@ struct LayoutOptions {
   // count on both sides, or the claim describes some other pair of buffers.
   // Either stamp zero means "cannot say", which is what a caller with no span
   // to offer -- a test, the perf harness -- gets.
-  struct EditedSpan {
-    std::uint64_t fromRevision = 0;
-    std::uint64_t toRevision = 0;
-    std::size_t start = 0;
-    std::size_t oldEnd = 0;
-    std::size_t newEnd = 0;
-  };
-  EditedSpan editedSpan;
+  editor::TextEdit editedSpan;
   // Moves whenever `wikiLinkResolves` would answer differently -- a note
   // created, renamed, deleted, or the library re-listed.
   //
@@ -432,14 +429,14 @@ private:
   // rather than correctness -- two edits landing between two updates is the
   // ordinary case of that, and it happens whenever a frame handles more than
   // one keystroke.
-  LayoutOptions::EditedSpan claimFor(const LayoutOptions& options) const;
+  editor::TextEdit claimFor(const LayoutOptions& options) const;
 
   // `claim` bounds the search when it describes this pair of buffers, and is
   // ignored when it does not. The answer is the same either way: the loops only
   // ever *narrow* the window, so a claim merely says where to start narrowing
   // from.
   static EditWindow matchEdges(std::string_view oldSource, std::string_view newSource,
-                               const LayoutOptions::EditedSpan& claim);
+                               const editor::TextEdit& claim);
 
   // `blocks_` brought up to date with `source_`, given the window the edit fell
   // inside and how many bytes the buffer held before it.
@@ -477,6 +474,9 @@ private:
   // which blocks a fold change moved, and a byte-wise diff is a `memcmp`.
   // Returns whether anything came out hidden, which is the state that lets the
   // next call skip the resolution altogether.
+  // The walk both resolvers share; see the definition.
+  bool hideFoldedFrom(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
+                      std::size_t from, std::vector<std::uint8_t>& hidden) const;
   bool resolveFolds(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
                     std::vector<std::uint8_t>* out) const;
   // The same resolution, resumed rather than restarted, for an edit that
