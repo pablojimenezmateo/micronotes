@@ -33,4 +33,8 @@ void openTagMenu(UiRuntime& ui, std::string_view tag, float x, float y);
 // palette laid out to be pointed at, plus a way back to the derived default.
 void openTagColorPicker(UiRuntime& ui, std::string tag);
 
+// The same grid, for the mark a note wears beside its name. Its first cell is
+// "no icon", so a note can be stripped of one without a second gesture.
+void openIconPicker(UiRuntime& ui);
+
 }

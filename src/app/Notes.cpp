@@ -324,6 +324,46 @@ bool applyWatchedChanges(UiRuntime& ui) {
   return true;
 }
 
+void beginRename(UiRuntime& ui) {
+  if(ui.state.openNote().noteId.empty()) {
+    ui.status = "Select a note before renaming";
+    return;
+  }
+  if(ui.editor.dirty() && !saveCurrent(ui)) return;
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::TextPrompt;
+  overlay.id = "rename-note";
+  overlay.title = "Rename note";
+  overlay.value.beginWith(std::string(ui.state.selectedTitle()));
+  overlay.placeholder = "Note title";
+  overlay.hint = "Enter to save, Esc to cancel";
+  ui.overlays.open(std::move(overlay));
+}
+
+void saveRename(UiRuntime& ui) {
+  if(ui.rename.empty()) {
+    ui.status = "Rename needs a title";
+    return;
+  }
+  invalidateWikiNotes(ui);
+  const std::string asked = ui.rename.text();
+  if(ui.state.renameSelectedNote(asked)) {
+    loadSelectedIntoEditor(ui);
+    ui.focus = FocusArea::Editor;
+    // A note is a file, and a folder cannot hold two files of one name, so a
+    // title already taken beside it is given a numbered one instead. That is
+    // the right answer -- a modal saying "no" would leave the reader to invent
+    // a name they did not want either -- but it has to be *said*: renaming to a
+    // name in use reported "Renamed note" and left a note called something the
+    // reader never typed.
+    const auto settled = ui.state.selectedTitle();
+    ui.status = settled == asked ? "Renamed note"
+                                 : "That name was taken -- renamed to " + std::string(settled);
+  } else {
+    ui.status = "Rename failed";
+  }
+}
+
 void createNote(UiRuntime& ui) {
   if(!ui.state.hasLibrary()) {
     ui.status = "Start with --library <path> before creating notes";

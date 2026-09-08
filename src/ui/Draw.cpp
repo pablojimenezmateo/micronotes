@@ -231,40 +231,217 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
     SDL_RenderLines(renderer, hull, kPoints + 1);
     return;
   }
-  // Scanline fill: for each row, the span between the leftmost and rightmost
-  // crossing of the outline. A star is not convex, so this over-fills the two
-  // notches either side of the bottom points by a pixel or so -- at twelve
-  // pixels that is what a filled star looks like anyway, and it costs one
-  // submit rather than a triangulation.
-  SDL_FRect spans[64];
+  // Scanline fill, even-odd: for each row, every crossing of the outline in
+  // order, filled between the first pair, the second pair, and so on.
+  //
+  // It used to take only the leftmost and rightmost crossing, which is a
+  // convex-hull fill -- and a star is the textbook non-convex polygon, so the
+  // two lower points were swallowed and what the favourite mark actually drew
+  // was a lump. Sorting the crossings is the whole difference, and a row of a
+  // five-pointed star has at most six of them.
+  SDL_FRect spans[192];
   int count = 0;
   const int top = static_cast<int>(std::floor(cy - r));
   const int bottom = static_cast<int>(std::ceil(cy + r));
-  for(int y = top; y <= bottom && count < 64; ++y) {
+  for(int y = top; y <= bottom && count + 3 < 192; ++y) {
     const float row = static_cast<float>(y) + 0.5f;
-    float left = 0.0f;
-    float right = 0.0f;
-    bool any = false;
+    float crossings[kPoints];
+    int found = 0;
     for(int i = 0; i < kPoints; ++i) {
       const SDL_FPoint a = hull[i];
       const SDL_FPoint b = hull[i + 1];
       if((row < a.y && row < b.y) || (row >= a.y && row >= b.y)) continue;
       const float t = (row - a.y) / (b.y - a.y);
-      const float x = a.x + (b.x - a.x) * t;
-      if(!any) {
-        left = x;
-        right = x;
-        any = true;
-        continue;
-      }
-      left = std::min(left, x);
-      right = std::max(right, x);
+      crossings[found++] = a.x + (b.x - a.x) * t;
     }
-    if(!any || right - left < 0.5f) continue;
-    spans[count++] = SDL_FRect {std::round(left), static_cast<float>(y),
-                                std::round(right - left), 1.0f};
+    if(found < 2) continue;
+    std::sort(crossings, crossings + found);
+    for(int i = 0; i + 1 < found && count < 192; i += 2) {
+      const float left = crossings[i];
+      const float right = crossings[i + 1];
+      // A span covering less than half a pixel is dropped rather than rounded
+      // up to one. At the very tip of a point the two edges cross inside a
+      // single row, and a rounded-up span there lands beside the tip instead of
+      // on it -- a loose speck floating off the star, which reads far worse
+      // than the blunt point that dropping it leaves.
+      if(right - left < 0.5f) continue;
+      spans[count++] = SDL_FRect {std::round(left), static_cast<float>(y),
+                                  std::max(1.0f, std::round(right - left)), 1.0f};
+    }
   }
   if(count > 0) SDL_RenderFillRects(renderer, spans, count);
+}
+
+namespace {
+
+// The marks a note can wear, in the order the picker lays them out.
+//
+// Drawn rather than typeset, for the reason every other glyph in this file is:
+// the chrome face is a mono programming face with none of these in it, and the
+// one face that does carry them -- a colour emoji font -- is a single fixed
+// bitmap strike that has to be resampled to any size the shell actually uses.
+// A note's icon is drawn at sixteen pixels beside its name, which is exactly
+// where a resampled 136px bitmap looks worst.
+//
+// Eleven of them, and not a hundred: an icon here is a note saying what kind of
+// thing it is, and a reader who has to hunt through a grid for the right shade
+// of meaning has been handed a worse job than typing the word.
+constexpr NoteGlyph kNoteGlyphs[] = {
+  {"star", "Star"},         {"check", "Done"},      {"flag", "Follow up"},
+  {"bookmark", "Bookmark"}, {"tag", "Label"},       {"folder", "Collection"},
+  {"calendar", "Dated"},    {"clock", "Waiting"},   {"bolt", "Urgent"},
+  {"warning", "Careful"},   {"code", "Technical"},
+};
+
+// A ring, from a polygon with enough sides that the corners are gone at this
+// size. Cheaper than the disc in `drawTagDot`, which fills; a clock face wants
+// the hole.
+void strokeCircle(SDL_Renderer* renderer, float cx, float cy, float r, SDL_Color color) {
+  constexpr int kSides = 24;
+  SDL_FPoint hull[kSides + 1];
+  for(int i = 0; i < kSides; ++i) {
+    const float angle = static_cast<float>(i) * 6.2831853f / static_cast<float>(kSides);
+    hull[i] = SDL_FPoint {cx + std::cos(angle) * r, cy + std::sin(angle) * r};
+  }
+  hull[kSides] = hull[0];
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  SDL_RenderLines(renderer, hull, kSides + 1);
+}
+
+// A closed outline through the given points, in the box's own coordinates.
+void strokePath(SDL_Renderer* renderer, const SDL_FPoint* points, int count, SDL_Color color) {
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  SDL_RenderLines(renderer, points, count);
+}
+
+}
+
+std::span<const NoteGlyph> noteGlyphs() {
+  return std::span<const NoteGlyph>(kNoteGlyphs, std::size(kNoteGlyphs));
+}
+
+bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Color color) {
+  if(id.empty()) return false;
+  // A 12x12 field centred in whatever box the caller has, so one set of
+  // coordinates below serves a 16px sidebar row and a 30px picker cell alike.
+  const float side = 12.0f;
+  const float left = std::round(box.x + (box.w - side) / 2.0f);
+  const float top = std::round(box.y + (box.h - side) / 2.0f);
+  const float cx = left + side / 2.0f;
+  const float cy = top + side / 2.0f;
+  const Rect field {left, top, side, side};
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+
+  if(id == "star") {
+    drawStarGlyph(renderer, field, true, color);
+    return true;
+  }
+  if(id == "check") {
+    drawCheckGlyph(renderer, field, color);
+    return true;
+  }
+  if(id == "flag") {
+    // A pole with the pennant hanging off its top half, so the mark has a
+    // baseline the way a letter does.
+    SDL_RenderLine(renderer, left + 2.0f, top, left + 2.0f, top + side);
+    const SDL_FPoint pennant[] = {
+      {left + 2.0f, top + 0.5f}, {left + side - 1.0f, top + 2.5f},
+      {left + 2.0f, top + 5.5f}, {left + 2.0f, top + 0.5f},
+    };
+    strokePath(renderer, pennant, 4, color);
+    fill(renderer, {left + 3.0f, top + 1.5f, 5.0f, 3.0f}, color);
+    return true;
+  }
+  if(id == "bookmark") {
+    const SDL_FPoint ribbon[] = {
+      {left + 2.0f, top + side - 1.0f}, {left + 2.0f, top + 1.0f},
+      {left + side - 2.0f, top + 1.0f}, {left + side - 2.0f, top + side - 1.0f},
+      {cx, top + side - 4.0f},          {left + 2.0f, top + side - 1.0f},
+    };
+    strokePath(renderer, ribbon, 6, color);
+    return true;
+  }
+  if(id == "tag") {
+    // A luggage label: square at the string end, pointed at the other, with the
+    // hole the string goes through near the square end. The hole is what says
+    // "tag" rather than "arrow" -- without it the shape is a chevron.
+    const SDL_FPoint label[] = {
+      {left + 1.0f, top + 2.0f},        {left + side - 4.5f, top + 2.0f},
+      {left + side - 1.0f, cy},         {left + side - 4.5f, top + side - 2.0f},
+      {left + 1.0f, top + side - 2.0f}, {left + 1.0f, top + 2.0f},
+    };
+    strokePath(renderer, label, 6, color);
+    fill(renderer, {left + 3.0f, cy - 1.0f, 2.0f, 2.0f}, color);
+    return true;
+  }
+  if(id == "folder") {
+    // The tab first, then the body under it: two rules meeting at the tab's
+    // right shoulder is what reads as a folder at this size.
+    const SDL_FPoint folder[] = {
+      {left + 1.0f, top + side - 2.0f}, {left + 1.0f, top + 2.0f},
+      {left + 5.0f, top + 2.0f},        {left + 6.5f, top + 4.0f},
+      {left + side - 1.0f, top + 4.0f}, {left + side - 1.0f, top + side - 2.0f},
+      {left + 1.0f, top + side - 2.0f},
+    };
+    strokePath(renderer, folder, 7, color);
+    return true;
+  }
+  if(id == "calendar") {
+    stroke(renderer, {left + 1.0f, top + 2.0f, side - 2.0f, side - 3.0f}, color);
+    // The filled band is the month header; the two ticks above it are the
+    // rings. Without them the mark is a picture frame.
+    fill(renderer, {left + 1.0f, top + 2.0f, side - 2.0f, 3.0f}, color);
+    SDL_RenderLine(renderer, left + 3.5f, top, left + 3.5f, top + 2.0f);
+    SDL_RenderLine(renderer, left + side - 3.5f, top, left + side - 3.5f, top + 2.0f);
+    return true;
+  }
+  if(id == "clock") {
+    strokeCircle(renderer, cx, cy, side / 2.0f - 1.0f, color);
+    // Hands at twelve and four, drawn as filled bars rather than as lines: a
+    // one-pixel diagonal inside a one-pixel ring is lost against the ring, and
+    // a clock face with no hands on it is a circle.
+    fill(renderer, {std::round(cx), std::round(cy) - 3.0f, 1.0f, 4.0f}, color);
+    fill(renderer, {std::round(cx), std::round(cy), 3.0f, 1.0f}, color);
+    return true;
+  }
+  if(id == "bolt") {
+    // Two strokes down and one across, doubled sideways for weight -- a
+    // single-pixel lightning bolt reads as a scratch.
+    for(float d = 0.0f; d <= 1.0f; d += 1.0f) {
+      const SDL_FPoint bolt[] = {
+        {left + 7.0f + d, top},        {left + 3.0f + d, cy + 0.5f},
+        {left + 6.0f + d, cy + 0.5f},  {left + 4.0f + d, top + side},
+      };
+      strokePath(renderer, bolt, 4, color);
+    }
+    return true;
+  }
+  if(id == "warning") {
+    // The apex is cut flat by a pixel. At twelve pixels the two sides meet
+    // inside one row and the join draws a stray dot above the triangle, which
+    // reads as a mark of its own rather than as a point.
+    const float apex = std::round(cx);
+    const SDL_FPoint triangle[] = {
+      {apex, top + 1.0f},               {left + side - 0.5f, top + side - 1.0f},
+      {left + 0.5f, top + side - 1.0f}, {apex, top + 1.0f},
+    };
+    strokePath(renderer, triangle, 4, color);
+    // The bar and its dot sit in the lower two thirds, where the triangle is
+    // wide enough for them to have air either side.
+    fill(renderer, {apex, top + 5.0f, 1.0f, 3.0f}, color);
+    fill(renderer, {apex, top + 9.0f, 1.0f, 1.0f}, color);
+    return true;
+  }
+  if(id == "code") {
+    // `< >`, the two chevrons the chrome already draws for a disclosure, turned
+    // outward and set either side of the centre.
+    SDL_RenderLine(renderer, left + 4.5f, top + 2.0f, left + 1.0f, cy);
+    SDL_RenderLine(renderer, left + 1.0f, cy, left + 4.5f, top + side - 2.0f);
+    SDL_RenderLine(renderer, left + side - 4.5f, top + 2.0f, left + side - 1.0f, cy);
+    SDL_RenderLine(renderer, left + side - 1.0f, cy, left + side - 4.5f, top + side - 2.0f);
+    return true;
+  }
+  return false;
 }
 
 void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized,

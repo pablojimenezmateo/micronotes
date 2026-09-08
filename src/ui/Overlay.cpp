@@ -152,7 +152,7 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   const float rows = static_cast<float>(rowsShown);
   const float listH = overlay.kind == OverlayKind::List ? rows * kRowHeight : 0.0f;
   // The grid's own height, from how many rows the swatches fill.
-  const int swatchRows = overlay.kind == OverlayKind::ColorPicker
+  const int swatchRows = isGridOverlay(overlay.kind)
                            ? static_cast<int>((indices.size() + kSwatchColumns - 1) / kSwatchColumns)
                            : 0;
   const float gridH = swatchRows > 0
@@ -171,7 +171,7 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   // edge -- which is what "the cancel goes out of the popup" was.
   const float gridW = static_cast<float>(kSwatchColumns) * (kSwatchCell + kSwatchGap) - kSwatchGap;
   float asked = overlay.width;
-  if(overlay.kind == OverlayKind::ColorPicker) {
+  if(isGridOverlay(overlay.kind)) {
     const float hintW = overlay.hint.empty()
                           ? 0.0f
                           : static_cast<float>(text.width(overlay.hint, hintFace()));
@@ -205,7 +205,7 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
     layout.field = {x + kPadding, cursorY, width - kPadding * 2.0f, kFieldHeight};
     cursorY += fieldH;
   }
-  if(overlay.kind == OverlayKind::ColorPicker) {
+  if(isGridOverlay(overlay.kind)) {
     // Centred, because the panel is as wide as the *wider* of the grid and the
     // hint: left-aligned under a hint that outruns it, the grid would sit off
     // to one side of its own panel.
@@ -268,9 +268,15 @@ void OverlayStack::moveHighlight(int delta) {
   // Section headings are listed as disabled items, so movement steps over them
   // rather than parking on a row that Enter would ignore. Bounded by the row
   // count, so a list of nothing but headings still terminates.
-  for(int taken = 0; taken < count; ++taken) {
-    position = (position + step % count + count) % count;
-    if(overlay->items[static_cast<std::size_t>(indices[static_cast<std::size_t>(position)])].enabled) break;
+  //
+  // `delta` is a distance, not just a direction: a grid moves a whole row at a
+  // time when the arrow points up or down, and each of those cells has to be
+  // stepped over one at a time or the skipping rule above cannot apply.
+  for(int move = 0; move < std::max(1, std::abs(delta)); ++move) {
+    for(int taken = 0; taken < count; ++taken) {
+      position = (position + step % count + count) % count;
+      if(overlay->items[static_cast<std::size_t>(indices[static_cast<std::size_t>(position)])].enabled) break;
+    }
   }
   overlay->highlighted = indices[static_cast<std::size_t>(position)];
   ensureHighlightVisible();
@@ -326,7 +332,7 @@ std::optional<OverlayResult> OverlayStack::commit() {
   // is the answer", and the only difference between them is how they are laid
   // out. Leaving the picker out of this branch was how it came to have a grid
   // that could be pointed at and no way to choose anything on it.
-  if(overlay->kind == OverlayKind::List || overlay->kind == OverlayKind::ColorPicker) {
+  if(overlay->kind == OverlayKind::List || isGridOverlay(overlay->kind)) {
     const auto indices = visibleIndices(*overlay);
     if(indices.empty()) return std::nullopt;
     int chosen = overlay->highlighted;
@@ -355,12 +361,19 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
     return std::nullopt;
   }
   if(key == SDLK_RETURN || key == SDLK_KP_ENTER) return commit();
+  // In a grid, down is a row and right is a cell. A list has no left and right,
+  // and its rows are one cell wide, so both come to the same thing there.
+  const int rowStep = isGridOverlay(overlay->kind) ? kSwatchColumns : 1;
   if(key == SDLK_DOWN) {
-    moveHighlight(1);
+    moveHighlight(rowStep);
     return std::nullopt;
   }
   if(key == SDLK_UP) {
-    moveHighlight(-1);
+    moveHighlight(-rowStep);
+    return std::nullopt;
+  }
+  if(isGridOverlay(overlay->kind) && (key == SDLK_RIGHT || key == SDLK_LEFT)) {
+    moveHighlight(key == SDLK_RIGHT ? 1 : -1);
     return std::nullopt;
   }
   if(key == SDLK_TAB) {
@@ -530,13 +543,36 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     }
   }
 
-  if(overlay->kind == OverlayKind::ColorPicker) {
+  if(isGridOverlay(overlay->kind)) {
+    const bool glyphs = overlay->kind == OverlayKind::GlyphPicker;
     for(std::size_t i = 0; i < layout.itemRects.size(); ++i) {
       const auto rect = layout.itemRects[i];
       const int index = layout.itemIndices[i];
       if(index < 0 || index >= static_cast<int>(overlay->items.size())) continue;
       const bool highlighted = index == overlay->highlighted || contains(rect, mouseX_, mouseY_);
       const bool inForce = index == overlay->current;
+      if(glyphs) {
+        // A glyph cannot fill its cell the way a colour does, so the cell needs
+        // a ground of its own or the grid is eleven marks floating on the
+        // panel with no edges to point at. The mark takes the accent when it is
+        // the one in force, so the answer to "which is it now" is the mark
+        // itself rather than a tick sitting on top of one.
+        fill(renderer, rect, inForce ? theme().selectionFill : theme().surfaceRaised);
+        const SDL_Color ink = inForce ? theme().accent
+                                      : (highlighted ? theme().textPrimary : theme().textSecondary);
+        // The id of the "no icon" cell is empty, and drawNoteGlyph declines it,
+        // which is exactly the fallback the sidebar takes for a note with none.
+        const auto& id = overlay->items[static_cast<std::size_t>(index)].id;
+        if(!drawNoteGlyph(renderer, id, rect, ink)) {
+          fill(renderer, {rect.x + rect.w / 2.0f - 5.0f, rect.y + rect.h / 2.0f, 10.0f, 1.0f}, ink);
+        }
+        if(highlighted) {
+          stroke(renderer, rect, theme().cursor);
+          stroke(renderer, {rect.x - 1.0f, rect.y - 1.0f, rect.w + 2.0f, rect.h + 2.0f},
+                 theme().overlayBackground);
+        }
+        continue;
+      }
       // The swatch fills its cell, so the thing being chosen is the thing being
       // pointed at. A colour shown as a chip inside a row would be competing
       // with the row's own ground for what the eye reads as "this colour".

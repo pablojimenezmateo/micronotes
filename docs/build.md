@@ -303,11 +303,13 @@ Useful runtime controls:
   each get their own colour and a badge, in the live surface and the reading
   view alike; the slash menu and the turn-into menu offer all five.
 - A fenced code block shows its language and a `Copy` button in its top right.
-- A note can carry an `icon:` emoji in its front matter, shown beside it in the
-  tree and the breadcrumb. Set it from the command palette; an
-  empty value removes the key. Front matter keys micronotes does not model are
-  preserved exactly as they were written, so a note written by another tool
-  survives being saved here.
+- A note can carry an `icon:` in its front matter, shown beside it in the tree
+  and the breadcrumb. It names one of the marks the shell draws -- `star`,
+  `check`, `flag`, `bookmark`, `tag`, `folder`, `calendar`, `clock`, `bolt`,
+  `warning`, `code` -- and is chosen from a grid, not typed. The first cell of
+  that grid is "none", which removes the key. Front matter keys micronotes does
+  not model are preserved exactly as they were written, so a note written by
+  another tool survives being saved here.
 - `Ctrl+1`: live surface. Markdown is rendered where you type it: headings,
   emphasis, code spans, links, list bullets, and task checkboxes all show as
   formatting, and a block's syntax markers appear only while the caret is in it.
@@ -416,14 +418,26 @@ library's `.micronotes/ui.state`. Display scale and text size are different
 things and both apply: the compositor says how big a pixel is, the text size
 says how big you want the type on top of that.
 
-Note icons are drawn through the installed emoji font, scaled down to the icon
-box. Emoji typed into a note's *text* are a different matter: a colour emoji
-font such as Noto Color Emoji carries a single fixed bitmap strike - 128 pixels
-- and SDL3_ttf cannot resize it, so attaching it to the body face would paint
-one emoji over the four lines around it. It is therefore attached only if it
-honours the size asked for, which the monochrome Noto Emoji does and the colour
-one does not; where neither is installed, a note with no icon still gets a drawn
-page mark rather than a tofu box.
+Note icons are **drawn**, not typeset: eleven marks in `ui/Draw.cpp`, rendered
+with the same lines and rects as the chevrons, the tick and the favourite star.
+
+They used to be emoji, and could not stay. A colour emoji font such as Noto
+Color Emoji carries a single fixed bitmap strike - 128 pixels - which SDL3_ttf
+cannot resize, so every icon had to be resampled down to the sixteen pixels a
+sidebar row gives it, which is exactly where a resampled bitmap looks worst. On
+a machine with no emoji font installed there was nothing to resample: the note
+kept its default page mark and the picker appeared to have done nothing. A
+drawn mark is exact at any size and is the same on every machine, which is what
+an icon in a shared library has to be.
+
+Emoji typed into a note's *text* are a different matter and still render: a
+colour emoji face cannot be attached to the body font for the same
+fixed-strike reason, so the monochrome Noto Emoji is attached when it is
+installed and the colour one is not.
+
+An `icon:` value this version does not recognise - an emoji written by an older
+one, or a name from a future set - is left in the file untouched and the note
+shows the default page mark until its icon is set again.
 
 ## Debug And Capture Flags
 

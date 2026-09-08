@@ -299,3 +299,28 @@ MICRONOTES_TEST(app_state_writes_a_vanished_note_back) {
 
   std::filesystem::remove_all(root);
 }
+
+MICRONOTES_TEST(app_state_numbers_a_rename_onto_a_name_already_taken) {
+  // A note is a file, so two notes in one folder cannot both be called TODO.
+  // Nothing blocks the rename: the second is numbered, and the caller is
+  // expected to notice that the title it got back is not the one it asked for.
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-rename-collision-test";
+  std::filesystem::remove_all(root);
+
+  micronotes::ui::AppState state;
+  MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
+  MICRONOTES_REQUIRE(state.createNote("TODO", "pi4", "first").has_value());
+  const auto second = state.createNote("Scratch", "pi4", "second");
+  MICRONOTES_REQUIRE(second.has_value());
+
+  MICRONOTES_REQUIRE(state.renameSelectedNote("TODO"));
+  MICRONOTES_REQUIRE(state.selectedTitle() == "TODO-2");
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "pi4" / "TODO.md"));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "pi4" / "TODO-2.md"));
+
+  // And renaming a note to the name it already has is not a collision with
+  // itself: the numbering must not creep every time the prompt is confirmed.
+  MICRONOTES_REQUIRE(state.renameSelectedNote("TODO-2"));
+  MICRONOTES_REQUIRE(state.selectedTitle() == "TODO-2");
+  std::filesystem::remove_all(root);
+}

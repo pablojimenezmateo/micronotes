@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -97,6 +98,23 @@ void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 // the proportional face, and switching the chrome to mono left tofu where the
 // star had been.
 void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color);
+
+// One of the marks a note can wear beside its name, and what the picker calls
+// it. The id is what goes into the note's front matter, so it has to stay
+// stable: a library written by one version is read by the next.
+struct NoteGlyph {
+  std::string_view id;
+  std::string_view label;
+};
+
+// The whole set, in picker order.
+std::span<const NoteGlyph> noteGlyphs();
+
+// Draws one of them centred in `box`. False when `id` names none of ours --
+// an empty icon, or one written by a version that offered a different set --
+// so the caller can fall back to the mark a note with no icon wears.
+bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Color color);
+
 // Minimise, maximise (or restore), close: `which` is 0, 1, 2 in that order,
 // which is the order they are laid out in.
 void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized,
@@ -193,29 +211,6 @@ public:
     SDL_RenderDebugText(renderer_, x, y, std::string(value).c_str());
   }
 
-  // Draws an emoji scaled to fit inside `box` and centred there. A colour emoji
-  // font is one fixed bitmap strike that SDL_ttf cannot resize, so the glyph
-  // arrives at 128 pixels whatever was asked for; scaling the rendered texture
-  // is the only place its size can be honoured. Returns false when no emoji
-  // face is installed, so the caller can draw its own mark instead of tofu.
-  bool drawIcon(std::string_view value, Rect box, SDL_Color color) {
-    if(value.empty() || !fonts_.ready() || box.w <= 0.0f || box.h <= 0.0f) return false;
-    if(!fonts_.hasIconFont()) return false;
-    const CachedText* cached = iconTexture(value, color);
-    if(!cached || cached->w <= 0 || cached->h <= 0) return false;
-    const float w = static_cast<float>(cached->w);
-    const float h = static_cast<float>(cached->h);
-    const float fit = std::min(box.w / w, box.h / h);
-    SDL_FRect dst {
-      std::round(box.x + (box.w - w * fit) / 2.0f),
-      std::round(box.y + (box.h - h * fit) / 2.0f),
-      w * fit,
-      h * fit,
-    };
-    SDL_RenderTexture(renderer_, cached->texture, nullptr, &dst);
-    return true;
-  }
-
   // Compatibility shims for the boolean-flag call sites inherited from the
   // pre-token UI. New code should pass a ui::TextStyle directly.
   static ui::TextStyle styleFor(bool heading, bool mono, bool strong, bool emphasis) {
@@ -241,7 +236,6 @@ public:
 
   void clear() {
     cache_.clear();
-    iconCache_.clear();
     // Every stored width was measured with the faces being replaced.
     measures_.clear();
   }
@@ -253,53 +247,6 @@ private:
     return render::TextTextureCache::Style {
       false, style.family == ui::FontFamily::Mono, style.strong, style.italic, style.size,
     };
-  }
-
-  // The physical size an icon is cached at. Icons are drawn into a row-height
-  // box -- 16 logical pixels everywhere the shell uses one -- and a colour
-  // emoji face hands back one fixed bitmap strike, 136 pixels for Noto. Two
-  // pixels of source per pixel of destination is as far as the renderer's own
-  // bilinear filter can be trusted; beyond that it samples four texels out of
-  // seventy and the glyph arrives as noise. So the surface is walked down to
-  // this size first and the renderer is left the gentle last step.
-  static constexpr int kIconCachePx = 32;
-
-  // Halve until one more halving would overshoot, then land exactly on the
-  // target. Repeated halving is a box filter over every source pixel, which is
-  // what a single large downscale is missing; doing it on the surface costs one
-  // pass per step, once, against every frame the texture is drawn.
-  static SDL_Surface* downscale(SDL_Surface* surface, int target) {
-    while(surface && surface->w > target * 2 && surface->h > target * 2) {
-      SDL_Surface* half = SDL_ScaleSurface(surface, surface->w / 2, surface->h / 2, SDL_SCALEMODE_LINEAR);
-      if(!half) return surface;
-      SDL_DestroySurface(surface);
-      surface = half;
-    }
-    if(!surface || (surface->w <= target && surface->h <= target)) return surface;
-    const float fit = std::min(static_cast<float>(target) / static_cast<float>(surface->w),
-                               static_cast<float>(target) / static_cast<float>(surface->h));
-    SDL_Surface* fitted = SDL_ScaleSurface(surface, std::max(1, static_cast<int>(std::lround(surface->w * fit))),
-                                           std::max(1, static_cast<int>(std::lround(surface->h * fit))),
-                                           SDL_SCALEMODE_LINEAR);
-    if(!fitted) return surface;
-    SDL_DestroySurface(surface);
-    return fitted;
-  }
-
-  const CachedText* iconTexture(std::string_view text, SDL_Color color) {
-    const auto key = render::TextTextureCache::makeKey(text, color, render::TextTextureCache::Style {});
-    if(const auto* hit = iconCache_.find(key)) return hit;
-    SDL_Surface* surface = fonts_.renderIcon(text, color);
-    if(!surface) return nullptr;
-    // Cached at one size for every caller, because the display scale is in the
-    // key of nothing here and clear() drops the cache when it changes.
-    surface = downscale(surface, static_cast<int>(std::lround(kIconCachePx * fonts_.displayScale())));
-    if(!surface) return nullptr;
-    SDL_Texture* created = SDL_CreateTextureFromSurface(renderer_, surface);
-    CachedText entry {created, surface->w, surface->h};
-    SDL_DestroySurface(surface);
-    if(!created) return nullptr;
-    return iconCache_.insert(key, entry);
   }
 
   const CachedText* texture(std::string_view text, SDL_Color color, const ui::TextStyle& style) {
@@ -320,10 +267,8 @@ private:
   SDL_Renderer* renderer_ = nullptr;
   ui::FontStore fonts_;
   // Sized for a few full screens of text so the working set stays resident
-  // while scrolling; icons get their own small cache so a glyph and a text run
-  // that happen to share a string cannot collide.
+  // while scrolling.
   render::TextTextureCache cache_ {4096};
-  render::TextTextureCache iconCache_ {256};
   // Widths are asked for far more often than textures -- once per word of a
   // layout pass against once per drawn run -- and an entry is 24 bytes rather
   // than a texture, so this is sized an order of magnitude larger. Mutable

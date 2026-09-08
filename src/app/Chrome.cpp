@@ -110,10 +110,11 @@ const char* paneModeName(ui::PaneMode mode) {
 }
 
 
-void drawNoteIcon(SDL_Renderer* renderer, TextRenderer& text, std::string_view icon, Rect box, SDL_Color color) {
-  if(text.drawIcon(icon, box, color)) return;
-  // No emoji face anywhere, or no icon set: a drawn page mark rather than the
-  // tofu box the missing glyph would otherwise leave behind.
+void drawNoteIcon(SDL_Renderer* renderer, std::string_view icon, Rect box, SDL_Color color) {
+  if(ui::drawNoteGlyph(renderer, icon, box, color)) return;
+  // No icon, or one this version does not know: the page mark every note wears
+  // by default. Kept here rather than in the glyph set because it is not a
+  // choice on the picker -- it is what "no icon" looks like.
   const float w = 9.0f;
   const float h = 11.0f;
   const float left = std::round(box.x + (box.w - w) / 2.0f);

@@ -93,6 +93,13 @@ This is a same-note style anchor link: [jump to Footnotes](markdown-elements.md#
 Autolinks should render as links when supported by md4c GFM:
 <https://example.com/autolink>.
 
+A bare URL pasted straight into a line is a link too, in the reading view and
+the live surface alike, and keeps every `&`, `%` and `=` in its query string:
+https://example.com/report?e=4x&ovuser=a%2Cb%40c.com&x=eyJBIjoiQiJ9%3D%3D
+
+The sentence punctuation after one is not part of it, so this full stop stays
+text: https://example.com/report.pdf.
+
 This is a local file link intended to exercise safe local opening:
 [local attachment placeholder](.micronotes/attachments/example/document.pdf).
 

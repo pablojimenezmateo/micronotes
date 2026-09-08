@@ -362,6 +362,46 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
 }
 
+// Non-const because the outline is cached lazily behind `outlineFor`, which is
+// the same reason the click handler is.
+bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect rect,
+                            float x, float y) {
+  if(!ui::contains(rect, x, y)) return false;
+  const auto& workspace = ui.state.workspace();
+  const int tabCount = static_cast<int>(std::size(kViews));
+  for(int i = 0; i < tabCount; ++i) {
+    if(ui::contains(tabRect(rect, i, tabCount), x, y)) return true;
+  }
+  const Rect list = listRect(rect);
+  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanelScroll, ui.rightPanelMaxScroll);
+     bar && ui::contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
+    return true;
+  }
+  // The row lists the draw recorded, which is exactly what the click walks --
+  // a cursor derived from anything else would promise clicks that miss.
+  if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
+    for(const auto& row : ui.backlinkRows) {
+      if(ui::contains(row.rect, x, y)) return true;
+    }
+    return false;
+  }
+  if(workspace.rightPanelView == ui::RightPanelView::Tags) {
+    for(const auto& row : ui.tagRows) {
+      if(ui::contains(row.rect, x, y)) return true;
+    }
+    return false;
+  }
+  if(workspace.rightPanelView != ui::RightPanelView::Outline) return false;
+  const auto& entries = outlineFor(ui);
+  const ui::TextStyle rowStyle = ui::chromeStyle();
+  const float pitch = rowPitch(text, rowStyle);
+  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanelScroll);
+  if(offset < 0.0f) return false;
+  const auto index = static_cast<std::size_t>(offset / pitch);
+  return index < entries.size() &&
+         ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanelScroll), x, y);
+}
+
 bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
   auto& workspace = ui.state.workspace();

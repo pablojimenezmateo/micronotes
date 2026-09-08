@@ -81,15 +81,6 @@ public:
   SDL_Surface* render(std::string_view value, const TextStyle& style, SDL_Color color) const;
   int lineHeight(const TextStyle& style) const;
 
-  // A single emoji rendered from the emoji face at whatever size that face can
-  // produce, for the caller to scale into the space it has. Colour emoji fonts
-  // carry one fixed bitmap strike that SDL_ttf cannot resize, which is why they
-  // are not attached as a fallback for ordinary text and why the size asked for
-  // here is only a hint. Null when no emoji face is installed, so the caller
-  // can draw its own mark rather than a tofu box.
-  bool hasIconFont() const;
-  SDL_Surface* renderIcon(std::string_view value, SDL_Color color) const;
-
   // Which font directory was used, for diagnostics.
   const char* sourceDescription() const;
 

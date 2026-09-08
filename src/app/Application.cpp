@@ -25,6 +25,7 @@
 #include "app/Screenshot.h"
 #include "app/RawPane.h"
 #include "app/ContextMenus.h"
+#include "app/Cursor.h"
 #include "app/SettingsDialog.h"
 #include "app/TabStrip.h"
 #include "app/WikiLinks.h"
@@ -328,37 +329,6 @@ static void saveTags(UiRuntime& ui) {
   }
 }
 
-static void beginRename(UiRuntime& ui) {
-  if(ui.state.openNote().noteId.empty()) {
-    ui.status = "Select a note before renaming";
-    return;
-  }
-  if(ui.editor.dirty() && !saveCurrent(ui)) return;
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::TextPrompt;
-  overlay.id = "rename-note";
-  overlay.title = "Rename note";
-  overlay.value.beginWith(std::string(ui.state.selectedTitle()));
-  overlay.placeholder = "Note title";
-  overlay.hint = "Enter to save, Esc to cancel";
-  ui.overlays.open(std::move(overlay));
-}
-
-static void saveRename(UiRuntime& ui) {
-  if(ui.rename.empty()) {
-    ui.status = "Rename needs a title";
-    return;
-  }
-  invalidateWikiNotes(ui);
-  if(ui.state.renameSelectedNote(ui.rename.text())) {
-    loadSelectedIntoEditor(ui);
-    ui.focus = FocusArea::Editor;
-    ui.status = "Renamed note";
-  } else {
-    ui.status = "Rename failed";
-  }
-}
-
 static void beginFolderCreate(UiRuntime& ui) {
   if(!ui.state.hasLibrary()) {
     ui.status = "Open a library before creating notebooks";
@@ -515,94 +485,6 @@ static void performAction(UiRuntime& ui, UiAction action) {
 
 
 
-
-// A hidden panel has no edge to grab: its width is zero, so its right edge sits
-// on top of the next panel's left one and dragging there would resize a panel
-// nobody can see.
-static bool isResizeGutter(const ShellLayout& layout, float x, float y) {
-  if(y < layout.sidebar.y || y > layout.sidebar.y + layout.sidebar.h) return false;
-  const auto nearEdge = [&](const Rect& panel) {
-    return !ui::empty(panel) && std::abs(x - (panel.x + panel.w)) <= ui::kResizeGutterInflate + 1.0f;
-  };
-  return nearEdge(layout.sidebar) ||
-         (!ui::empty(layout.rightPanel) &&
-          std::abs(x - layout.rightPanel.x) <= ui::kResizeGutterInflate + 1.0f);
-}
-
-
-// A note with no icon still needs something in the icon column, or its title
-// would sit where a folder's does and the two would read as one kind of thing.
-
-
-static bool scrollbarHit(Rect viewport, int scroll, int maxScroll, float x, float y) {
-  const auto geometry = ui::scrollbarGeometry(viewport, scroll, maxScroll);
-  return geometry && contains(ui::scrollbarHitRect(geometry->thumb), x, y);
-}
-
-static CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int height) {
-  if(ui.resizingSidebar) return CursorKind::ResizeHorizontal;
-  if(ui.scrollDragTarget != ScrollDragTarget::None) return CursorKind::ResizeVertical;
-
-  const float x = ui.mouseX;
-  const float y = ui.mouseY;
-  const ShellLayout layout = shellLayout(ui, width, height);
-  if(isResizeGutter(layout, x, y)) return CursorKind::ResizeHorizontal;
-  if(menuBarHasControlAt(text, ui, layout.menuBar, x, y)) return CursorKind::Pointer;
-  if(breadcrumbHasControlAt(ui, layout.breadcrumb, x, y)) return CursorKind::Pointer;
-
-  // Which part of the overlay, rather than one answer for the whole window.
-  if(ui.overlays.active()) return cursorForOverlay(ui.overlays.cursorAt(x, y));
-
-  if(contains(layout.sidebar, x, y)) {
-    if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebarScroll, ui.sidebarMaxScroll, x, y)) {
-      return CursorKind::Pointer;
-    }
-    const Rect search = searchBoxRect(layout.sidebar);
-    if(contains(search, x, y)) {
-      return contains(ui.searchScopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
-    }
-    if(sidebarRowAt(ui, sidebarListRect(layout.sidebar), x, y)) return CursorKind::Pointer;
-    return CursorKind::Default;
-  }
-
-  if(!contains(layout.content, x, y)) return CursorKind::Default;
-
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
-    if(scrollbarHit(ui.livePage.pageRect(), ui.livePage.scroll(), ui.livePage.maxScroll(), x, y)) return CursorKind::Pointer;
-    if(!ui.livePage.linkAt(x, y).empty()) return CursorKind::Pointer;
-    if(ui.livePage.gutterAt(x, y) || !ui.livePage.toolbarAt(x, y).empty()) return CursorKind::Pointer;
-    if(ui.livePage.foldAt(x, y) || ui.livePage.copyButtonAt(x, y)) return CursorKind::Pointer;
-    if(ui.livePage.checkboxAt(x, y)) return CursorKind::Pointer;
-    return contains(ui.livePage.pageRect(), x, y) ? CursorKind::Text : CursorKind::Default;
-  }
-
-  const ContentPanes panes = contentPanes(ui, layout.content);
-  const Rect editorRect = panes.editor;
-  const Rect viewerRect = panes.viewer;
-  const bool hasEditor = panes.hasEditor;
-  const bool hasViewer = panes.hasViewer;
-
-  if(hasEditor && contains(editorRect, x, y)) {
-    const Rect writing = editorWritingRect(editorRect);
-    if(scrollbarHit(writing, ui.editorScroll, editorMaxScroll(text, ui, editorRect), x, y)) {
-      return CursorKind::Pointer;
-    }
-    if(contains(writing, x, y)) return CursorKind::Text;
-  }
-
-  if(hasViewer && contains(viewerRect, x, y)) {
-    const Rect page = ui::pageRectIn(viewerRect);
-    if(scrollbarHit(page, ui.readingPage.scroll(), ui.readingPage.maxScroll(), x, y)) {
-      return CursorKind::Pointer;
-    }
-    if(ui.readingPage.copyButtonAt(x, y)) return CursorKind::Pointer;
-    for(const auto& link : ui.linkRegions) {
-      if(contains(link.rect, x, y)) return CursorKind::Pointer;
-    }
-  }
-
-  return CursorKind::Default;
-}
 
 // One frame of the whole window. Every surface it calls is timed separately:
 // before that, `page.draw` was the only instrumented part of a frame, so a
@@ -849,8 +731,9 @@ static void openNotePalette(UiRuntime& ui, std::string overlayId, std::string ti
   const auto root = ui.state.libraryRoot();
   for(const auto& note : ui.state.allNotes()) {
     const auto folder = note.folder.generic_string();
-    overlay.items.push_back({note.id,
-                             note.icon.empty() ? note.title : note.icon + " " + note.title,
+    // The title alone: an icon is a drawn mark now, and its id ("bookmark")
+    // pasted in front of a note's name is a word the reader never chose.
+    overlay.items.push_back({note.id, note.title,
                              folder.empty() ? root.filename().generic_string() : folder,
                              "", true, false});
   }
@@ -895,22 +778,6 @@ static void openTrashPalette(UiRuntime& ui) {
     overlay.items.push_back({entry.name, entry.title,
                              entry.originalRelative.parent_path().generic_string(), entry.deletedAt, true, false});
   }
-  ui.overlays.open(std::move(overlay));
-}
-
-static void openIconPrompt(UiRuntime& ui) {
-  const auto& note = ui.state.openNote();
-  if(note.noteId.empty()) {
-    ui.status = "No note selected";
-    return;
-  }
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::TextPrompt;
-  overlay.id = "note-icon";
-  overlay.title = "Note icon";
-  overlay.value.beginWith(note.metadata.icon);
-  overlay.placeholder = "One emoji";
-  overlay.hint = "Enter save   Esc cancel   empty removes the icon";
   ui.overlays.open(std::move(overlay));
 }
 
@@ -1060,7 +927,7 @@ static void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "new-folder") beginFolderCreate(ui);
   else if(id == "save") saveCurrent(ui);
   else if(id == "rename") beginRename(ui);
-  else if(id == "icon") openIconPrompt(ui);
+  else if(id == "icon") openIconPicker(ui);
   else if(id == "tags") beginTagEdit(ui);
   else if(id == "favorite") {
     const auto noteId = ui.state.selection().noteId;
@@ -1234,8 +1101,9 @@ static void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) 
   } else if(result.overlayId == "restore-trash") {
     ui.status = ui.state.restoreFromTrash(result.itemId) ? "Restored from trash" : "Restore failed";
   } else if(result.overlayId == "note-icon") {
-    ui.status = ui.state.setSelectedNoteIcon(result.value) ? (result.value.empty() ? "Removed icon" : "Set icon")
-                                                           : "Could not set icon";
+    ui.status = ui.state.setSelectedNoteIcon(result.itemId)
+                  ? (result.itemId.empty() ? "Removed icon" : "Set icon")
+                  : "Could not set icon";
   } else if(result.overlayId == "settings") {
     if(result.itemId == "library") openLibraryPrompt(ui);
     else if(result.itemId == "shortcuts") openShortcutHelp(ui);
@@ -2232,6 +2100,7 @@ int run(ApplicationOptions options) {
     else if(which == "shortcuts") openShortcutHelp(ui);
     else if(which == "command-palette") openCommandPalette(ui);
     else if(which == "wiki-menu") openWikiMenu(ui, ui.editor.cursor());
+    else if(which == "icon") openIconPicker(ui);
     else std::cerr << "unknown --open value: " << which << "\n";
   }
 

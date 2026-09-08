@@ -143,6 +143,7 @@ set(MICROCORE_SOURCES
   src/core/editor/SoftWrap.cpp
   src/core/editor/TextField.cpp
   src/core/editor/WrappedLines.cpp
+  src/core/markdown/BareUrl.cpp
   src/core/markdown/MarkdownParser.cpp
   src/core/markdown/RenderModel.cpp
   src/core/perf/Perf.cpp
@@ -225,6 +226,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Breadcrumb.cpp
   src/app/Chrome.cpp
   src/app/ContextMenus.cpp
+  src/app/Cursor.cpp
   src/app/Desktop.cpp
   src/app/Dismiss.cpp
   src/app/Folds.cpp

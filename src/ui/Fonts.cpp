@@ -93,6 +93,10 @@ const std::vector<std::string>& systemFallbacks(bool mono, bool strong, bool ita
   return italic ? sansItalic : sansRegular;
 }
 
+// Emoji faces, for emoji typed into a note's *text*. The shell's own icons are
+// drawn rather than typeset -- see `ui::noteGlyphs` -- so nothing here is about
+// them; this is only so that an emoji in a sentence is a character rather than
+// a tofu box.
 const std::vector<std::string>& emojiFallbacks() {
   static const std::vector<std::string> paths {
     "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
@@ -158,10 +162,6 @@ struct FontStore::Impl {
   // TTF_AddFallbackFont does not take ownership, so the emoji faces are held
   // here and closed with the fonts that reference them.
   std::vector<TTF_Font*> fallbacks;
-  // The colour emoji face, kept apart from the text fallbacks and opened once.
-  // See `attachEmoji` for why it cannot be one of them.
-  TTF_Font* iconFont = nullptr;
-  bool iconTried = false;
 
   std::string facePath(bool mono, bool strong, bool italic) const {
     if(!root.empty()) {
@@ -206,8 +206,9 @@ struct FontStore::Impl {
   // Noto - and SDL_ttf cannot scale it: ask for 14 and every glyph still comes
   // back at 128. Attached as a text fallback it would paint one emoji straight
   // over the four lines around it, so only a face that actually honours the
-  // size asked for is attached here. The colour face is still opened, once, for
-  // the icon path, which scales the rendered glyph itself.
+  // size asked for is attached here. On a machine with only the colour face
+  // installed, an emoji in a sentence is a tofu box -- which is a font the
+  // system does not have, and not something this application can conjure.
   void attachEmoji(TTF_Font* font, int px) {
     for(const auto& emoji : emojiFallbacks()) {
       std::error_code ec;
@@ -224,20 +225,6 @@ struct FontStore::Impl {
     }
   }
 
-  TTF_Font* icon() {
-    if(iconTried) return iconFont;
-    iconTried = true;
-    for(const auto& emoji : emojiFallbacks()) {
-      std::error_code ec;
-      if(!std::filesystem::exists(emoji, ec)) continue;
-      // Any size: an unscalable face ignores it, and a scalable one is asked
-      // for something big enough to look right when scaled down.
-      iconFont = TTF_OpenFont(emoji.c_str(), 48.0f);
-      if(iconFont) return iconFont;
-    }
-    return nullptr;
-  }
-
   void clear() {
     for(auto& [_, font] : cache) {
       if(font) TTF_CloseFont(font);
@@ -246,8 +233,6 @@ struct FontStore::Impl {
     // After the fonts that referenced them, never before.
     for(TTF_Font* fallback : fallbacks) TTF_CloseFont(fallback);
     fallbacks.clear();
-    // The icon face is referenced by nothing and survives a rescale: it is
-    // rendered at its own size and scaled by the caller either way.
   }
 
   int pixelSize(const TextStyle& style) const {
@@ -283,8 +268,6 @@ bool FontStore::init() {
 void FontStore::shutdown() {
   if(!impl_) return;
   impl_->clear();
-  if(impl_->iconFont) TTF_CloseFont(impl_->iconFont);
-  impl_->iconFont = nullptr;
   if(impl_->ttfReady) TTF_Quit();
   delete impl_;
   impl_ = nullptr;
@@ -332,17 +315,6 @@ int FontStore::lineHeight(const TextStyle& style) const {
   return TTF_GetFontHeight(font);
 }
 
-bool FontStore::hasIconFont() const {
-  return impl_ && impl_->ttfReady && impl_->icon() != nullptr;
-}
-
-SDL_Surface* FontStore::renderIcon(std::string_view value, SDL_Color color) const {
-  if(!impl_ || !impl_->ttfReady || value.empty()) return nullptr;
-  TTF_Font* font = impl_->icon();
-  if(!font) return nullptr;
-  return TTF_RenderText_Blended(font, value.data(), value.size(), color);
-}
-
 const char* FontStore::sourceDescription() const {
   return impl_ ? impl_->source.c_str() : "uninitialized";
 }
@@ -364,9 +336,6 @@ SDL_Surface* FontStore::render(std::string_view, const TextStyle&, SDL_Color) co
 int FontStore::lineHeight(const TextStyle& style) const {
   return static_cast<int>((style.size > 0.0f ? style.size : type().body) * displayScale() * 1.4f);
 }
-bool FontStore::hasIconFont() const { return false; }
-SDL_Surface* FontStore::renderIcon(std::string_view, SDL_Color) const { return nullptr; }
-
 const char* FontStore::sourceDescription() const { return "SDL3_ttf unavailable"; }
 
 #endif

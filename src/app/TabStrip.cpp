@@ -98,6 +98,21 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   if(layout.hiddenRight > 0) ui.offerTooltip(layout.scrollRight, "Later tabs");
 }
 
+bool tabStripHasControlAt(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
+  if(!ui::contains(rect, x, y)) return false;
+  // Through the same measurer the draw and the click use, for the reason spelt
+  // out in `handleTabStripClick`: the strip's geometry depends on it.
+  const auto layout = slotsFor(tabTitles(ui), &text, rect, ui.state.workspace().activeTab);
+  // A chevron with nothing hidden behind it is drawn dimmed and does nothing,
+  // so it is not a control and must not claim the pointer.
+  if(layout.hiddenLeft > 0 && ui::contains(layout.scrollLeft, x, y)) return true;
+  if(layout.hiddenRight > 0 && ui::contains(layout.scrollRight, x, y)) return true;
+  for(const auto& slot : layout.slots) {
+    if(slot.visible && ui::contains(slot.rect, x, y)) return true;
+  }
+  return false;
+}
+
 bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y,
                          Uint8 button, bool ctrl) {
   if(!ui::contains(rect, x, y)) return false;

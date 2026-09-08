@@ -1,5 +1,7 @@
 #include "core/markdown/MarkdownParser.h"
 
+#include "core/markdown/BareUrl.h"
+
 #include "core/AppIdentity.h"
 #include "core/perf/PerformanceCounters.h"
 
@@ -358,18 +360,6 @@ static int textCallback(MD_TEXTTYPE type, const char* text, unsigned size, void*
   return 0;
 }
 
-static bool startsWithUrl(std::string_view text, std::size_t pos) {
-  return text.substr(pos, 7) == "http://" || text.substr(pos, 8) == "https://";
-}
-
-static bool isUrlTerminator(char c) {
-  return std::isspace(static_cast<unsigned char>(c)) || c == '<' || c == '>';
-}
-
-static bool isTrailingUrlPunctuation(char c) {
-  return c == '.' || c == ',' || c == ';' || c == ':' || c == '!' || c == '?' || c == '"' || c == '\'';
-}
-
 static std::string fileNameFromTarget(std::string_view target) {
   const auto lastSlash = target.find_last_of("/\\");
   const auto begin = lastSlash == std::string_view::npos ? 0 : lastSlash + 1;
@@ -443,11 +433,12 @@ static std::vector<Inline> autolinkTextInline(const Inline& item) {
   std::size_t pos = 0;
   while(pos < item.text.size()) {
     std::size_t urlStart = std::string::npos;
+    BareUrl url;
     for(std::size_t i = pos; i < item.text.size(); ++i) {
-      if(startsWithUrl(item.text, i)) {
-        urlStart = i;
-        break;
-      }
+      url = bareUrlAt(item.text, i);
+      if(url.span == 0) continue;
+      urlStart = i;
+      break;
     }
     if(urlStart == std::string::npos) {
       Inline text = item;
@@ -460,28 +451,24 @@ static std::vector<Inline> autolinkTextInline(const Inline& item) {
       text.text = item.text.substr(pos, urlStart - pos);
       out.push_back(std::move(text));
     }
-    std::size_t urlEnd = urlStart;
-    while(urlEnd < item.text.size() && !isUrlTerminator(item.text[urlEnd])) ++urlEnd;
-    std::size_t trimmedEnd = urlEnd;
-    while(trimmedEnd > urlStart && isTrailingUrlPunctuation(item.text[trimmedEnd - 1])) --trimmedEnd;
-    if(trimmedEnd == urlStart) {
+    if(url.length == 0) {
       Inline text = item;
-      text.text = item.text.substr(urlStart, urlEnd - urlStart);
+      text.text = item.text.substr(urlStart, url.span);
       out.push_back(std::move(text));
     } else {
       Inline link = item;
       link.type = InlineType::Link;
-      link.text = item.text.substr(urlStart, trimmedEnd - urlStart);
+      link.text = item.text.substr(urlStart, url.length);
       link.target = link.text;
       out.push_back(std::move(link));
       perf::addCounter(perf::CounterId::MarkdownAutolinkRewrites);
-      if(trimmedEnd < urlEnd) {
+      if(url.length < url.span) {
         Inline punctuation = item;
-        punctuation.text = item.text.substr(trimmedEnd, urlEnd - trimmedEnd);
+        punctuation.text = item.text.substr(urlStart + url.length, url.span - url.length);
         out.push_back(std::move(punctuation));
       }
     }
-    pos = urlEnd;
+    pos = urlStart + url.span;
   }
   return out;
 }

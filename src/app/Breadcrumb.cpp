@@ -92,7 +92,7 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
     x += static_cast<float>(text.width("/", style)) + ui::kSpace2;
   }
   if(note && x < limit) {
-    drawNoteIcon(renderer, text, note->icon,
+    drawNoteIcon(renderer, note->icon,
                  {x, std::round(rect.y + (rect.h - kCrumbIconSize) / 2.0f), kCrumbIconSize,
                   kCrumbIconSize},
                  theme().textMuted);

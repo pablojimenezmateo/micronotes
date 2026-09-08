@@ -23,8 +23,18 @@ enum class OverlayKind {
   // A grid of colour swatches. A list would do the job with one swatch a row,
   // and would be the wrong shape: choosing a colour is comparing colours, and
   // twelve of them in a column are never all in the eye at once.
-  ColorPicker
+  ColorPicker,
+  // A grid of the marks a note can wear. The same shape as the swatches, for
+  // the same reason: choosing a glyph is comparing glyphs.
+  GlyphPicker
 };
+
+// Whether an overlay lays its items out as a grid rather than as rows. The two
+// pickers differ only in what they paint into a cell, and every rule about
+// sizing, pointing at and choosing one is shared.
+constexpr bool isGridOverlay(OverlayKind kind) {
+  return kind == OverlayKind::ColorPicker || kind == OverlayKind::GlyphPicker;
+}
 
 struct OverlayItem {
   std::string id;

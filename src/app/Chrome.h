@@ -20,10 +20,9 @@ struct UiRuntime;
 // (`app/Breadcrumb.h`) that carries the trail down to the open note.
 void drawStatus(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
-// A note's icon, or a drawn mark when no emoji face is installed. Shared with
-// the sidebar and the note list, which name notes the same way the trail does.
-void drawNoteIcon(SDL_Renderer* renderer, ui::TextRenderer& text, std::string_view icon, ui::Rect box,
-                  SDL_Color color);
+// A note's icon, or the page mark a note with no icon wears. Shared with the
+// sidebar and the note list, which name notes the same way the trail does.
+void drawNoteIcon(SDL_Renderer* renderer, std::string_view icon, ui::Rect box, SDL_Color color);
 
 // What the status bar calls the current pane mode.
 const char* paneModeName(microcore::ui::PaneMode mode);

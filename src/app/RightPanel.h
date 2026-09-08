@@ -30,6 +30,12 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
 const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui);
 
 // Returns whether the click landed on something the panel owns.
+// Whether the pointer is over something in the panel that answers a click: one
+// of its view tabs, its scrollbar thumb, or a backlink, tag or outline row.
+// Asked by the cursor, and derived from the same row lists the click walks.
+bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, ui::Rect rect,
+                            float x, float y);
+
 bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, ui::Rect rect, float x, float y);
 
 // Showing and hiding a panel, and choosing what the right one shows.

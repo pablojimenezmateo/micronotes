@@ -178,6 +178,16 @@ void rescanLibraryAfterExternalChange(UiRuntime& ui);
 // track of who wrote it.
 bool applyWatchedChanges(UiRuntime& ui);
 
+// Renaming, in two halves: the prompt, and what the answer does.
+//
+// A note is a file and its name is that file's name, so a title already taken
+// by a note beside it cannot simply be granted. Nothing blocks the rename --
+// the title is numbered (`TODO-2`) and the rename goes through -- and
+// `saveRename` says so on the status line when the name it settled on is not
+// the one that was typed.
+void beginRename(UiRuntime& ui);
+void saveRename(UiRuntime& ui);
+
 void createNote(UiRuntime& ui);
 void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder);
 

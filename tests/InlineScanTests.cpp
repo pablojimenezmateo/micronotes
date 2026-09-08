@@ -1,5 +1,6 @@
 #include "TestSupport.h"
 
+#include "core/markdown/MarkdownParser.h"
 #include "doc/InlineScan.h"
 
 #include <string>
@@ -305,4 +306,64 @@ MICRONOTES_TEST(inline_scan_leaves_a_bracket_that_is_not_a_footnote_alone) {
                                  "read a footnote reference out of: " + std::string(text));
     }
   }
+}
+
+MICRONOTES_TEST(inline_scan_autolinks_a_bare_url) {
+  const std::string text = "Model calibration https://ptvgroup-my.sharepoint.com/:w:/p/a_b/IQCq?e=4x&isSPOFile=1";
+  const auto spans = scanInlines(text);
+  const auto* url = find(spans, SpanKind::Autolink);
+  MICRONOTES_REQUIRE(url != nullptr);
+  MICRONOTES_REQUIRE(url->target == text.substr(18));
+  // No brackets to hide, so the span is all content: a bare URL reads the same
+  // laid out as it does with its markers revealed.
+  MICRONOTES_REQUIRE(url->openStart == url->openEnd);
+  MICRONOTES_REQUIRE(slice(text, url->contentStart, url->contentEnd) == url->target);
+  // The underscore inside the URL is the scanner's, not emphasis's.
+  MICRONOTES_REQUIRE(find(spans, SpanKind::Emphasis) == nullptr);
+}
+
+MICRONOTES_TEST(inline_scan_gives_back_the_sentence_punctuation) {
+  const std::string text = "See https://example.com/report.pdf.";
+  const auto spans = scanInlines(text);
+  const auto* url = find(spans, SpanKind::Autolink);
+  MICRONOTES_REQUIRE(url != nullptr);
+  MICRONOTES_REQUIRE(url->target == "https://example.com/report.pdf");
+  MICRONOTES_REQUIRE(url->end == text.size() - 1);
+}
+
+MICRONOTES_TEST(inline_scan_leaves_a_link_target_to_its_link) {
+  const std::string text = "[6 pilars](https://example.com/deck) and nothing else";
+  const auto spans = scanInlines(text);
+  // One link, and it is the bracketed one: the URL inside `(...)` must not be
+  // claimed a second time as a bare URL of its own.
+  MICRONOTES_REQUIRE(find(spans, SpanKind::Autolink) == nullptr);
+  const auto* link = find(spans, SpanKind::Link);
+  MICRONOTES_REQUIRE(link != nullptr && link->target == "https://example.com/deck");
+}
+
+MICRONOTES_TEST(inline_scan_leaves_a_url_in_a_code_span_alone) {
+  const auto spans = scanInlines("try `https://example.com` first");
+  MICRONOTES_REQUIRE(find(spans, SpanKind::Autolink) == nullptr);
+  MICRONOTES_REQUIRE(find(spans, SpanKind::Code) != nullptr);
+}
+
+MICRONOTES_TEST(inline_scan_agrees_with_the_reading_model_on_a_bare_url) {
+  // The two pipelines lay out the same note -- md4c behind the reading model,
+  // this scanner behind the page -- and a URL that links in one and not the
+  // other is the app appearing to forget. They share `bareUrlAt`; this is the
+  // check that they still share it.
+  const std::string url =
+    "https://ptvgroup-my.sharepoint.com/:w:/p/eduardo_a/IQCq?e=4x&ovuser=a%2Cb%40c.com&x=eyJBIjoiQiJ9%3D%3D";
+  const std::string text = "Model calibration " + url;
+  const auto spans = scanInlines(text);
+  const auto* scanned = find(spans, SpanKind::Autolink);
+  MICRONOTES_REQUIRE(scanned != nullptr && scanned->target == url);
+
+  const auto doc = microcore::markdown::MarkdownParser().parse(text + "\n");
+  MICRONOTES_REQUIRE(doc.blocks.size() == 1);
+  bool parsed = false;
+  for(const auto& item : doc.blocks[0].inlines) {
+    parsed = parsed || (item.type == microcore::markdown::InlineType::Link && item.target == url);
+  }
+  MICRONOTES_REQUIRE(parsed);
 }

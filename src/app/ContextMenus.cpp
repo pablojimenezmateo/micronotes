@@ -4,6 +4,7 @@
 
 #include "ui/Actions.h"
 #include "ui/Overlay.h"
+#include "ui/Draw.h"
 #include "ui/TagColors.h"
 
 #include <string>
@@ -121,6 +122,42 @@ void openTagColorPicker(UiRuntime& ui, std::string tag) {
   // Carried through the commit, because the result only reports which item was
   // chosen and the tag is the other half of the answer.
   overlay.value.beginWith(std::move(tag), false);
+  ui.overlays.open(std::move(overlay));
+}
+
+// The set of marks, not a field to type one into.
+//
+// It used to be a text prompt asking for "one emoji", which asked the reader to
+// find a character picker, and then handed what they found to a colour emoji
+// face that is one fixed 136px bitmap strike -- resampled down to the sixteen
+// pixels a sidebar row gives it, and absent altogether on a machine with no
+// emoji font installed, where the note simply kept its default page mark and
+// the prompt appeared to have done nothing. The marks here are drawn by the
+// shell at the size they are used, so a note looks the same on every machine.
+void openIconPicker(UiRuntime& ui) {
+  const auto& note = ui.state.openNote();
+  if(note.noteId.empty()) {
+    ui.status = "No note selected";
+    return;
+  }
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::GlyphPicker;
+  overlay.id = "note-icon";
+  overlay.title = "Note icon";
+  overlay.hint = "Enter  choose        Esc  cancel";
+  // The first cell is the absence of one, so removing an icon is a choice on
+  // the same grid rather than a second gesture to be learnt.
+  overlay.items.push_back({"", "None", "", "", true, false});
+  for(const auto& glyph : ui::noteGlyphs()) {
+    overlay.items.push_back({std::string(glyph.id), std::string(glyph.label), "", "", true, false});
+  }
+  overlay.current = 0;
+  for(std::size_t i = 0; i < overlay.items.size(); ++i) {
+    if(overlay.items[i].id != note.metadata.icon) continue;
+    overlay.current = static_cast<int>(i);
+    break;
+  }
+  overlay.highlighted = overlay.current;
   ui.overlays.open(std::move(overlay));
 }
 

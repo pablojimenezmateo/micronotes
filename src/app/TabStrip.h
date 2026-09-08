@@ -19,6 +19,11 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
 // `text` is not decoration: a tab's width depends on how wide its title
 // measures, so the hit test has to lay the strip out through the same measurer
 // the draw does or it tests rects that are not the ones on screen.
+// Whether the pointer is over something on the strip that answers a click: a
+// tab, its close cross, or an overflow chevron with tabs actually hidden behind
+// it. The cursor asks, so that a strip of controls says it is one.
+bool tabStripHasControlAt(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y);
+
 bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y,
                          Uint8 button, bool ctrl);
 

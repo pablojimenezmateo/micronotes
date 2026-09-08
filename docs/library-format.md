@@ -103,14 +103,17 @@ Notes use a small front matter header:
 ---
 id: stable-note-id
 title: Note title
-icon: 📓
+icon: bookmark
 tags: work fast local
 ---
 ```
 
-The `id` is stable across rename and folder moves. `icon` is one emoji, shown
-beside the note in the sidebar, the note list and the breadcrumb; the key is
-omitted entirely when a note has no icon.
+The `id` is stable across rename and folder moves. `icon` names one of the marks
+the shell draws - `star`, `check`, `flag`, `bookmark`, `tag`, `folder`,
+`calendar`, `clock`, `bolt`, `warning`, `code` - shown beside the note in the
+sidebar, the note list and the breadcrumb; the key is omitted entirely when a
+note has no icon, and a name this version does not know is kept in the file and
+drawn as the default page mark.
 
 Tags are space-separated in the initial format. YAML's other two forms are read
 as well - `tags: [work, fast]` and a `- item` block - and each is written back

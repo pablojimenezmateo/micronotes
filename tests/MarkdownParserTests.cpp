@@ -231,3 +231,19 @@ MICRONOTES_TEST(markdown_parser_decodes_entities_like_md4c_html) {
   const auto html = md4cHtml(source);
   MICRONOTES_REQUIRE(html.find("Fish &amp; chips ©") != std::string::npos);
 }
+
+MICRONOTES_TEST(markdown_parser_autolinks_a_url_full_of_query_punctuation) {
+  // The shape that sent us looking: a SharePoint link whose query string is
+  // full of `&`, `%` and `=` and which ends in a base64 blob. Nothing in it is
+  // sentence punctuation, so none of it may be trimmed away.
+  const auto url = std::string(
+    "https://ptvgroup-my.sharepoint.com/:w:/p/eduardo_a/IQCq?e=4xVv3h&isSPOFile=1"
+    "&ovuser=5dad80bc%2Cpablo.jimenez%40ptvgroup.com&clickparams=eyJBcHBOYW1lIjoiVGVhbXMifQ%3D%3D");
+  const auto doc = MarkdownParser().parse("Model calibration\n" + url + "\n");
+  MICRONOTES_REQUIRE(doc.blocks.size() == 1);
+  bool sawWholeUrl = false;
+  for(const auto& item : doc.blocks[0].inlines) {
+    sawWholeUrl = sawWholeUrl || (item.type == InlineType::Link && item.target == url);
+  }
+  MICRONOTES_REQUIRE(sawWholeUrl);
+}

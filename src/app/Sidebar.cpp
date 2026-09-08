@@ -309,7 +309,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
                                                                     : theme().textMuted);
     }
     if(isNote) {
-      drawNoteIcon(renderer, text, row.tree.icon,
+      drawNoteIcon(renderer, row.tree.icon,
                    {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
                     kSidebarGutterWidth, kSidebarGutterWidth},
                    selected ? theme().accent : theme().textMuted);

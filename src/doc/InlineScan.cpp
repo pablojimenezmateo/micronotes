@@ -1,5 +1,7 @@
 #include "doc/InlineScan.h"
 
+#include "core/markdown/BareUrl.h"
+
 #include "CoreAliases.h"
 #include "core/perf/PerformanceCounters.h"
 
@@ -77,11 +79,32 @@ constexpr std::array<bool, 256> markupBytes = [] {
   return table;
 }();
 
-bool hasMarkupByte(std::string_view text) {
+// What one walk of a block found, and so which of the three routes below it
+// takes.
+//
+// A bare URL is the awkward case. It begins with `h`, which is far too common a
+// letter to gate anything on, and a single `:` is barely better -- "Model
+// calibration:" is a line of prose, and putting `:` in the table above dragged
+// every paragraph like it onto the full five-pass path, 0.60us a block against
+// 0.07us to reject one. But no URL can be written without `://`, and almost no
+// prose contains it, so that is what is looked for: a `/` whose previous byte
+// was a `:`. It does not mean the block has markup in it. It means only that
+// the URL pass has to run, and that pass alone needs no mask, no delimiter
+// stack and nothing sorted.
+struct Prescan {
+  bool markup = false;
+  bool scheme = false;
+};
+
+Prescan prescan(std::string_view text) {
+  Prescan found;
+  char previous = 0;
   for(const char c : text) {
-    if(markupBytes[static_cast<unsigned char>(c)]) return true;
+    if(markupBytes[static_cast<unsigned char>(c)]) found.markup = true;
+    else if(c == '/' && previous == ':') found.scheme = true;
+    previous = c;
   }
-  return false;
+  return found;
 }
 
 }
@@ -91,7 +114,8 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   std::vector<SourceSpan>& spans = scratch->spans;
   spans.clear();
   if(text.empty()) return spans;
-  if(!hasMarkupByte(text)) {
+  const Prescan found = prescan(text);
+  if(!found.markup && !found.scheme) {
     perf::addCounter(perf::CounterId::LayoutInlineScanRejects);
     return spans;
   }
@@ -100,11 +124,17 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   // recognised outside them. Reassigned rather than reallocated: `assign` keeps
   // the capacity a previous block grew, so a document's worth of scanning takes
   // one allocation instead of one per block.
+  //
+  // Left empty on the URL-only route, where no pass claims anything: `mask`
+  // and `claimed` both read its size, so an empty one is simply a block in
+  // which nothing has been spoken for.
   std::vector<char>& masked = scratch->masked;
-  masked.assign(text.size(), 0);
+  if(found.markup) masked.assign(text.size(), 0);
+  else masked.clear();
   const auto mask = [&](std::size_t from, std::size_t to) {
     for(std::size_t i = from; i < to && i < masked.size(); ++i) masked[i] = 1;
   };
+  const auto claimed = [&](std::size_t i) { return i < masked.size() && masked[i] != 0; };
   const auto add = [&](SourceSpan span) {
     span.start += base;
     span.end += base;
@@ -118,7 +148,10 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   };
 
   // Pass 1: escapes, code spans and autolinks. These win over everything.
-  for(std::size_t i = 0; i < text.size();) {
+  //
+  // Every pass from here to pass 4 looks for a markup byte, so a block whose
+  // only find was a `://` skips all of them and runs the URL pass alone.
+  for(std::size_t i = 0; found.markup && i < text.size();) {
     const char c = text[i];
     if(c == '\\' && i + 1 < text.size() && isAsciiPunct(text[i + 1])) {
       SourceSpan span;
@@ -202,7 +235,7 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   //
   // The whole span is masked, unlike a link: what is between the brackets is a
   // note's title, so a `*` in it is part of the name rather than emphasis.
-  for(std::size_t i = 0; i + 3 < text.size();) {
+  for(std::size_t i = 0; found.markup && i + 3 < text.size();) {
     if(masked[i] || text[i] != '[' || text[i + 1] != '[' || masked[i + 1]) {
       ++i;
       continue;
@@ -261,7 +294,7 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   // The definition it points at is a block of its own, handed to md4c; this is
   // the `[^a]` in the middle of a sentence, and what it needs from the layout
   // is to be a link to the anchor the page records for that definition.
-  for(std::size_t i = 0; i + 3 < text.size();) {
+  for(std::size_t i = 0; found.markup && i + 3 < text.size();) {
     if(masked[i] || text[i] != '[' || text[i + 1] != '^' || masked[i + 1]) {
       ++i;
       continue;
@@ -297,7 +330,7 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
 
   // Pass 3: links and images. Only their markers are masked, so emphasis inside
   // a link label still matches.
-  for(std::size_t i = 0; i < text.size();) {
+  for(std::size_t i = 0; found.markup && i < text.size();) {
     if(masked[i] || text[i] != '[') {
       ++i;
       continue;
@@ -330,10 +363,47 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
     i = span.contentStart;
   }
 
+  // Pass 3b: bare URLs, pasted into prose without brackets around them.
+  //
+  // After pass 3, because a link's `](target)` is masked by then and a URL
+  // inside one must stay that link's target rather than becoming a second link
+  // of its own. Before pass 4, because a query string is full of underscores
+  // and every one of them would otherwise be offered to emphasis.
+  for(std::size_t i = 0; found.scheme && i < text.size();) {
+    if(claimed(i) || text[i] != 'h') {
+      ++i;
+      continue;
+    }
+    const auto url = markdown::bareUrlAt(text, i);
+    if(url.span == 0) {
+      ++i;
+      continue;
+    }
+    if(url.length > 0) {
+      SourceSpan span;
+      span.kind = SpanKind::Autolink;
+      span.start = i;
+      span.end = i + url.length;
+      // No brackets to hide: the whole span is its own content, which is what
+      // makes this the one link in the shell that reads the same revealed as
+      // it does laid out.
+      span.openStart = i;
+      span.openEnd = i;
+      span.contentStart = i;
+      span.contentEnd = span.end;
+      span.closeStart = span.end;
+      span.closeEnd = span.end;
+      span.target = std::string(text.substr(i, url.length));
+      add(std::move(span));
+      mask(i, i + url.length);
+    }
+    i += url.span;
+  }
+
   // Pass 4: emphasis, strong and strikethrough delimiter runs.
   std::vector<Delimiter>& open = scratch->delimiters;
   open.clear();
-  for(std::size_t i = 0; i < text.size();) {
+  for(std::size_t i = 0; found.markup && i < text.size();) {
     const char c = text[i];
     if(masked[i] || (c != '*' && c != '_' && c != '~')) {
       ++i;

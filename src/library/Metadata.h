@@ -21,8 +21,11 @@ struct NoteMetadata {
 
   std::string id;
   std::string title;
-  // A single emoji shown beside the note in the tree and the breadcrumbs.
-  // Empty means the note has no icon, not that it has a default one.
+  // Names one of the marks the shell draws beside the note in the tree and the
+  // breadcrumbs -- see `ui::noteGlyphs()`. Empty means the note has no icon,
+  // not that it has a default one; a name this version does not know is kept as
+  // it was written and drawn as the default page mark, so a library is not
+  // rewritten by being opened in an older build.
   std::string icon;
   std::vector<std::string> tags;
   TagForm tagForm = TagForm::Inline;
