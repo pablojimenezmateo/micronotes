@@ -23,7 +23,6 @@ namespace microcore::platform {}
 namespace microcore::render {}
 namespace microcore::ui {}
 namespace microcore::util {}
-namespace microcore::viewer {}
 
 namespace micronotes {
 
@@ -35,6 +34,5 @@ namespace persistence = microcore::persistence;
 namespace platform = microcore::platform;
 namespace render = microcore::render;
 namespace util = microcore::util;
-namespace viewer = microcore::viewer;
 
 }

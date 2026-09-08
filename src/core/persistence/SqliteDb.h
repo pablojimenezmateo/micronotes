@@ -94,8 +94,6 @@ public:
   bool isOpen() const { return db_ != nullptr; }
   sqlite3* handle() const { return db_; }
 
-  std::string lastError() const;
-
 private:
   friend class Statement;
 

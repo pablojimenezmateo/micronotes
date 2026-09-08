@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/ui/ShellModel.h"
+#include "core/ui/PaneMode.h"
 #include "ui/Metrics.h"
 #include "ui/TagColors.h"
 #include "ui/ShellLayout.h"
@@ -58,11 +58,10 @@ const SidebarSection* sidebarSections(std::size_t* count);
 // The arrangement of the window: which panels are showing, how wide they are,
 // and what the reader keeps to hand.
 //
-// This deliberately does not extend microcore::ui::ShellModel, even though the
-// two widths started there. Panels, and the tabs and splits that follow, are
-// notes-app furniture: putting them in the core would mean the app-agnostic
-// layer describing an arrangement only this app has. PaneMode is the one piece
-// that genuinely is not app-specific, so that is the one piece imported.
+// Panels, and the tabs and splits that follow, are notes-app furniture: putting
+// them in the core would mean the app-agnostic layer describing an arrangement
+// only this app has. `microcore::ui::PaneMode` is the one piece that genuinely
+// is not app-specific, so that is the one piece imported.
 struct WorkspaceModel {
   // The notes open in the editor area, and which of them is showing. Never
   // empty is not an invariant worth having: a window with nothing open is a

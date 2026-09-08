@@ -168,7 +168,6 @@ public:
 
   void open(Overlay overlay);
   void close();
-  void closeAll();
 
   // Each handler returns a result once the user commits; nullopt otherwise.
   // `handled` reports whether the overlay consumed the event at all, so the

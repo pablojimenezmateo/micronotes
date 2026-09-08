@@ -133,14 +133,6 @@ std::string resolveUncached(const FontRequest& request) {
 
 }
 
-bool hasFontconfig() {
-#if MICROCORE_HAS_FONTCONFIG
-  return true;
-#else
-  return false;
-#endif
-}
-
 std::string resolveFontFile(const FontRequest& request) {
   // Resolution walks the font graph (or the filesystem), which is far too
   // expensive to repeat per face per launch; the answer cannot change within a

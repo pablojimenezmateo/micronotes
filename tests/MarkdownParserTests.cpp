@@ -6,6 +6,10 @@
 
 #include <md4c-html.h>
 
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
 #include <string>
 
 using microcore::markdown::BlockType;
@@ -246,4 +250,42 @@ MICRONOTES_TEST(markdown_parser_autolinks_a_url_full_of_query_punctuation) {
     sawWholeUrl = sawWholeUrl || (item.type == InlineType::Link && item.target == url);
   }
   MICRONOTES_REQUIRE(sawWholeUrl);
+}
+
+MICRONOTES_TEST(markdown_parser_covers_syntax_reference_blocks) {
+  const std::filesystem::path syntaxFixture = std::filesystem::path(__FILE__).parent_path().parent_path() / "docs/markdown-elements.md";
+  std::ifstream in {syntaxFixture};
+  MICRONOTES_REQUIRE(static_cast<bool>(in));
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  const auto doc = microcore::markdown::MarkdownParser().parse(buffer.str());
+  int headings = 0;
+  int orderedItems = 0;
+  int unorderedItems = 0;
+  int quotes = 0;
+  int codeBlocks = 0;
+  int links = 0;
+  for(const auto& block : doc.blocks) {
+    if(block.type == microcore::markdown::BlockType::Heading) ++headings;
+    if(block.type == microcore::markdown::BlockType::OrderedItem) ++orderedItems;
+    if(block.type == microcore::markdown::BlockType::UnorderedItem) ++unorderedItems;
+    if(block.type == microcore::markdown::BlockType::Quote) ++quotes;
+    if(block.type == microcore::markdown::BlockType::Code) ++codeBlocks;
+    for(const auto& inlineItem : block.inlines) {
+      if(inlineItem.type == microcore::markdown::InlineType::Link) ++links;
+    }
+    for(const auto& row : block.tableRows) {
+      for(const auto& cell : row.cells) {
+        for(const auto& inlineItem : cell.inlines) {
+          if(inlineItem.type == microcore::markdown::InlineType::Link) ++links;
+        }
+      }
+    }
+  }
+  MICRONOTES_REQUIRE(headings >= 8);
+  MICRONOTES_REQUIRE(orderedItems >= 3);
+  MICRONOTES_REQUIRE(unorderedItems >= 3);
+  MICRONOTES_REQUIRE(quotes >= 2);
+  MICRONOTES_REQUIRE(codeBlocks >= 2);
+  MICRONOTES_REQUIRE(links >= 8);
 }

@@ -164,11 +164,6 @@ void TraceChannel::setAggregateEnabled(bool on) {
   if(on) acquireSlot();
 }
 
-void TraceChannel::setStreamEnabled(bool on) {
-  stream_.store(on, std::memory_order_relaxed);
-  if(on) acquireSlot();
-}
-
 void TraceChannel::reset() {
   if(!impl_) return;
   {

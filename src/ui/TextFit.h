@@ -16,8 +16,7 @@
 //
 // What stayed is what genuinely belongs to a renderer: every function here
 // takes a `measure`, because how much text fits is a question about a font and
-// cannot be answered by counting bytes. The byte-counting form, for a status
-// line or an id, is `util::ellipsize`.
+// cannot be answered by counting bytes.
 namespace micronotes::ui {
 
 // The width of a run of text, in the font it is being laid out in.

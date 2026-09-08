@@ -88,7 +88,6 @@ public:
   // anything, and a test needs a channel it controls; neither should have to
   // mutate the process environment to get one.
   void setAggregateEnabled(bool on);
-  void setStreamEnabled(bool on);
 
   // Rebase the elapsed-time origin and clear this thread's nesting. No-op when
   // the channel is off.

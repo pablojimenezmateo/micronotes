@@ -37,10 +37,4 @@ std::vector<std::string> splitLines(std::string_view text) {
   return lines;
 }
 
-std::string ellipsize(std::string text, std::size_t limit) {
-  if(text.size() <= limit) return text;
-  if(limit <= 3) return text.substr(0, limit);
-  return text.substr(0, limit - 3) + "...";
-}
-
 }

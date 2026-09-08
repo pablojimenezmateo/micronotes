@@ -413,10 +413,6 @@ const std::string& DocumentLayout::source() const {
   return source_;
 }
 
-std::size_t DocumentLayout::cachedBlockCount() const {
-  return cache_.size();
-}
-
 std::size_t DocumentLayout::lastRelaidBlocks() const {
   return lastRelaid_;
 }

@@ -157,12 +157,9 @@ set(MICROCORE_SOURCES
   src/core/platform/DirectoryWatcher.cpp
   src/core/platform/DurableFile.cpp
   src/core/platform/PathUtils.cpp
-  src/core/ui/ShellModel.cpp
   src/core/util/Fuzzy.cpp
   src/core/util/StringUtil.cpp
   src/core/util/Utf8.cpp
-  src/core/viewer/MarkdownViewer.cpp
-  src/core/viewer/SdlMarkdownRenderer.cpp
 )
 
 # micronotes-only code: the live-Markdown document model, the note library,
@@ -312,7 +309,7 @@ add_executable(micronotes_tests
   tests/ColorMathTests.cpp
   tests/DirectoryWatcherTests.cpp
   tests/DurableFileTests.cpp
-  tests/EditorViewerTests.cpp
+  tests/EditorTests.cpp
   tests/EditsTests.cpp
   tests/FoldTests.cpp
   tests/FramePolicyTests.cpp

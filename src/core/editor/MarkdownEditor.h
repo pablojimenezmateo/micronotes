@@ -56,7 +56,6 @@ public:
   void selectAll();
   void clearSelection();
   bool hasSelection() const;
-  std::size_t selectionAnchor() const;
   std::size_t selectionStart() const;
   std::size_t selectionEnd() const;
   std::string selectedText() const;

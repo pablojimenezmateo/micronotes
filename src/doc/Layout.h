@@ -374,7 +374,6 @@ public:
   std::size_t rowsPerHeight(float height) const;
 
   // Diagnostics for the perf harness.
-  std::size_t cachedBlockCount() const;
   std::size_t lastRelaidBlocks() const;
 
 private:

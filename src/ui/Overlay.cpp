@@ -101,10 +101,6 @@ void OverlayStack::close() {
   if(!stack_.empty()) stack_.pop_back();
 }
 
-void OverlayStack::closeAll() {
-  stack_.clear();
-}
-
 const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) const {
   const std::string& query = overlay.value.text();
   if(overlay.filterCacheValid && overlay.filterCacheQuery == query) {

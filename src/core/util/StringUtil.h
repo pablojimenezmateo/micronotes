@@ -59,11 +59,6 @@ void toLowerAsciiInPlace(std::string& value);
 // which is what a text editor means by "the last line".
 [[nodiscard]] std::vector<std::string> splitLines(std::string_view text);
 
-// Truncated to `limit` bytes with an ellipsis, when it does not fit. By *count*
-// rather than by measured width: for a log line, a status message or an id,
-// where there is no font in scope. The width-aware form is `ui::ellipsizeToFit`.
-[[nodiscard]] std::string ellipsize(std::string text, std::size_t limit);
-
 // Equal but for ASCII case. One pass, and no allocation: the two sites that
 // wanted this each lowered a copy of both sides first.
 [[nodiscard]] bool equalsIgnoringAsciiCase(std::string_view a, std::string_view b);

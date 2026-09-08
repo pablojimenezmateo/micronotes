@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/ui/ShellModel.h"
+#include "core/ui/PaneMode.h"
 #include "ui/Rect.h"
 
 #include <cstddef>

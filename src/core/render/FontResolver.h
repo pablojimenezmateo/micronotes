@@ -31,8 +31,4 @@ struct FontRequest {
 // within a run.
 std::string resolveFontFile(const FontRequest& request);
 
-// True when fontconfig was compiled in. Reported by the startup banner so a
-// packaging mistake is visible rather than silently degrading font choice.
-bool hasFontconfig();
-
 }

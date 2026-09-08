@@ -117,8 +117,4 @@ Statement SqliteDb::prepare(std::string_view sql) {
   return Statement(stmt, &entry->second);
 }
 
-std::string SqliteDb::lastError() const {
-  return db_ ? sqlite3_errmsg(db_) : "database is not open";
-}
-
 }
