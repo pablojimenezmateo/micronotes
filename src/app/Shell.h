@@ -8,6 +8,9 @@
 #include "core/editor/TextField.h"
 #include "core/markdown/MarkdownParser.h"
 #include "core/platform/DirectoryWatcher.h"
+#include "app/NoteCaches.h"
+#include "app/PanelState.h"
+#include "app/Wheel.h"
 #include "doc/BlockScan.h"
 #include "library/Library.h"
 #include "ui/AppState.h"
@@ -20,7 +23,9 @@
 #include "ui/CaretBlink.h"
 #include "ui/Menus.h"
 #include "ui/Overlay.h"
+#include "ui/Memo.h"
 #include "ui/Rect.h"
+#include "ui/Settings.h"
 #include "ui/ShellLayout.h"
 #include "ui/TextUtil.h"
 #include "ui/Tooltip.h"
@@ -117,6 +122,26 @@ inline bool inputDebugEnabled() {
   }();
   return enabled;
 }
+
+// What the raw pane's soft wrap was computed from: the buffer, the column, and
+// the face it was measured in. The pane shows the file as bytes, so its line
+// breaks are the file's rather than the layout's -- which is why it is the one
+// surface with a wrap of its own to memoise.
+// The question the sidebar's result list answers, and the library it answered
+// it against.
+struct SearchKey {
+  std::string query;
+  library::SearchScope scope = library::SearchScope::All;
+  std::uint64_t libraryRevision = 0;
+  bool operator==(const SearchKey&) const = default;
+};
+
+struct RawRowsKey {
+  std::uint64_t revision = 0;
+  int wrapWidth = -1;
+  ui::TextSize textSize = ui::TextSize::Medium;
+  bool operator==(const RawRowsKey&) const = default;
+};
 
 struct LinkRegion {
   Rect rect;
@@ -249,43 +274,6 @@ struct SystemCursors {
   }
 };
 
-constexpr int kEditorPageLines = 20;
-
-// How far one notch of the wheel moves each surface. In lines for the raw
-// editor, which scrolls by row; in pixels for everything else, which scrolls by
-// distance. Together here rather than beside their own call sites, because the
-// only way to tell whether two surfaces scroll at the same rate is to read the
-// numbers next to each other.
-constexpr float kEditorScrollLinesPerNotch = 3.0f;
-constexpr float kViewerScrollPixelsPerNotch = 42.0f;
-constexpr float kLiveScrollPixelsPerNotch = 42.0f;
-constexpr float kSidebarScrollPixelsPerNotch = 42.0f;
-constexpr float kRightPanelScrollPixelsPerNotch = 42.0f;
-
-// A wheel gesture accumulated to whole units.
-//
-// SDL reports `wheel.y` in notches for a discrete wheel and in fractions of a
-// notch for a precise one: a trackpad delivers a stream of deltas well below
-// 1.0. Truncating each event to an int discards them, so a slow gesture scrolls
-// nothing at all and a fast one moves in visible jumps. Carrying the remainder
-// across events makes the movement track the finger.
-//
-// Every scrolling surface owns one. It used to be two floats on the runtime
-// with the arithmetic written out at each site, which is why the sidebar and the
-// live page -- the two surfaces added after it -- did not get it.
-struct WheelAccumulator {
-  float remainder = 0.0f;
-
-  // Whole units to scroll by, positive downwards. `notches` is SDL's sign
-  // convention, where a positive value means the content moves down.
-  int take(float notches, float unitsPerNotch) {
-    remainder += -notches * unitsPerNotch;
-    const float whole = std::trunc(remainder);
-    remainder -= whole;
-    return static_cast<int>(whole);
-  }
-};
-
 // What the drawn window controls ask the run loop to do.
 enum class WindowAction {
   None,
@@ -309,26 +297,12 @@ struct UiRuntime {
   // panes lay the note out at different widths -- in split view, at the same
   // time -- and one block cache serving both would be swept on every frame.
   PageView readingPage;
-  // md4c documents for the blocks the live surface hands off, keyed by source.
-  // Keyed by the block's own source text, and looked up through a view --
-  // `std::less<>` rather than the default, so finding a parse does not first
-  // allocate a copy of the bytes to look it up by.
-  std::map<std::string, markdown::Document, std::less<>> complexCache;
-  // How many distinct `Complex` blocks the last sweep found in the note. The
-  // cache is allowed to run this far past it before the next sweep, which is
-  // what makes "is a sweep due" one comparison rather than a walk of the note.
-  std::size_t complexCacheLive = 0;
-  // Image targets resolved to files on disk, or to nothing when the target
-  // names no drawable file. Memoised because resolving one canonicalises both
-  // the library root and the candidate -- a `stat` per path component of each,
-  // twice -- and the layout asks per picture per relaid block: a note of 200
-  // pictures spent about 3,200 syscalls being laid out, which was 47 ms of its
-  // first frame. Dropped when the library root moves under it.
-  std::map<std::string, std::filesystem::path, std::less<>> imagePaths;
-  std::filesystem::path imagePathRoot;
-  std::string cachedEditorRowsSource;
-  int cachedEditorRowsWidth = -1;
-  std::vector<editor::SoftWrapRow> cachedEditorRows;
+  // What the shell remembers about the note on the page. Each one carries its
+  // own forgetting rule; see `app/NoteCaches.h`.
+  ComplexParseCache complexParses;
+  ImagePathCache imagePaths;
+  // The raw pane's soft-wrapped rows. See `editorRows`.
+  ui::Memo<std::vector<editor::SoftWrapRow>, RawRowsKey> rawRows;
   FocusArea focus = FocusArea::Editor;
   std::string loadedNoteId;
   editor::TextField search;
@@ -350,20 +324,11 @@ struct UiRuntime {
   WheelAccumulator viewerWheel;
   WheelAccumulator liveWheel;
   WheelAccumulator sidebarWheel;
-  WheelAccumulator rightPanelWheel;
   Uint64 lastRefresh = 0;
   float mouseX = -1;
   float mouseY = -1;
   ui::OverlayStack overlays;
-  // Every note in the library, for resolving wikilinks. Invalidated rather than
-  // rebuilt on every layout: a note with fifty links would otherwise list the
-  // whole library fifty times per keystroke.
-  std::vector<library::NoteListItem> wikiNotes;
-  bool wikiNotesValid = false;
-  // Moves with every invalidation of the list above, so the layout can be told
-  // that what a `[[target]]` resolves to may have changed. See
-  // `invalidateWikiNotes`, which is the only thing that should touch either.
-  std::uint64_t wikiNotesRevision = 1;
+  WikiTargets wikiTargets;
   // The first "[" of the "[[" that opened the wikilink picker.
   std::size_t wikiStart = 0;
   // A heading to scroll to once the note now being opened has been laid out.
@@ -375,72 +340,13 @@ struct UiRuntime {
   // page's anchor table is built from its own laid-out document. Asking
   // immediately searched the wrong note. See `queueAnchorJump`.
   std::string pendingAnchor;
-  // Where the backlinks panel drew each row last frame, so a click can find the
-  // note it named without laying the list out a second time.
-  struct BacklinkRow {
-    Rect rect;
-    std::string noteId;
-  };
-  std::vector<BacklinkRow> backlinkRows;
-  // The same, for the right panel's tag rows. A tag there filters the library
-  // exactly as a tag in the sidebar does, so a click has to be able to find
-  // which one it landed on.
-  struct TagRow {
-    Rect rect;
-    std::string tag;
-  };
-  std::vector<TagRow> tagRows;
-  // The open note's front matter, drawn above its first block.
-  //
-  // Producing it means reading the file, so it is cached against the note and
-  // the library's revision rather than rebuilt per frame -- the header is drawn
-  // every frame and a note is read from disk when it is opened, renamed,
-  // retagged or re-iconed, all of which move the revision.
-  std::vector<ui::NoteProperty> headerProperties;
-  std::string headerNoteId;
-  std::uint64_t headerRevision = 0;
-  bool headerValid = false;
+  // The open note's front matter, drawn above its first block. Producing it
+  // means reading the file, so it is memoised on the note and the library's
+  // revision rather than rebuilt per frame.
+  PageHeaderMemo pageHeader;
 
-  // What the right panel is showing, cached against the inputs that decide it.
-  //
-  // All three of its views were rebuilt on every frame, and each was expensive
-  // in a different way. Measured over a real session on a 400-note library with
-  // a 200 KB note open, per frame: the outline scanned the whole note for its
-  // headings, 0.30 ms; the backlinks ran a SQLite query, 0.25 ms; and the tags
-  // *read the note back off disk*, 0.53 ms. The same frame drew the note itself
-  // in 0.16 ms -- so an idle frame spent two to three times as long on the panel
-  // beside the note as on the note.
-  //
-  // Two keys, because the three views do not depend on the same things. The
-  // outline is a function of the buffer, so it turns on the editor's revision
-  // and has to move while the user types. Backlinks and tags come from the
-  // library -- the index and the note's front matter -- so they turn on the note
-  // id and the library's revision, and typing must *not* move them.
-  //
-  // Keyed rather than invalidated by a flag, for the reason the page header
-  // above gives: a flag has to be raised at every mutation site and the one that
-  // forgets leaves the panel describing a note that has moved on.
-  struct RightPanelMemo {
-    std::vector<ui::OutlineEntry> outline;
-    std::uint64_t outlineRevision = 0;
-    bool outlineValid = false;
-
-    std::vector<library::Backlink> backlinks;
-    std::vector<std::string> tags;
-    std::string noteId;
-    std::uint64_t libraryRevision = 0;
-    bool libraryValid = false;
-
-    // Which view of which note the panel's scroll offset belongs to. Switching
-    // either starts the list at the top; see `resetScrollOnChange`. Two fields
-    // rather than one joined key, because this is compared on every frame and a
-    // joined key would build a string on every one of them to find out that
-    // nothing had moved.
-    ui::RightPanelView scrollView = ui::RightPanelView::Outline;
-    std::string scrollNoteId;
-    bool scrollKeyValid = false;
-  };
-  RightPanelMemo rightPanel;
+  // The right-hand panel, and its own memos. See `app/PanelState.h`.
+  RightPanelState rightPanel;
 
   // What the pointer is resting on. Cleared at the start of a frame and set by
   // whichever surface the pointer is over, so exactly one is ever showing.
@@ -506,25 +412,12 @@ struct UiRuntime {
   // hover causes -- and each query is a hit on SQLite. Keyed on the library
   // revision as well as the query, so an edit that changes what matches is not
   // served a stale answer.
-  std::string searchCacheQuery;
-  library::SearchScope searchCacheScope = library::SearchScope::All;
-  std::uint64_t searchCacheRevision = 0;
-  bool searchCacheValid = false;
-  std::vector<library::SearchResult> searchCache;
+  ui::Memo<std::vector<library::SearchResult>, SearchKey> searchResults;
   // Last frame's sidebar rect, so keyboard navigation can scroll a row into
   // view without recomputing the whole window layout.
   Rect sidebarRect;
   int sidebarScroll = 0;
   int sidebarMaxScroll = 0;
-  // The right-hand panel scrolls like every other list in the shell. It used to
-  // be the one that did not: a note with more headings than the panel was tall
-  // simply stopped listing them, with no scrollbar to say so and a wheel over it
-  // scrolling the note behind instead.
-  int rightPanelScroll = 0;
-  int rightPanelMaxScroll = 0;
-  // Last frame's right-panel rect, so a wheel can be clamped to the same
-  // maximum the draw computed without laying the panel out a second time.
-  Rect rightPanelRect;
   bool creatingFolder = false;
   bool draggingNote = false;
   std::string draggingNoteId;

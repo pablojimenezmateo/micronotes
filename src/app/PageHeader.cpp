@@ -50,43 +50,40 @@ ui::TextStyle valueStyle() {
 // naming a note by the title it used to have. A key cannot be forgotten, only
 // unequal. Rename, tags and icon all go through refreshLibrary(), which is
 // where the revision moves.
-const UiRuntime& refreshedHeader(UiRuntime& ui) {
-  const std::string& noteId = ui.state.selection().noteId;
-  const std::uint64_t revision = ui.state.revision();
-  if(ui.headerValid && ui.headerNoteId == noteId && ui.headerRevision == revision) return ui;
+const std::vector<ui::NoteProperty>& refreshedHeader(UiRuntime& ui) {
+  const NoteRevision key {ui.state.selection().noteId, ui.state.revision()};
+  if(const auto* rows = ui.pageHeader.get(key)) return *rows;
 
-  ui.headerValid = true;
-  ui.headerNoteId = noteId;
-  ui.headerRevision = revision;
-  ui.headerProperties.clear();
-  if(noteId.empty() || !ui.state.hasLibrary()) return ui;
+  auto& rows = ui.pageHeader.rebuild(key);
+  rows.clear();
+  if(key.noteId.empty() || !ui.state.hasLibrary()) return rows;
   // From the open-note record, which costs nothing. This used to be
   // `selectedNote()`: a read and a front-matter parse of the whole note, keyed
   // on the library revision -- which moves on every save. Drawing the header
   // re-read the note once a second while somebody was typing into it.
   const auto& note = ui.state.openNote();
-  if(note.noteId.empty()) return ui;
-  ui.headerProperties = ui::notePropertiesOf(note.metadata);
-  return ui;
+  if(note.noteId.empty()) return rows;
+  rows = ui::notePropertiesOf(note.metadata);
+  return rows;
 }
 
-float propertiesHeight(const UiRuntime& ui) {
-  if(ui.headerProperties.empty()) return 0.0f;
-  return static_cast<float>(ui.headerProperties.size()) * kPropertyRowHeight + ui::kSpace2;
+float propertiesHeight(const std::vector<ui::NoteProperty>& rows) {
+  if(rows.empty()) return 0.0f;
+  return static_cast<float>(rows.size()) * kPropertyRowHeight + ui::kSpace2;
 }
 
 }
 
 float pageHeaderHeight(ui::TextRenderer& text, UiRuntime& ui) {
   (void)text;
-  refreshedHeader(ui);
-  if(ui.headerProperties.empty()) return 0.0f;
-  return kSpaceAboveProperties + propertiesHeight(ui) + kSpaceBelowHeader;
+  const auto& rows = refreshedHeader(ui);
+  if(rows.empty()) return 0.0f;
+  return kSpaceAboveProperties + propertiesHeight(rows) + kSpaceBelowHeader;
 }
 
 void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect column, float top) {
-  refreshedHeader(ui);
-  if(ui.headerProperties.empty()) return;
+  const auto& rows = refreshedHeader(ui);
+  if(rows.empty()) return;
 
   float y = top + kSpaceAboveProperties;
 
@@ -95,7 +92,7 @@ void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   const float keyColumn = std::min(kKeyColumnMax, column.w * kKeyColumnFraction);
   const float valueLeft = column.x + keyColumn;
   const float valueRoom = std::max(40.0f, column.w - keyColumn);
-  for(const auto& row : ui.headerProperties) {
+  for(const auto& row : rows) {
     const float keyBaseline = y + (kPropertyRowHeight - static_cast<float>(text.lineHeight(key))) / 2.0f;
     text.draw(ui::ellipsizeToWidth(text, row.key, static_cast<int>(keyColumn - ui::kSpace3), key),
               column.x, keyBaseline, theme().textMuted, key);

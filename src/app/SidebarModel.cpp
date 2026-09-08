@@ -58,17 +58,10 @@ float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metric
 // is a hit on SQLite.
 const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
   const auto& selection = ui.state.selection();
-  if(!ui.searchCacheValid || ui.searchCacheQuery != selection.search ||
-     ui.searchCacheScope != selection.searchScope || ui.searchCacheRevision != ui.state.revision()) {
-    ui.searchCacheQuery = selection.search;
-    ui.searchCacheScope = selection.searchScope;
-    ui.searchCacheRevision = ui.state.revision();
-    ui.searchCache = ui.state.currentSearchResults();
-    ui.searchCacheValid = true;
-  }
-  return ui.searchCache;
+  const SearchKey key {selection.search, selection.searchScope, ui.state.revision()};
+  if(const auto* results = ui.searchResults.get(key)) return *results;
+  return ui.searchResults.store(key, ui.state.currentSearchResults());
 }
-
 
 namespace {
 

@@ -49,7 +49,7 @@ void wireReadingPage(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache&
 void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images, UiRuntime& ui,
                  Rect rect) {
   if(!ui.readingPage.wired()) wireReadingPage(renderer, text, images, ui);
-  ui.readingPage.setWikiLinkRevision(ui.wikiNotesRevision);
+  ui.readingPage.setWikiLinkRevision(ui.wikiTargets.revision());
   // A texture that has finished loading changes the height of the block showing
   // it, so the cache's generation is an input to the layout like the buffer is.
   ui.readingPage.setImageRevision(pageImageRevision(images));

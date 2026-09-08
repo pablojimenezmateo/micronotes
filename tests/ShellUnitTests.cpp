@@ -266,7 +266,7 @@ MICRONOTES_TEST(shell_complex_parses_survive_a_note_bigger_than_any_cap) {
   MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 120);
   MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 0);
   MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 0);
-  MICRONOTES_REQUIRE(ui.complexCache.size() == 120);
+  MICRONOTES_REQUIRE(ui.complexParses.size() == 120);
 }
 
 // And the other half: a parse the note no longer contains does not stay
@@ -292,10 +292,10 @@ MICRONOTES_TEST(shell_complex_parses_go_when_the_note_does) {
     micronotes::app::sweepComplexCache(ui, blocks, source);
   };
   layOut(tableNote("first", 100));
-  MICRONOTES_REQUIRE(ui.complexCache.size() == 100);
+  MICRONOTES_REQUIRE(ui.complexParses.size() == 100);
   layOut(tableNote("second", 100));
   // The first note's hundred are gone rather than accumulated.
-  MICRONOTES_REQUIRE(ui.complexCache.size() == 100);
+  MICRONOTES_REQUIRE(ui.complexParses.size() == 100);
 }
 
 // An image cache miss must not be able to move `generation()`, because every
@@ -459,7 +459,7 @@ MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_splice
     ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), {0.0f, 0.0f, 800.0f, 600.0f});
   };
   const auto rebuildTheOutline = [&] {
-    ui.rightPanel.outlineValid = false;
+    ui.rightPanel.outline.invalidate();
     const auto scansBefore = counter(CounterId::RightPanelOutlineScans);
     const auto borrowsBefore = counter(CounterId::RightPanelOutlineBlocksBorrowed);
     const std::size_t headings = micronotes::app::outlineFor(ui).size();

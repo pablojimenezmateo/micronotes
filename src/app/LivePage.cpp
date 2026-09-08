@@ -64,7 +64,7 @@ void wireLivePage(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& im
 void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images, UiRuntime& ui,
               Rect rect) {
   if(!ui.livePage.wired()) wireLivePage(renderer, text, images, ui);
-  ui.livePage.setWikiLinkRevision(ui.wikiNotesRevision);
+  ui.livePage.setWikiLinkRevision(ui.wikiTargets.revision());
   ui.livePage.setImageRevision(pageImageRevision(images));
   // Whether this note has anything collapsed is per-frame state, not a
   // closure: the layout skips resolving folds entirely when it is told there is

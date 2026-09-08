@@ -27,15 +27,8 @@ const std::filesystem::path& resolvedImagePath(UiRuntime& ui, std::string_view t
   static const std::filesystem::path kNone;
   if(!ui.state.hasLibrary()) return kNone;
   const auto& root = ui.state.libraryRoot();
-  if(ui.imagePathRoot != root) {
-    ui.imagePaths.clear();
-    ui.imagePathRoot = root;
-  }
-  if(const auto found = ui.imagePaths.find(target); found != ui.imagePaths.end()) {
-    perf::addCounter(perf::CounterId::ImagePathsReused);
-    return found->second;
-  }
-  perf::addCounter(perf::CounterId::ImagePathsResolved);
+  ui.imagePaths.retarget(root);
+  if(const auto* found = ui.imagePaths.find(target)) return *found;
   std::filesystem::path path;
   if(!ui::isRemoteTarget(target)) {
     try {
@@ -46,7 +39,7 @@ const std::filesystem::path& resolvedImagePath(UiRuntime& ui, std::string_view t
       path.clear();
     }
   }
-  return ui.imagePaths.emplace(std::string(target), std::move(path)).first->second;
+  return ui.imagePaths.keep(target, std::move(path));
 }
 
 // The texture behind an image link, or nothing when there is not one.

@@ -58,9 +58,9 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
     return;
   }
   if(contains(layout.rightPanel, ui.mouseX, ui.mouseY)) {
-    ui.rightPanelScroll = std::clamp(
-      ui.rightPanelScroll + ui.rightPanelWheel.take(notches, kRightPanelScrollPixelsPerNotch),
-      0, ui.rightPanelMaxScroll);
+    ui.rightPanel.scroll = std::clamp(
+      ui.rightPanel.scroll + ui.rightPanel.wheel.take(notches, kRightPanelScrollPixelsPerNotch),
+      0, ui.rightPanel.maxScroll);
     return;
   }
 

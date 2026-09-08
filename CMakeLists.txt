@@ -240,6 +240,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
   src/app/MenuBar.cpp
+  src/app/NoteCaches.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
   src/app/OverlayRouter.cpp

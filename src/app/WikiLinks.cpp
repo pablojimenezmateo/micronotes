@@ -18,11 +18,7 @@ namespace micronotes::app {
 // listing every note in the library that many times per keystroke is the kind
 // of cost that only shows up on somebody else's machine.
 const std::vector<library::NoteListItem>& wikiCandidates(UiRuntime& ui) {
-  if(!ui.wikiNotesValid) {
-    ui.wikiNotes = ui.state.allNotes();
-    ui.wikiNotesValid = true;
-  }
-  return ui.wikiNotes;
+  return ui.wikiTargets.all(ui.state);
 }
 
 bool wikiLinkResolves(UiRuntime& ui, std::string_view target) {
@@ -30,8 +26,7 @@ bool wikiLinkResolves(UiRuntime& ui, std::string_view target) {
 }
 
 void invalidateWikiNotes(UiRuntime& ui) {
-  ui.wikiNotesValid = false;
-  ++ui.wikiNotesRevision;
+  ui.wikiTargets.invalidate();
 }
 
 // Follows a `[[target]]`. A target that names nothing is not a mistake -- the

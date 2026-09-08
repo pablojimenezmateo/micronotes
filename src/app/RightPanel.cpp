@@ -93,25 +93,9 @@ Rect outlineRowRect(Rect rect, std::size_t index, float pitch, int scroll) {
 // cannot disagree about where the bottom is.
 void setMaxScroll(UiRuntime& ui, Rect rect, float contentHeight) {
   const Rect list = listRect(rect);
-  ui.rightPanelRect = rect;
-  ui.rightPanelMaxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight + ui::kSpace2 - list.h)));
-  ui.rightPanelScroll = std::clamp(ui.rightPanelScroll, 0, ui.rightPanelMaxScroll);
-}
-
-// Switching view or note starts the list at the top. Keyed rather than reset by
-// a flag at every site that could change either, for the reason the memo above
-// gives: the site that forgets leaves the panel scrolled to an offset that
-// belongs to something else.
-void resetScrollOnChange(UiRuntime& ui) {
-  auto& memo = ui.rightPanel;
-  const ui::RightPanelView view = ui.state.workspace().rightPanelView;
-  const std::string& noteId = ui.state.selection().noteId;
-  if(memo.scrollKeyValid && memo.scrollView == view && memo.scrollNoteId == noteId) return;
-  memo.scrollKeyValid = true;
-  memo.scrollView = view;
-  memo.scrollNoteId = noteId;
-  ui.rightPanelScroll = 0;
-  ui.rightPanelWheel.remainder = 0.0f;
+  ui.rightPanel.rect = rect;
+  ui.rightPanel.maxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight + ui::kSpace2 - list.h)));
+  ui.rightPanel.scroll = std::clamp(ui.rightPanel.scroll, 0, ui.rightPanel.maxScroll);
 }
 
 }
@@ -139,20 +123,18 @@ void resetScrollOnChange(UiRuntime& ui) {
 // nothing about the paint depends on the order -- the shell's surfaces are
 // disjoint rects and the tooltip and overlays are resolved after all of them.
 const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui) {
-  auto& memo = ui.rightPanel;
   const std::uint64_t revision = ui.editor.revision();
-  if(memo.outlineValid && memo.outlineRevision == revision) {
+  if(const auto* entries = ui.rightPanel.outline.get(revision)) {
     perf::addCounter(perf::CounterId::RightPanelOutlineReused);
-    return memo.outline;
+    return *entries;
   }
   perf::addCounter(perf::CounterId::RightPanelOutlineBuilds);
-  memo.outlineValid = true;
-  memo.outlineRevision = revision;
+  auto& entries = ui.rightPanel.outline.rebuild(revision);
   const doc::BlockSpan blocks = editorBlocks(ui);
   perf::addCounter(blocks.empty() ? perf::CounterId::RightPanelOutlineScans
                                   : perf::CounterId::RightPanelOutlineBlocksBorrowed);
-  ui::outlineInto(ui.editor.text(), blocks, &memo.outline);
-  return memo.outline;
+  ui::outlineInto(ui.editor.text(), blocks, &entries);
+  return entries;
 }
 
 namespace {
@@ -160,26 +142,23 @@ namespace {
 // The two views that come from the library rather than from the buffer. Both are
 // filled together because both turn on the same key, and asking for either is
 // what says the note or the library has moved.
-void refreshLibraryViews(UiRuntime& ui) {
-  auto& memo = ui.rightPanel;
-  const std::string& noteId = ui.state.selection().noteId;
-  const std::uint64_t revision = ui.state.revision();
-  if(memo.libraryValid && memo.noteId == noteId && memo.libraryRevision == revision) {
+const RightPanelState::LibraryViews& libraryViews(UiRuntime& ui) {
+  const NoteRevision key {ui.state.selection().noteId, ui.state.revision()};
+  if(const auto* views = ui.rightPanel.library.get(key)) {
     perf::addCounter(perf::CounterId::RightPanelLibraryReused);
-    return;
+    return *views;
   }
   perf::addCounter(perf::CounterId::RightPanelLibraryBuilds);
-  memo.libraryValid = true;
-  memo.noteId = noteId;
-  memo.libraryRevision = revision;
-  memo.backlinks.clear();
-  memo.tags.clear();
-  if(noteId.empty() || !ui.state.hasLibrary()) return;
-  memo.backlinks = ui.state.backlinksToSelected();
+  auto& views = ui.rightPanel.library.rebuild(key);
+  views.backlinks.clear();
+  views.tags.clear();
+  if(key.noteId.empty() || !ui.state.hasLibrary()) return views;
+  views.backlinks = ui.state.backlinksToSelected();
   // From the open-note record rather than the file. This used to read and parse
   // the whole note -- for a row of chips -- on every library revision, and the
   // revision moves on every save.
-  memo.tags = ui.state.openNote().metadata.tags;
+  views.tags = ui.state.openNote().metadata.tags;
+  return views;
 }
 
 }
@@ -218,7 +197,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + kHeaderHeight - 1.0f, theme().border);
 
   const Rect list = listRect(rect);
-  resetScrollOnChange(ui);
+  ui.rightPanel.rebaseScroll(ui.state.workspace().rightPanelView, ui.state.selection().noteId);
   // An empty view has nothing to scroll, and the message says so where the rows
   // would have been.
   const auto empty = [&](std::string_view title, std::string_view detail, std::string_view keys = {}) {
@@ -229,7 +208,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     // the same order every list here uses.
     ui::ClipGuard clip(renderer, list);
     const float used = ui::drawEmptyMessage(text, title, detail, list.x,
-                                            list.y - static_cast<float>(ui.rightPanelScroll), list.w, keys);
+                                            list.y - static_cast<float>(ui.rightPanel.scroll), list.w, keys);
     setMaxScroll(ui, rect, used);
   };
 
@@ -241,7 +220,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   // Every view scrolls inside the list, so every view is clipped to it: a row
   // half off the bottom is cut at the edge rather than drawn over the tabs.
   ui::ClipGuard listClip(renderer, list);
-  const int scroll = ui.rightPanelScroll;
+  const int scroll = ui.rightPanel.scroll;
 
   if(workspace.rightPanelView == ui::RightPanelView::Outline) {
     const auto& entries = outlineFor(ui);
@@ -273,13 +252,13 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(row.x + row.w - x - ui::kSpace2), rowStyle),
                 x, ui::textTop(row, text, rowStyle), colour, rowStyle);
     }
-    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
+    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.maxScroll);
     return;
   }
 
-  refreshLibraryViews(ui);
+  const auto& views = libraryViews(ui);
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
-    const auto& backlinks = ui.rightPanel.backlinks;
+    const auto& backlinks = views.backlinks;
     if(backlinks.empty()) {
       empty("Nothing links here",
             "Write [[the title of this note]] in another note and it will show up.");
@@ -292,7 +271,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
                                  static_cast<float>(text.lineHeight(rowStyle) + text.lineHeight(lineStyle)) + ui::kSpace2);
     setMaxScroll(ui, rect, static_cast<float>(backlinks.size()) * pitch);
     float y = list.y + ui::kSpace1 - static_cast<float>(scroll);
-    ui.backlinkRows.clear();
+    ui.rightPanel.backlinkRows.clear();
     for(const auto& link : backlinks) {
       if(y + pitch >= list.y && y <= list.y + list.h) {
         const Rect row = rowRect(list, y, pitch);
@@ -313,15 +292,15 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
         text.draw(ui::ellipsizeToWidth(text, ui::plainWikiText(link.line), room, lineStyle),
                   row.x + kPadX, titleY + static_cast<float>(text.lineHeight(rowStyle)),
                   theme().textMuted, lineStyle);
-        ui.backlinkRows.push_back({row, link.id});
+        ui.rightPanel.backlinkRows.push_back({row, link.id});
       }
       y += pitch;
     }
-    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
+    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.maxScroll);
     return;
   }
 
-  const auto& tags = ui.rightPanel.tags;
+  const auto& tags = views.tags;
   if(tags.empty()) {
     empty("No tags", "This note carries none yet.", ui::keysFor(ui::ActionId::EditTags) + "  edit tags");
     return;
@@ -338,7 +317,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   setMaxScroll(ui, rect, static_cast<float>(tags.size()) * pitch);
   const std::string& activeTag = ui.state.selection().tag;
   float y = list.y + ui::kSpace1 - static_cast<float>(scroll);
-  ui.tagRows.clear();
+  ui.rightPanel.tagRows.clear();
   for(const auto& tag : tags) {
     if(y + pitch >= list.y && y <= list.y + list.h) {
       const Rect row = rowRect(list, y, pitch);
@@ -355,11 +334,11 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       text.draw(ui::ellipsizeToWidth(text, tag, static_cast<int>(row.x + row.w - labelX - kPadX), rowStyle),
                 labelX, ui::textTop(row, text, rowStyle),
                 selected ? theme().textPrimary : theme().textSecondary, rowStyle);
-      ui.tagRows.push_back({row, tag});
+      ui.rightPanel.tagRows.push_back({row, tag});
     }
     y += pitch;
   }
-  ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanelMaxScroll);
+  ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.maxScroll);
 }
 
 // Non-const because the outline is cached lazily behind `outlineFor`, which is
@@ -373,20 +352,20 @@ bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect re
     if(ui::contains(tabRect(rect, i, tabCount), x, y)) return true;
   }
   const Rect list = listRect(rect);
-  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanelScroll, ui.rightPanelMaxScroll);
+  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanel.scroll, ui.rightPanel.maxScroll);
      bar && ui::contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
     return true;
   }
   // The row lists the draw recorded, which is exactly what the click walks --
   // a cursor derived from anything else would promise clicks that miss.
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
-    for(const auto& row : ui.backlinkRows) {
+    for(const auto& row : ui.rightPanel.backlinkRows) {
       if(ui::contains(row.rect, x, y)) return true;
     }
     return false;
   }
   if(workspace.rightPanelView == ui::RightPanelView::Tags) {
-    for(const auto& row : ui.tagRows) {
+    for(const auto& row : ui.rightPanel.tagRows) {
       if(ui::contains(row.rect, x, y)) return true;
     }
     return false;
@@ -395,11 +374,11 @@ bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect re
   const auto& entries = outlineFor(ui);
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const float pitch = rowPitch(text, rowStyle);
-  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanelScroll);
+  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.scroll);
   if(offset < 0.0f) return false;
   const auto index = static_cast<std::size_t>(offset / pitch);
   return index < entries.size() &&
-         ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanelScroll), x, y);
+         ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.scroll), x, y);
 }
 
 bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rect, float x, float y) {
@@ -414,22 +393,22 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   // A click on the scrollbar is a click on the scrollbar, wherever the rows
   // under it happen to fall.
   const Rect list = listRect(rect);
-  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanelScroll, ui.rightPanelMaxScroll);
+  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanel.scroll, ui.rightPanel.maxScroll);
      bar && ui::contains(ui::scrollbarHitRect(bar->track), x, y)) {
     return true;
   }
   if(workspace.rightPanelView == ui::RightPanelView::Backlinks) {
-    for(const auto& row : ui.backlinkRows) {
+    for(const auto& row : ui.rightPanel.backlinkRows) {
       if(!ui::contains(row.rect, x, y)) continue;
-      selectNoteById(ui, row.noteId);
+      selectNoteById(ui, row.id);
       return true;
     }
     return true;
   }
   if(workspace.rightPanelView == ui::RightPanelView::Tags) {
-    for(const auto& row : ui.tagRows) {
+    for(const auto& row : ui.rightPanel.tagRows) {
       if(!ui::contains(row.rect, x, y)) continue;
-      selectTag(ui, row.tag);
+      selectTag(ui, row.id);
       return true;
     }
     return true;
@@ -442,10 +421,10 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   // would have been there before the list was scrolled.
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const float pitch = rowPitch(text, rowStyle);
-  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanelScroll);
+  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.scroll);
   if(offset >= 0.0f) {
     const auto index = static_cast<std::size_t>(offset / pitch);
-    if(index < entries.size() && ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanelScroll), x, y)) {
+    if(index < entries.size() && ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.scroll), x, y)) {
       // Clicking a heading is a way of scrolling to it, so the caret goes to its
       // text rather than to the marker in front of it.
       ui.editor.moveCursor(entries[index].offset);
