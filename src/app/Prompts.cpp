@@ -18,6 +18,18 @@ namespace {
 using micronotes::ui::joinTags;
 using micronotes::ui::splitTags;
 
+// Whether there is a notebook to act on, which for the root there is not: it
+// is the library, and renaming or deleting it is not a notebook operation.
+//
+// One function because the answer and the sentence that reports it were written
+// out three times -- and the confirm and the delete behind it each checked
+// separately, so the two could have disagreed about what "no notebook" means.
+bool hasSelectedFolder(UiRuntime& ui, const char* verb) {
+  if(!ui.state.selection().folder.empty()) return true;
+  ui.status = std::string("Root notebook cannot be ") + verb;
+  return false;
+}
+
 }
 
 void beginTagEdit(UiRuntime& ui) {
@@ -63,10 +75,7 @@ void beginFolderCreate(UiRuntime& ui) {
 }
 
 void beginFolderRename(UiRuntime& ui) {
-  if(ui.state.selection().folder.empty()) {
-    ui.status = "Root notebook cannot be renamed";
-    return;
-  }
+  if(!hasSelectedFolder(ui, "renamed")) return;
   ui.sidebar.creatingFolder = false;
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::TextPrompt;
@@ -99,7 +108,7 @@ void deleteSelected(UiRuntime& ui) {
   if(ui.state.deleteSelectedNote()) {
     ui.editor.setText("");
     ui.loadedNoteId.clear();
-      selectNoteAt(ui, 0);
+    selectNoteAt(ui, 0);
     ui.status = "Deleted note";
   } else {
     ui.status = "Delete failed";
@@ -107,14 +116,11 @@ void deleteSelected(UiRuntime& ui) {
 }
 
 void deleteSelectedFolder(UiRuntime& ui) {
-  if(ui.state.selection().folder.empty()) {
-    ui.status = "Root notebook cannot be deleted";
-    return;
-  }
+  if(!hasSelectedFolder(ui, "deleted")) return;
   if(ui.state.deleteSelectedFolder()) {
     ui.editor.setText("");
     ui.loadedNoteId.clear();
-      ui.status = "Deleted notebook";
+    ui.status = "Deleted notebook";
   } else {
     ui.status = "Notebook delete failed";
   }
@@ -274,10 +280,7 @@ void openDeleteNoteConfirm(UiRuntime& ui) {
 }
 
 void openDeleteFolderConfirm(UiRuntime& ui) {
-  if(ui.state.selection().folder.empty()) {
-    ui.status = "Root notebook cannot be deleted";
-    return;
-  }
+  if(!hasSelectedFolder(ui, "deleted")) return;
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::Confirm;
   overlay.id = "delete-folder";

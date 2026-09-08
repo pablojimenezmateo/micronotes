@@ -93,7 +93,7 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
   }
 
   const bool ctrlHeld = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
-  if(handleTabStripClick(text, ui, layout.tabs, x, y, button, ctrlHeld)) return;
+  if(handleTabStripClick(ui, x, y, button, ctrlHeld)) return;
 
   // The right panel owns everything inside it, including its own background:
   // without that, a click between two outline rows would fall through to the
@@ -127,15 +127,10 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       return;
     }
     if(contains(layout.content, x, y)) {
-      Rect editorRect = layout.content;
-      bool editorAtPoint = ui.state.workspace().paneMode() == ui::PaneMode::Editor;
-      if(ui.state.workspace().paneMode() == ui::PaneMode::Split) {
-        editorRect.w = layout.content.w / 2.0f;
-        editorAtPoint = contains(editorRect, x, y);
-      }
-      if(editorAtPoint) {
+      const ContentPanes panes = contentPanes(ui, layout.content);
+      if(panes.hasEditor && contains(panes.editor, x, y)) {
         ui.focus = FocusArea::Editor;
-        placeEditorCursor(text, ui, editorRect, x, y);
+        placeEditorCursor(text, ui, panes.editor, x, y);
         ui.revealEditorCursor = true;
         ui.status = pastePrimarySelectionText(ui) ? "Pasted primary selection" : "No primary selection text";
         return;
@@ -288,12 +283,15 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       // The formatting toolbar floats over the page, so it has to win over the
       // text underneath it.
       if(const auto action = ui.livePage.toolbarAt(x, y); !action.empty()) {
-        if(action == "bold") wrapEditorSelection(ui, "**", "**", "Bold");
-        else if(action == "italic") wrapEditorSelection(ui, "*", "*", "Italic");
-        else if(action == "code") wrapEditorSelection(ui, "`", "`", "Code");
-        else if(action == "strike") wrapEditorSelection(ui, "~~", "~~", "Strikethrough");
-        else if(action == "link") linkEditorSelection(ui);
+        // The toolbar's ids are action names, so the four it shares with the
+        // palette and the key chain go through the one chain rather than
+        // spelling the markers a second time -- "**" written out twice is two
+        // places to get the count of asterisks wrong. The two that are not
+        // actions stay here: "strike" has neither a chord nor a palette row,
+        // and "turn" needs the point it was clicked at.
+        if(action == "strike") wrapEditorSelection(ui, "~~", "~~", "Strikethrough");
         else if(action == "turn") openTurnIntoMenu(ui, x, y);
+        else performCommand(ui, std::string(action));
         return;
       }
       // The disclosure control is chrome: it acts and leaves the caret and the
@@ -368,13 +366,12 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       beginTextSelection(ui);
       return;
     }
-    if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) ui.focus = FocusArea::Viewer;
-    else if(ui.state.workspace().paneMode() == ui::PaneMode::Split && x >= layout.content.x + layout.content.w / 2.0f) ui.focus = FocusArea::Viewer;
-    else {
+    const ContentPanes panes = contentPanes(ui, layout.content);
+    if(panes.hasViewer && contains(panes.viewer, x, y)) {
+      ui.focus = FocusArea::Viewer;
+    } else {
       ui.focus = FocusArea::Editor;
-      Rect editorRect = layout.content;
-      if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
-      placeEditorCursor(text, ui, editorRect, x, y);
+      placeEditorCursor(text, ui, panes.editor, x, y);
       beginTextSelection(ui);
     }
   }
@@ -460,8 +457,7 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
       ui.editor.selectRange(ui.textSelect.anchor, ui.livePage.offsetAt(x, y));
     } else {
       const ShellLayout layout = shellLayout(ui, width, height);
-      Rect editorRect = layout.content;
-      if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+      const Rect editorRect = contentPanes(ui, layout.content).editor;
       ui.editor.selectRange(ui.textSelect.anchor, editorIndexAtPoint(text, ui, editorRect, x, y));
     }
     ui.revealEditorCursor = true;
@@ -479,8 +475,7 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
                                             ui.sidebar.maxScroll);
         break;
       case ScrollDrag::RawPane: {
-        Rect editorRect = layout.content;
-        if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
+        const Rect editorRect = contentPanes(ui, layout.content).editor;
         ui.raw.scroll = scrollFromThumbY(editorWritingRect(editorRect), y, ui.pointer.scrollDragOffsetY,
                                            editorMaxScroll(text, ui, editorRect));
         ui.revealEditorCursor = false;

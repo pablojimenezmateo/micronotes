@@ -16,6 +16,7 @@
 #include "app/RawPaneState.h"
 #include "app/TextFields.h"
 #include "app/SidebarState.h"
+#include "app/TabStrip.h"
 #include "app/Wheel.h"
 #include "doc/BlockScan.h"
 #include "library/Library.h"
@@ -233,6 +234,9 @@ struct UiRuntime {
   // See `app/SidebarState.h`, `app/PanelState.h`, `app/ChromeState.h`.
   SidebarState sidebar;
   RightPanelState rightPanel;
+  // The strip of open notes, as it was last drawn: the draw records it and
+  // everything else walks what was drawn. See `app/TabStrip.h`.
+  TabStripState tabStrip;
   ChromeState chrome;
   ui::OverlayStack overlays;
   // The mode the last computed layout settled in. Fed back into the next one so

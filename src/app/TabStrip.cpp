@@ -29,23 +29,14 @@ std::vector<std::string> tabTitles(const UiRuntime& ui) {
   return titles;
 }
 
-// Takes the titles rather than fetching them: `drawTabStrip` needs them for the
-// draw as well, and building them twice a frame is a vector of strings and a
-// `findNote` per tab, twice, to lay out the handful of tabs a strip can show.
-ui::TabStripLayout slotsFor(const std::vector<std::string>& titles, ui::TextRenderer* text,
-                            Rect rect, std::size_t activeTab) {
+// The strip's own text measurer. The widths depend on it, which is why the
+// layout is built where the renderer is and read everywhere else.
+std::function<int(std::string_view)> tabMeasure(ui::TextRenderer& text) {
   const ui::TextStyle style = ui::chromeStyle();
-  std::function<int(std::string_view)> measure;
-  if(text) {
-    measure = [text, style](std::string_view value) {
-      return text->width(value, style);
-    };
-  }
-  return ui::layoutTabs(titles, rect, measure, activeTab);
+  return [&text, style](std::string_view value) { return text.width(value, style); };
 }
 
 }
-
 void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rect) {
   // The strip is chrome, so it takes the chrome's ground; the active tab is a
   // step up out of it with a 2px accent lid. The lid is what makes that tab
@@ -54,8 +45,11 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   ui::fill(renderer, rect, theme().chromeBackground);
   ui::ClipGuard clip(renderer, rect);
   const auto& workspace = ui.state.workspace();
-  const auto titles = tabTitles(ui);
-  const auto layout = slotsFor(titles, &text, rect, workspace.activeTab);
+  ui.tabStrip.rect = rect;
+  ui.tabStrip.titles = tabTitles(ui);
+  ui.tabStrip.layout = ui::layoutTabs(ui.tabStrip.titles, rect, tabMeasure(text), workspace.activeTab);
+  const auto& titles = ui.tabStrip.titles;
+  const auto& layout = ui.tabStrip.layout;
   const ui::StripTabColors colors = ui::stripTabColors();
 
   for(const auto& slot : layout.slots) {
@@ -98,11 +92,9 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   if(layout.hiddenRight > 0) ui.pointer.offerTooltip(layout.scrollRight, "Later tabs");
 }
 
-bool tabStripHasControlAt(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
-  if(!ui::contains(rect, x, y)) return false;
-  // Through the same measurer the draw and the click use, for the reason spelt
-  // out in `handleTabStripClick`: the strip's geometry depends on it.
-  const auto layout = slotsFor(tabTitles(ui), &text, rect, ui.state.workspace().activeTab);
+bool tabStripHasControlAt(const UiRuntime& ui, float x, float y) {
+  if(!ui::contains(ui.tabStrip.rect, x, y)) return false;
+  const auto& layout = ui.tabStrip.layout;
   // A chevron with nothing hidden behind it is drawn dimmed and does nothing,
   // so it is not a control and must not claim the pointer.
   if(layout.hiddenLeft > 0 && ui::contains(layout.scrollLeft, x, y)) return true;
@@ -113,21 +105,9 @@ bool tabStripHasControlAt(ui::TextRenderer& text, UiRuntime& ui, Rect rect, floa
   return false;
 }
 
-bool handleTabStripClick(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y,
-                         Uint8 button, bool ctrl) {
-  if(!ui::contains(rect, x, y)) return false;
-  // Through the same measurer the draw uses, because the strip's geometry is
-  // *not* independent of it: `layoutTabs` narrows every tab to the widest title
-  // when that is less than an even share of the strip, so a measurer-less
-  // layout gives each tab the full even share instead.
-  //
-  // This used to pass nullptr, on a comment claiming the geometry was a pure
-  // function of the titles and the strip. With two short titles in a wide strip
-  // the drawn tabs were a third of the width the hit test believed, so a click
-  // on the second tab landed in the first one's rect and activated it, a click
-  // past the last drawn tab still hit one, and the close cross's target sat in
-  // empty strip well to the right of the cross. The strip looked inert.
-  const auto layout = slotsFor(tabTitles(ui), &text, rect, ui.state.workspace().activeTab);
+bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctrl) {
+  if(!ui::contains(ui.tabStrip.rect, x, y)) return false;
+  const auto& layout = ui.tabStrip.layout;
   // The chevrons first: they are drawn over the tabs that reach under them, so
   // they are clicked before them too. Each steps the active tab one along,
   // which is what scrolls the derived window -- there is no scroll to set.

@@ -61,7 +61,7 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
   // change shape over is one the reader has to discover by clicking.
   // A hidden band is an empty rect, and both of these test theirs first, so
   // there is no visibility flag to keep in step with here.
-  if(tabStripHasControlAt(text, ui, layout.tabs, x, y)) return CursorKind::Pointer;
+  if(tabStripHasControlAt(ui, x, y)) return CursorKind::Pointer;
   if(rightPanelHasControlAt(ui, text, layout.rightPanel, x, y)) return CursorKind::Pointer;
 
   // Which part of the overlay, rather than one answer for the whole window.

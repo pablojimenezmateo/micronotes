@@ -45,26 +45,33 @@ is two decisions rather than one. That is down from three, and the one that is
 left is the one furthest from the others: the raw pane deliberately shows the
 file as bytes, so its line breaks are the file's and not the layout's.
 
-It also costs the one thing the live surface no longer does: the raw pane's
-`editorRows` re-wraps the **whole note on every keystroke**, because its cache
-is keyed on a copy of the source rather than on the editor's revision and
-`editor::softWrap` has no incremental form. Measured on a 200 KB note:
+It used to cost one more thing, and that half is paid: `editorRows` was keyed on
+a **copy of the note**, so every keystroke copied a 200 KB buffer into the cache
+key (17.6 us) and every frame compared the buffer against it (9.8 us) to answer
+a question the editor's revision answers in one word. The key is
+`(revision, column, text size)` now -- and the text size is new, because the
+wrap width is a rect and does not move when the reader makes the text bigger, so
+at one width the pane kept wrapping the note to a font it was no longer drawn in.
+
+What is left is the rewrap itself, which is still the whole note on every
+keystroke:
 
 | | per |
 |---|---:|
 | full soft wrap | **807 us** per keystroke |
-| whole-note copy into the cache key | 17.6 us per keystroke |
-| whole-note compare against the cache key | 9.8 us per frame |
 
 That is three times what the ninth pass removed from the outline panel and the
-status bar put together, on the same event. It is not fixed here because the two
-cheap rows are 3% of the total and fixing them alone would be noise: what the
-807 us needs is an incremental soft wrap, which is the second engine this entry
-is about. If the pane goes, the number goes with it.
+status bar put together, on the same event. What it needs is an incremental soft
+wrap, which is the second engine this entry is about. If the pane goes, the
+number goes with it.
 
 **Why it is still here.** `RawPane`'s own header says it is "kept apart so that
-replacing it is a matter of deleting one file", which is the right plan. What it
-is waiting for is a decision rather than a refactor: whether a pane that shows
+replacing it is a matter of deleting one file", which is the right plan -- and
+is now true of its *state* as well: the five fields it kept on `UiRuntime` are
+`app/RawPaneState.h`, so deleting the pane deletes a header rather than picking
+five fields out of a struct.
+
+What it is waiting for is a decision rather than a refactor: whether a pane that shows
 the source *as a monospaced file* is a thing this app wants at all now that the
 live surface reveals a block's markers under the caret and drops a `Complex`
 block to raw source when you click into it. If it is not, the file deletes; if
@@ -156,7 +163,10 @@ the same kind, still open at 807 us.
 
 The shape is specific and it will recur: anything memoised on
 `ui.editor.revision()` is *by construction* recomputed on every keystroke, and
-the memo makes it look handled. There are five such memos on `UiRuntime` today.
+the memo makes it look handled. They are `ui::Memo` now rather than four loose
+fields each, which makes them findable -- `rg 'ui::Memo'` lists them -- but
+findable is not measured, and a memo keyed on the revision is exactly the thing
+this lane would catch.
 
 **Why it has not been paid.** The lane needs a `UiRuntime` and a `TextRenderer`
 driven through a real key handler, and the pieces are all there now -- the shell
@@ -169,52 +179,6 @@ being the thing that runs in three seconds with no display. The first is
 worth doing and is an afternoon; it was not done in the same pass that found the
 bugs, because a lane written to catch the bug you already know about is the one
 that catches nothing else.
-
-## TD-20 — two surfaces derive the same geometry from different inputs
-
-`src/app/TabStrip.cpp` and `src/app/SidebarModel.cpp`, against `ui::layoutTabs`
-and `ui::TreeModel::rows`.
-
-**What it costs today.** It cost a tab strip that did not work. `layoutTabs`
-narrows every tab to the widest title when that is less than an even share of
-the strip, so its result depends on the text measurer it is handed --
-`drawTabStrip` passed one and `handleTabStripClick` passed `nullptr`, on a
-comment asserting the geometry was a pure function of the titles and the strip.
-With two short note names in a wide strip the drawn tabs were a third of the
-width the hit test believed: a click on the second tab landed inside the first
-one's rect and opened the wrong note, a click past the last drawn tab still hit
-one, and the close cross's target sat in empty strip well to the right of the
-cross.
-
-That one is fixed -- the hit test takes the same `TextRenderer` the draw does,
-and `tabs_need_the_measurer_the_draw_used` pins the disagreement so a future
-`nullptr` fails rather than misroutes. The *debt* is the shape, which is still
-here: a draw and a hit test that each call the layout function again, with no
-compiler check that they called it the same way.
-
-**Partly paid by the shell overhaul.** Three of the five surfaces it named are
-gone or closed:
-
-- The scrollbars had *four* spellings of their geometry, one of them a private
-  copy inside `PageView` that painted the live page's bar while ui's was
-  hit-tested against it -- identical only by luck. There is one
-  `ui::scrollbarGeometry` now, and the paint, the hit test, the cursor shape and
-  the drag all ask it.
-- The window controls derived their boxes in the paint and again in the hit
-  test. `ui::menuBarLayout` answers for the whole bar, and the borderless
-  window's hit test -- which runs on the platform's callback with no renderer to
-  measure a label with -- reads the band the draw recorded, the way it already
-  read the buttons.
-- The icon rail is gone, so its two derivations went with it.
-
-What is left is the original pair: the tab strip lays out twice per click, and
-the sidebar builds `ui.sidebarRows` once and hit-tests the stored rects. The
-sidebar is the shape the strip should take.
-
-**Why it has not been paid.** The remaining fix is to make "lay out" and "hit
-test" one thing for the strip: build `TabStripLayout` once per frame into
-`UiRuntime` and have the click walk what was drawn. Small, and now genuinely
-small -- the surfaces that made it a wide change have been dealt with.
 
 ## TD-21 — a capture waits half a second no matter what it is capturing
 

@@ -158,3 +158,68 @@ MICRONOTES_TEST(actions_labels_ending_in_ellipsis_are_the_ones_that_ask_again) {
     MICRONOTES_REQUIRE(spec.label.size() > 3);
   }
 }
+
+// Every chord in the table has to reach something, and the chain in
+// `handleKey` is no longer where that is decided: `keyRunsIt` says whether the
+// key alone runs it, and everything else has to have a branch that reads the
+// focus first.
+//
+// This is the check that was missing. `F2`, `Ctrl+Q` and the `Ctrl+O` alias
+// were in the table -- printed by the palette, printed by the shortcut list --
+// and reached no branch at all, because the chain was a second copy of the
+// table and nobody had added them to it. The table is the only copy now, so
+// what this asserts is that the resolver can find every binding in it.
+MICRONOTES_TEST(actions_every_chord_resolves_back_to_its_own_action) {
+  for(const auto& spec : actionSpecs()) {
+    for(const auto& written : {spec.chord, spec.altChord}) {
+      if(written.empty()) continue;
+      const auto chord = parseKeyChord(written);
+      micronotes::tests::require(chord.has_value(),
+                                 std::string("unparseable chord in the registry: ") +
+                                   std::string(written));
+      const auto* found = findActionForChord(*chord);
+      micronotes::tests::require(found != nullptr,
+                                 std::string("nothing answers to ") + std::string(written));
+      // The first row claiming a chord wins, so a duplicate shows up here as
+      // the wrong action rather than as a silent shadow.
+      micronotes::tests::require(found->id == spec.id,
+                                 std::string(written) + " resolves to " + std::string(found->name) +
+                                   " rather than " + std::string(spec.name));
+    }
+  }
+}
+
+// A chord names a character, and on a layout where that character is somewhere
+// else the shortcut has to keep working: the physical key is the fallback.
+//
+// The hand-written branches this replaced all did this -- `shortcut(SDLK_S,
+// SDL_SCANCODE_S)` -- and the table-driven ones did not, so the seven chords
+// already dispatched from the table were the seven that broke on a Dvorak
+// keyboard.
+MICRONOTES_TEST(actions_a_chord_answers_to_its_physical_key_too) {
+  using micronotes::ui::findActionForKey;
+  // Ctrl+S on a layout where the US `S` position produces something else: the
+  // keycode is bound to nothing and the scancode is right. (A keycode that *is*
+  // bound wins instead, which is the documented precedence -- on Dvorak the S
+  // position produces an `o`, and `Ctrl+O` is the note switcher's own alias.)
+  const auto* save = findActionForKey(SDLK_SEMICOLON, SDL_SCANCODE_S, true, false, false);
+  MICRONOTES_REQUIRE(save != nullptr);
+  MICRONOTES_REQUIRE(save->id == ActionId::Save);
+
+  // The keycode still wins when it matches, so a layout that puts the letter
+  // somewhere else answers there as well.
+  const auto* alsoSave = findActionForKey(SDLK_S, SDL_SCANCODE_SEMICOLON, true, false, false);
+  MICRONOTES_REQUIRE(alsoSave != nullptr);
+  MICRONOTES_REQUIRE(alsoSave->id == ActionId::Save);
+
+  // Modifiers are still exact: the fallback must not turn Ctrl+Shift+3 into
+  // the pane switch, because that is the key the block transforms use.
+  MICRONOTES_REQUIRE(findActionForKey(SDLK_HASH, SDL_SCANCODE_3, true, true, false) == nullptr);
+  // And Ctrl+3 alone still is the pane switch.
+  const auto* pane = findActionForKey(SDLK_3, SDL_SCANCODE_3, true, false, false);
+  MICRONOTES_REQUIRE(pane != nullptr);
+  MICRONOTES_REQUIRE(pane->id == ActionId::PaneReading);
+
+  // Nothing to fall back to for a key that is already physical.
+  MICRONOTES_REQUIRE(findActionForKey(SDLK_UNKNOWN, SDL_SCANCODE_UNKNOWN, true, false, false) == nullptr);
+}

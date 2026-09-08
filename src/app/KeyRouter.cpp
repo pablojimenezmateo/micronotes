@@ -98,48 +98,23 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
               << " field_selection=" << (focusedField(ui) != nullptr && focusedField(ui)->editor.hasSelection())
               << "\n";
   }
-  // Actions whose meaning does not depend on where the caret is are dispatched
-  // straight from the binding table, so the chord lives in exactly one place.
-  // The chain below is what is left to move: those branches read the focus, the
-  // selection or the pane before deciding what the key meant, and each has to
-  // be untangled before it can join this list.
-  static constexpr ui::ActionId kBoundHere[] = {
-    ui::ActionId::NextTab,
-    ui::ActionId::PreviousTab,
-    ui::ActionId::CloseTab,
-    ui::ActionId::OpenInNewTab,
-    ui::ActionId::ToggleSidebar,
-    ui::ActionId::ToggleRightPanel,
-    ui::ActionId::CycleRightPanel,
-  };
-  const ui::KeyChord pressed {key, ctrl, shift, alt};
-  if(const auto* bound = ui::findActionForChord(pressed)) {
-    if(std::find(std::begin(kBoundHere), std::end(kBoundHere), bound->id) != std::end(kBoundHere)) {
-      performCommand(ui, std::string(bound->name));
-      return;
-    }
+  // Actions the key alone can run are dispatched straight from the binding
+  // table, so a chord is spelled in exactly one place. `ActionSpec::keyRunsIt`
+  // is what says which those are; the chain below is the rest, and every branch
+  // in it reads the focus, the selection or the pane before deciding what the
+  // key meant.
+  //
+  // This was an allowlist of seven ids here, with twenty-five more chords
+  // written out again as `shortcut(SDLK_x, SDL_SCANCODE_x)` branches -- and
+  // three of the table's bindings (`F2`, `Ctrl+Q`, and `Ctrl+O` as the alias
+  // for the note switcher) reached no branch at all, so they were advertised in
+  // the palette and the shortcut list while doing nothing.
+  if(const auto* bound = ui::findActionForKey(key, scancode, ctrl, shift, alt); bound && bound->keyRunsIt) {
+    performCommand(ui, std::string(bound->name));
+    return;
   }
 
-  if(key == SDLK_F1) {
-    openShortcutHelp(ui);
-  } else if(shortcut(SDLK_COMMA, SDL_SCANCODE_COMMA)) {
-    openSettings(ui);
-  } else if(shortcut(SDLK_P, SDL_SCANCODE_P)) {
-    // Ctrl+Shift+P is every command; Ctrl+P is the notes, which is the jump
-    // people reach for a hundred times more often.
-    if(shift) openCommandPalette(ui);
-    else openNotePalette(ui, "jump-note", "Go to note");
-  } else if(shortcut(SDLK_N, SDL_SCANCODE_N)) {
-    createNote(ui);
-  } else if(shortcut(SDLK_S, SDL_SCANCODE_S)) {
-    saveCurrent(ui);
-  } else if(shortcut(SDLK_R, SDL_SCANCODE_R)) {
-    invalidateWikiNotes(ui);
-    ui.state.refreshLibrary();
-    ui.status = "Refreshed library";
-  } else if(shortcut(SDLK_T, SDL_SCANCODE_T)) {
-    beginTagEdit(ui);
-  } else if(shortcut(SDLK_A, SDL_SCANCODE_A)) {
+  if(shortcut(SDLK_A, SDL_SCANCODE_A)) {
     if(ui.focus == FocusArea::Editor) {
       ui.editor.selectAll();
       publishEditorPrimarySelection(ui);
@@ -204,12 +179,6 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
       }
       ui.revealEditorCursor = true;
     }
-  } else if(shortcut(SDLK_B, SDL_SCANCODE_B)) {
-    wrapEditorSelection(ui, "**", "**", "Bold");
-  } else if(shortcut(SDLK_I, SDL_SCANCODE_I)) {
-    wrapEditorSelection(ui, "*", "*", "Italic");
-  } else if(shortcut(SDLK_E, SDL_SCANCODE_E)) {
-    wrapEditorSelection(ui, "`", "`", "Code");
   } else if(shortcut(SDLK_K, SDL_SCANCODE_K)) {
     // In the editor Ctrl+K makes a link out of the selection, as it does
     // everywhere else; outside it there is no selection to link, so it is the
@@ -236,24 +205,6 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     turnCurrentBlockInto(ui, doc::BlockKind::Bullet, 0, "a bullet");
   } else if(shift && shortcut(SDLK_9, SDL_SCANCODE_9)) {
     turnCurrentBlockInto(ui, doc::BlockKind::Todo, 0, "a task");
-  } else if(shortcut(SDLK_1, SDL_SCANCODE_1)) {
-    setPaneMode(ui, ui::PaneMode::Live);
-  } else if(shortcut(SDLK_2, SDL_SCANCODE_2)) {
-    setPaneMode(ui, ui::PaneMode::Editor);
-  } else if(shortcut(SDLK_3, SDL_SCANCODE_3)) {
-    setPaneMode(ui, ui::PaneMode::Viewer);
-  } else if(shortcut(SDLK_4, SDL_SCANCODE_4)) {
-    setPaneMode(ui, ui::PaneMode::Split);
-  } else if(shortcut(SDLK_L, SDL_SCANCODE_L) && shift) {
-    const bool toDark = ui::themeMode() == ui::ThemeMode::Light;
-    ui::setThemeMode(toDark ? ui::ThemeMode::Dark : ui::ThemeMode::Light);
-    ui.status = toDark ? "Dark theme" : "Light theme";
-  } else if(shortcut(SDLK_L, SDL_SCANCODE_L)) {
-    cyclePaneMode(ui);
-  } else if(shortcut(SDLK_F, SDL_SCANCODE_F) && shift) {
-    focusSearchAllNotes(ui);
-  } else if(shortcut(SDLK_F, SDL_SCANCODE_F)) {
-    focusFindInNote(ui);
   } else if(key == SDLK_ESCAPE) {
     // One press undoes one narrowing; `app/Dismiss.h` owns which, and why.
     const Dismissed undid = dismissOne(ui);

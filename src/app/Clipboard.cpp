@@ -102,82 +102,96 @@ bool pasteClipboardImage(UiRuntime& ui) {
   }
 }
 
-bool pasteClipboardText(UiRuntime& ui) {
-  const bool hasText = SDL_HasClipboardText();
-  if(inputDebugEnabled()) {
-    std::cerr << "clipboard paste editor"
-              << " has_text=" << hasText
-              << " has_primary=" << SDL_HasPrimarySelectionText()
-              << "\n";
+namespace {
+
+// Which of X11's two selections a paste is reading.
+//
+// X11 has two, and they are read by different SDL calls but pasted into the
+// same two places -- so this was four functions that differed by exactly which
+// pair of calls they made. Four copies of "does it have text, take it, insert
+// it, free it" is four places to leak the pointer SDL hands over, and four
+// places for the debug line to say something slightly different.
+struct Selection {
+  const char* what;
+  bool (*has)();
+  char* (*take)();
+};
+
+const Selection kClipboard {"clipboard", &SDL_HasClipboardText, &SDL_GetClipboardText};
+const Selection kPrimary {"primary", &SDL_HasPrimarySelectionText, &SDL_GetPrimarySelectionText};
+
+// The text on `from`, or nothing when it holds none.
+//
+// RAII around SDL's pointer, because the free is the part a fifth copy of this
+// would forget: every early return between the take and the free is a leak, and
+// there were sixteen of them.
+class Pasted {
+public:
+  explicit Pasted(const Selection& from, const char* into) {
+    const bool has = from.has();
+    if(inputDebugEnabled()) {
+      std::cerr << from.what << " paste " << into << " has_text=" << has << "\n";
+    }
+    if(!has) return;
+    raw_ = from.take();
+    if(inputDebugEnabled() && raw_) {
+      std::cerr << from.what << " paste " << into << " bytes=" << std::strlen(raw_) << "\n";
+    }
   }
-  if(!hasText) return false;
-  char* raw = SDL_GetClipboardText();
-  if(!raw) return false;
-  if(inputDebugEnabled()) std::cerr << "clipboard paste editor bytes=" << std::strlen(raw) << "\n";
-  ui.editor.insert(raw);
+  ~Pasted() {
+    if(raw_) SDL_free(raw_);
+  }
+  Pasted(const Pasted&) = delete;
+  Pasted& operator=(const Pasted&) = delete;
+
+  explicit operator bool() const { return raw_ != nullptr; }
+  const char* text() const { return raw_; }
+
+private:
+  char* raw_ = nullptr;
+};
+
+// Into the note's buffer.
+bool pasteIntoNote(UiRuntime& ui, const Selection& from) {
+  const Pasted pasted(from, "editor");
+  if(!pasted) return false;
+  ui.editor.insert(pasted.text());
   ui.markEdited();
-  SDL_free(raw);
   return true;
 }
 
-bool pasteClipboardIntoInput(UiRuntime& ui) {
+// Into whichever one-line field has the keyboard, at the caret and replacing
+// the selection -- rather than appended to the end of the field regardless of
+// where the reader was working.
+bool pasteIntoField(UiRuntime& ui, const Selection& from) {
   auto* input = focusedField(ui);
-  const bool hasText = SDL_HasClipboardText();
-  if(inputDebugEnabled()) {
-    std::cerr << "clipboard paste input"
-              << " input=" << (input != nullptr)
-              << " has_text=" << hasText
-              << " has_primary=" << SDL_HasPrimarySelectionText()
-              << "\n";
+  if(!input) {
+    if(inputDebugEnabled()) std::cerr << from.what << " paste input: no field has focus\n";
+    return false;
   }
-  if(!input || !hasText) return false;
-  char* raw = SDL_GetClipboardText();
-  if(!raw) return false;
-  if(inputDebugEnabled()) std::cerr << "clipboard paste input bytes=" << std::strlen(raw) << "\n";
-  // Lands at the caret and replaces the selection, rather than being appended
-  // to the end of the field regardless of where the user was working.
-  input->editor.insert(raw);
-  SDL_free(raw);
+  const Pasted pasted(from, "input");
+  if(!pasted) return false;
+  input->editor.insert(pasted.text());
   syncFocusedInput(ui);
   return true;
+}
+
+}
+
+bool pasteClipboardText(UiRuntime& ui) {
+  return pasteIntoNote(ui, kClipboard);
 }
 
 bool pastePrimarySelectionText(UiRuntime& ui) {
-  const bool hasPrimary = SDL_HasPrimarySelectionText();
-  if(inputDebugEnabled()) {
-    std::cerr << "primary paste editor"
-              << " has_primary=" << hasPrimary
-              << " has_clipboard=" << SDL_HasClipboardText()
-              << "\n";
-  }
-  if(!hasPrimary) return false;
-  char* raw = SDL_GetPrimarySelectionText();
-  if(!raw) return false;
-  if(inputDebugEnabled()) std::cerr << "primary paste editor bytes=" << std::strlen(raw) << "\n";
-  ui.editor.insert(raw);
-  ui.markEdited();
-  SDL_free(raw);
-  return true;
+  return pasteIntoNote(ui, kPrimary);
+}
+
+bool pasteClipboardIntoInput(UiRuntime& ui) {
+  return pasteIntoField(ui, kClipboard);
 }
 
 bool pastePrimarySelectionIntoInput(UiRuntime& ui) {
-  auto* input = focusedField(ui);
-  const bool hasPrimary = SDL_HasPrimarySelectionText();
-  if(inputDebugEnabled()) {
-    std::cerr << "primary paste input"
-              << " input=" << (input != nullptr)
-              << " has_primary=" << hasPrimary
-              << " has_clipboard=" << SDL_HasClipboardText()
-              << "\n";
-  }
-  if(!input || !hasPrimary) return false;
-  char* raw = SDL_GetPrimarySelectionText();
-  if(!raw) return false;
-  if(inputDebugEnabled()) std::cerr << "primary paste input bytes=" << std::strlen(raw) << "\n";
-  input->editor.insert(raw);
-  SDL_free(raw);
-  syncFocusedInput(ui);
-  return true;
+  return pasteIntoField(ui, kPrimary);
 }
 
 }

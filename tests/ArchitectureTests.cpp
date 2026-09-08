@@ -392,9 +392,16 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
                      std::string::npos);
 
   std::set<std::string> offered;
-  // Everything the command palette lists.
   for(const auto& spec : micronotes::ui::actionSpecs()) {
+    // Everything the command palette lists.
     if(spec.inPalette) offered.insert(std::string(spec.name));
+    // And everything a key alone runs, which the palette does not have to
+    // list: the editing verbs act on a selection the palette has just taken
+    // the focus away from, so they carry `inPalette = false` and were checked
+    // by nothing. `keyRunsIt` means `handleKey` hands the name straight to
+    // performCommand, so a name with no branch there is a dead shortcut --
+    // which is exactly what `F2` and `Ctrl+Q` were.
+    if(spec.keyRunsIt && !spec.chord.empty()) offered.insert(std::string(spec.name));
   }
   // Everything the menu bar can be clicked on. Read from the menus' own tables
   // rather than a copy of them, so an item added there is covered by this test
@@ -420,4 +427,42 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
     missing.empty(),
     "actions the palette or the menu bar offer but nothing under src/app/ dispatches: " + missing +
     " -- clicking one of these does nothing at all, and nothing else notices");
+}
+
+// The tab strip lays itself out exactly once, in the draw.
+//
+// That is the shape `TD-20` asked for, and the reason it is asserted here is
+// that nothing else can see it. `ui::layoutTabs` narrows every tab to the
+// widest title when that is less than an even share of the strip, so its
+// result depends on the text measurer it is handed -- and a second caller that
+// hands it a different one, or none, gets a *different strip* with no error and
+// identical-looking pixels. That is exactly what happened: the hit test passed
+// `nullptr` on a comment claiming the geometry was a pure function of the
+// titles, and a click on the second tab opened the first.
+//
+// `tabs_need_the_measurer_the_draw_used` pins the disagreement. This pins the
+// fix: with one caller there is no second answer to disagree with, and the
+// hit tests read `ui.tabStrip` -- what was drawn.
+MICRONOTES_TEST(architecture_the_tab_strip_is_laid_out_once) {
+  std::vector<std::string> callers;
+  for(const auto& entry : std::filesystem::directory_iterator(repoRoot() / "src" / "app")) {
+    if(entry.path().extension() != ".cpp") continue;
+    const std::string text = readText(entry.path());
+    std::size_t at = text.find("layoutTabs(");
+    while(at != std::string::npos) {
+      callers.push_back(entry.path().filename().string());
+      at = text.find("layoutTabs(", at + 1);
+    }
+  }
+  std::string where;
+  for(const auto& caller : callers) {
+    if(!where.empty()) where += ", ";
+    where += caller;
+  }
+  micronotes::tests::require(
+    callers.size() == 1 && callers.front() == "TabStrip.cpp",
+    "ui::layoutTabs is called " + std::to_string(callers.size()) + " times under src/app/ (" + where +
+      "). It must be called once, by drawTabStrip: its result depends on the text measurer it is "
+      "handed, so a second caller is a second strip -- and the click lands on whichever one it "
+      "built rather than on the one that was painted. Read ui.tabStrip instead.");
 }

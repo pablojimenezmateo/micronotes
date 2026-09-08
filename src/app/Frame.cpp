@@ -41,6 +41,9 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   (void)settleCaret(ui);
   ui.caret.painted = ui.caret.visible;
   ui.linkRegions.clear();
+  // Refilled by the strip if it is drawn at all; a hidden strip answers no
+  // clicks because there is nothing recorded to hit.
+  ui.tabStrip.clear();
   // Cleared here and set by whichever surface the pointer turns out to be over,
   // so a frame can never end up with two tooltips resolved.
   ui.pointer.tooltip = {};

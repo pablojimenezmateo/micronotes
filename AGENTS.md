@@ -184,10 +184,34 @@ when the counters went in it turned out to be 70% of every frame.
   only at a durable polymorphic boundary.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
-- `src/app/Application.cpp` is a 2,700-line catch-all doing layout, input,
-  rendering, and persistence. Do not grow it: `ArchitectureTests` holds it to a
-  line budget that only ever goes down. New behaviour wants a named unit under
-  `src/`, not another function in that file.
+- `src/app/Application.cpp` is the window, the renderer and the event loop, and
+  nothing else. It was a 2,700-line catch-all; the input routing is
+  `app/KeyRouter.h` and `app/PointerRouter.h`, the frame is `app/Frame.h`, the
+  command chain is `app/Commands.h`, and what the command line asked for is
+  `app/Startup.h`. `ArchitectureTests` holds that file to a line budget that only
+  ever goes down, **and every other `src/app/` source to a 1,000-line ceiling** --
+  because a budget on one file by name does not stop a catch-all, it only stops
+  that one. New behaviour wants a named unit, not another function in an old file.
+- The shell's state is a composition, not a struct. `UiRuntime` in
+  `app/Shell.h` holds what is genuinely shell-wide -- the library, the buffer,
+  the focus, the status line -- and each surface's state is a named type in its
+  own header (`app/SidebarState.h`, `app/PanelState.h`, `app/ChromeState.h`,
+  `app/EditingState.h`, `app/PointerState.h`, `app/RawPaneState.h`,
+  `app/TextFields.h`). Two things follow. A function should take the part it
+  works on rather than the whole shell. And a rule about one surface's state
+  belongs as a *method* on that surface's type, not as arithmetic repeated at
+  each call site -- that is where this codebase's quieter bugs have come from.
+- A memoised value is `ui::Memo<Value, Key>`, not a value plus a `valid` flag
+  plus the key spelled out field by field. The failure that shape has is
+  specific: the comparison and the assignment are two lists, they drift, and
+  the memo then answers for inputs it was not built from -- silently, because it
+  is only wrong when the field nobody stored is the field that changed.
+- A key binding lives once, in `ui::actionSpecs()`. `ActionSpec::keyRunsIt` says
+  whether the key alone runs it; if it does, `handleKey` hands the name to
+  `performCommand` and there is no branch to write. Only a chord whose meaning
+  depends on the focus gets a hand-written branch. The chain used to be a second
+  copy of the table, and three bindings -- `F2`, `Ctrl+Q`, `Ctrl+O` -- were
+  advertised in the palette and the shortcut list while doing nothing at all.
 - Debt goes in `docs/tech-debt.md` as a numbered `TD-n`, with what it costs
   today and why it has not been paid. There are no `TODO` comments in this tree
   and it should stay that way -- a TODO is invisible to everyone who is not

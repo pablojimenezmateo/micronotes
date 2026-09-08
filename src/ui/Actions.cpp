@@ -14,68 +14,68 @@ using S = ActionSection;
 // added to the enum and forgotten here fails the build rather than showing up
 // as a blank row.
 constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpecs {{
-  {ActionId::GoToNote,        "jump",           "Go to note...",                   "Ctrl+P",       "",              S::Navigation, false, true, "Ctrl+O"},
-  {ActionId::CommandPalette,  "command-palette","Commands...",                     "Ctrl+Shift+P", "",              S::Navigation, false, false, ""},
-  {ActionId::FindInNote,      "find",           "Find in this note",               "Ctrl+F",       "",              S::Navigation, true,  true, ""},
-  {ActionId::SearchAllNotes,  "search",         "Search every note",               "Ctrl+Shift+F", "",              S::Navigation, false, true, ""},
-  {ActionId::Shortcuts,       "shortcuts",      "Keyboard shortcuts...",           "F1",           "",              S::Navigation, false, true, ""},
-  {ActionId::Settings,        "settings",       "Settings...",                     "Ctrl+,",       "",              S::Navigation, false, true, ""},
-  {ActionId::Quit,            "quit",           "Quit micronotes",                 "Ctrl+Q",       "",              S::Navigation, false, true, ""},
+  {ActionId::GoToNote,        "jump",           "Go to note...",                   "Ctrl+P",       "",              S::Navigation, false, true, "Ctrl+O", true},
+  {ActionId::CommandPalette,  "command-palette","Commands...",                     "Ctrl+Shift+P", "",              S::Navigation, false, false, "", true},
+  {ActionId::FindInNote,      "find",           "Find in this note",               "Ctrl+F",       "",              S::Navigation, true,  true, "", true},
+  {ActionId::SearchAllNotes,  "search",         "Search every note",               "Ctrl+Shift+F", "",              S::Navigation, false, true, "", true},
+  {ActionId::Shortcuts,       "shortcuts",      "Keyboard shortcuts...",           "F1",           "",              S::Navigation, false, true, "", true},
+  {ActionId::Settings,        "settings",       "Settings...",                     "Ctrl+,",       "",              S::Navigation, false, true, "", true},
+  {ActionId::Quit,            "quit",           "Quit micronotes",                 "Ctrl+Q",       "",              S::Navigation, false, true, "", true},
 
-  {ActionId::NewNote,         "new-note",       "New note",                        "Ctrl+N",       "",              S::Notes, false, true, ""},
-  {ActionId::NewFolder,       "new-folder",     "New notebook",                    "",             "",              S::Notes, false, true, ""},
-  {ActionId::Save,            "save",           "Save note",                       "Ctrl+S",       "",              S::Notes, true,  true, ""},
-  {ActionId::RenameNote,      "rename",         "Rename note...",                  "F2",           "",              S::Notes, true,  true, ""},
-  {ActionId::SetNoteIcon,     "icon",           "Set note icon...",                "",             "",              S::Notes, true,  true, ""},
-  {ActionId::EditTags,        "tags",           "Edit tags...",                    "Ctrl+T",       "",              S::Notes, true,  true, ""},
-  {ActionId::ToggleFavorite,  "favorite",       "Toggle favorite",                 "",             "",              S::Notes, true,  true, ""},
-  {ActionId::MoveNote,        "move-note",      "Move note to notebook...",        "",             "",              S::Notes, true,  true, ""},
+  {ActionId::NewNote,         "new-note",       "New note",                        "Ctrl+N",       "",              S::Notes, false, true, "", true},
+  {ActionId::NewFolder,       "new-folder",     "New notebook",                    "",             "",              S::Notes, false, true, "", true},
+  {ActionId::Save,            "save",           "Save note",                       "Ctrl+S",       "",              S::Notes, true,  true, "", true},
+  {ActionId::RenameNote,      "rename",         "Rename note...",                  "F2",           "",              S::Notes, true,  true, "", true},
+  {ActionId::SetNoteIcon,     "icon",           "Set note icon...",                "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::EditTags,        "tags",           "Edit tags...",                    "Ctrl+T",       "",              S::Notes, true,  true, "", true},
+  {ActionId::ToggleFavorite,  "favorite",       "Toggle favorite",                 "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::MoveNote,        "move-note",      "Move note to notebook...",        "",             "",              S::Notes, true,  true, "", true},
   // The note is a file, and these three are the questions a reader asks about
   // one. Ported from the sibling microide, whose file tree and tab strip both
   // carry them; there is no chord because none of the three is something you
   // reach for mid-sentence, and inventing one would spend a key nobody wanted.
-  {ActionId::ShowOnDisk,      "show-on-disk",   "Show on disk",                    "",             "",              S::Notes, true,  true, ""},
-  {ActionId::CopyRelativePath, "copy-relative-path", "Copy relative path",         "",             "",              S::Notes, true,  true, ""},
-  {ActionId::CopyAbsolutePath, "copy-absolute-path", "Copy absolute path",         "",             "",              S::Notes, true,  true, ""},
-  {ActionId::MoveBlocks,      "move-blocks",    "Move selected blocks to note...", "",             "",              S::Notes, true,  true, ""},
-  {ActionId::DeleteNote,      "delete-note",    "Delete note...",                  "",             "",              S::Notes, true,  true, ""},
-  {ActionId::RenameFolder,    "rename-folder",  "Rename notebook...",              "",             "",              S::Notes, false, true, ""},
-  {ActionId::DeleteFolder,    "delete-folder",  "Delete notebook...",              "",             "",              S::Notes, false, true, ""},
-  {ActionId::RestoreFromTrash,"restore",        "Restore from trash...",           "",             "",              S::Notes, false, true, ""},
-  {ActionId::RefreshLibrary,  "refresh",        "Refresh library",                 "Ctrl+R",       "",              S::Notes, false, true, ""},
+  {ActionId::ShowOnDisk,      "show-on-disk",   "Show on disk",                    "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::CopyRelativePath, "copy-relative-path", "Copy relative path",         "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::CopyAbsolutePath, "copy-absolute-path", "Copy absolute path",         "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::MoveBlocks,      "move-blocks",    "Move selected blocks to note...", "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::DeleteNote,      "delete-note",    "Delete note...",                  "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::RenameFolder,    "rename-folder",  "Rename notebook...",              "",             "",              S::Notes, false, true, "", true},
+  {ActionId::DeleteFolder,    "delete-folder",  "Delete notebook...",              "",             "",              S::Notes, false, true, "", true},
+  {ActionId::RestoreFromTrash,"restore",        "Restore from trash...",           "",             "",              S::Notes, false, true, "", true},
+  {ActionId::RefreshLibrary,  "refresh",        "Refresh library",                 "Ctrl+R",       "",              S::Notes, false, true, "", true},
 
   // The editing verbs act on what is selected, and opening the palette takes
   // the selection's focus away, so they are shortcuts and help rows only.
-  {ActionId::Bold,            "bold",           "Bold",                            "Ctrl+B",       "",              S::Writing, true, false, ""},
-  {ActionId::Italic,          "italic",         "Italic",                          "Ctrl+I",       "",              S::Writing, true, false, ""},
-  {ActionId::Code,            "code",           "Inline code",                     "Ctrl+E",       "",              S::Writing, true, false, ""},
-  {ActionId::Link,            "link",           "Link the selection",              "Ctrl+K",       "",              S::Writing, true, false, ""},
-  {ActionId::Undo,            "undo",           "Undo",                            "Ctrl+Z",       "",              S::Writing, true, false, ""},
-  {ActionId::Redo,            "redo",           "Redo",                            "Ctrl+Y",       "",              S::Writing, true, false, ""},
-  {ActionId::ToggleTask,      "toggle-task",    "Tick or untick a task",           "Ctrl+Enter",   "",              S::Writing, true, false, ""},
+  {ActionId::Bold,            "bold",           "Bold",                            "Ctrl+B",       "",              S::Writing, true, false, "", true},
+  {ActionId::Italic,          "italic",         "Italic",                          "Ctrl+I",       "",              S::Writing, true, false, "", true},
+  {ActionId::Code,            "code",           "Inline code",                     "Ctrl+E",       "",              S::Writing, true, false, "", true},
+  {ActionId::Link,            "link",           "Link the selection",              "Ctrl+K",       "",              S::Writing, true, false, "", false},
+  {ActionId::Undo,            "undo",           "Undo",                            "Ctrl+Z",       "",              S::Writing, true, false, "", false},
+  {ActionId::Redo,            "redo",           "Redo",                            "Ctrl+Y",       "",              S::Writing, true, false, "", false},
+  {ActionId::ToggleTask,      "toggle-task",    "Tick or untick a task",           "Ctrl+Enter",   "",              S::Writing, true, false, "", false},
 
-  {ActionId::DuplicateBlock,  "duplicate-block","Duplicate the block",             "Ctrl+D",       "",              S::Blocks, true, false, ""},
-  {ActionId::DeleteBlock,     "delete-block",   "Delete the block",                "Ctrl+Shift+D", "",              S::Blocks, true, false, ""},
-  {ActionId::MoveBlockUp,     "move-block-up",  "Move the block up",               "Alt+Up",       "",              S::Blocks, true, false, ""},
-  {ActionId::MoveBlockDown,   "move-block-down","Move the block down",             "Alt+Down",     "",              S::Blocks, true, false, ""},
-  {ActionId::InsertBlock,     "insert-block",   "Insert a block",                  "",             "/",             S::Blocks, true, false, ""},
-  {ActionId::TurnInto,        "turn-into",      "Turn the block into...",          "",             "Ctrl+Shift+1-9",S::Blocks, true, false, ""},
-  {ActionId::Fold,            "fold",           "Fold or unfold section",          "Ctrl+.",       "",              S::Blocks, true, true, ""},
+  {ActionId::DuplicateBlock,  "duplicate-block","Duplicate the block",             "Ctrl+D",       "",              S::Blocks, true, false, "", false},
+  {ActionId::DeleteBlock,     "delete-block",   "Delete the block",                "Ctrl+Shift+D", "",              S::Blocks, true, false, "", false},
+  {ActionId::MoveBlockUp,     "move-block-up",  "Move the block up",               "Alt+Up",       "",              S::Blocks, true, false, "", false},
+  {ActionId::MoveBlockDown,   "move-block-down","Move the block down",             "Alt+Down",     "",              S::Blocks, true, false, "", false},
+  {ActionId::InsertBlock,     "insert-block",   "Insert a block",                  "",             "/",             S::Blocks, true, false, "", false},
+  {ActionId::TurnInto,        "turn-into",      "Turn the block into...",          "",             "Ctrl+Shift+1-9",S::Blocks, true, false, "", false},
+  {ActionId::Fold,            "fold",           "Fold or unfold section",          "Ctrl+.",       "",              S::Blocks, true, true, "", false},
 
-  {ActionId::PaneLive,        "pane-live",      "View: live",                      "Ctrl+1",       "",              S::View, false, true, ""},
-  {ActionId::PaneRaw,         "pane-raw",       "View: raw Markdown",              "Ctrl+2",       "",              S::View, false, true, ""},
-  {ActionId::PaneReading,     "pane-reading",   "View: reading",                   "Ctrl+3",       "",              S::View, false, true, ""},
-  {ActionId::PaneSplit,       "pane-split",     "View: split",                     "Ctrl+4",       "",              S::View, false, true, ""},
-  {ActionId::CyclePane,       "cycle-pane",     "Cycle the four views",            "Ctrl+L",       "",              S::View, false, true, ""},
-  {ActionId::ToggleTheme,     "theme",          "Toggle light and dark",           "Ctrl+Shift+L", "",              S::View, false, true, ""},
-  {ActionId::ToggleSidebar,   "toggle-sidebar", "Show or hide the sidebar",        "Ctrl+Alt+Left","",              S::View, false, true, ""},
-  {ActionId::ToggleRightPanel,"toggle-right",   "Show or hide the outline panel",  "Ctrl+Alt+Right","",             S::View, false, true, ""},
-  {ActionId::NextTab,         "next-tab",       "Next tab",                        "Ctrl+Tab",     "",              S::View, false, true, ""},
-  {ActionId::PreviousTab,     "previous-tab",   "Previous tab",                    "Ctrl+Shift+Tab","",             S::View, false, true, ""},
-  {ActionId::CloseTab,        "close-tab",      "Close this tab",                  "Ctrl+W",       "",              S::View, true,  true, ""},
-  {ActionId::OpenInNewTab,    "new-tab",        "Open a note in a new tab...",     "Ctrl+Shift+T", "",              S::View, false, true, ""},
-  {ActionId::PinTab,          "pin-tab",        "Pin or unpin this tab",           "",             "",              S::View, true,  true, ""},
-  {ActionId::CycleRightPanel, "cycle-right",    "Outline, links or tags",      "Ctrl+Alt+Up",  "",              S::View, false, true, ""},
+  {ActionId::PaneLive,        "pane-live",      "View: live",                      "Ctrl+1",       "",              S::View, false, true, "", true},
+  {ActionId::PaneRaw,         "pane-raw",       "View: raw Markdown",              "Ctrl+2",       "",              S::View, false, true, "", true},
+  {ActionId::PaneReading,     "pane-reading",   "View: reading",                   "Ctrl+3",       "",              S::View, false, true, "", true},
+  {ActionId::PaneSplit,       "pane-split",     "View: split",                     "Ctrl+4",       "",              S::View, false, true, "", true},
+  {ActionId::CyclePane,       "cycle-pane",     "Cycle the four views",            "Ctrl+L",       "",              S::View, false, true, "", true},
+  {ActionId::ToggleTheme,     "theme",          "Toggle light and dark",           "Ctrl+Shift+L", "",              S::View, false, true, "", true},
+  {ActionId::ToggleSidebar,   "toggle-sidebar", "Show or hide the sidebar",        "Ctrl+Alt+Left","",              S::View, false, true, "", true},
+  {ActionId::ToggleRightPanel,"toggle-right",   "Show or hide the outline panel",  "Ctrl+Alt+Right","",             S::View, false, true, "", true},
+  {ActionId::NextTab,         "next-tab",       "Next tab",                        "Ctrl+Tab",     "",              S::View, false, true, "", true},
+  {ActionId::PreviousTab,     "previous-tab",   "Previous tab",                    "Ctrl+Shift+Tab","",             S::View, false, true, "", true},
+  {ActionId::CloseTab,        "close-tab",      "Close this tab",                  "Ctrl+W",       "",              S::View, true,  true, "", true},
+  {ActionId::OpenInNewTab,    "new-tab",        "Open a note in a new tab...",     "Ctrl+Shift+T", "",              S::View, false, true, "", true},
+  {ActionId::PinTab,          "pin-tab",        "Pin or unpin this tab",           "",             "",              S::View, true,  true, "", true},
+  {ActionId::CycleRightPanel, "cycle-right",    "Outline, links or tags",      "Ctrl+Alt+Up",  "",              S::View, false, true, "", true},
 }};
 
 // Named keys, so a chord can say "Enter" rather than a keycode. Only the keys
@@ -224,6 +224,47 @@ const ActionSpec* findActionForChord(const KeyChord& chord) {
     if(bound && *bound == chord) return &spec;
     const auto alias = parseKeyChord(spec.altChord);
     if(alias && *alias == chord) return &spec;
+  }
+  return nullptr;
+}
+
+namespace {
+
+// The scancode a chord's key sits at on the layout the chords were written for.
+//
+// A chord names a *character* -- "Ctrl+S" -- and on a layout where the key in
+// that position produces something else, matching the keycode alone means the
+// shortcut is simply gone. The letters and digits are contiguous in both
+// enumerations, which is what makes this arithmetic rather than a table.
+//
+// Unknown for anything else, which is the right answer: `F1` and `Ctrl+Tab`
+// already *are* physical keys, and there is nothing to fall back to.
+SDL_Scancode writtenScancodeFor(SDL_Keycode key) {
+  if(key >= SDLK_A && key <= SDLK_Z) {
+    return static_cast<SDL_Scancode>(SDL_SCANCODE_A + (key - SDLK_A));
+  }
+  if(key >= SDLK_1 && key <= SDLK_9) {
+    return static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (key - SDLK_1));
+  }
+  if(key == SDLK_0) return SDL_SCANCODE_0;
+  if(key == SDLK_COMMA) return SDL_SCANCODE_COMMA;
+  if(key == SDLK_PERIOD) return SDL_SCANCODE_PERIOD;
+  return SDL_SCANCODE_UNKNOWN;
+}
+
+}
+
+const ActionSpec* findActionForKey(SDL_Keycode key, SDL_Scancode scancode, bool ctrl, bool shift,
+                                   bool alt) {
+  if(const auto* spec = findActionForChord({key, ctrl, shift, alt})) return spec;
+  if(scancode == SDL_SCANCODE_UNKNOWN) return nullptr;
+  for(const auto& spec : kSpecs) {
+    for(const auto& written : {spec.chord, spec.altChord}) {
+      const auto bound = parseKeyChord(written);
+      if(!bound) continue;
+      if(bound->ctrl != ctrl || bound->shift != shift || bound->alt != alt) continue;
+      if(writtenScancodeFor(bound->key) == scancode) return &spec;
+    }
   }
   return nullptr;
 }

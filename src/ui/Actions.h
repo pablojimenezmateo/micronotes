@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL_scancode.h>
 
 #include <optional>
 #include <span>
@@ -136,6 +137,21 @@ struct ActionSpec {
   // default reads better and does not build: the warnings-as-errors lane treats
   // a partly-initialized aggregate as the mistake it usually is.
   std::string_view altChord;
+  // Whether the key alone is enough to run it.
+  //
+  // Most actions mean the same thing wherever the focus is: `Ctrl+1` shows the
+  // live pane, `Ctrl+R` re-reads the library. A few do not -- `Ctrl+Z` undoes
+  // in whichever of the six editable things has the keyboard, `Ctrl+K` links a
+  // selection in the note and opens the note switcher outside it -- and those
+  // have to be decided by the key handler, which can see the focus.
+  //
+  // The distinction lives here rather than as a list in the key handler because
+  // it is a fact about the *binding*, and as a list beside the table it was a
+  // second copy of the table: twenty-five chords ended up spelled out twice,
+  // and three -- `F2`, `Ctrl+Q` and the `Ctrl+O` alias -- were advertised in
+  // the shortcut list and the palette while doing nothing at all, because the
+  // second copy is where the doing lives and nobody had added them to it.
+  bool keyRunsIt = true;
 };
 
 // Not everything with a key is a command. Walking the sidebar, continuing a
@@ -156,6 +172,20 @@ const ActionSpec* findAction(std::string_view name);
 // The action a key press runs, or nullptr. Bindings live in one table, so two
 // actions cannot quietly claim the same keys.
 const ActionSpec* findActionForChord(const KeyChord& chord);
+
+// The same, from an SDL key event, and the form the key handler should use.
+//
+// `scancode` is the physical key, and it is what makes a chord work on a
+// layout the chord was not written for: `Ctrl+S` has to save on a Dvorak or an
+// AZERTY keyboard, where the key in the US `S` position does not produce an
+// `s`. The keycode is tried first, so a layout that *does* produce the letter
+// somewhere else answers to it there too.
+//
+// Only positions a chord could name are matched this way -- the letters, the
+// digits, the comma and the full stop. There is nothing to fall back to for
+// `F1` or `Ctrl+Tab`, whose keycode is the physical key.
+const ActionSpec* findActionForKey(SDL_Keycode key, SDL_Scancode scancode, bool ctrl, bool shift,
+                                   bool alt);
 
 // What the shortcut list and the palette print beside a row.
 std::string acceleratorText(const ActionSpec& spec);
