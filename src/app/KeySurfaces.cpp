@@ -65,7 +65,7 @@ void handleBlockSelectionKey(UiRuntime& ui, SDL_Keycode key, bool shift, bool al
 }
 
 void handleEditorKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, bool shift, bool alt) {
-  const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
+  const bool live = ui.paneMode() == ui::PaneMode::Live;
   // One visual row up or down: the live surface wraps, the raw editor does not.
   const auto rowStep = [&](int rows) {
     return live ? ui.livePage.rowRelative(ui.editor.cursor(), rows) : ui.editor.cursor();

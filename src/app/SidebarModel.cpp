@@ -428,7 +428,7 @@ void expandTreeCursor(UiRuntime& ui, bool open) {
       moveTreeCursor(ui, open ? 1 : -1);
       return;
     }
-    ui.state.workspace().setSectionCollapsed(*row.section, !open);
+    ui.state.editWorkspace().setSectionCollapsed(*row.section, !open);
     return;
   }
   if(row.kind != SidebarRow::Kind::Tree || row.tree.kind == ui::TreeRowKind::Note) {
@@ -513,7 +513,7 @@ void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how)
   // landing on them, so a `Cursor` activation here would mean a band shutting
   // as the reader arrowed past it.
   if(row.kind == SidebarRow::Kind::SectionLabel) {
-    if(how == RowActivation::Click && row.section) ui.state.workspace().toggleSection(*row.section);
+    if(how == RowActivation::Click && row.section) ui.state.editWorkspace().toggleSection(*row.section);
     return;
   }
   // Passing over a note takes over the tab showing; asking for one gives it a

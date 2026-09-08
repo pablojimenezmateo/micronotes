@@ -88,11 +88,11 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   } else {
     const perf::ScopeTimer timer("shell.content");
     const Rect content = layout.content;
-    if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+    if(ui.paneMode() == ui::PaneMode::Live) {
       drawLive(renderer, text, images, ui, content);
-    } else if(ui.state.workspace().paneMode() == ui::PaneMode::Editor) {
+    } else if(ui.paneMode() == ui::PaneMode::Editor) {
       drawEditor(renderer, text, ui, content);
-    } else if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) {
+    } else if(ui.paneMode() == ui::PaneMode::Viewer) {
       drawReading(renderer, text, images, ui, content);
     } else {
       const float split = content.w / 2.0f;

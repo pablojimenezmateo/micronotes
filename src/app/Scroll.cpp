@@ -20,7 +20,7 @@ using ui::contains;
 
 ContentPanes contentPanes(const UiRuntime& ui, Rect content) {
   ContentPanes panes {content, content, false, false};
-  switch(ui.state.workspace().paneMode()) {
+  switch(ui.paneMode()) {
     case ui::PaneMode::Editor:
       panes.hasEditor = true;
       return panes;
@@ -65,7 +65,7 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
     return;
   }
 
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+  if(ui.paneMode() == ui::PaneMode::Live) {
     ui.livePage.wheel(notches, kLiveScrollPixelsPerNotch);
     return;
   }

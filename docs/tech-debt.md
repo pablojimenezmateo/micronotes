@@ -438,35 +438,32 @@ in four places (`update`, this, `Overlay::draw` and `drawSettingsSurface` --
 `TD-23` and `TD-35`), and they are worth doing together once, with one shape,
 rather than four times with four.
 
-## TD-33 — `AppState` is 55 methods, and the widest is `workspace()`
+## TD-33 — `AppState` is 55 methods, and one of them is the note-writing path
 
 `src/ui/AppState.h`.
 
-**What it costs today.** `WorkspaceModel& workspace()` hands out a mutable
-reference to the whole view model, and it is reached through at **62 sites** as
-`ui.state.workspace().something`. So `AppState`'s encapsulation is whatever
-`WorkspaceModel` chooses to make public, and 21 of those 62 are
-`ui.state.workspace().paneMode()` -- a question the shell asks constantly, three
-objects deep, about the thing it is drawing.
+The reach-through half is paid. `workspace()` is const-only now and the sites
+that write say `editWorkspace()`, so `AppState`'s encapsulation is no longer
+"whatever `WorkspaceModel` chooses to make public at 62 call sites"; there are
+fourteen writers and the compiler names them. The pane mode -- the question the
+shell asks most, and asked three objects deep at 21 sites -- is
+`UiRuntime::paneMode()`.
 
-The 55 methods themselves are mostly fine: `AppState` is an aggregate root and
-most of them are one-line delegations to `library_`, `index_` or
-`organization_`. What is not fine is that a reader cannot tell which is which,
-and that the note-writing path -- `saveSelectedNote`, which stats a file before
-overwriting it so that an edit made in another program is filed beside the note
-rather than destroyed, and which `AGENTS.md` singles out as the rule never to
-bypass -- sits in the same list as `toggleFavorite`.
+**What is left, and what it costs today.** The 55 methods themselves are mostly
+fine: `AppState` is an aggregate root and most of them are one-line delegations
+to `library_`, `index_` or `organization_`. What is not fine is that a reader
+cannot tell which is which, and that the note-writing path --
+`saveSelectedNote`, which stats a file before overwriting it so that an edit
+made in another program is filed beside the note rather than destroyed, and
+which `AGENTS.md` singles out as the rule never to bypass -- sits in the same
+list as `toggleFavorite`.
 
-**Why it has not been paid.** Splitting the class is the wrong first move: the
+**Why it has not been paid.** Splitting the class is the wrong move: the
 selection, the library, the index and the workspace really are one thing with
 one revision counter, and pulling them apart would put the revision in two
-places. The first move is narrower and worth doing on its own: the reach-through
-is a Law-of-Demeter problem, not an ownership one, so the fix is that callers
-which only *read* the pane mode should not be handed a mutable workspace. That
-is either a `paneMode()` on `UiRuntime` or a `const WorkspaceModel&` overload
-used by default, and it is 62 mechanical sites -- which is why it wants to be
-its own commit rather than a rider on something else.
-
+places. What the remaining cost wants is an ordering and a boundary inside the
+header -- the writes that go to disk, named as such and grouped -- rather than
+a new type.
 
 ## TD-34 — one popup shape, laid out by two engines
 

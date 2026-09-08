@@ -66,7 +66,7 @@ const WorkspaceModel& AppState::workspace() const {
   return workspace_;
 }
 
-WorkspaceModel& AppState::workspace() {
+WorkspaceModel& AppState::editWorkspace() {
   return workspace_;
 }
 

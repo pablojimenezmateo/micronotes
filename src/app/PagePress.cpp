@@ -72,7 +72,7 @@ bool pressPaneScrollbar(TextRenderer& text, UiRuntime& ui, Rect content, float x
     return true;
   };
 
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+  if(ui.paneMode() == ui::PaneMode::Live) {
     if(!grab(ScrollDrag::Live, ui.livePage.pageRect(), ui.livePage.scroll(), ui.livePage.maxScroll())) {
       return false;
     }
@@ -106,22 +106,22 @@ void pressPage(TextRenderer& text, UiRuntime& ui, Rect content, float x, float y
   // A page's own chrome sits above its text, so a link underneath it must not
   // swallow the click. Copying is the one piece of it a read-only page still
   // carries, so it is asked of whichever page is showing the note.
-  const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
+  const bool live = ui.paneMode() == ui::PaneMode::Live;
   const bool overLiveChrome =
     live && (ui.livePage.gutterAt(x, y).has_value() || !ui.livePage.toolbarAt(x, y).empty() ||
              ui.livePage.foldAt(x, y).has_value() || ui.livePage.copyButtonAt(x, y).has_value());
-  if(ui.state.workspace().paneMode() != ui::PaneMode::Editor) {
+  if(ui.paneMode() != ui::PaneMode::Editor) {
     const PageView& page = live ? ui.livePage : ui.readingPage;
     if(const auto code = codeUnderCopyButton(page, ui.editor.text(), x, y)) {
       ui.status = setClipboardText(*code) ? "Copied code" : "Clipboard unavailable";
       return;
     }
   }
-  if(ui.state.workspace().paneMode() != ui::PaneMode::Editor && !overLiveChrome &&
+  if(ui.paneMode() != ui::PaneMode::Editor && !overLiveChrome &&
      followLinkAt(ui, x, y)) {
     return;
   }
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+  if(ui.paneMode() == ui::PaneMode::Live) {
     ui.focus = FocusArea::Editor;
     if(button == SDL_BUTTON_RIGHT) {
       if(const auto index = ui.livePage.blockAt(x, y)) {

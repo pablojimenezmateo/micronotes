@@ -86,7 +86,7 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
     text.draw(tally, right - width, baseline, theme().chromeTextSecondary, style);
     right -= width + ui::kSpace4;
   }
-  const std::string mode = paneModeName(ui.state.workspace().paneMode());
+  const std::string mode = paneModeName(ui.paneMode());
   const float modeWidth = static_cast<float>(text.width(mode, style));
   text.draw(mode, right - modeWidth, baseline, theme().chromeTextSecondary, style);
   right -= modeWidth;

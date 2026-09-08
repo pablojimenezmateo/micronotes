@@ -60,14 +60,14 @@ void handleText(UiRuntime& ui, const char* input) {
     ui.revealEditorCursor = true;
     // "/" opens the block inserter, but only where a block could start: mid-word
     // slashes belong to paths and URLs.
-    if(ui.state.workspace().paneMode() == ui::PaneMode::Live && std::string_view(input) == "/") {
+    if(ui.paneMode() == ui::PaneMode::Live && std::string_view(input) == "/") {
       const std::size_t slash = ui.editor.cursor() - 1;
       const char before = slash == 0 ? '\n' : ui.editor.text()[slash - 1];
       if(before == '\n' || before == ' ' || before == '\t') openSlashMenu(ui, slash);
     }
     // The second "[" of a "[[" offers the notes it could mean. A single bracket
     // is left alone: it is how every ordinary link and every task marker starts.
-    if(ui.state.workspace().paneMode() == ui::PaneMode::Live && std::string_view(input) == "[") {
+    if(ui.paneMode() == ui::PaneMode::Live && std::string_view(input) == "[") {
       const std::size_t bracket = ui.editor.cursor() - 1;
       if(bracket > 0 && ui.editor.text()[bracket - 1] == '[') openWikiMenu(ui, bracket - 1);
     }
@@ -222,7 +222,7 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     // surface it steps out of the text onto the block, and the press after that
     // is the block selection `dismissOne` then finds.
     if(undid == Dismissed::Nothing && ui.focus == FocusArea::Editor &&
-       ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+       ui.paneMode() == ui::PaneMode::Live) {
       selectBlockAtCursor(ui);
     }
     // Leaving a tag filter lands in the tree that has just come back; every

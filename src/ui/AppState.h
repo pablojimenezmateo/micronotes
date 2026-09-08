@@ -78,8 +78,15 @@ public:
   bool openOrCreateLibrary(const std::filesystem::path& root);
   bool hasLibrary() const;
   const std::filesystem::path& libraryRoot() const;
+  // The arrangement of the window, to read. Const because it is read at ten
+  // times the rate it is written and the mutable overload was what got picked:
+  // `workspace()` handed out a writable reference to the whole view model at
+  // every one of those sites, so `AppState`'s encapsulation was whatever
+  // `WorkspaceModel` happened to make public.
   const WorkspaceModel& workspace() const;
-  WorkspaceModel& workspace();
+  // The same thing, to change. Named rather than an overload so that a site
+  // which writes says so, and a reader can find every site that does.
+  WorkspaceModel& editWorkspace();
   const UiSelection& selection() const;
 
   void selectFolder(std::filesystem::path folder);

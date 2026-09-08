@@ -28,14 +28,14 @@ namespace micronotes::app {
 
 void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
   ui.blockSelection.clear();
-  ui.state.workspace().setPaneMode(mode);
+  ui.state.editWorkspace().setPaneMode(mode);
   ui.focus = mode == ui::PaneMode::Viewer ? FocusArea::Viewer : FocusArea::Editor;
   ui.revealEditorCursor = true;
   ui.status = paneModeName(mode);
 }
 
 void cyclePaneMode(UiRuntime& ui) {
-  switch(ui.state.workspace().paneMode()) {
+  switch(ui.paneMode()) {
     case ui::PaneMode::Live: setPaneMode(ui, ui::PaneMode::Editor); break;
     case ui::PaneMode::Editor: setPaneMode(ui, ui::PaneMode::Viewer); break;
     case ui::PaneMode::Viewer: setPaneMode(ui, ui::PaneMode::Split); break;
@@ -169,8 +169,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "close-tab") closeActiveTab(ui);
   else if(id == "new-tab") openNotePalette(ui, "jump-note-new", "Open in a new tab");
   else if(id == "pin-tab") {
-    auto& workspace = ui.state.workspace();
-    if(auto* tab = workspace.activeTab_()) {
+    if(auto* tab = ui.state.editWorkspace().activeTab_()) {
       tab->pinned = !tab->pinned;
       ui.status = tab->pinned ? "Tab pinned" : "Tab unpinned";
     }

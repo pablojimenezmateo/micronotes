@@ -54,7 +54,7 @@ MICRONOTES_TEST(app_state_opens_library_filters_and_persists_state) {
   state.setSearch("search");
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
   state.selectNote("note-1");
-  state.workspace().setPaneMode(micronotes::ui::PaneMode::Viewer);
+  state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Viewer);
   const auto statePath = root / ".micronotes" / "ui.state";
   MICRONOTES_REQUIRE(state.saveUiState(statePath));
 

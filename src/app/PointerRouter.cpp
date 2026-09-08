@@ -67,7 +67,7 @@ bool pastePrimaryWherePointed(TextRenderer& text, UiRuntime& ui, const ShellLayo
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
       return true;
     }
-    if(contains(layout.content, x, y) && ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+    if(contains(layout.content, x, y) && ui.paneMode() == ui::PaneMode::Live) {
       ui.focus = FocusArea::Editor;
       ui.editor.moveCursor(ui.livePage.offsetAt(x, y));
       ui.revealEditorCursor = true;
@@ -237,7 +237,7 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
     return;
   }
   if(ui.textSelect.active) {
-    if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+    if(ui.paneMode() == ui::PaneMode::Live) {
       ui.editor.selectRange(ui.textSelect.anchor, ui.livePage.offsetAt(x, y));
     } else {
       const ShellLayout layout = shellLayout(ui, width, height);
@@ -283,7 +283,7 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
     return;
   }
   if(ui.sidebar.resizing) {
-    ui.state.workspace().sidebarWidth =
+    ui.state.editWorkspace().sidebarWidth =
       std::clamp(x, ui::kMinSidebarWidth, std::max(ui::kMinSidebarWidth, static_cast<float>(width) - 520.0f));
   }
 }

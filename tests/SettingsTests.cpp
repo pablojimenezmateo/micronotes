@@ -101,7 +101,7 @@ MICRONOTES_TEST(ui_state_load_does_not_inherit_the_previous_library) {
   const auto statePath = dir / "ui.state";
 
   AppState state;
-  state.workspace().favorites.push_back("note-a");
+  state.editWorkspace().favorites.push_back("note-a");
   state.selectNote("note-a");
   MICRONOTES_REQUIRE(state.saveUiState(statePath));
   MICRONOTES_REQUIRE(state.loadUiState(statePath));
@@ -131,12 +131,12 @@ MICRONOTES_TEST(ui_state_carries_tag_colours_and_shut_bands) {
   const auto statePath = dir / "ui.state";
 
   AppState saved;
-  saved.workspace().tagColors.set("work", 7);
-  saved.workspace().tagColors.set("a tag with spaces", 2);
+  saved.editWorkspace().tagColors.set("work", 7);
+  saved.editWorkspace().tagColors.set("a tag with spaces", 2);
   // Deliberately not picked, so the file has nothing to say about it and the
   // load leaves it on its derived colour.
-  saved.workspace().setSectionCollapsed(SidebarSection::Tags, true);
-  saved.workspace().setSectionCollapsed(SidebarSection::Recent, true);
+  saved.editWorkspace().setSectionCollapsed(SidebarSection::Tags, true);
+  saved.editWorkspace().setSectionCollapsed(SidebarSection::Recent, true);
   MICRONOTES_REQUIRE(saved.saveUiState(statePath));
 
   AppState loaded;

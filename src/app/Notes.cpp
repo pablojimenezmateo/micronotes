@@ -96,7 +96,7 @@ void setTagColor(UiRuntime& ui, std::string_view tag, std::string_view swatch) {
   // picker that built it, so a value that will not parse means the two have
   // drifted apart -- and silently painting the tag blue would hide that.
   if(ec != std::errc {} || ptr != first + swatch.size()) return;
-  ui.state.workspace().tagColors.set(std::string(tag), index);
+  ui.state.editWorkspace().tagColors.set(std::string(tag), index);
   ui.status = "Coloured " + std::string(tag);
 }
 
@@ -116,7 +116,7 @@ bool handleTagOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
 
 void clearTagColor(UiRuntime& ui, std::string_view tag) {
   if(tag.empty()) return;
-  ui.state.workspace().tagColors.clear(tag);
+  ui.state.editWorkspace().tagColors.clear(tag);
   ui.status = std::string(tag) + " back to its automatic colour";
 }
 

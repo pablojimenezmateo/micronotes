@@ -273,6 +273,14 @@ struct UiRuntime {
   Uint64 lastEdit = 0;
   Uint64 lastAutosaveAttempt = 0;
 
+  // What the note area is showing.
+  //
+  // Here rather than spelled `state.workspace().paneMode()` at each of the
+  // twenty-two sites that ask, which is three objects deep for the question the
+  // shell asks most often about the thing it is drawing -- and every one of
+  // those sites was reaching through a *mutable* accessor to read a value.
+  ui::PaneMode paneMode() const { return state.workspace().paneMode(); }
+
   // Records that the buffer has changed. The recovery copy is written here
   // rather than at save time, so a crash between keystrokes loses nothing.
   void markEdited() {

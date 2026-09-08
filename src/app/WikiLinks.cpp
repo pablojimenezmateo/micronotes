@@ -117,7 +117,7 @@ void commitWikiMenu(UiRuntime& ui, const std::string& title, const std::string& 
 
 bool jumpToAnchor(UiRuntime& ui, std::string_view anchor) {
   const auto slug = doc::headingAnchor(anchor);
-  const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
+  const bool live = ui.paneMode() == ui::PaneMode::Live;
   PageView& page = live ? ui.livePage : ui.readingPage;
   auto found = page.anchorScroll(slug);
   if(!found) found = page.anchorScroll(anchor);

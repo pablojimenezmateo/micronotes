@@ -388,7 +388,7 @@ bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect re
 
 bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
-  auto& workspace = ui.state.workspace();
+  auto& workspace = ui.state.editWorkspace();
   const int tabCount = static_cast<int>(std::size(kViews));
   for(int i = 0; i < tabCount; ++i) {
     if(!ui::contains(tabRect(rect, i, tabCount), x, y)) continue;
@@ -447,7 +447,7 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
 // Showing and hiding a panel. The status line names what moved, because the
 // window can be rearranged by a key that gives no other sign it did anything.
 void togglePanel(UiRuntime& ui, bool ui::WorkspaceModel::*panel, std::string_view name) {
-  auto& workspace = ui.state.workspace();
+  auto& workspace = ui.state.editWorkspace();
   const bool showing = !(workspace.*panel);
   if(!workspace.togglePanel(panel)) {
     ui.status = "The last panel stays open";
@@ -457,7 +457,7 @@ void togglePanel(UiRuntime& ui, bool ui::WorkspaceModel::*panel, std::string_vie
 }
 
 void cycleRightPanel(UiRuntime& ui) {
-  auto& workspace = ui.state.workspace();
+  auto& workspace = ui.state.editWorkspace();
   switch(workspace.rightPanelView) {
     case ui::RightPanelView::Outline: workspace.rightPanelView = ui::RightPanelView::Backlinks; break;
     case ui::RightPanelView::Backlinks: workspace.rightPanelView = ui::RightPanelView::Tags; break;

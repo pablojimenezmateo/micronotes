@@ -67,11 +67,11 @@ bool applyStartupOptions(UiRuntime& ui, ApplicationOptions& options) {
     }
   }
   if(!options.selectTitle.empty()) openTitles(ui, options.selectTitle);
-  if(options.paneMode) ui.state.workspace().setPaneMode(paneModeFromOption(*options.paneMode));
-  if(options.showSidebar) ui.state.workspace().sidebarVisible = *options.showSidebar;
-  if(options.showRightPanel) ui.state.workspace().rightPanelVisible = *options.showRightPanel;
+  if(options.paneMode) ui.state.editWorkspace().setPaneMode(paneModeFromOption(*options.paneMode));
+  if(options.showSidebar) ui.state.editWorkspace().sidebarVisible = *options.showSidebar;
+  if(options.showRightPanel) ui.state.editWorkspace().rightPanelVisible = *options.showRightPanel;
   if(!options.rightPanelView.empty()) {
-    ui.state.workspace().rightPanelView = ui::rightPanelViewFromName(options.rightPanelView);
+    ui.state.editWorkspace().rightPanelView = ui::rightPanelViewFromName(options.rightPanelView);
   }
   return attachFromCli(ui, options.attachPath);
 }

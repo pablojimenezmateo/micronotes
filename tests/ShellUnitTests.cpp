@@ -1016,7 +1016,7 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   MICRONOTES_REQUIRE(tagRows() == 2);
 
   // Shut it: the rows go, the band stays, and the count stays with it.
-  ui.state.workspace().setSectionCollapsed(SidebarSection::Tags, true);
+  ui.state.editWorkspace().setSectionCollapsed(SidebarSection::Tags, true);
   rebuild();
   MICRONOTES_REQUIRE(tagRows() == 0);
   MICRONOTES_REQUIRE(bandFor(SidebarSection::Tags) != nullptr);

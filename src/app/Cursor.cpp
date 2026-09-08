@@ -87,7 +87,7 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
 
   if(!contains(layout.content, x, y)) return CursorKind::Default;
 
-  if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
+  if(ui.paneMode() == ui::PaneMode::Live) {
     if(scrollbarHit(ui.livePage.pageRect(), ui.livePage.scroll(), ui.livePage.maxScroll(), x, y)) return CursorKind::Pointer;
     if(!ui.livePage.linkAt(x, y).empty()) return CursorKind::Pointer;
     if(ui.livePage.gutterAt(x, y) || !ui.livePage.toolbarAt(x, y).empty()) return CursorKind::Pointer;

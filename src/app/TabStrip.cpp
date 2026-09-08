@@ -140,13 +140,13 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
     if(ctrl) {
       // Ctrl+click pins, which is how a tab stops being the one that gets
       // replaced by the next note opened.
-      auto& tabs = ui.state.workspace().tabs;
+      auto& tabs = ui.state.editWorkspace().tabs;
       if(slot.index < tabs.size()) tabs[slot.index].pinned = !tabs[slot.index].pinned;
       return true;
     }
     if(slot.index == ui.state.workspace().activeTab) return true;
     if(!saveCurrent(ui, true)) return true;
-    ui.state.workspace().activeTab = slot.index;
+    ui.state.editWorkspace().activeTab = slot.index;
     ui.state.selectNote(ui.state.workspace().tabs[slot.index].noteId);
     loadSelectedIntoEditor(ui);
     return true;
@@ -157,7 +157,7 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
 
 bool handleTabMenuResult(UiRuntime& ui, const ui::OverlayResult& result) {
   if(result.overlayId != "tab-menu") return false;
-  auto& workspace = ui.state.workspace();
+  auto& workspace = ui.state.editWorkspace();
   const auto index = workspace.findTab(result.value);
   if(result.itemId == "close") {
     if(index == std::string::npos) return true;

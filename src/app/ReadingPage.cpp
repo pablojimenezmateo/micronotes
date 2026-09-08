@@ -90,7 +90,7 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
     const Rect column = ui.readingPage.columnRect();
     ui::drawEmptyMessage(text, "Nothing to read yet", "This note has no text in it.", column.x,
                          column.y, column.w,
-                         ui.state.workspace().paneMode() == ui::PaneMode::Split
+                         ui.paneMode() == ui::PaneMode::Split
                            ? "type on the left"
                            : ui::keysFor(ui::ActionId::PaneLive) + "  go back and write");
   }
