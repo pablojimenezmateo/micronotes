@@ -71,8 +71,8 @@ void drawStatus(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
        ui.editor.dirty() ? theme().warn : theme().accent);
 
   std::string left = ui.status;
-  if(ui.focus == FocusArea::Search) left = "Search all: " + ui.search.text() + "    Enter open  Esc clear";
-  else if(ui.focus == FocusArea::Find) left = "Find in note: " + ui.find.text() + "    Esc close";
+  if(ui.focus == FocusArea::Search) left = "Search all: " + ui.fields.search.text() + "    Enter open  Esc clear";
+  else if(ui.focus == FocusArea::Find) left = "Find in note: " + ui.fields.find.text() + "    Esc close";
   else if(ui.editor.dirty()) left = "Unsaved changes";
 
   // The right first, so the left knows how much room it was left with.

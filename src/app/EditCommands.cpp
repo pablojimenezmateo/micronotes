@@ -36,9 +36,9 @@ void linkEditorSelection(UiRuntime& ui) {
 // The blocks a command applies to: the block selection when there is one,
 // otherwise the block holding the caret. Both ends are carets, not indices.
 std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui) {
-  if(!ui.blockSelectActive) return {ui.editor.cursor(), ui.editor.cursor()};
-  return {std::min(ui.blockSelectAnchor, ui.blockSelectFocus),
-          std::max(ui.blockSelectAnchor, ui.blockSelectFocus)};
+  if(!ui.blockSelection.active) return {ui.editor.cursor(), ui.editor.cursor()};
+  return {std::min(ui.blockSelection.anchor, ui.blockSelection.focus),
+          std::max(ui.blockSelection.anchor, ui.blockSelection.focus)};
 }
 
 void selectBlockAtCursor(UiRuntime& ui) {
@@ -47,9 +47,9 @@ void selectBlockAtCursor(UiRuntime& ui) {
   // A blank line - the empty last line included - is a separator, not something
   // to select: step back to the nearest real block.
   while(index > 0 && blocks[index].kind == doc::BlockKind::Blank) --index;
-  ui.blockSelectActive = true;
-  ui.blockSelectAnchor = blocks[index].start;
-  ui.blockSelectFocus = blocks[index].start;
+  ui.blockSelection.active = true;
+  ui.blockSelection.anchor = blocks[index].start;
+  ui.blockSelection.focus = blocks[index].start;
   ui.editor.moveCursor(blocks[index].start);
   ui.editor.clearSelection();
   ui.editor.breakUndoGroup();
@@ -58,18 +58,18 @@ void selectBlockAtCursor(UiRuntime& ui) {
 // A range transform hands back its result as a text selection. A block
 // selection wants the same span expressed as blocks again.
 void syncBlockSelectionToEdit(UiRuntime& ui) {
-  if(!ui.blockSelectActive) return;
+  if(!ui.blockSelection.active) return;
   if(ui.editor.hasSelection()) {
-    ui.blockSelectAnchor = ui.editor.selectionStart();
+    ui.blockSelection.anchor = ui.editor.selectionStart();
     // One byte inside the last block, not the boundary after it, so the range
     // does not reach into whatever follows.
-    ui.blockSelectFocus = ui.editor.selectionEnd() > ui.blockSelectAnchor ? ui.editor.selectionEnd() - 1
-                                                                         : ui.blockSelectAnchor;
+    ui.blockSelection.focus = ui.editor.selectionEnd() > ui.blockSelection.anchor ? ui.editor.selectionEnd() - 1
+                                                                         : ui.blockSelection.anchor;
     ui.editor.clearSelection();
-    ui.editor.moveCursor(ui.blockSelectAnchor);
+    ui.editor.moveCursor(ui.blockSelection.anchor);
   } else {
-    ui.blockSelectAnchor = ui.editor.cursor();
-    ui.blockSelectFocus = ui.editor.cursor();
+    ui.blockSelection.anchor = ui.editor.cursor();
+    ui.blockSelection.focus = ui.editor.cursor();
   }
 }
 
@@ -77,7 +77,7 @@ void syncBlockSelectionToEdit(UiRuntime& ui) {
 // they are separators, not something a user means to select.
 void moveBlockSelection(UiRuntime& ui, int delta, bool extend) {
   const EditorBlocks blocks(ui);
-  std::size_t next = doc::blockIndexAt(blocks, ui.blockSelectFocus);
+  std::size_t next = doc::blockIndexAt(blocks, ui.blockSelection.focus);
   bool moved = false;
   while(true) {
     if(delta < 0) {
@@ -93,8 +93,8 @@ void moveBlockSelection(UiRuntime& ui, int delta, bool extend) {
     }
   }
   if(!moved) return;
-  ui.blockSelectFocus = blocks[next].start;
-  if(!extend) ui.blockSelectAnchor = ui.blockSelectFocus;
+  ui.blockSelection.focus = blocks[next].start;
+  if(!extend) ui.blockSelection.anchor = ui.blockSelection.focus;
   ui.editor.moveCursor(blocks[next].start);
   ui.editor.clearSelection();
   ui.revealEditorCursor = true;

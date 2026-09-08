@@ -46,7 +46,7 @@ void handleText(UiRuntime& ui, const char* input) {
   } else if(ui.focus == FocusArea::Editor) {
     // Typing is text editing, so it takes the caret back from a block selection
     // rather than replacing whole blocks with a character.
-    ui.clearBlockSelection();
+    ui.blockSelection.clear();
     ui.editor.insert(input);
     // "[] " only becomes a real task marker once the space lands, so the check
     // is cheap and runs at most once per typed space.
@@ -150,7 +150,7 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
       if(field->editor.hasSelection()) SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
     }
   } else if(shortcut(SDLK_C, SDL_SCANCODE_C)) {
-    if(ui.focus == FocusArea::Editor && ui.blockSelectActive) {
+    if(ui.focus == FocusArea::Editor && ui.blockSelection.active) {
       const auto [from, to] = blockSelectionCarets(ui);
       const EditorBlocks blocks(ui);
       const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
@@ -290,7 +290,7 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
         SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
       }
     }
-  } else if(ui.focus == FocusArea::Editor && ui.blockSelectActive) {
+  } else if(ui.focus == FocusArea::Editor && ui.blockSelection.active) {
     // Selected blocks are objects: the arrows walk them, and one command acts
     // over the whole range.
     if(alt && (key == SDLK_UP || key == SDLK_DOWN)) {
@@ -306,11 +306,11 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
       // Enter puts the caret back into the first selected block's text.
       const EditorBlocks blocks(ui);
       const auto content = blocks[doc::blockIndexAt(blocks, blockSelectionCarets(ui).first)].contentStart();
-      ui.clearBlockSelection();
+      ui.blockSelection.clear();
       ui.editor.moveCursor(content);
       ui.revealEditorCursor = true;
     } else if(key == SDLK_LEFT || key == SDLK_RIGHT) {
-      ui.clearBlockSelection();
+      ui.blockSelection.clear();
     }
   } else if(ui.focus == FocusArea::Editor) {
     const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
@@ -375,7 +375,7 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
         const int rows = static_cast<int>(std::max<std::size_t>(1, ui.livePage.rowsPerPage()));
         ui.editor.moveTo(rowStep(direction * rows), shift);
       } else {
-        for(int i = 0; i < std::max(1, ui.editorVisibleRows); ++i) {
+        for(int i = 0; i < std::max(1, ui.raw.visibleRows); ++i) {
           if(direction < 0) ui.editor.moveLineUp(shift);
           else ui.editor.moveLineDown(shift);
         }

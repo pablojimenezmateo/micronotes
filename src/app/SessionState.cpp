@@ -51,8 +51,8 @@ void persistLibraryState(UiRuntime& ui) {
   if(!ui.state.hasLibrary()) return;
   ui.state.saveUiState(uiStatePath(ui.state.libraryRoot()));
   if(ui.folds.dirty()) ui.folds.save(foldStatePath(ui.state.libraryRoot()));
-  if(ui.tree.dirty()) {
-    platform::writeFileDurably(treeStatePath(ui.state.libraryRoot()), ui.tree.serialize());
+  if(ui.sidebar.tree.dirty()) {
+    platform::writeFileDurably(treeStatePath(ui.state.libraryRoot()), ui.sidebar.tree.serialize());
   }
 }
 
@@ -110,19 +110,19 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   if(std::ifstream treeState(treeStatePath(ui.state.libraryRoot())); treeState) {
     treeBuffer << treeState.rdbuf();
   }
-  ui.tree.load(treeBuffer.str());
+  ui.sidebar.tree.load(treeBuffer.str());
   // Whatever was open last time still has to be reachable, so the folder
   // holding it is opened even if its parent was left collapsed.
-  ui.tree.reveal(ui.state.selection().folder);
-  ui.search.beginWith(ui.state.selection().search, false);
-  ui.searchScope = ui.state.selection().searchScope;
+  ui.sidebar.tree.reveal(ui.state.selection().folder);
+  ui.fields.search.beginWith(ui.state.selection().search, false);
+  ui.fields.searchScope = ui.state.selection().searchScope;
   // The editor is emptied first: the previous library's note is gone, and a
   // library with nothing in it has no note to overwrite it with.
   ui.loadedNoteId.clear();
   ui.editor.setText("");
   ui.editor.markSaved();
-  ui.sidebarScroll = 0;
-  ui.editorScroll = 0;
+  ui.sidebar.scroll = 0;
+  ui.raw.scroll = 0;
   ui.livePage.setScroll(0);
   ui.readingPage.setScroll(0);
   loadSelectedIntoEditor(ui);

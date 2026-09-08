@@ -35,7 +35,7 @@ using ui::theme;
 // activated the first.
 MenuBarLayout layoutFor(TextRenderer& text, const UiRuntime& ui, Rect rect) {
   const ui::TextStyle style = ui::chromeStyle();
-  return ui::menuBarLayout(rect, ui.openMenu, ui.customChrome,
+  return ui::menuBarLayout(rect, ui.chrome.openMenu, ui.chrome.customChrome,
                            [&text, style](std::string_view value) {
                              return text.width(value, style);
                            });
@@ -49,8 +49,8 @@ struct OpenMenu {
 };
 
 OpenMenu openMenuFor(TextRenderer& text, const UiRuntime& ui, Rect rect, Rect bounds) {
-  if(ui.openMenu == MenuId::None) return {};
-  const ui::MenuSpec* spec = ui::findMenu(ui.openMenu);
+  if(ui.chrome.openMenu == MenuId::None) return {};
+  const ui::MenuSpec* spec = ui::findMenu(ui.chrome.openMenu);
   if(!spec) return {};
 
   // The anchor is the bar item when the menu is on the bar, and the chevron
@@ -59,7 +59,7 @@ OpenMenu openMenuFor(TextRenderer& text, const UiRuntime& ui, Rect rect, Rect bo
   const MenuBarLayout layout = layoutFor(text, ui, rect);
   Rect anchor = layout.chevron;
   for(const auto& item : layout.items) {
-    if(item.id == ui.openMenu) anchor = item.rect;
+    if(item.id == ui.chrome.openMenu) anchor = item.rect;
   }
   if(ui::empty(anchor)) return {};
 
@@ -72,8 +72,8 @@ OpenMenu openMenuFor(TextRenderer& text, const UiRuntime& ui, Rect rect, Rect bo
 }
 
 void closeMenu(UiRuntime& ui) {
-  ui.openMenu = MenuId::None;
-  ui.menuHighlight = 0;
+  ui.chrome.openMenu = MenuId::None;
+  ui.chrome.menuHighlight = 0;
 }
 
 // The first item a keyboard walk should land on, and the next one in a
@@ -130,14 +130,14 @@ bool menuItemEnabled(const UiRuntime& ui, ui::ActionId action) {
   if(action == ui::ActionId::RenameFolder || action == ui::ActionId::DeleteFolder) {
     return !ui.state.selection().folder.empty();
   }
-  if(action == ui::ActionId::MoveBlocks) return ui.blockSelectActive;
+  if(action == ui::ActionId::MoveBlocks) return ui.blockSelection.active;
   return !spec->needsNote || !ui.state.selection().noteId.empty();
 }
 
 void drawMenuBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  ui.windowButtons = {};
-  ui.menuItemsBand = {};
-  ui.menuChevron = {};
+  ui.chrome.windowButtons = {};
+  ui.chrome.menuItemsBand = {};
+  ui.chrome.menuChevron = {};
   if(ui::empty(rect)) return;
   fill(renderer, rect, theme().chromeBackground);
   ui::hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h - 1.0f, theme().border);
@@ -148,14 +148,14 @@ void drawMenuBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   if(!layout.items.empty()) {
     const Rect first = layout.items.front().rect;
     const Rect last = layout.items.back().rect;
-    ui.menuItemsBand = {first.x, first.y, last.x + last.w - first.x, first.h};
+    ui.chrome.menuItemsBand = {first.x, first.y, last.x + last.w - first.x, first.h};
   }
-  ui.menuChevron = layout.chevron;
+  ui.chrome.menuChevron = layout.chevron;
 
   for(const auto& item : layout.items) {
     const ui::MenuSpec* spec = ui::findMenu(item.id);
     if(!spec) continue;
-    const bool hot = !item.active && ui.hovered(item.rect);
+    const bool hot = !item.active && ui.pointer.over(item.rect);
     if(item.active) {
       fill(renderer, item.rect, theme().chromeActive);
       // A foot rather than a full outline: the popup below overlaps the item's
@@ -172,7 +172,7 @@ void drawMenuBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   }
 
   if(!ui::empty(layout.chevron)) {
-    const bool hot = ui.hovered(layout.chevron);
+    const bool hot = ui.pointer.over(layout.chevron);
     if(hot) fill(renderer, layout.chevron, theme().rowHighlight);
     // Three dots rather than a chevron: a chevron here would point the same way
     // as every disclosure in the tree and mean something else entirely.
@@ -182,13 +182,13 @@ void drawMenuBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     for(int i = -1; i <= 1; ++i) {
       fill(renderer, {cx - 1.0f, cy + static_cast<float>(i) * 5.0f - 1.0f, 2.0f, 2.0f}, ink);
     }
-    ui.offerTooltip(layout.chevron, "More menus");
+    ui.pointer.offerTooltip(layout.chevron, "More menus");
   }
 
   // The application's name, centred, and only when it fits clear of both sides.
   // A title squeezed between two controls it is touching says less than no
   // title, and this is the only thing left that says which window this is.
-  if(ui.customChrome) {
+  if(ui.chrome.customChrome) {
     const std::string title = microcore::kAppName;
     const float width = static_cast<float>(text.width(title, style));
     const float x = std::round(rect.x + (rect.w - width) / 2.0f);
@@ -204,23 +204,23 @@ void drawMenuBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   for(std::size_t i = 0; i < layout.windowButtons.size(); ++i) {
     const Rect box = layout.windowButtons[i];
     if(ui::empty(box)) continue;
-    ui.windowButtons[i] = box;
-    const bool hot = ui.hovered(ui::windowButtonHitRect(box));
+    ui.chrome.windowButtons[i] = box;
+    const bool hot = ui.pointer.over(ui::windowButtonHitRect(box));
     // Close goes red on hover; the other two take the ordinary hover fill.
     if(hot) fill(renderer, box, i == 2 ? theme().warn : theme().rowHighlight);
     const SDL_Color mark = hot ? (i == 2 ? theme().onAccent : theme().textPrimary)
                                : theme().chromeTextSecondary;
-    drawWindowGlyph(renderer, box, i, ui.windowMaximized, mark);
+    drawWindowGlyph(renderer, box, i, ui.chrome.windowMaximized, mark);
   }
-  if(ui.customChrome) {
-    ui.offerTooltip(ui.windowButtons[0], "Minimize");
-    ui.offerTooltip(ui.windowButtons[1], ui.windowMaximized ? "Restore" : "Maximize");
-    ui.offerTooltip(ui.windowButtons[2], "Close");
+  if(ui.chrome.customChrome) {
+    ui.pointer.offerTooltip(ui.chrome.windowButtons[0], "Minimize");
+    ui.pointer.offerTooltip(ui.chrome.windowButtons[1], ui.chrome.windowMaximized ? "Restore" : "Maximize");
+    ui.pointer.offerTooltip(ui.chrome.windowButtons[2], "Close");
   }
 }
 
 void drawOpenMenu(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect bounds) {
-  const OpenMenu open = openMenuFor(text, ui, ui.menuBarRect, bounds);
+  const OpenMenu open = openMenuFor(text, ui, ui.chrome.menuBarRect, bounds);
   if(open.items.empty() || ui::empty(open.popup)) return;
 
   fill(renderer, open.popup, theme().overlayBackground);
@@ -237,7 +237,7 @@ void drawOpenMenu(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
       continue;
     }
     const bool enabled = menuItemEnabled(ui, spec.action);
-    const bool hot = ui.hovered(row) || i == ui.menuHighlight;
+    const bool hot = ui.pointer.over(row) || i == ui.chrome.menuHighlight;
     // Destructive items read as destructive wherever they are offered, which is
     // the same rule the confirm overlays and the context menus follow.
     const bool destructive = spec.action == ui::ActionId::DeleteNote ||
@@ -269,7 +269,7 @@ MenuBarClick handleMenuBarClick(TextRenderer& text, UiRuntime& ui, Rect rect, Re
     // A press anywhere else dismisses an open menu, and is *not* consumed:
     // clicking a tree row with the File menu open should select that row, which
     // is what every menu bar does.
-    if(ui.openMenu != MenuId::None) closeMenu(ui);
+    if(ui.chrome.openMenu != MenuId::None) closeMenu(ui);
     return result;
   }
 
@@ -285,26 +285,26 @@ MenuBarClick handleMenuBarClick(TextRenderer& text, UiRuntime& ui, Rect rect, Re
     result.handled = true;
     // A second press on the open menu shuts it, which is how a menu bar lets go
     // of the pointer.
-    if(ui.openMenu == item.id) closeMenu(ui);
+    if(ui.chrome.openMenu == item.id) closeMenu(ui);
     else {
-      ui.openMenu = item.id;
-      ui.menuHighlight = 0;
+      ui.chrome.openMenu = item.id;
+      ui.chrome.menuHighlight = 0;
     }
     return result;
   }
   if(!ui::empty(layout.chevron) && ui::contains(layout.chevron, x, y)) {
     result.handled = true;
     const MenuId first = layout.overflow.front();
-    if(ui.openMenu == first) closeMenu(ui);
+    if(ui.chrome.openMenu == first) closeMenu(ui);
     else {
-      ui.openMenu = first;
-      ui.menuHighlight = 0;
+      ui.chrome.openMenu = first;
+      ui.chrome.menuHighlight = 0;
     }
     return result;
   }
   // The bar's own empty space. An open menu closes; otherwise this is the strip
   // a borderless window is dragged by, and the press belongs to the platform.
-  if(ui.openMenu != MenuId::None) {
+  if(ui.chrome.openMenu != MenuId::None) {
     closeMenu(ui);
     result.handled = true;
   }
@@ -313,15 +313,15 @@ MenuBarClick handleMenuBarClick(TextRenderer& text, UiRuntime& ui, Rect rect, Re
 
 bool handleMenuBarMotion(TextRenderer& text, UiRuntime& ui, Rect rect, Rect bounds,
                          float x, float y) {
-  if(ui.openMenu == MenuId::None) return false;
+  if(ui.chrome.openMenu == MenuId::None) return false;
 
   // Sliding along the bar switches menus without a click. This is the whole of
   // what makes a menu bar feel like one rather than like seven buttons.
   const MenuBarLayout layout = layoutFor(text, ui, rect);
   for(const auto& item : layout.items) {
-    if(!ui::contains(item.rect, x, y) || item.id == ui.openMenu) continue;
-    ui.openMenu = item.id;
-    ui.menuHighlight = 0;
+    if(!ui::contains(item.rect, x, y) || item.id == ui.chrome.openMenu) continue;
+    ui.chrome.openMenu = item.id;
+    ui.chrome.menuHighlight = 0;
     return true;
   }
 
@@ -330,8 +330,8 @@ bool handleMenuBarMotion(TextRenderer& text, UiRuntime& ui, Rect rect, Rect boun
   const OpenMenu open = openMenuFor(text, ui, rect, bounds);
   if(open.items.empty()) return false;
   if(const auto index = ui::menuPopupItemAt(open.popup, open.items, x, y);
-     index && *index != ui.menuHighlight) {
-    ui.menuHighlight = *index;
+     index && *index != ui.chrome.menuHighlight) {
+    ui.chrome.menuHighlight = *index;
     return true;
   }
   return false;
@@ -340,7 +340,7 @@ bool handleMenuBarMotion(TextRenderer& text, UiRuntime& ui, Rect rect, Rect boun
 MenuBarKey handleMenuBarKey(TextRenderer& text, UiRuntime& ui, Rect rect, Rect bounds,
                             SDL_Keycode key) {
   MenuBarKey result;
-  if(ui.openMenu == MenuId::None) return result;
+  if(ui.chrome.openMenu == MenuId::None) return result;
   const OpenMenu open = openMenuFor(text, ui, rect, bounds);
   if(open.items.empty()) {
     closeMenu(ui);
@@ -352,11 +352,11 @@ MenuBarKey handleMenuBarKey(TextRenderer& text, UiRuntime& ui, Rect rect, Rect b
   const auto stepMenu = [&](int delta) {
     const auto specs = ui::menuSpecs();
     for(std::size_t i = 0; i < specs.size(); ++i) {
-      if(specs[i].id != ui.openMenu) continue;
+      if(specs[i].id != ui.chrome.openMenu) continue;
       const auto count = static_cast<int>(specs.size());
       const int next = (static_cast<int>(i) + delta + count) % count;
-      ui.openMenu = specs[static_cast<std::size_t>(next)].id;
-      ui.menuHighlight = 0;
+      ui.chrome.openMenu = specs[static_cast<std::size_t>(next)].id;
+      ui.chrome.menuHighlight = 0;
       return;
     }
   };
@@ -366,10 +366,10 @@ MenuBarKey handleMenuBarKey(TextRenderer& text, UiRuntime& ui, Rect rect, Rect b
       closeMenu(ui);
       return result;
     case SDLK_DOWN:
-      ui.menuHighlight = stepHighlight(open.items, ui.menuHighlight, 1);
+      ui.chrome.menuHighlight = stepHighlight(open.items, ui.chrome.menuHighlight, 1);
       return result;
     case SDLK_UP:
-      ui.menuHighlight = stepHighlight(open.items, ui.menuHighlight, -1);
+      ui.chrome.menuHighlight = stepHighlight(open.items, ui.chrome.menuHighlight, -1);
       return result;
     case SDLK_LEFT:
       stepMenu(-1);
@@ -379,11 +379,11 @@ MenuBarKey handleMenuBarKey(TextRenderer& text, UiRuntime& ui, Rect rect, Rect b
       return result;
     case SDLK_RETURN:
     case SDLK_KP_ENTER: {
-      if(ui.menuHighlight >= open.items.size()) {
+      if(ui.chrome.menuHighlight >= open.items.size()) {
         closeMenu(ui);
         return result;
       }
-      const MenuItemSpec& spec = open.items[ui.menuHighlight];
+      const MenuItemSpec& spec = open.items[ui.chrome.menuHighlight];
       closeMenu(ui);
       if(!spec.separator && menuItemEnabled(ui, spec.action)) result.action = spec.action;
       return result;

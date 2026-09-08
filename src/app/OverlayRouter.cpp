@@ -19,13 +19,13 @@ namespace micronotes::app {
 
 void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   if(result.overlayId == "rename-note") {
-    ui.rename.beginWith(result.value, false);
+    ui.fields.rename.beginWith(result.value, false);
     saveRename(ui);
   } else if(result.overlayId == "tags") {
-    ui.tag.beginWith(result.value, false);
+    ui.fields.tag.beginWith(result.value, false);
     saveTags(ui);
   } else if(result.overlayId == "folder-name") {
-    ui.folderRename.beginWith(result.value, false);
+    ui.fields.folderRename.beginWith(result.value, false);
     saveFolderRename(ui);
   } else if(result.overlayId == "delete-note") {
     deleteSelected(ui);
@@ -44,7 +44,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     // Filter, colour, un-colour: all three are verbs on the tag, so they live
     // with the others in `app/Notes.h`.
   } else if(result.overlayId == "block-menu") {
-    if(result.itemId == "turn") openTurnIntoMenu(ui, ui.mouseX, ui.mouseY);
+    if(result.itemId == "turn") openTurnIntoMenu(ui, ui.pointer.x, ui.pointer.y);
     else performBlockCommand(ui, result.itemId);
   } else if(result.overlayId == "turn-into") {
     performBlockCommand(ui, result.itemId);
@@ -62,7 +62,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   } else if(result.overlayId == "jump-note") {
     selectNoteById(ui, result.itemId);
     if(const auto note = ui.state.findNote(result.itemId)) {
-      ui.search.reset();
+      ui.fields.search.reset();
       showFolder(ui, note->folder);
       ui.state.selectNote(result.itemId);
     }
@@ -72,7 +72,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   } else if(result.overlayId == "move-note-folder") {
     const std::filesystem::path folder = result.itemId == "/" ? std::filesystem::path {} : std::filesystem::path {result.itemId};
     ui.status = ui.state.moveSelectedNoteToFolder(folder) ? "Moved note" : "Move note failed";
-    ui.tree.reveal(folder);
+    ui.sidebar.tree.reveal(folder);
   } else if(result.overlayId == "restore-trash") {
     ui.status = ui.state.restoreFromTrash(result.itemId) ? "Restored from trash" : "Restore failed";
   } else if(result.overlayId == "note-icon") {

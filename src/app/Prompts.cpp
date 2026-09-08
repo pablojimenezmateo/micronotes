@@ -38,7 +38,7 @@ void beginTagEdit(UiRuntime& ui) {
 }
 
 void saveTags(UiRuntime& ui) {
-  if(ui.state.updateSelectedTags(splitTags(ui.tag.text()))) {
+  if(ui.state.updateSelectedTags(splitTags(ui.fields.tag.text()))) {
     ui.focus = FocusArea::Editor;
     ui.status = "Saved tags";
   } else {
@@ -51,7 +51,7 @@ void beginFolderCreate(UiRuntime& ui) {
     ui.status = "Open a library before creating notebooks";
     return;
   }
-  ui.creatingFolder = true;
+  ui.sidebar.creatingFolder = true;
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "folder-name";
@@ -67,7 +67,7 @@ void beginFolderRename(UiRuntime& ui) {
     ui.status = "Root notebook cannot be renamed";
     return;
   }
-  ui.creatingFolder = false;
+  ui.sidebar.creatingFolder = false;
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "folder-name";
@@ -79,14 +79,14 @@ void beginFolderRename(UiRuntime& ui) {
 }
 
 void saveFolderRename(UiRuntime& ui) {
-  if(ui.folderRename.empty()) {
+  if(ui.fields.folderRename.empty()) {
     ui.status = "Notebook name is required";
     return;
   }
-  const bool creating = ui.creatingFolder;
-  const bool saved = creating ? ui.state.createFolder(ui.folderRename.text()) : ui.state.renameSelectedFolder(ui.folderRename.text());
+  const bool creating = ui.sidebar.creatingFolder;
+  const bool saved = creating ? ui.state.createFolder(ui.fields.folderRename.text()) : ui.state.renameSelectedFolder(ui.fields.folderRename.text());
   if(saved) {
-    ui.creatingFolder = false;
+    ui.sidebar.creatingFolder = false;
     ui.focus = FocusArea::Folders;
     ui.status = creating ? "Created notebook" : "Saved notebook";
   } else {

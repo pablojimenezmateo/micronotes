@@ -528,8 +528,8 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
 
   // Collapsed to start with, which is the state the bug needed: the folder is
   // shut, so nothing in it is on screen.
-  ui.tree.setExpanded(folder, false);
-  MICRONOTES_REQUIRE(!ui.tree.expanded(folder));
+  ui.sidebar.tree.setExpanded(folder, false);
+  MICRONOTES_REQUIRE(!ui.sidebar.tree.expanded(folder));
 
   const auto* alpha = ui.state.noteById("gi-alpha");
   MICRONOTES_REQUIRE(alpha != nullptr);
@@ -539,12 +539,12 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
 
   // Both halves: the context moved, and the tree opened.
   MICRONOTES_REQUIRE(ui.state.selection().folder == folder);
-  MICRONOTES_REQUIRE(ui.tree.expanded(folder));
-  MICRONOTES_REQUIRE(ui.tree.expanded({}));  // and every ancestor of it
+  MICRONOTES_REQUIRE(ui.sidebar.tree.expanded(folder));
+  MICRONOTES_REQUIRE(ui.sidebar.tree.expanded({}));  // and every ancestor of it
 
   // And the note is now a row inside that folder rather than only in a flat
   // list above it -- which is the thing the user was looking for.
-  const auto rows = ui.tree.rows(ui.state.folders(), ui.state.allNotes());
+  const auto rows = ui.sidebar.tree.rows(ui.state.folders(), ui.state.allNotes());
   bool folderRow = false;
   bool noteUnderIt = false;
   for(const auto& row : rows) {
@@ -757,7 +757,7 @@ MICRONOTES_TEST(shell_a_tag_filter_has_a_way_back_to_the_tree) {
   // note actually lives rather than at the root.
   MICRONOTES_REQUIRE(ui.state.selection().noteId == "tf-plan");
   MICRONOTES_REQUIRE(ui.state.selection().folder == std::filesystem::path("work"));
-  MICRONOTES_REQUIRE(ui.tree.expanded(std::filesystem::path("work")));
+  MICRONOTES_REQUIRE(ui.sidebar.tree.expanded(std::filesystem::path("work")));
 
   // Idempotent, so Esc with no filter running falls through to whatever else
   // Esc means rather than being swallowed.
@@ -799,28 +799,28 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
 
   // Stack all four up, outermost first, in the order a reader would reach them.
   micronotes::app::selectTag(ui, "work");
-  ui.creatingFolder = true;
-  ui.find.beginWith("body");
-  ui.search.beginWith("Findable");
-  ui.state.setSearch(ui.search.text(), ui.searchScope);
+  ui.sidebar.creatingFolder = true;
+  ui.fields.find.beginWith("body");
+  ui.fields.search.beginWith("Findable");
+  ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
   MICRONOTES_REQUIRE(!ui.state.currentSearchResults().empty());
 
   // And they come off one at a time, innermost first. Each assertion also
   // pins that the *others* are still standing, which is the property the
   // pile of `if`s did not have.
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Search);
-  MICRONOTES_REQUIRE(ui.search.empty());
-  MICRONOTES_REQUIRE(!ui.find.empty());
-  MICRONOTES_REQUIRE(ui.creatingFolder);
+  MICRONOTES_REQUIRE(ui.fields.search.empty());
+  MICRONOTES_REQUIRE(!ui.fields.find.empty());
+  MICRONOTES_REQUIRE(ui.sidebar.creatingFolder);
   MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
 
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Find);
-  MICRONOTES_REQUIRE(ui.find.empty());
-  MICRONOTES_REQUIRE(ui.creatingFolder);
+  MICRONOTES_REQUIRE(ui.fields.find.empty());
+  MICRONOTES_REQUIRE(ui.sidebar.creatingFolder);
   MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
 
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::FolderName);
-  MICRONOTES_REQUIRE(!ui.creatingFolder);
+  MICRONOTES_REQUIRE(!ui.sidebar.creatingFolder);
   MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
 
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::TagFilter);
@@ -830,9 +830,9 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
 
   // A block selection is last: it is a selection inside the page rather than a
   // filter over the library, so it only comes off once nothing is narrowed.
-  ui.blockSelectActive = true;
+  ui.blockSelection.active = true;
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::BlockSelection);
-  MICRONOTES_REQUIRE(!ui.blockSelectActive);
+  MICRONOTES_REQUIRE(!ui.blockSelection.active);
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
 
   std::filesystem::remove_all(root);
@@ -965,8 +965,8 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
   micronotes::app::selectNoteById(ui, "sc-hub");
-  ui.tree.setExpanded({}, true);
-  ui.tree.setExpanded(std::filesystem::path("work"), true);
+  ui.sidebar.tree.setExpanded({}, true);
+  ui.sidebar.tree.setExpanded(std::filesystem::path("work"), true);
 
   const micronotes::app::SidebarMetrics metrics = micronotes::app::sidebarMetrics(16, 13);
   const micronotes::ui::Rect list {0.0f, 0.0f, 260.0f, 900.0f};
@@ -974,11 +974,11 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
     // The key holds the collapsed set, so shutting a band rebuilds rather than
     // shifting a list laid out at the old heights. Invalidated here because the
     // test drives the model directly rather than through a frame.
-    ui.sidebarRowsKey.valid = false;
+    ui.sidebar.rowsKey.valid = false;
     micronotes::app::buildSidebarRows(ui, list, metrics);
   };
   const auto bandFor = [&](SidebarSection section) -> const micronotes::app::SidebarRow* {
-    for(const auto& row : ui.sidebarRows) {
+    for(const auto& row : ui.sidebar.rows) {
       if(row.kind == micronotes::app::SidebarRow::Kind::SectionLabel && row.section &&
          *row.section == section) {
         return &row;
@@ -987,7 +987,7 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
     return nullptr;
   };
   const auto tagRows = [&] {
-    return std::count_if(ui.sidebarRows.begin(), ui.sidebarRows.end(), [](const auto& row) {
+    return std::count_if(ui.sidebar.rows.begin(), ui.sidebar.rows.end(), [](const auto& row) {
       return row.kind == micronotes::app::SidebarRow::Kind::Tag;
     });
   };
@@ -1034,10 +1034,10 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   const auto hit = micronotes::app::sidebarRowAt(ui, list, band->rect.x + band->rect.w / 2.0f,
                                                  band->rect.y + band->rect.h / 2.0f);
   MICRONOTES_REQUIRE(hit.has_value());
-  MICRONOTES_REQUIRE(ui.sidebarRows[*hit].section.has_value());
+  MICRONOTES_REQUIRE(ui.sidebar.rows[*hit].section.has_value());
   // And activating it toggles, from anywhere on the band rather than only on
   // the 12px triangle.
-  micronotes::app::activateSidebarRow(ui, ui.sidebarRows[*hit],
+  micronotes::app::activateSidebarRow(ui, ui.sidebar.rows[*hit],
                                       micronotes::app::RowActivation::Click);
   MICRONOTES_REQUIRE(!ui.state.workspace().sectionCollapsed(SidebarSection::Tags));
 
@@ -1047,8 +1047,8 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   micronotes::app::selectTag(ui, "work");
   rebuild();
   bool sawCaption = false;
-  for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
-    const auto& row = ui.sidebarRows[i];
+  for(std::size_t i = 0; i < ui.sidebar.rows.size(); ++i) {
+    const auto& row = ui.sidebar.rows[i];
     if(row.kind != micronotes::app::SidebarRow::Kind::SectionLabel) continue;
     sawCaption = true;
     MICRONOTES_REQUIRE(!row.section.has_value());
@@ -1117,15 +1117,15 @@ MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
   micronotes::app::selectNoteById(ui, "td-hub");
-  ui.tree.setExpanded({}, true);
+  ui.sidebar.tree.setExpanded({}, true);
 
   const micronotes::app::SidebarMetrics metrics = micronotes::app::sidebarMetrics(16, 13);
   const micronotes::ui::Rect list {0.0f, 0.0f, 260.0f, 900.0f};
-  ui.sidebarRowsKey.valid = false;
+  ui.sidebar.rowsKey.valid = false;
   micronotes::app::buildSidebarRows(ui, list, metrics);
 
   const micronotes::app::SidebarRow* noteRow = nullptr;
-  for(const auto& row : ui.sidebarRows) {
+  for(const auto& row : ui.sidebar.rows) {
     if(row.kind == micronotes::app::SidebarRow::Kind::Tree &&
        row.tree.kind == micronotes::ui::TreeRowKind::Note) {
       noteRow = &row;
@@ -1169,19 +1169,19 @@ MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
 
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
-  ui.tree.setExpanded({}, true);
+  ui.sidebar.tree.setExpanded({}, true);
   const micronotes::app::SidebarMetrics metrics = micronotes::app::sidebarMetrics(16, 13);
   const micronotes::ui::Rect list {0.0f, 0.0f, 260.0f, 900.0f};
   const auto rebuild = [&] {
-    ui.sidebarRowsKey.valid = false;
+    ui.sidebar.rowsKey.valid = false;
     micronotes::app::buildSidebarRows(ui, list, metrics);
   };
   rebuild();
-  ui.sidebarRect = list;
+  ui.sidebar.rect = list;
 
   const auto indexOfBand = [&](SidebarSection section) {
-    for(std::size_t i = 0; i < ui.sidebarRows.size(); ++i) {
-      const auto& row = ui.sidebarRows[i];
+    for(std::size_t i = 0; i < ui.sidebar.rows.size(); ++i) {
+      const auto& row = ui.sidebar.rows[i];
       if(row.section && *row.section == section) return static_cast<int>(i);
     }
     return -1;
@@ -1190,21 +1190,21 @@ MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
   // The cursor stops on a band...
   const int tagsBand = indexOfBand(SidebarSection::Tags);
   MICRONOTES_REQUIRE(tagsBand >= 0);
-  ui.folderCursor = tagsBand;
+  ui.sidebar.cursor = tagsBand;
   // ...and Left shuts it, Right opens it, exactly as they do for a folder --
   // which is what it looks like, since both wear the same chevron.
   micronotes::app::expandTreeCursor(ui, /*open=*/false);
   MICRONOTES_REQUIRE(ui.state.workspace().sectionCollapsed(SidebarSection::Tags));
   rebuild();
-  ui.folderCursor = indexOfBand(SidebarSection::Tags);
+  ui.sidebar.cursor = indexOfBand(SidebarSection::Tags);
   micronotes::app::expandTreeCursor(ui, /*open=*/true);
   MICRONOTES_REQUIRE(!ui.state.workspace().sectionCollapsed(SidebarSection::Tags));
 
   // But arrowing *past* a band must not shut it: the cursor lands there and
   // waits, so a walk down the list does not collapse the library on the way.
   rebuild();
-  ui.folderCursor = 0;
-  for(int step = 0; step < static_cast<int>(ui.sidebarRows.size()) + 2; ++step) {
+  ui.sidebar.cursor = 0;
+  for(int step = 0; step < static_cast<int>(ui.sidebar.rows.size()) + 2; ++step) {
     micronotes::app::moveTreeCursor(ui, 1);
   }
   std::size_t sectionCount = 0;

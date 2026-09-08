@@ -21,7 +21,7 @@ struct UiRuntime;
 void drawBreadcrumb(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
 // A click on a crumb or on the star. Acted on here rather than returned: both
-// are navigation inside the library rather than commands, and `ui.crumbs` --
+// are navigation inside the library rather than commands, and `ui.chrome.crumbs` --
 // which is what a crumb *is* -- is recorded by the draw above.
 bool handleBreadcrumbClick(UiRuntime& ui, ui::Rect rect, float x, float y);
 

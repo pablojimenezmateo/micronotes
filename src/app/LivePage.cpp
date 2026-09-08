@@ -87,14 +87,14 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
                                                                change.toRevision + 1ull,
                                                                change.start, change.oldEnd,
                                                                change.newEnd});
-  ui.livePage.setPointer(ui.mouseX, ui.mouseY);
-  ui.livePage.setBlockSelection({ui.blockSelectActive, ui.blockSelectAnchor, ui.blockSelectFocus});
-  ui.livePage.setDropOffset(ui.draggingBlock ? ui.blockDropOffset : std::nullopt);
-  ui.livePage.setSelecting(ui.selectingEditorText);
+  ui.livePage.setPointer(ui.pointer.x, ui.pointer.y);
+  ui.livePage.setBlockSelection({ui.blockSelection.active, ui.blockSelection.anchor, ui.blockSelection.focus});
+  ui.livePage.setDropOffset(ui.blockDrag.active ? ui.blockDrag.dropOffset : std::nullopt);
+  ui.livePage.setSelecting(ui.textSelect.active);
   // Measured before the layout, because the header is room the page has to
   // reserve at the top of its scrolling space rather than something drawn over
   // it afterwards.
-  ui.livePage.setCaretVisible(ui.caretVisible);
+  ui.livePage.setCaretVisible(ui.caret.visible);
   ui.livePage.setHeaderHeight(pageHeaderHeight(text, ui));
   ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), rect);
 
@@ -128,7 +128,7 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
     selection.start = ui.editor.selectionStart();
     selection.end = ui.editor.selectionEnd();
   }
-  ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.find.text());
+  ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor, ui.fields.find.text());
   {
     // Clipped to the page, so the header scrolls off the top rather than
     // running up over the tab strip on its way out.

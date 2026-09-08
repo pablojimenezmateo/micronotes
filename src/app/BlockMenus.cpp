@@ -71,9 +71,9 @@ void openBlockMenu(UiRuntime& ui, float x, float y) {
 // `slashStart` is the "/" the user typed; committing erases [slashStart, caret)
 // before the block transform runs.
 void openSlashMenu(UiRuntime& ui, std::size_t slashStart) {
-  ui.slashStart = slashStart;
-  ui.slashInserts = false;
-  ui.clearBlockSelection();
+  ui.slash.start = slashStart;
+  ui.slash.inserts = false;
+  ui.blockSelection.clear();
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::List;
   overlay.id = "slash-menu";
@@ -90,21 +90,21 @@ void openSlashMenu(UiRuntime& ui, std::size_t slashStart) {
 // is chosen, so dismissing the menu leaves the note exactly as it was.
 void openInsertMenu(UiRuntime& ui, std::size_t blockStart) {
   openSlashMenu(ui, ui.editor.cursor());
-  ui.slashInserts = true;
-  ui.slashAfterBlock = blockStart;
+  ui.slash.inserts = true;
+  ui.slash.afterBlock = blockStart;
 }
 
 void commitSlashMenu(UiRuntime& ui, const std::string& itemId) {
   const BlockKindEntry* entry = blockKindFor(itemId);
-  if(ui.slashInserts) {
-    if(entry && applyEdit(ui, doc::insertBlockAfter(ui.editor.text(), ui.slashAfterBlock, entry->kind, entry->level,
+  if(ui.slash.inserts) {
+    if(entry && applyEdit(ui, doc::insertBlockAfter(ui.editor.text(), ui.slash.afterBlock, entry->kind, entry->level,
                                              editorBlocks(ui)))) {
       ui.status = entry->label;
     }
     return;
   }
   const std::size_t caret = ui.editor.cursor();
-  const std::size_t start = std::min(ui.slashStart, caret);
+  const std::size_t start = std::min(ui.slash.start, caret);
   if(start < caret) {
     ui.editor.replaceRange(start, caret, "");
     ui.markEdited();
@@ -137,7 +137,7 @@ void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
     return;
   }
   if(applyEdit(ui, doc::deleteBlocks(source, from, to, editorBlocks(ui)))) {
-    ui.clearBlockSelection();
+    ui.blockSelection.clear();
     ui.status = "Moved blocks to " + target->title;
   }
 }

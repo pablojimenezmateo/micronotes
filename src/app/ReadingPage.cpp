@@ -64,7 +64,7 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
                                                                    change.toRevision + 1ull,
                                                                    change.start, change.oldEnd,
                                                                    change.newEnd});
-  ui.readingPage.setPointer(ui.mouseX, ui.mouseY);
+  ui.readingPage.setPointer(ui.pointer.x, ui.pointer.y);
   // Measured before the layout: the header is room the page reserves at the top
   // of its scrolling space rather than a banner the note passes under.
   ui.readingPage.setHeaderHeight(pageHeaderHeight(text, ui));
@@ -79,7 +79,7 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
   sweepComplexCache(ui, ui.readingPage.document().blocks(), ui.editor.text());
 
   ui.readingPage.draw(renderer, text, 0, PageSelection {}, ui.focus == FocusArea::Viewer,
-                      ui.find.text());
+                      ui.fields.find.text());
   {
     // Clipped to the page, so the header scrolls off the top rather than
     // running up over the tab strip on its way out.

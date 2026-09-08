@@ -15,7 +15,7 @@
 // The pairing is the point. `openSlashMenu` records where the "/" was typed and
 // `commitSlashMenu` erases back to it; `openInsertMenu` sets the same fields to
 // mean "insert after this block instead". Those are three fields with one
-// contract between them (`ui.slashStart`, `slashInserts`, `slashAfterBlock`),
+// contract between them (`ui.slash.start`, `slashInserts`, `slashAfterBlock`),
 // and the open and the commit are the only two functions allowed to know it.
 namespace micronotes::app {
 

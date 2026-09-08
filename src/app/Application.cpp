@@ -153,7 +153,7 @@ int run(ApplicationOptions options) {
     out.caretBlinkMs = settleCaret(ui);
     // A drag past the edge of a list has to keep scrolling while the pointer is
     // perfectly still, which produces no events at all.
-    out.hint = ui.selectingEditorText || ui.draggingNote || ui.draggingFolder || ui.draggingBlock
+    out.hint = ui.textSelect.active || ui.sidebar.drag.active() || ui.blockDrag.active
                  ? IdleHint::Busy
                : out.caretBlinkMs >= 0 ? IdleHint::Blinking
                                        : IdleHint::Idle;
@@ -209,7 +209,7 @@ int run(ApplicationOptions options) {
         // -- threading both through it would have every other branch carry them
         // for the one that uses them.
         bool menuTook = false;
-        if(ui.openMenu != ui::MenuId::None) {
+        if(ui.chrome.openMenu != ui::MenuId::None) {
           const ShellLayout layout = shellLayout(ui, width, height);
           const MenuBarKey menu = handleMenuBarKey(
             text, ui, layout.menuBar,
@@ -223,18 +223,18 @@ int run(ApplicationOptions options) {
         }
         if(!menuTook) handleKey(ui, event.key.key, event.key.scancode, event.key.mod);
       } else if(event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-        ui.mouseX = event.button.x;
-        ui.mouseY = event.button.y;
+        ui.pointer.x = event.button.x;
+        ui.pointer.y = event.button.y;
         handleMouse(text, ui, event.button.x, event.button.y, event.button.button, width, height);
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-        ui.mouseX = event.button.x;
-        ui.mouseY = event.button.y;
+        ui.pointer.x = event.button.x;
+        ui.pointer.y = event.button.y;
         handleMouseUp(ui, event.button.x, event.button.y, event.button.button, width, height);
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_MOTION) {
-        ui.mouseX = event.motion.x;
-        ui.mouseY = event.motion.y;
+        ui.pointer.x = event.motion.x;
+        ui.pointer.y = event.motion.y;
         handleMouseMotion(text, ui, event.motion.x, event.motion.y, width, height);
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {

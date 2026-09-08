@@ -42,6 +42,32 @@ namespace {
 
 using micronotes::ui::contains;
 
+// A press into the note's text, once the caret has been placed: it starts a
+// selection, and a second or third press in quick succession widens it to the
+// word or the line.
+//
+// One function because it was two copies -- one for the live surface, one for
+// the raw pane and the split view -- identical but for a brace, each spelling
+// out the 450 ms threshold and each re-anchoring the drag to the widened
+// selection. Two copies of a rule about *time* is the kind that drifts
+// silently: nothing about a fourth click behaving differently in one pane than
+// the other would fail a test or look wrong in a screenshot.
+void beginTextSelection(UiRuntime& ui) {
+  ui.textSelect.active = true;
+  ui.textSelect.anchor = ui.editor.cursor();
+  const int clicks = ui.editorClicks.extend(SDL_GetTicks());
+  if(clicks < 2) return;
+  // Re-anchored to the widened selection, so dragging on from a double click
+  // extends from the word rather than from where the pointer happened to land.
+  if(clicks == 2) selectWordAtCursor(ui);
+  else {
+    selectLineAtCursor(ui);
+    ui.editorClicks.reset();
+  }
+  ui.textSelect.anchor = ui.editor.selectionStart();
+  publishEditorPrimarySelection(ui);
+}
+
 }
 
 void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 button, int width, int height) {
@@ -89,7 +115,7 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       ui.focus = FocusArea::Search;
       // Middle-click pastes at the point pressed, like every other X11 text
       // field, rather than always at the end of the string.
-      ui.search.editor.moveCursor(fieldOffsetAtX(text, ui.search, searchTextRect(layout.sidebar, text), x));
+      ui.fields.search.editor.moveCursor(fieldOffsetAtX(text, ui.fields.search, searchTextRect(layout.sidebar, text), x));
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
       return;
     }
@@ -133,8 +159,8 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
     const int maxScroll = ui.livePage.maxScroll();
     const auto bar = ui::scrollbarGeometry(ui.livePage.pageRect(), ui.livePage.scroll(), maxScroll);
     if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
-      ui.scrollDragTarget = ScrollDragTarget::Live;
-      ui.scrollDragOffsetY = y - bar->thumb.y;
+      ui.pointer.scrollDrag = ScrollDrag::Live;
+      ui.pointer.scrollDragOffsetY = y - bar->thumb.y;
       ui.focus = FocusArea::Editor;
       return;
     }
@@ -146,10 +172,10 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       const Rect editorRect = panes.editor;
       const Rect writing = editorWritingRect(editorRect);
       const int maxScroll = editorMaxScroll(text, ui, editorRect);
-      const auto bar = ui::scrollbarGeometry(writing, ui.editorScroll, maxScroll);
+      const auto bar = ui::scrollbarGeometry(writing, ui.raw.scroll, maxScroll);
       if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
-        ui.scrollDragTarget = ScrollDragTarget::Editor;
-        ui.scrollDragOffsetY = y - bar->thumb.y;
+        ui.pointer.scrollDrag = ScrollDrag::RawPane;
+        ui.pointer.scrollDragOffsetY = y - bar->thumb.y;
         ui.focus = FocusArea::Editor;
         ui.revealEditorCursor = false;
         return;
@@ -160,8 +186,8 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       const int maxScroll = ui.readingPage.maxScroll();
       const auto bar = ui::scrollbarGeometry(page, ui.readingPage.scroll(), maxScroll);
       if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
-        ui.scrollDragTarget = ScrollDragTarget::Viewer;
-        ui.scrollDragOffsetY = y - bar->thumb.y;
+        ui.pointer.scrollDrag = ScrollDrag::Reading;
+        ui.pointer.scrollDragOffsetY = y - bar->thumb.y;
         ui.focus = FocusArea::Viewer;
         return;
       }
@@ -170,17 +196,8 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
 
   if(button == SDL_BUTTON_LEFT) {
     if(std::abs(x - (layout.sidebar.x + layout.sidebar.w)) <= 4.0f) {
-      ui.resizingSidebar = true;
+      ui.sidebar.resizing = true;
       return;
-    }
-  }
-
-  if(button == SDL_BUTTON_LEFT) {
-    for(const auto& region : ui.buttonRegions) {
-      if(contains(region.rect, x, y)) {
-        performAction(ui, region.action);
-        return;
-      }
     }
   }
 
@@ -190,30 +207,30 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
     // whatever it happens to be lying on.
     if(button == SDL_BUTTON_LEFT) {
       const Rect list = sidebarListRect(layout.sidebar);
-      const auto bar = ui::scrollbarGeometry(list, ui.sidebarScroll, ui.sidebarMaxScroll);
+      const auto bar = ui::scrollbarGeometry(list, ui.sidebar.scroll, ui.sidebar.maxScroll);
       if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
-        ui.scrollDragTarget = ScrollDragTarget::Sidebar;
-        ui.scrollDragOffsetY = y - bar->thumb.y;
+        ui.pointer.scrollDrag = ScrollDrag::Sidebar;
+        ui.pointer.scrollDragOffsetY = y - bar->thumb.y;
         return;
       }
     }
     // The search field is part of the sidebar but not part of its row list, so
     // it takes the click before any row arithmetic happens.
     if(contains(searchBoxRect(layout.sidebar), x, y)) {
-      if(contains(ui.searchScopeToggle, x, y)) {
-        ui.searchScope = ui::nextSearchScope(ui.searchScope);
-        ui.state.setSearch(ui.search.text(), ui.searchScope);
-        ui.status = "Searching " + std::string(ui::searchScopeName(ui.searchScope));
+      if(contains(ui.sidebar.scopeToggle, x, y)) {
+        ui.fields.searchScope = ui::nextSearchScope(ui.fields.searchScope);
+        ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
+        ui.status = "Searching " + std::string(ui::searchScopeName(ui.fields.searchScope));
         return;
       }
       // Clicking a text field puts the caret where you clicked. Before, it only
       // moved focus, and the insertion point stayed pinned to the end.
       const Rect fieldRect = searchTextRect(layout.sidebar, text);
       ui.focus = FocusArea::Search;
-      const auto offset = fieldOffsetAtX(text, ui.search, fieldRect, x);
-      ui.search.editor.moveCursor(offset);
-      ui.selectingFieldText = true;
-      ui.fieldSelectionAnchor = offset;
+      const auto offset = fieldOffsetAtX(text, ui.fields.search, fieldRect, x);
+      ui.fields.search.editor.moveCursor(offset);
+      ui.fieldSelect.active = true;
+      ui.fieldSelect.anchor = offset;
       return;
     }
 
@@ -223,8 +240,8 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       if(button == SDL_BUTTON_RIGHT) openFolderMenu(ui, x, y);
       return;
     }
-    const SidebarRow row = ui.sidebarRows[*index];
-    ui.folderCursor = static_cast<int>(*index);
+    const SidebarRow row = ui.sidebar.rows[*index];
+    ui.sidebar.cursor = static_cast<int>(*index);
     // What a press on a row means lives with the rows. See `pressSidebarRow`.
     pressSidebarRow(ui, row, x, y, button);
     return;
@@ -258,7 +275,7 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       if(button == SDL_BUTTON_RIGHT) {
         if(const auto index = ui.livePage.blockAt(x, y)) {
           const auto& blocks = ui.livePage.document().blocks();
-          if(*index < blocks.size() && !ui.blockSelectActive) {
+          if(*index < blocks.size() && !ui.blockSelection.active) {
             ui.editor.moveCursor(blocks[*index].start);
             selectBlockAtCursor(ui);
           }
@@ -293,24 +310,24 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
           // Grabbing a block outside the selection selects just that one; inside
           // it, the whole selection comes along.
           const auto [from, to] = blockSelectionCarets(ui);
-          const bool inside = ui.blockSelectActive && hit->blockStart >= from && hit->blockStart <= to;
+          const bool inside = ui.blockSelection.active && hit->blockStart >= from && hit->blockStart <= to;
           if(!inside) {
             ui.editor.moveCursor(hit->blockStart);
             selectBlockAtCursor(ui);
           }
           const auto [dragFrom, dragTo] = blockSelectionCarets(ui);
-          ui.draggingBlock = true;
-          ui.dragBlockAnchor = dragFrom;
-          ui.dragBlockFocus = dragTo;
-          ui.blockDropOffset.reset();
+          ui.blockDrag.active = true;
+          ui.blockDrag.anchor = dragFrom;
+          ui.blockDrag.focus = dragTo;
+          ui.blockDrag.dropOffset.reset();
         }
         return;
       }
       if((SDL_GetModState() & SDL_KMOD_SHIFT) != 0) {
-        if(ui.blockSelectActive) {
+        if(ui.blockSelection.active) {
           const auto& blocks = ui.livePage.document().blocks();
           if(const auto index = ui.livePage.blockAt(x, y); index && *index < blocks.size()) {
-            ui.blockSelectFocus = blocks[*index].start;
+            ui.blockSelection.focus = blocks[*index].start;
             ui.editor.moveCursor(blocks[*index].start);
           }
         } else {
@@ -320,7 +337,7 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
         ui.revealEditorCursor = true;
         return;
       }
-      ui.clearBlockSelection();
+      ui.blockSelection.clear();
       // A task checkbox is a control, not text: ticking it must not move the
       // caret or start a selection.
       if(const auto blockStart = ui.livePage.checkboxAt(x, y)) {
@@ -348,21 +365,7 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       }
       ui.editor.moveCursor(ui.livePage.offsetAt(x, y));
       ui.revealEditorCursor = true;
-      ui.selectingEditorText = true;
-      ui.editorSelectionAnchor = ui.editor.cursor();
-      const Uint64 now = SDL_GetTicks();
-      ui.editorClickCount = now - ui.lastEditorClick < 450 ? ui.editorClickCount + 1 : 1;
-      ui.lastEditorClick = now;
-      if(ui.editorClickCount == 2) {
-        selectWordAtCursor(ui);
-        ui.editorSelectionAnchor = ui.editor.selectionStart();
-        publishEditorPrimarySelection(ui);
-      } else if(ui.editorClickCount >= 3) {
-        selectLineAtCursor(ui);
-        ui.editorSelectionAnchor = ui.editor.selectionStart();
-        publishEditorPrimarySelection(ui);
-        ui.editorClickCount = 0;
-      }
+      beginTextSelection(ui);
       return;
     }
     if(ui.state.workspace().paneMode() == ui::PaneMode::Viewer) ui.focus = FocusArea::Viewer;
@@ -372,76 +375,57 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
       Rect editorRect = layout.content;
       if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
       placeEditorCursor(text, ui, editorRect, x, y);
-      ui.selectingEditorText = true;
-      ui.editorSelectionAnchor = ui.editor.cursor();
-      const Uint64 now = SDL_GetTicks();
-      ui.editorClickCount = now - ui.lastEditorClick < 450 ? ui.editorClickCount + 1 : 1;
-      ui.lastEditorClick = now;
-      if(ui.editorClickCount == 2) {
-        selectWordAtCursor(ui);
-        ui.editorSelectionAnchor = ui.editor.selectionStart();
-        publishEditorPrimarySelection(ui);
-      }
-      else if(ui.editorClickCount >= 3) {
-        selectLineAtCursor(ui);
-        ui.editorSelectionAnchor = ui.editor.selectionStart();
-        publishEditorPrimarySelection(ui);
-        ui.editorClickCount = 0;
-      }
+      beginTextSelection(ui);
     }
   }
 }
 
 void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int width, int height) {
   if(button == SDL_BUTTON_LEFT) {
-    if(ui.draggingBlock) {
-      if(ui.blockDropOffset &&
-         applyEdit(ui, doc::moveBlocksTo(ui.editor.text(), ui.dragBlockAnchor, ui.dragBlockFocus, *ui.blockDropOffset,
+    if(ui.blockDrag.active) {
+      if(ui.blockDrag.dropOffset &&
+         applyEdit(ui, doc::moveBlocksTo(ui.editor.text(), ui.blockDrag.anchor, ui.blockDrag.focus, *ui.blockDrag.dropOffset,
                                            editorBlocks(ui)))) {
         syncBlockSelectionToEdit(ui);
         ui.status = "Moved block";
       }
-      ui.draggingBlock = false;
-      ui.blockDropOffset.reset();
+      ui.blockDrag.active = false;
+      ui.blockDrag.dropOffset.reset();
     }
-    if(ui.selectingEditorText) publishEditorPrimarySelection(ui);
-    if(ui.selectingFieldText) {
+    if(ui.textSelect.active) publishEditorPrimarySelection(ui);
+    if(ui.fieldSelect.active) {
       if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
         SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
       }
     }
-    ui.resizingSidebar = false;
-    ui.selectingEditorText = false;
-    ui.selectingFieldText = false;
-    ui.scrollDragTarget = ScrollDragTarget::None;
+    ui.sidebar.resizing = false;
+    ui.textSelect.active = false;
+    ui.fieldSelect.active = false;
+    ui.pointer.scrollDrag = ScrollDrag::None;
   }
-  if(button != SDL_BUTTON_LEFT || (!ui.draggingNote && !ui.draggingFolder)) return;
+  if(button != SDL_BUTTON_LEFT || !ui.sidebar.drag.active()) return;
   const ShellLayout layout = shellLayout(ui, width, height);
   const auto index = sidebarRowAt(ui, layout.sidebar, x, y);
-  if(index && ui.sidebarRows[*index].kind == SidebarRow::Kind::Tree) {
+  if(index && ui.sidebar.rows[*index].kind == SidebarRow::Kind::Tree) {
     // A note row stands for the folder holding it, so dropping between two
     // notes does the obvious thing rather than nothing.
-    const auto target = ui.sidebarRows[*index].tree.folder;
-    if(ui.draggingNote) {
-      selectNoteById(ui, ui.draggingNoteId);
+    const auto target = ui.sidebar.rows[*index].tree.folder;
+    if(ui.sidebar.drag.note) {
+      selectNoteById(ui, ui.sidebar.drag.noteId);
       if(ui.state.moveSelectedNoteToFolder(target)) {
-        ui.tree.reveal(target);
+        ui.sidebar.tree.reveal(target);
         ui.status = "Moved note to " + (target.empty() ? ui.state.libraryRoot().filename().generic_string() : target.generic_string());
       } else {
         ui.status = "Move note failed";
       }
-    } else if(ui.state.moveFolderInto(ui.draggingFolderPath, target)) {
-      ui.tree.reveal(target / ui.draggingFolderPath.filename());
+    } else if(ui.state.moveFolderInto(ui.sidebar.drag.folderPath, target)) {
+      ui.sidebar.tree.reveal(target / ui.sidebar.drag.folderPath.filename());
       ui.status = "Moved notebook into " + (target.empty() ? ui.state.libraryRoot().filename().generic_string() : target.generic_string());
-    } else if(target != ui.draggingFolderPath.parent_path() && target != ui.draggingFolderPath) {
+    } else if(target != ui.sidebar.drag.folderPath.parent_path() && target != ui.sidebar.drag.folderPath) {
       ui.status = "Cannot move a notebook into itself";
     }
   }
-  ui.draggingNote = false;
-  ui.draggingNoteId.clear();
-  ui.draggingFolder = false;
-  ui.draggingFolderPath.clear();
-  ui.sidebarDropRow.reset();
+  ui.sidebar.drag.clear();
 }
 
 
@@ -458,7 +442,7 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
     ui.overlays.handleMotion(x, y);
     return;
   }
-  if(ui.openMenu != ui::MenuId::None) {
+  if(ui.chrome.openMenu != ui::MenuId::None) {
     // Sliding along the bar with a menu open switches menus without a click,
     // which is the whole of what makes a menu bar feel like one rather than
     // like seven buttons.
@@ -467,60 +451,60 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
                               {0, 0, static_cast<float>(width), static_cast<float>(height)}, x, y);
     return;
   }
-  if(ui.draggingBlock) {
-    ui.blockDropOffset = ui.livePage.dropOffsetAt(y);
+  if(ui.blockDrag.active) {
+    ui.blockDrag.dropOffset = ui.livePage.dropOffsetAt(y);
     return;
   }
-  if(ui.selectingEditorText) {
+  if(ui.textSelect.active) {
     if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
-      ui.editor.selectRange(ui.editorSelectionAnchor, ui.livePage.offsetAt(x, y));
+      ui.editor.selectRange(ui.textSelect.anchor, ui.livePage.offsetAt(x, y));
     } else {
       const ShellLayout layout = shellLayout(ui, width, height);
       Rect editorRect = layout.content;
       if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
-      ui.editor.selectRange(ui.editorSelectionAnchor, editorIndexAtPoint(text, ui, editorRect, x, y));
+      ui.editor.selectRange(ui.textSelect.anchor, editorIndexAtPoint(text, ui, editorRect, x, y));
     }
     ui.revealEditorCursor = true;
     return;
   }
-  if(ui.scrollDragTarget != ScrollDragTarget::None) {
+  if(ui.pointer.scrollDrag != ScrollDrag::None) {
     const ShellLayout layout = shellLayout(ui, width, height);
-    switch(ui.scrollDragTarget) {
-      case ScrollDragTarget::Live:
+    switch(ui.pointer.scrollDrag) {
+      case ScrollDrag::Live:
         ui.livePage.setScroll(
-          scrollFromThumbY(ui.livePage.pageRect(), y, ui.scrollDragOffsetY, ui.livePage.maxScroll()));
+          scrollFromThumbY(ui.livePage.pageRect(), y, ui.pointer.scrollDragOffsetY, ui.livePage.maxScroll()));
         break;
-      case ScrollDragTarget::Sidebar:
-        ui.sidebarScroll = scrollFromThumbY(sidebarListRect(layout.sidebar), y, ui.scrollDragOffsetY,
-                                            ui.sidebarMaxScroll);
+      case ScrollDrag::Sidebar:
+        ui.sidebar.scroll = scrollFromThumbY(sidebarListRect(layout.sidebar), y, ui.pointer.scrollDragOffsetY,
+                                            ui.sidebar.maxScroll);
         break;
-      case ScrollDragTarget::Editor: {
+      case ScrollDrag::RawPane: {
         Rect editorRect = layout.content;
         if(ui.state.workspace().paneMode() == ui::PaneMode::Split) editorRect.w = layout.content.w / 2.0f;
-        ui.editorScroll = scrollFromThumbY(editorWritingRect(editorRect), y, ui.scrollDragOffsetY,
+        ui.raw.scroll = scrollFromThumbY(editorWritingRect(editorRect), y, ui.pointer.scrollDragOffsetY,
                                            editorMaxScroll(text, ui, editorRect));
         ui.revealEditorCursor = false;
         break;
       }
-      case ScrollDragTarget::Viewer: {
+      case ScrollDrag::Reading: {
         const Rect page = ui::pageRectIn(contentPanes(ui, layout.content).viewer);
         ui.readingPage.setScroll(
-          scrollFromThumbY(page, y, ui.scrollDragOffsetY, ui.readingPage.maxScroll()));
+          scrollFromThumbY(page, y, ui.pointer.scrollDragOffsetY, ui.readingPage.maxScroll()));
         break;
       }
-      case ScrollDragTarget::None: break;
+      case ScrollDrag::None: break;
     }
     return;
   }
-  if(ui.draggingNote || ui.draggingFolder) {
+  if(ui.sidebar.drag.active()) {
     const ShellLayout layout = shellLayout(ui, width, height);
     const auto row = sidebarRowAt(ui, sidebarListRect(layout.sidebar), x, y);
-    ui.sidebarDropRow = row && ui.sidebarRows[*row].kind == SidebarRow::Kind::Tree
+    ui.sidebar.drag.dropRow = row && ui.sidebar.rows[*row].kind == SidebarRow::Kind::Tree
                           ? row
                           : std::optional<std::size_t> {};
     return;
   }
-  if(ui.resizingSidebar) {
+  if(ui.sidebar.resizing) {
     ui.state.workspace().sidebarWidth =
       std::clamp(x, ui::kMinSidebarWidth, std::max(ui::kMinSidebarWidth, static_cast<float>(width) - 520.0f));
   }

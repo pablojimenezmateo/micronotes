@@ -20,14 +20,9 @@
 namespace micronotes::app {
 
 struct UiRuntime;
-enum class UiAction;
 
 // Runs the command named `id`. The names are `ui::actionSpecs()`'s.
 void performCommand(UiRuntime& ui, const std::string& id);
-
-// The pane a button in a pane's own chrome asks for. A small closed set that
-// predates the action table and is still how a drawn button says what it does.
-void performAction(UiRuntime& ui, UiAction action);
 
 // Which pane shows the note. Not a plain setter: the pane decides where focus
 // goes and whether a block selection survives, and a caller that reaches past

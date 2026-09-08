@@ -53,14 +53,14 @@ static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRunt
   const bool focused = ui.focus == FocusArea::Search;
   const ui::TextStyle style = ui::chromeStyle();
   ui::drawTextFieldFrame(renderer, search, focused);
-  ui.searchScopeToggle = parts.scope;
-  ui.offerTooltip(ui.searchScopeToggle,
-                  "Searching " + std::string(ui::searchScopeName(ui.searchScope)) + " - click to change");
+  ui.sidebar.scopeToggle = parts.scope;
+  ui.pointer.offerTooltip(ui.sidebar.scopeToggle,
+                  "Searching " + std::string(ui::searchScopeName(ui.fields.searchScope)) + " - click to change");
   ui::drawSearchGlyph(renderer, parts.label, focused ? theme().accent : theme().textMuted);
-  drawTextField(renderer, text, ui, ui.search, parts.field, focused, "Search all notes");
+  drawTextField(renderer, text, ui, ui.fields.search, parts.field, focused, "Search all notes");
   ui::drawSurface(renderer, parts.scope, theme().surfaceRaised,
                   focused ? theme().accent : theme().border);
-  const auto scopeLabel = ui::searchScopeLabel(ui.searchScope);
+  const auto scopeLabel = ui::searchScopeLabel(ui.fields.searchScope);
   text.draw(scopeLabel,
             std::round(parts.scope.x + (parts.scope.w - static_cast<float>(text.width(scopeLabel, style))) / 2.0f),
             ui::textTop(parts.scope, text, style), focused ? theme().accent : theme().textSecondary, style);
@@ -82,8 +82,8 @@ static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
   if(!ui.state.hasLibrary()) {
     drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
                      x, y, width, ui::keysFor(ui::ActionId::Settings) + "  Settings");
-  } else if(!ui.search.empty()) {
-    drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.search.text() + "\".",
+  } else if(!ui.fields.search.empty()) {
+    drawEmptyMessage(text, "Nothing matches", "No note contains \"" + ui.fields.search.text() + "\".",
                      x, y, width, "Esc  clear the search");
   } else if(!ui.state.selection().tag.empty()) {
     drawEmptyMessage(text, "No notes with this tag",
@@ -169,14 +169,14 @@ void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
     // in a mono face reads as a pipe character rather than as an insertion
     // point, so the caret used to say "your typing goes here" in exactly the
     // same voice as the text beside it.
-    if(ui.caretVisible) {
+    if(ui.caret.visible) {
       fill(renderer, {caretX, box.y - 2.0f, 2.0f, box.h + 4.0f}, theme().accent);
     }
     // Give the IME a candidate rectangle here too. Without it a dead-key or
     // composition popup opened while typing in a field lands at the window
     // origin instead of next to the text being composed.
-    ui.caretReported = true;
-    ui.caretRect = SDL_Rect {static_cast<int>(caretX), static_cast<int>(box.y - 2.0f),
+    ui.caret.reported = true;
+    ui.caret.rect = SDL_Rect {static_cast<int>(caretX), static_cast<int>(box.y - 2.0f),
                              2, static_cast<int>(box.h + 4.0f)};
   }
 }
@@ -196,7 +196,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + ui::kSidebarSearchBand - 1.0f, theme().border);
 
   const Rect list = sidebarListRect(rect);
-  ui.sidebarRect = list;
+  ui.sidebar.rect = list;
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const ui::TextStyle snippetStyle = snippetTextStyle();
   // Measured here and handed to the model, which stays free of the font: the
@@ -204,7 +204,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   // how tall that is.
   const SidebarMetrics metrics = sidebarMetrics(text.lineHeight(rowStyle), text.lineHeight(snippetStyle));
   buildSidebarRows(ui, list, metrics);
-  if(ui.sidebarRows.empty()) {
+  if(ui.sidebar.rows.empty()) {
     drawSidebarEmpty(text, ui, list);
     return;
   }
@@ -217,13 +217,13 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   };
   // The visible band, not the library: two binary searches over a row list that
   // tiles the panel. See `sidebarRowRange`.
-  const auto [firstRow, lastRow] = sidebarRowRange(ui.sidebarRows, list.y, list.y + list.h);
+  const auto [firstRow, lastRow] = sidebarRowRange(ui.sidebar.rows, list.y, list.y + list.h);
   for(std::size_t i = firstRow; i < lastRow; ++i) {
     // Trimmed now that the row is known to be painted. See `fillSearchSnippets`.
     fillSearchSnippets(ui, i, list.w, snippetWidth);
-    const auto& row = ui.sidebarRows[i];
+    const auto& row = ui.sidebar.rows[i];
     perf::addCounter(perf::CounterId::SidebarRowsDrawn);
-    const bool hot = ui.hovered(row.rect);
+    const bool hot = ui.pointer.over(row.rect);
     // Two columns, and every kind of row uses them: the gutter that holds a
     // disclosure or an icon, and the label beside it. Indent moves both.
     const float gutterX = row.rect.x + kSidebarGutterX + static_cast<float>(row.tree.depth) * kSidebarIndent;
@@ -233,7 +233,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
       ui::drawSectionBand(renderer, text, row.rect, row.disclosure, row.label, row.trailing,
                           row.collapsed, hot);
       if(row.section) {
-        ui.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
+        ui.pointer.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
       }
       continue;
     }
@@ -295,7 +295,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     // selections rather than as one place and one file.
     const bool selected = isNote && row.tree.noteId == selection.noteId;
     const bool current = !isNote && selection.tag.empty() && selection.folder == row.tree.folder;
-    const bool dropTarget = ui.sidebarDropRow && *ui.sidebarDropRow == i;
+    const bool dropTarget = ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == i;
     // Hover lifts the row's ground and nothing else, so the tree reads as "this
     // is what I would click" without masquerading as selected.
     drawRow(renderer, row.rect, theme().surfaceBackground,
@@ -305,7 +305,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     if(row.disclosure.w > 0.0f) {
       drawChevron(renderer, row.disclosure.x, row.disclosure.y + row.disclosure.h / 2.0f,
                   row.tree.expanded,
-                  selected || current || ui.hovered(row.disclosure) ? theme().textPrimary
+                  selected || current || ui.pointer.over(row.disclosure) ? theme().textPrimary
                                                                     : theme().textMuted);
     }
     if(isNote) {
@@ -365,7 +365,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
           for(std::size_t t = d; t < tagged->tags.size(); ++t) {
             rest += (rest.empty() ? "" : ", ") + tagged->tags[t];
           }
-          ui.offerTooltip(dots[d], rest);
+          ui.pointer.offerTooltip(dots[d], rest);
           continue;
         }
         const auto& tag = tagged->tags[d];
@@ -373,12 +373,12 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
         // The tag's name, and nothing else. A 7px disc raises exactly one
         // question -- *which* tag -- and "Filter by work" answers it while also
         // narrating a click the reader has not made yet.
-        ui.offerTooltip(dots[d], tag);
+        ui.pointer.offerTooltip(dots[d], tag);
       }
     }
   }
-  drawVerticalScrollbar(renderer, list, ui.sidebarScroll, ui.sidebarMaxScroll,
-                        ui.scrollDragTarget == ScrollDragTarget::Sidebar);
+  drawVerticalScrollbar(renderer, list, ui.sidebar.scroll, ui.sidebar.maxScroll,
+                        ui.pointer.scrollDrag == ScrollDrag::Sidebar);
 }
 
 }

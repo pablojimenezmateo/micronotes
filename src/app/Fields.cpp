@@ -10,18 +10,18 @@ namespace micronotes::app {
 
 editor::TextField* focusedField(UiRuntime& ui) {
   switch(ui.focus) {
-    case FocusArea::Search: return &ui.search;
-    case FocusArea::Find: return &ui.find;
-    case FocusArea::TagEditor: return &ui.tag;
-    case FocusArea::RenameNote: return &ui.rename;
-    case FocusArea::RenameFolder: return &ui.folderRename;
+    case FocusArea::Search: return &ui.fields.search;
+    case FocusArea::Find: return &ui.fields.find;
+    case FocusArea::TagEditor: return &ui.fields.tag;
+    case FocusArea::RenameNote: return &ui.fields.rename;
+    case FocusArea::RenameFolder: return &ui.fields.folderRename;
     default: return nullptr;
   }
 }
 
 void syncFocusedInput(UiRuntime& ui) {
   if(ui.focus == FocusArea::Search) {
-    ui.state.setSearch(ui.search.text(), ui.searchScope);
+    ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
     selectNoteAt(ui, 0);
   } else if(ui.focus == FocusArea::Find) {
     updateFindStatus(ui);
@@ -29,7 +29,7 @@ void syncFocusedInput(UiRuntime& ui) {
 }
 
 void updateFindStatus(UiRuntime& ui) {
-  const std::string& needle = ui.find.text();
+  const std::string& needle = ui.fields.find.text();
   if(needle.empty()) {
     ui.status = "Find in note";
     return;
@@ -47,15 +47,15 @@ void updateFindStatus(UiRuntime& ui) {
 // palette row run the same code rather than two copies that drift.
 void focusFindInNote(UiRuntime& ui) {
   ui.focus = FocusArea::Find;
-  ui.find.editor.selectAll();
+  ui.fields.find.editor.selectAll();
   updateFindStatus(ui);
 }
 
 void focusSearchAllNotes(UiRuntime& ui) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.focus = FocusArea::Search;
-  ui.search.editor.selectAll();
-  ui.state.setSearch(ui.search.text(), ui.searchScope);
+  ui.fields.search.editor.selectAll();
+  ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
   ui.status = "Search all notes";
 }
 

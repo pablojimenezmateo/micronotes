@@ -67,7 +67,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     // two disagreed about the same list -- see TD-20.
     if(!slot.visible) continue;
     const bool active = slot.index == workspace.activeTab;
-    const bool hot = ui::contains(slot.rect, ui.mouseX, ui.mouseY);
+    const bool hot = ui::contains(slot.rect, ui.pointer.x, ui.pointer.y);
     ui::drawStripTab(renderer, text, slot.rect, titles[slot.index], active, hot,
                      ui::kTabCloseReserve, colors);
     // A tab only says what it is when the title did not fit. Repeating a title
@@ -75,27 +75,27 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     const ui::TextStyle style = ui::chromeStyle();
     const float room = slot.rect.w - ui::kSidebarInset - ui::kTabCloseReserve;
     if(static_cast<float>(text.width(titles[slot.index], style)) > room) {
-      ui.offerTooltip(slot.rect, titles[slot.index]);
+      ui.pointer.offerTooltip(slot.rect, titles[slot.index]);
     }
     // The close button appears on the tab you are pointing at and on the one
     // you are reading; a strip of crosses is a strip that reads as a warning.
     if(!active && !hot) continue;
-    const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.mouseX, ui.mouseY);
+    const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.pointer.x, ui.pointer.y);
     ui::drawCloseGlyph(renderer, slot.close,
                        overClose ? theme().textPrimary
                        : active  ? colors.activeText
                                  : colors.inactiveText);
     // Offered after the tab's own, so the innermost control wins.
-    ui.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
+    ui.pointer.offerTooltip(ui::tabCloseHitRect(slot), "Close " + titles[slot.index]);
   }
 
   // The overflow chevrons last, over whichever tab reaches under them.
   ui::drawStripOverflowButton(renderer, text, layout.scrollLeft, false, layout.hiddenLeft,
-                              ui.hovered(layout.scrollLeft));
+                              ui.pointer.over(layout.scrollLeft));
   ui::drawStripOverflowButton(renderer, text, layout.scrollRight, true, layout.hiddenRight,
-                              ui.hovered(layout.scrollRight));
-  if(layout.hiddenLeft > 0) ui.offerTooltip(layout.scrollLeft, "Earlier tabs");
-  if(layout.hiddenRight > 0) ui.offerTooltip(layout.scrollRight, "Later tabs");
+                              ui.pointer.over(layout.scrollRight));
+  if(layout.hiddenLeft > 0) ui.pointer.offerTooltip(layout.scrollLeft, "Earlier tabs");
+  if(layout.hiddenRight > 0) ui.pointer.offerTooltip(layout.scrollRight, "Later tabs");
 }
 
 bool tabStripHasControlAt(ui::TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {

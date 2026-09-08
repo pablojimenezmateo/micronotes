@@ -77,7 +77,7 @@ void openWikiLink(UiRuntime& ui, std::string_view target) {
 // swallowing it, which is what makes the picker feel like part of typing.
 void openWikiMenu(UiRuntime& ui, std::size_t wikiStart) {
   ui.wikiStart = wikiStart;
-  ui.clearBlockSelection();
+  ui.blockSelection.clear();
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::List;
   overlay.id = "wiki-menu";

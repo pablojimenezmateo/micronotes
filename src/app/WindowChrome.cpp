@@ -31,7 +31,7 @@ SDL_HitTestResult SDLCALL windowHitTest(SDL_Window* window, const SDL_Point* are
   auto* context = static_cast<HitTestContext*>(data);
   if(!area || !context || !context->ui || !context->renderer) return SDL_HITTEST_NORMAL;
   UiRuntime& ui = *context->ui;
-  if(!ui.customChrome) return SDL_HITTEST_NORMAL;
+  if(!ui.chrome.customChrome) return SDL_HITTEST_NORMAL;
 
   // The renderer draws under SDL_SetRenderScale, so the window coordinates SDL
   // hands over have to come back to the space the rects were recorded in.
@@ -69,9 +69,9 @@ SDL_HitTestResult SDLCALL windowHitTest(SDL_Window* window, const SDL_Point* are
   // to start that move and never reaches the app, which is why the maximize
   // button is the only way to maximize: there is no second click for a
   // double-click to pair with.
-  if(contains(ui.menuItemsBand, x, y)) return SDL_HITTEST_NORMAL;
-  if(contains(ui.menuChevron, x, y)) return SDL_HITTEST_NORMAL;
-  for(const auto& box : ui.windowButtons) {
+  if(contains(ui.chrome.menuItemsBand, x, y)) return SDL_HITTEST_NORMAL;
+  if(contains(ui.chrome.menuChevron, x, y)) return SDL_HITTEST_NORMAL;
+  for(const auto& box : ui.chrome.windowButtons) {
     if(contains(ui::windowButtonHitRect(box), x, y)) return SDL_HITTEST_NORMAL;
   }
   return SDL_HITTEST_DRAGGABLE;
@@ -114,18 +114,18 @@ bool installWindowHitTest(SDL_Window* window, SDL_Renderer* renderer, UiRuntime&
   // if the platform refuses one the decorations come back and the drawn buttons
   // stand down.
   std::cerr << "SDL_SetWindowHitTest failed: " << SDL_GetError() << "\n";
-  ui.customChrome = false;
+  ui.chrome.customChrome = false;
   SDL_SetWindowBordered(window, true);
   return false;
 }
 
 bool pressWindowButton(UiRuntime& ui, float x, float y, Uint8 button) {
-  if(!ui.customChrome || button != SDL_BUTTON_LEFT) return false;
+  if(!ui.chrome.customChrome || button != SDL_BUTTON_LEFT) return false;
   static constexpr WindowAction kActions[] {WindowAction::Minimize, WindowAction::ToggleMaximize,
                                             WindowAction::Close};
-  for(std::size_t i = 0; i < ui.windowButtons.size(); ++i) {
-    if(!contains(ui.windowButtons[i], x, y)) continue;
-    ui.pendingWindowAction = kActions[i];
+  for(std::size_t i = 0; i < ui.chrome.windowButtons.size(); ++i) {
+    if(!contains(ui.chrome.windowButtons[i], x, y)) continue;
+    ui.chrome.pendingWindowAction = kActions[i];
     return true;
   }
   return false;
@@ -133,8 +133,8 @@ bool pressWindowButton(UiRuntime& ui, float x, float y, Uint8 button) {
 
 bool applyPendingWindowAction(SDL_Window* window, UiRuntime& ui, bool& running) {
   bool changed = false;
-  if(ui.pendingWindowAction != WindowAction::None) {
-    switch(ui.pendingWindowAction) {
+  if(ui.chrome.pendingWindowAction != WindowAction::None) {
+    switch(ui.chrome.pendingWindowAction) {
       case WindowAction::Minimize: SDL_MinimizeWindow(window); break;
       case WindowAction::ToggleMaximize:
         if((SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0) SDL_RestoreWindow(window);
@@ -143,15 +143,15 @@ bool applyPendingWindowAction(SDL_Window* window, UiRuntime& ui, bool& running) 
       case WindowAction::Close: running = false; break;
       case WindowAction::None: break;
     }
-    ui.pendingWindowAction = WindowAction::None;
+    ui.chrome.pendingWindowAction = WindowAction::None;
     changed = true;
   }
   // Read back rather than assumed: the compositor can maximize or restore the
   // window without being asked, and the middle button's glyph has to agree with
   // what actually happened.
   const bool maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
-  if(ui.windowMaximized != maximized) {
-    ui.windowMaximized = maximized;
+  if(ui.chrome.windowMaximized != maximized) {
+    ui.chrome.windowMaximized = maximized;
     changed = true;
   }
   return changed;

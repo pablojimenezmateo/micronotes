@@ -46,8 +46,8 @@ constexpr float kFavoriteGlyphSize = 13.0f;
 }
 
 void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
-  ui.crumbs.clear();
-  ui.favoriteButton = {};
+  ui.chrome.crumbs.clear();
+  ui.chrome.favoriteButton = {};
   if(ui::empty(rect)) return;
   fill(renderer, rect, theme().chromeBackground);
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h, theme().border);
@@ -83,10 +83,10 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
                                         : trail[i].filename().generic_string();
     const float w = static_cast<float>(text.width(label, style));
     const Rect hit {x - ui::kSpace1, rect.y + 1.0f, w + ui::kSpace2, rect.h - 2.0f};
-    const bool hot = ui.hovered(hit);
+    const bool hot = ui.pointer.over(hit);
     if(hot) fill(renderer, hit, theme().rowHighlight);
     text.draw(label, x, baseline, hot ? theme().textPrimary : theme().textMuted, style);
-    ui.crumbs.emplace_back(hit, trail[i]);
+    ui.chrome.crumbs.emplace_back(hit, trail[i]);
     x += w + ui::kSpace2;
     text.draw("/", x, baseline, theme().textDisabled, style);
     x += static_cast<float>(text.width("/", style)) + ui::kSpace2;
@@ -103,32 +103,32 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
 
   if(!note) return;
   // A filled star reads as "kept"; the outline is an offer.
-  ui.favoriteButton = {rect.x + rect.w - kFavoriteWidth - ui::kSpace2, rect.y + 1.0f,
+  ui.chrome.favoriteButton = {rect.x + rect.w - kFavoriteWidth - ui::kSpace2, rect.y + 1.0f,
                        kFavoriteWidth, rect.h - 2.0f};
   const bool pinned = ui.state.favorite(note->id);
-  ui.offerTooltip(ui.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
-  if(ui.hovered(ui.favoriteButton)) fill(renderer, ui.favoriteButton, theme().rowHighlight);
+  ui.pointer.offerTooltip(ui.chrome.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
+  if(ui.pointer.over(ui.chrome.favoriteButton)) fill(renderer, ui.chrome.favoriteButton, theme().rowHighlight);
   // The mark centred in the target rather than filling it. See
   // `kFavoriteGlyphSize`.
   ui::drawStarGlyph(renderer,
-                    {std::round(ui.favoriteButton.x + (ui.favoriteButton.w - kFavoriteGlyphSize) / 2.0f),
-                     std::round(ui.favoriteButton.y + (ui.favoriteButton.h - kFavoriteGlyphSize) / 2.0f),
+                    {std::round(ui.chrome.favoriteButton.x + (ui.chrome.favoriteButton.w - kFavoriteGlyphSize) / 2.0f),
+                     std::round(ui.chrome.favoriteButton.y + (ui.chrome.favoriteButton.h - kFavoriteGlyphSize) / 2.0f),
                      kFavoriteGlyphSize, kFavoriteGlyphSize},
                     pinned, pinned ? theme().accent : theme().textMuted);
 }
 
 bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
-  if(ui::contains(ui.favoriteButton, x, y)) {
+  if(ui::contains(ui.chrome.favoriteButton, x, y)) {
     const auto noteId = ui.state.selection().noteId;
     ui.status = ui.state.toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
     return true;
   }
-  for(const auto& [crumb, folder] : ui.crumbs) {
+  for(const auto& [crumb, folder] : ui.chrome.crumbs) {
     if(!ui::contains(crumb, x, y)) continue;
     if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return true;
     showFolder(ui, folder);
-    ui.search.reset();
+    ui.fields.search.reset();
     selectNoteAt(ui, 0);
     return true;
   }
@@ -139,8 +139,8 @@ bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {
 
 bool breadcrumbHasControlAt(const UiRuntime& ui, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
-  if(ui::contains(ui.favoriteButton, x, y)) return true;
-  for(const auto& [crumb, folder] : ui.crumbs) {
+  if(ui::contains(ui.chrome.favoriteButton, x, y)) return true;
+  for(const auto& [crumb, folder] : ui.chrome.crumbs) {
     (void)folder;
     if(ui::contains(crumb, x, y)) return true;
   }

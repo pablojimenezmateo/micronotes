@@ -52,7 +52,7 @@ void revealWindow(SDL_Window* window, const std::function<void(int, int)>& drawF
 
 // Makes `window` movable and resizable by its drawn chrome. Returns false when
 // the platform refuses a hit test, having already put the decorations back and
-// cleared `ui.customChrome` -- a borderless window nobody can move is worse
+// cleared `ui.chrome.customChrome` -- a borderless window nobody can move is worse
 // than a decorated one, so the caller does not have to handle the failure.
 //
 // `context` must outlive the window: SDL keeps the pointer and calls back into
@@ -68,7 +68,7 @@ bool installWindowHitTest(SDL_Window* window, SDL_Renderer* renderer, UiRuntime&
 
 // Carries out whatever the drawn buttons recorded this frame and clears it.
 // Returns true when something happened, so the caller knows to repaint; sets
-// `running` to false for a close. Also reconciles `ui.windowMaximized` with the
+// `running` to false for a close. Also reconciles `ui.chrome.windowMaximized` with the
 // window's real state, which the compositor can change without being asked.
 bool applyPendingWindowAction(SDL_Window* window, UiRuntime& ui, bool& running);
 

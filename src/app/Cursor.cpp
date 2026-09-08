@@ -46,11 +46,11 @@ bool scrollbarHit(Rect viewport, int scroll, int maxScroll, float x, float y) {
 }
 
 CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int height) {
-  if(ui.resizingSidebar) return CursorKind::ResizeHorizontal;
-  if(ui.scrollDragTarget != ScrollDragTarget::None) return CursorKind::ResizeVertical;
+  if(ui.sidebar.resizing) return CursorKind::ResizeHorizontal;
+  if(ui.pointer.scrollDrag != ScrollDrag::None) return CursorKind::ResizeVertical;
 
-  const float x = ui.mouseX;
-  const float y = ui.mouseY;
+  const float x = ui.pointer.x;
+  const float y = ui.pointer.y;
   const ShellLayout layout = shellLayout(ui, width, height);
   if(isResizeGutter(layout, x, y)) return CursorKind::ResizeHorizontal;
   if(menuBarHasControlAt(text, ui, layout.menuBar, x, y)) return CursorKind::Pointer;
@@ -68,12 +68,12 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
   if(ui.overlays.active()) return cursorForOverlay(ui.overlays.cursorAt(x, y));
 
   if(contains(layout.sidebar, x, y)) {
-    if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebarScroll, ui.sidebarMaxScroll, x, y)) {
+    if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebar.scroll, ui.sidebar.maxScroll, x, y)) {
       return CursorKind::Pointer;
     }
     const Rect search = searchBoxRect(layout.sidebar);
     if(contains(search, x, y)) {
-      return contains(ui.searchScopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
+      return contains(ui.sidebar.scopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
     }
     if(sidebarRowAt(ui, sidebarListRect(layout.sidebar), x, y)) return CursorKind::Pointer;
     return CursorKind::Default;
@@ -98,7 +98,7 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
 
   if(hasEditor && contains(editorRect, x, y)) {
     const Rect writing = editorWritingRect(editorRect);
-    if(scrollbarHit(writing, ui.editorScroll, editorMaxScroll(text, ui, editorRect), x, y)) {
+    if(scrollbarHit(writing, ui.raw.scroll, editorMaxScroll(text, ui, editorRect), x, y)) {
       return CursorKind::Pointer;
     }
     if(contains(writing, x, y)) return CursorKind::Text;

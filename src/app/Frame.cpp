@@ -39,16 +39,15 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   // Before anything draws a caret, and recorded so the loop can tell when the
   // blink has flipped underneath it. See `settleCaret`, `caretPhaseChanged`.
   (void)settleCaret(ui);
-  ui.caretPainted = ui.caretVisible;
+  ui.caret.painted = ui.caret.visible;
   ui.linkRegions.clear();
-  ui.buttonRegions.clear();
   // Cleared here and set by whichever surface the pointer turns out to be over,
   // so a frame can never end up with two tooltips resolved.
-  ui.tooltip = {};
+  ui.pointer.tooltip = {};
 
   // First, above everything: it carries the menus and the window controls, and
   // the popup drawn at the end of the frame hangs off it.
-  ui.menuBarRect = layout.menuBar;
+  ui.chrome.menuBarRect = layout.menuBar;
   {
     const perf::ScopeTimer timer("shell.menu_bar");
     drawMenuBar(renderer, text, ui, layout.menuBar);
@@ -111,7 +110,7 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   }
   // An open overlay is a conversation; a tooltip about what is behind it would
   // be answering a question nobody is asking any more.
-  if(ui.overlays.active()) ui.tooltip = {};
+  if(ui.overlays.active()) ui.pointer.tooltip = {};
   {
     // After every panel, so it lands on top of whichever one it hangs over.
     const perf::ScopeTimer timer("shell.menu");
@@ -119,10 +118,10 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   }
   {
     const perf::ScopeTimer timer("shell.overlays");
-    ui.overlays.setCaretVisible(ui.caretVisible);
+    ui.overlays.setCaretVisible(ui.caret.visible);
     ui.overlays.draw(renderer, text, width, height);
     // Last, so nothing paints over it.
-    drawTooltip(renderer, text, ui.tooltip, {0, 0, static_cast<float>(width), static_cast<float>(height)});
+    drawTooltip(renderer, text, ui.pointer.tooltip, {0, 0, static_cast<float>(width), static_cast<float>(height)});
   }
   // The frame's work ends here. With vsync on, the present below blocks until
   // the display is ready, so charging that wait to the frame reports the refresh

@@ -52,12 +52,12 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
   // Then whichever panel the pointer is in. The tree and the outline can both
   // be taller than the window, so the pointer's column decides before the pane
   // mode does.
-  if(contains(layout.sidebar, ui.mouseX, ui.mouseY)) {
-    ui.sidebarScroll = std::clamp(ui.sidebarScroll + ui.sidebarWheel.take(notches, kSidebarScrollPixelsPerNotch),
-                                  0, ui.sidebarMaxScroll);
+  if(contains(layout.sidebar, ui.pointer.x, ui.pointer.y)) {
+    ui.sidebar.scroll = std::clamp(ui.sidebar.scroll + ui.sidebar.wheel.take(notches, kSidebarScrollPixelsPerNotch),
+                                  0, ui.sidebar.maxScroll);
     return;
   }
-  if(contains(layout.rightPanel, ui.mouseX, ui.mouseY)) {
+  if(contains(layout.rightPanel, ui.pointer.x, ui.pointer.y)) {
     ui.rightPanel.scroll = std::clamp(
       ui.rightPanel.scroll + ui.rightPanel.wheel.take(notches, kRightPanelScrollPixelsPerNotch),
       0, ui.rightPanel.maxScroll);
@@ -75,9 +75,9 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
   // being read.
   const bool single = !(panes.hasEditor && panes.hasViewer);
   const bool wheelViewer = panes.hasViewer &&
-    (contains(panes.viewer, ui.mouseX, ui.mouseY) || (single && ui.focus == FocusArea::Viewer));
+    (contains(panes.viewer, ui.pointer.x, ui.pointer.y) || (single && ui.focus == FocusArea::Viewer));
   const bool wheelEditor = panes.hasEditor &&
-    (contains(panes.editor, ui.mouseX, ui.mouseY) || (single && ui.focus == FocusArea::Editor));
+    (contains(panes.editor, ui.pointer.x, ui.pointer.y) || (single && ui.focus == FocusArea::Editor));
 
   if(wheelViewer) {
     // The page owns its scroll and clamps it to what it last laid out, so the
@@ -88,7 +88,7 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
     return;
   }
   if(wheelEditor) {
-    ui.editorScroll = std::clamp(ui.editorScroll + ui.editorWheel.take(notches, kEditorScrollLinesPerNotch),
+    ui.raw.scroll = std::clamp(ui.raw.scroll + ui.raw.wheel.take(notches, kEditorScrollLinesPerNotch),
                                  0, editorMaxScroll(text, ui, panes.editor));
     ui.revealEditorCursor = false;
   }

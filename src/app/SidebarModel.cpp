@@ -59,8 +59,8 @@ float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metric
 const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
   const auto& selection = ui.state.selection();
   const SearchKey key {selection.search, selection.searchScope, ui.state.revision()};
-  if(const auto* results = ui.searchResults.get(key)) return *results;
-  return ui.searchResults.store(key, ui.state.currentSearchResults());
+  if(const auto* results = ui.sidebar.searchResults.get(key)) return *results;
+  return ui.sidebar.searchResults.store(key, ui.state.currentSearchResults());
 }
 
 namespace {
@@ -70,9 +70,9 @@ namespace {
 // the first row, and every row is a string, a path and a rect. Called through
 // buildSidebarRows(), which is what keeps it off the frame path.
 void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
-  ui.sidebarRows.clear();
+  ui.sidebar.rows.clear();
   const float top = rect.y + 12.0f;
-  float y = top - static_cast<float>(ui.sidebarScroll);
+  float y = top - static_cast<float>(ui.sidebar.scroll);
 
   // A caption on what the list is showing: the result count, the tag being
   // filtered by. It heads the list the same way a band does and reads the same,
@@ -90,7 +90,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
     // the panel edges reads as a card sitting in the list rather than as a
     // division of it, and a division is the whole point.
     row.rect = {rect.x, y, rect.w, metrics.label};
-    ui.sidebarRows.push_back(std::move(row));
+    ui.sidebar.rows.push_back(std::move(row));
     y += metrics.label;
   };
   // A band that can be shut. Returns whether to go on and emit its contents,
@@ -113,7 +113,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
                       y + (metrics.label - kSidebarGutterWidth) / 2.0f,
                       kSidebarGutterWidth, kSidebarGutterWidth};
     const bool collapsed = row.collapsed;
-    ui.sidebarRows.push_back(std::move(row));
+    ui.sidebar.rows.push_back(std::move(row));
     y += metrics.label;
     return !collapsed;
   };
@@ -127,7 +127,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
                         kSidebarGutterWidth, kSidebarGutterWidth};
     }
     row.tree = std::move(tree);
-    ui.sidebarRows.push_back(std::move(row));
+    ui.sidebar.rows.push_back(std::move(row));
     y += metrics.row;
   };
 
@@ -168,16 +168,16 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   };
   // Whatever the list ended up holding, it scrolls the same way.
   const auto finish = [&]() {
-    perf::addCounter(perf::CounterId::SidebarRowsBuilt, ui.sidebarRows.size());
-    const float contentHeight = y + static_cast<float>(ui.sidebarScroll) - top;
-    ui.sidebarRowsKey.contentHeight = contentHeight;
-    ui.sidebarMaxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight - (rect.h - 24.0f))));
-    ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
+    perf::addCounter(perf::CounterId::SidebarRowsBuilt, ui.sidebar.rows.size());
+    const float contentHeight = y + static_cast<float>(ui.sidebar.scroll) - top;
+    ui.sidebar.rowsKey.contentHeight = contentHeight;
+    ui.sidebar.maxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight - (rect.h - 24.0f))));
+    ui.sidebar.scroll = std::clamp(ui.sidebar.scroll, 0, ui.sidebar.maxScroll);
   };
 
   // A running query replaces the tree rather than appearing beside it. The
   // sidebar answers one question at a time, and Esc puts the tree back.
-  if(!ui.search.empty()) {
+  if(!ui.fields.search.empty()) {
     const auto& results = searchResults(ui);
     // Nothing at all rather than a heading over a hole: a bare "0 RESULTS" is
     // a row saying the list is empty, drawn instead of the empty state that
@@ -201,7 +201,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
       row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f,
                   searchResultRowHeight(row.matchLineCount, metrics)};
       y += row.rect.h;
-      ui.sidebarRows.push_back(std::move(row));
+      ui.sidebar.rows.push_back(std::move(row));
     }
     finish();
     return;
@@ -245,7 +245,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // The tree is a band like the other three. It had no heading at all, which is
   // most of what made the divisions unclear: an unlabelled group between two
   // labelled ones reads as the tail of the one above it.
-  auto treeRows = ui.tree.rows(ui.state.folders(), notes);
+  auto treeRows = ui.sidebar.tree.rows(ui.state.folders(), notes);
   if(!treeRows.empty()) {
     if(pushSection(ui::SidebarSection::Notebooks, "Notebooks", notes.size())) {
       for(auto& row : treeRows) pushTreeRow(std::move(row));
@@ -262,7 +262,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
         row.kind = SidebarRow::Kind::Tag;
         row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f, metrics.tag};
         row.tag = tag;
-        ui.sidebarRows.push_back(std::move(row));
+        ui.sidebar.rows.push_back(std::move(row));
         y += metrics.tag;
       }
     }
@@ -281,7 +281,7 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // any more: a band is a control, and four shut bands is what a reader who
   // shut them asked for. So the check is now for a list with no bands *and* no
   // rows -- which is a library with nothing in it.
-  const bool onlyLabels = std::none_of(ui.sidebarRows.begin(), ui.sidebarRows.end(),
+  const bool onlyLabels = std::none_of(ui.sidebar.rows.begin(), ui.sidebar.rows.end(),
                                        [](const auto& row) {
                                          return row.kind != SidebarRow::Kind::SectionLabel ||
                                                 row.section.has_value();
@@ -294,16 +294,16 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   //
   // Asked of the *content* rows rather than of the whole list, because the
   // NOTEBOOKS band now sits above that row and a size check counted two.
-  const auto contentRows = std::count_if(ui.sidebarRows.begin(), ui.sidebarRows.end(),
+  const auto contentRows = std::count_if(ui.sidebar.rows.begin(), ui.sidebar.rows.end(),
                                          [](const auto& row) {
                                            return row.kind != SidebarRow::Kind::SectionLabel;
                                          });
   const bool rootAlone = contentRows == 1 &&
-    std::any_of(ui.sidebarRows.begin(), ui.sidebarRows.end(), [](const auto& row) {
+    std::any_of(ui.sidebar.rows.begin(), ui.sidebar.rows.end(), [](const auto& row) {
       return row.kind == SidebarRow::Kind::Tree &&
              row.tree.kind == ui::TreeRowKind::Folder && row.tree.folder.empty();
     });
-  if(onlyLabels || rootAlone) ui.sidebarRows.clear();
+  if(onlyLabels || rootAlone) ui.sidebar.rows.clear();
 }
 
 }
@@ -318,12 +318,12 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
 // frame spent re-deriving three dozen visible rows from four hundred notes.
 void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   const auto& workspace = ui.state.workspace();
-  const auto& previous = ui.sidebarRowsKey;
+  const auto& previous = ui.sidebar.rowsKey;
   const bool reusable = previous.valid &&
     previous.stateRevision == ui.state.revision() &&
-    previous.treeRevision == ui.tree.revision() &&
-    previous.search == ui.search.text() &&
-    previous.searchScope == ui.searchScope &&
+    previous.treeRevision == ui.sidebar.tree.revision() &&
+    previous.search == ui.fields.search.text() &&
+    previous.searchScope == ui.fields.searchScope &&
     previous.tag == ui.state.selection().tag &&
     previous.favorites == workspace.favorites &&
     previous.recents == workspace.recents &&
@@ -338,33 +338,33 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   if(reusable) {
     // Clamp first: the scroll the rows are shifted by has to be the one they
     // will be drawn at, or a clamp after the shift leaves them a scroll behind.
-    ui.sidebarMaxScroll = std::max(0, static_cast<int>(std::ceil(previous.contentHeight - (rect.h - 24.0f))));
-    ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
+    ui.sidebar.maxScroll = std::max(0, static_cast<int>(std::ceil(previous.contentHeight - (rect.h - 24.0f))));
+    ui.sidebar.scroll = std::clamp(ui.sidebar.scroll, 0, ui.sidebar.maxScroll);
     const float dx = rect.x - previous.originX;
-    const float dy = (rect.y - previous.originY) - static_cast<float>(ui.sidebarScroll - previous.scroll);
+    const float dy = (rect.y - previous.originY) - static_cast<float>(ui.sidebar.scroll - previous.scroll);
     if(dx != 0.0f || dy != 0.0f) {
-      for(auto& row : ui.sidebarRows) {
+      for(auto& row : ui.sidebar.rows) {
         row.rect.x += dx;
         row.rect.y += dy;
         row.disclosure.x += dx;
         row.disclosure.y += dy;
       }
     }
-    ui.sidebarRowsKey.originX = rect.x;
-    ui.sidebarRowsKey.originY = rect.y;
-    ui.sidebarRowsKey.scroll = ui.sidebarScroll;
-    perf::addCounter(perf::CounterId::SidebarRowsReused, ui.sidebarRows.size());
+    ui.sidebar.rowsKey.originX = rect.x;
+    ui.sidebar.rowsKey.originY = rect.y;
+    ui.sidebar.rowsKey.scroll = ui.sidebar.scroll;
+    perf::addCounter(perf::CounterId::SidebarRowsReused, ui.sidebar.rows.size());
     return;
   }
 
   rebuildSidebarRows(ui, rect, metrics);
 
-  auto& key = ui.sidebarRowsKey;
+  auto& key = ui.sidebar.rowsKey;
   key.valid = true;
   key.stateRevision = ui.state.revision();
-  key.treeRevision = ui.tree.revision();
-  key.search = ui.search.text();
-  key.searchScope = ui.searchScope;
+  key.treeRevision = ui.sidebar.tree.revision();
+  key.search = ui.fields.search.text();
+  key.searchScope = ui.fields.searchScope;
   key.tag = ui.state.selection().tag;
   key.favorites = workspace.favorites;
   key.recents = workspace.recents;
@@ -376,24 +376,24 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   key.originX = rect.x;
   key.originY = rect.y;
   // Read back rather than remembered: finish() clamps it.
-  key.scroll = ui.sidebarScroll;
+  key.scroll = ui.sidebar.scroll;
 }
 
 // Scrolls the cursor row into view using last frame's geometry, which is all
 // that is needed to know whether it is off an edge and by how much.
 void revealSidebarRow(UiRuntime& ui, std::size_t index) {
-  if(index >= ui.sidebarRows.size() || ui.sidebarRect.h <= 0.0f) return;
-  const Rect row = ui.sidebarRows[index].rect;
-  const float top = ui.sidebarRect.y + 8.0f;
-  const float bottom = ui.sidebarRect.y + ui.sidebarRect.h - 8.0f;
-  if(row.y < top) ui.sidebarScroll -= static_cast<int>(std::ceil(top - row.y));
-  else if(row.y + row.h > bottom) ui.sidebarScroll += static_cast<int>(std::ceil(row.y + row.h - bottom));
-  ui.sidebarScroll = std::clamp(ui.sidebarScroll, 0, ui.sidebarMaxScroll);
+  if(index >= ui.sidebar.rows.size() || ui.sidebar.rect.h <= 0.0f) return;
+  const Rect row = ui.sidebar.rows[index].rect;
+  const float top = ui.sidebar.rect.y + 8.0f;
+  const float bottom = ui.sidebar.rect.y + ui.sidebar.rect.h - 8.0f;
+  if(row.y < top) ui.sidebar.scroll -= static_cast<int>(std::ceil(top - row.y));
+  else if(row.y + row.h > bottom) ui.sidebar.scroll += static_cast<int>(std::ceil(row.y + row.h - bottom));
+  ui.sidebar.scroll = std::clamp(ui.sidebar.scroll, 0, ui.sidebar.maxScroll);
 }
 
 void moveTreeCursor(UiRuntime& ui, int delta) {
-  if(ui.sidebarRows.empty()) return;
-  int index = std::clamp(ui.folderCursor, 0, static_cast<int>(ui.sidebarRows.size()) - 1) + delta;
+  if(ui.sidebar.rows.empty()) return;
+  int index = std::clamp(ui.sidebar.cursor, 0, static_cast<int>(ui.sidebar.rows.size()) - 1) + delta;
   // A *caption* is drawn and nothing else, so the cursor steps over it. A band
   // is a control -- it shuts the rows under it -- so the cursor stops on one,
   // and Left/Right there shuts and opens it. Without that the collapsing was
@@ -401,24 +401,24 @@ void moveTreeCursor(UiRuntime& ui, int delta) {
   //
   // Landing on a band is safe because `activateSidebarRow` ignores a `Cursor`
   // activation on one: arrowing past a band must not shut it.
-  while(index >= 0 && index < static_cast<int>(ui.sidebarRows.size()) &&
-        ui.sidebarRows[static_cast<std::size_t>(index)].kind == SidebarRow::Kind::SectionLabel &&
-        !ui.sidebarRows[static_cast<std::size_t>(index)].section) {
+  while(index >= 0 && index < static_cast<int>(ui.sidebar.rows.size()) &&
+        ui.sidebar.rows[static_cast<std::size_t>(index)].kind == SidebarRow::Kind::SectionLabel &&
+        !ui.sidebar.rows[static_cast<std::size_t>(index)].section) {
     index += delta;
   }
-  if(index < 0 || index >= static_cast<int>(ui.sidebarRows.size())) return;
-  ui.folderCursor = index;
+  if(index < 0 || index >= static_cast<int>(ui.sidebar.rows.size())) return;
+  ui.sidebar.cursor = index;
   revealSidebarRow(ui, static_cast<std::size_t>(index));
   // Cursor, not Click: arrowing through the tree shows each note it passes
   // over, and must neither unfold the library nor open a tab per note.
-  activateSidebarRow(ui, ui.sidebarRows[static_cast<std::size_t>(index)], RowActivation::Cursor);
+  activateSidebarRow(ui, ui.sidebar.rows[static_cast<std::size_t>(index)], RowActivation::Cursor);
 }
 
 // Right opens a folder, or steps into it when it is already open; Left closes
 // it, or jumps to its parent when there is nothing to close.
 void expandTreeCursor(UiRuntime& ui, bool open) {
-  if(ui.folderCursor < 0 || ui.folderCursor >= static_cast<int>(ui.sidebarRows.size())) return;
-  const SidebarRow row = ui.sidebarRows[static_cast<std::size_t>(ui.folderCursor)];
+  if(ui.sidebar.cursor < 0 || ui.sidebar.cursor >= static_cast<int>(ui.sidebar.rows.size())) return;
+  const SidebarRow row = ui.sidebar.rows[static_cast<std::size_t>(ui.sidebar.cursor)];
   // A band shuts and opens like a folder does, which is what it looks like:
   // both wear the same chevron and both hide the rows under them.
   if(row.kind == SidebarRow::Kind::SectionLabel && row.section) {
@@ -438,14 +438,14 @@ void expandTreeCursor(UiRuntime& ui, bool open) {
     return;
   }
   if(!row.tree.expandable) return;
-  ui.tree.setExpanded(row.tree.folder, open);
+  ui.sidebar.tree.setExpanded(row.tree.folder, open);
 }
 
 FocusArea chooseSidebarCursorRow(UiRuntime& ui) {
-  if(ui.folderCursor < 0 || ui.folderCursor >= static_cast<int>(ui.sidebarRows.size())) {
+  if(ui.sidebar.cursor < 0 || ui.sidebar.cursor >= static_cast<int>(ui.sidebar.rows.size())) {
     return FocusArea::Editor;
   }
-  const SidebarRow row = ui.sidebarRows[static_cast<std::size_t>(ui.folderCursor)];
+  const SidebarRow row = ui.sidebar.rows[static_cast<std::size_t>(ui.sidebar.cursor)];
   activateSidebarRow(ui, row, RowActivation::Click);
   // A tag and a band both change what the list is showing rather than opening
   // anything, so the reader stays in the list to see what happened.
@@ -473,7 +473,7 @@ void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uin
   // `activateSidebarRow` handles below.
   if(row.kind == SidebarRow::Kind::Tree && row.disclosure.w > 0.0f &&
      contains(row.disclosure, x, y) && button == SDL_BUTTON_LEFT) {
-    ui.tree.toggle(row.tree.folder);
+    ui.sidebar.tree.toggle(row.tree.folder);
     return;
   }
   // On a tag's own row the whole row already means that tag, so the dot on it
@@ -493,11 +493,11 @@ void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uin
   // whether the pointer moves before it is let go.
   if(button == SDL_BUTTON_LEFT && row.kind == SidebarRow::Kind::Tree) {
     if(row.tree.kind == ui::TreeRowKind::Note) {
-      ui.draggingNote = true;
-      ui.draggingNoteId = row.tree.noteId;
+      ui.sidebar.drag.note = true;
+      ui.sidebar.drag.noteId = row.tree.noteId;
     } else if(!row.tree.folder.empty()) {
-      ui.draggingFolder = true;
-      ui.draggingFolderPath = row.tree.folder;
+      ui.sidebar.drag.folder = true;
+      ui.sidebar.drag.folderPath = row.tree.folder;
     }
   }
 }
@@ -539,7 +539,7 @@ void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how)
     // Opening a note moves the context to its folder *and* opens the tree onto
     // it, so the breadcrumb and the sidebar agree about where the note is. A
     // search owns the row list while it is running, so it is left alone.
-    if(ui.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
+    if(ui.fields.search.empty() && ui.state.selection().noteId == row.tree.noteId) {
       showFolder(ui, row.tree.folder);
     }
     return;
@@ -548,14 +548,14 @@ void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how)
   // in it, which is a move of the selection rather than opening anything new.
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectFolder(row.tree.folder);
-  if(how == RowActivation::Click) ui.tree.setExpanded(row.tree.folder, true);
+  if(how == RowActivation::Click) ui.sidebar.tree.setExpanded(row.tree.folder, true);
   selectNoteAt(ui, 0);
 }
 
 void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
                         const SnippetMeasure& measure) {
-  if(index >= ui.sidebarRows.size()) return;
-  SidebarRow& row = ui.sidebarRows[index];
+  if(index >= ui.sidebar.rows.size()) return;
+  SidebarRow& row = ui.sidebar.rows[index];
   if(row.kind != SidebarRow::Kind::SearchResult || row.matchLinesBuilt) return;
   row.matchLinesBuilt = true;
   const auto& results = searchResults(ui);
@@ -641,9 +641,9 @@ std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, Rect sidebar, float
   // A band of zero height is the rows the pointer's y is inside. Rows tile, so
   // a pointer exactly on a boundary is inside two of them and the first one
   // wins -- which is the answer the walk gave.
-  const auto [begin, end] = sidebarRowRange(ui.sidebarRows, y, y);
+  const auto [begin, end] = sidebarRowRange(ui.sidebar.rows, y, y);
   for(std::size_t i = begin; i < end; ++i) {
-    const auto& row = ui.sidebarRows[i];
+    const auto& row = ui.sidebar.rows[i];
     // A caption is drawn and nothing else -- a result count and the name of the
     // tag being filtered by are not controls. A *band* is: it shuts the rows
     // under it, so it has to be findable under the pointer. This used to skip

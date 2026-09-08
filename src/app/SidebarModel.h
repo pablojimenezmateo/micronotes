@@ -121,7 +121,7 @@ using SnippetMeasure = std::function<int(std::string_view)>;
 // library has changed. Each query is a hit on SQLite.
 const std::vector<library::SearchResult>& searchResults(UiRuntime& ui);
 
-// Fills `ui.sidebarRows` for a list occupying `rect`, reusing the standing list
+// Fills `ui.sidebar.rows` for a list occupying `rect`, reusing the standing list
 // when nothing it depends on has moved. An empty result means the list holds
 // nothing worth drawing -- the caller draws its empty message instead, and
 // hit-testing finds nothing, which is the same answer.

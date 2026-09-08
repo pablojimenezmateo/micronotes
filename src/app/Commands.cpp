@@ -27,7 +27,7 @@
 namespace micronotes::app {
 
 void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
-  ui.clearBlockSelection();
+  ui.blockSelection.clear();
   ui.state.workspace().setPaneMode(mode);
   ui.focus = mode == ui::PaneMode::Viewer ? FocusArea::Viewer : FocusArea::Editor;
   ui.revealEditorCursor = true;
@@ -43,42 +43,6 @@ void cyclePaneMode(UiRuntime& ui) {
   }
 }
 
-void performAction(UiRuntime& ui, UiAction action) {
-  switch(action) {
-    case UiAction::Refresh:
-      invalidateWikiNotes(ui);
-      ui.state.refreshLibrary();
-      ui.status = "Refreshed library";
-      break;
-    case UiAction::NewNote:
-      createNote(ui);
-      break;
-    case UiAction::RenameNote:
-      beginRename(ui);
-      break;
-    case UiAction::DeleteNote:
-      openDeleteNoteConfirm(ui);
-      break;
-    case UiAction::Save:
-      (void)saveCurrent(ui);
-      break;
-    case UiAction::Tags:
-      beginTagEdit(ui);
-      break;
-    case UiAction::PaneEditor:
-      ui.state.workspace().setPaneMode(ui::PaneMode::Editor);
-      ui.focus = FocusArea::Editor;
-      break;
-    case UiAction::PaneViewer:
-      ui.state.workspace().setPaneMode(ui::PaneMode::Viewer);
-      ui.focus = FocusArea::Viewer;
-      break;
-    case UiAction::PaneSplit:
-      ui.state.workspace().setPaneMode(ui::PaneMode::Split);
-      ui.focus = FocusArea::Editor;
-      break;
-  }
-}
 
 // Opens a different library without restarting. The one being left is written
 // out first, so its open note, favorites and folds go with it rather than
@@ -138,7 +102,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(handleNotePathCommand(ui, id, {})) {}
   else if(id == "move-note") openFolderPalette(ui);
   else if(id == "move-blocks") {
-    if(!ui.blockSelectActive) ui.status = "Select blocks first with Esc";
+    if(!ui.blockSelection.active) ui.status = "Select blocks first with Esc";
     else openNotePalette(ui, "move-blocks-target", "Move blocks to");
   }
   else if(id == "delete-note") openDeleteNoteConfirm(ui);
@@ -154,7 +118,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   // Through the same pending action the close button raises, so the one place
   // that knows how to shut the window down -- flushing the open note and the
   // library's state on the way out -- stays the only one.
-  else if(id == "quit") ui.pendingWindowAction = WindowAction::Close;
+  else if(id == "quit") ui.chrome.pendingWindowAction = WindowAction::Close;
   else if(id == "shortcuts") openShortcutHelp(ui);
   // The editing verbs. They used to be reachable only from the key chain, on
   // the reasoning that a palette row for one is useless -- the palette has
@@ -177,7 +141,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
     if(ui.focus != FocusArea::Editor) ui.status = "Put the caret in a task first";
     else if(!applyTransform(ui, doc::toggleTodo)) ui.status = "No task to toggle here";
   }
-  else if(id == "turn-into") openTurnIntoMenu(ui, ui.mouseX, ui.mouseY);
+  else if(id == "turn-into") openTurnIntoMenu(ui, ui.pointer.x, ui.pointer.y);
   else if(id == "insert-block") openSlashMenu(ui, ui.editor.cursor());
   else if(id == "duplicate-block") performBlockCommand(ui, "duplicate");
   else if(id == "delete-block") performBlockCommand(ui, "delete");

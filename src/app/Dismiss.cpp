@@ -10,17 +10,17 @@ Dismissed dismissOne(UiRuntime& ui) {
   // focus: a query is still narrowing the sidebar after the reader has clicked
   // into a result, and Esc from there should clear the query rather than fall
   // straight through to the page.
-  if(!ui.search.empty()) {
-    ui.search.reset();
-    ui.state.setSearch("", ui.searchScope);
+  if(!ui.fields.search.empty()) {
+    ui.fields.search.reset();
+    ui.state.setSearch("", ui.fields.searchScope);
     return Dismissed::Search;
   }
-  if(!ui.find.empty()) {
-    ui.find.reset();
+  if(!ui.fields.find.empty()) {
+    ui.fields.find.reset();
     return Dismissed::Find;
   }
-  if(ui.creatingFolder) {
-    ui.creatingFolder = false;
+  if(ui.sidebar.creatingFolder) {
+    ui.sidebar.creatingFolder = false;
     return Dismissed::FolderName;
   }
   // The tag filter, which is the one that had no way out at all. It sits
@@ -29,8 +29,8 @@ Dismissed dismissOne(UiRuntime& ui) {
   if(clearTagFilter(ui)) return Dismissed::TagFilter;
   // Last, because it is a selection inside the page rather than a filter over
   // the library: with nothing narrowed, Esc belongs to whatever has focus.
-  if(ui.blockSelectActive) {
-    ui.clearBlockSelection();
+  if(ui.blockSelection.active) {
+    ui.blockSelection.clear();
     return Dismissed::BlockSelection;
   }
   return Dismissed::Nothing;

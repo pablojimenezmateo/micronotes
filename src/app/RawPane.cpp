@@ -45,15 +45,15 @@ const std::vector<editor::SoftWrapRow>& editorRows(TextRenderer& text, UiRuntime
   const Rect writing = editorWritingRect(rect);
   const RawRowsKey key {ui.editor.revision(), static_cast<int>(std::max(1.0f, writing.w - 20.0f)),
                         ui::textSize()};
-  if(const auto* rows = ui.rawRows.get(key)) return *rows;
-  return ui.rawRows.store(key, editor::softWrap(ui.editor.text(), key.wrapWidth, editorMeasure(text)));
+  if(const auto* rows = ui.raw.rows.get(key)) return *rows;
+  return ui.raw.rows.store(key, editor::softWrap(ui.editor.text(), key.wrapWidth, editorMeasure(text)));
 }
 
 int editorMaxScroll(TextRenderer& text, UiRuntime& ui, Rect rect) {
   Rect writing = editorWritingRect(rect);
   const int lineHeight = text.lineHeight();
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
-  ui.editorVisibleRows = maxLines;
+  ui.raw.visibleRows = maxLines;
   const int lineCount = static_cast<int>(editorRows(text, ui, rect).size());
   return std::max(0, lineCount - maxLines);
 }
@@ -64,7 +64,7 @@ Rect editorWritingRect(Rect editorRect) {
 }
 
 void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui, const std::string& line, Rect writing, float y) {
-  const std::string& needle = ui.find.text();
+  const std::string& needle = ui.fields.find.text();
   if(needle.empty()) return;
   std::size_t pos = line.find(needle);
   while(pos != std::string::npos) {
@@ -84,7 +84,7 @@ std::size_t editorIndexAtPoint(TextRenderer& text, UiRuntime& ui, Rect rect, flo
   const auto& rows = editorRows(text, ui, rect);
   const Rect writing = editorWritingRect(rect);
   const int visibleLine = std::max(0, static_cast<int>((y - (writing.y + 12)) / static_cast<float>(lineHeight)));
-  const int rowIndex = std::clamp(ui.editorScroll + visibleLine, 0, std::max(0, static_cast<int>(rows.size()) - 1));
+  const int rowIndex = std::clamp(ui.raw.scroll + visibleLine, 0, std::max(0, static_cast<int>(rows.size()) - 1));
   return editor::offsetForRowX(rows[static_cast<std::size_t>(rowIndex)], x - (writing.x + 12), editorMeasure(text));
 }
 
@@ -104,16 +104,16 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
   const int cursorRow = editor::rowForOffset(rows, ui.editor.cursor());
   if(ui.revealEditorCursor) {
-    if(cursorRow < ui.editorScroll) ui.editorScroll = cursorRow;
-    if(cursorRow >= ui.editorScroll + maxLines) ui.editorScroll = cursorRow - maxLines + 1;
+    if(cursorRow < ui.raw.scroll) ui.raw.scroll = cursorRow;
+    if(cursorRow >= ui.raw.scroll + maxLines) ui.raw.scroll = cursorRow - maxLines + 1;
   }
   const int maxScroll = std::max(0, static_cast<int>(rows.size()) - maxLines);
-  ui.editorScroll = std::clamp(ui.editorScroll, 0, maxScroll);
+  ui.raw.scroll = std::clamp(ui.raw.scroll, 0, maxScroll);
   ui.revealEditorCursor = false;
   {
     ClipGuard clip(renderer, {writing.x + 1, writing.y + 1, writing.w - 2, writing.h - 2});
     float y = writing.y + 12;
-    for(int i = ui.editorScroll; i < static_cast<int>(rows.size()) && y < writing.y + writing.h - 12; ++i) {
+    for(int i = ui.raw.scroll; i < static_cast<int>(rows.size()) && y < writing.y + writing.h - 12; ++i) {
       const auto& row = rows[static_cast<std::size_t>(i)];
       const auto& line = row.text;
       if(ui.editor.hasSelection()) {
@@ -131,7 +131,7 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
       text.draw(line.empty() ? " " : line, writing.x + 12, y, theme().textPrimary, false, true);
       y += lineHeight;
     }
-    if(ui.focus == FocusArea::Editor && cursorRow >= ui.editorScroll && cursorRow < ui.editorScroll + maxLines) {
+    if(ui.focus == FocusArea::Editor && cursorRow >= ui.raw.scroll && cursorRow < ui.raw.scroll + maxLines) {
       std::string prefix;
       if(cursorRow >= 0 && cursorRow < static_cast<int>(rows.size())) {
         const auto& row = rows[static_cast<std::size_t>(cursorRow)];
@@ -139,16 +139,16 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
         prefix = row.text.substr(0, std::min<std::size_t>(row.text.size(), cursorInRow));
       }
       const float cursorX = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
-      const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.editorScroll) * lineHeight);
+      const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.raw.scroll) * lineHeight);
       // On the blink's on-phase, like every other caret in the shell. See
       // `ui::CaretBlink`.
-      if(ui.caretVisible) {
+      if(ui.caret.visible) {
         fill(renderer, {std::min(cursorX, writing.x + writing.w - 8), cursorY, 2, static_cast<float>(lineHeight - 2)}, theme().accent);
       }
     }
     if(ui.editor.text().empty()) text.draw("Start typing...", writing.x + 12, writing.y + 12, theme().textSecondary);
   }
-  drawVerticalScrollbar(renderer, writing, ui.editorScroll, maxScroll);
+  drawVerticalScrollbar(renderer, writing, ui.raw.scroll, maxScroll);
 }
 
 }

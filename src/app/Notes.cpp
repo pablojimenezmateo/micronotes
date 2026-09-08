@@ -49,7 +49,7 @@ void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
   // as the file's contents -- which is what makes the next autosave commit it.
   if(unsaved) ui.editor.markDirty();
   if(resetView) {
-    ui.editorScroll = 0;
+    ui.raw.scroll = 0;
     resetPageScroll(ui);
     ui.revealEditorCursor = false;
   }
@@ -65,7 +65,6 @@ void selectNoteAt(UiRuntime& ui, int index) {
   if(notes.empty()) return;
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   index = std::clamp(index, 0, static_cast<int>(notes.size()) - 1);
-  ui.noteCursor = index;
   ui.state.selectNote(notes[static_cast<std::size_t>(index)].id);
   loadSelectedBuffer(ui, /*resetView=*/true);
 }
@@ -228,7 +227,7 @@ bool clearTagFilter(UiRuntime& ui) {
 
 void showFolder(UiRuntime& ui, const std::filesystem::path& folder) {
   ui.state.selectFolder(folder);
-  ui.tree.reveal(folder);
+  ui.sidebar.tree.reveal(folder);
 }
 
 void selectNoteById(UiRuntime& ui, const std::string& noteId, ui::TabPolicy policy) {
@@ -238,7 +237,7 @@ void selectNoteById(UiRuntime& ui, const std::string& noteId, ui::TabPolicy poli
 }
 
 void loadSelectedIntoEditor(UiRuntime& ui) {
-  ui.clearBlockSelection();
+  ui.blockSelection.clear();
   // A dirty buffer for the note already showing is the newest copy of it, so it
   // stays. Anything else -- a different note, or the same one with nothing
   // unsaved -- is read.
@@ -341,12 +340,12 @@ void beginRename(UiRuntime& ui) {
 }
 
 void saveRename(UiRuntime& ui) {
-  if(ui.rename.empty()) {
+  if(ui.fields.rename.empty()) {
     ui.status = "Rename needs a title";
     return;
   }
   invalidateWikiNotes(ui);
-  const std::string asked = ui.rename.text();
+  const std::string asked = ui.fields.rename.text();
   if(ui.state.renameSelectedNote(asked)) {
     loadSelectedIntoEditor(ui);
     ui.focus = FocusArea::Editor;
@@ -379,7 +378,7 @@ void createNote(UiRuntime& ui) {
   if(auto created = ui.state.createNote("Untitled", folder, "")) {
     ui.loadedNoteId = created->id;
     ui.editor.setText("");
-    ui.editorScroll = 0;
+    ui.raw.scroll = 0;
     resetPageScroll(ui);
     ui.revealEditorCursor = true;
     ui.focus = FocusArea::Editor;

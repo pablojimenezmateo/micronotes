@@ -80,8 +80,8 @@ void applyWindowOptions(UiRuntime& ui, const ApplicationOptions& options) {
   if(!options.searchQuery.empty()) {
     // Not selectAll: a capture wants the caret after the query, the way it sits
     // once the query has been typed.
-    ui.search.beginWith(options.searchQuery, false);
-    ui.state.setSearch(options.searchQuery, ui.searchScope);
+    ui.fields.search.beginWith(options.searchQuery, false);
+    ui.state.setSearch(options.searchQuery, ui.fields.searchScope);
     ui.focus = FocusArea::Search;
   }
   if(options.openOverlay.empty()) return;
