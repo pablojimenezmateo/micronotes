@@ -1,5 +1,9 @@
 #include "ui/TextUtil.h"
 
+#include "CoreAliases.h"
+
+#include "core/util/StringUtil.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -14,7 +18,7 @@ std::string headingAnchor(std::string_view value) {
   for(const unsigned char c : value) {
     if(std::isalnum(c)) {
       if(pendingDash && !out.empty()) out.push_back('-');
-      out.push_back(static_cast<char>(std::tolower(c)));
+      out.push_back(util::toLowerAscii(static_cast<char>(c)));
       pendingDash = false;
     } else if(!out.empty()) {
       pendingDash = true;

@@ -1,6 +1,8 @@
 #include "CoreAliases.h"
 #include "library/LibraryIndex.h"
 
+#include "core/util/StringUtil.h"
+
 #include "ui/WikiLink.h"
 
 #include "library/Library.h"
@@ -13,8 +15,6 @@
 
 #include <sqlite3.h>
 
-#include <algorithm>
-#include <cctype>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -95,7 +95,7 @@ static std::vector<std::string> splitTagList(std::string_view value) {
 }
 
 static std::string lowerCopy(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  util::toLowerAsciiInPlace(value);
   return value;
 }
 
@@ -131,13 +131,10 @@ static std::string likePattern(std::string_view lowerQuery) {
 // Case-insensitive `find`, over views. `query` is already lowered.
 static std::size_t findLowered(std::string_view line, std::string_view lowerQuery) {
   if(lowerQuery.empty() || line.size() < lowerQuery.size()) return std::string_view::npos;
-  const auto lower = [](char c) {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  };
   const std::size_t last = line.size() - lowerQuery.size();
   for(std::size_t at = 0; at <= last; ++at) {
     std::size_t i = 0;
-    while(i < lowerQuery.size() && lower(line[at + i]) == lowerQuery[i]) ++i;
+    while(i < lowerQuery.size() && util::toLowerAscii(line[at + i]) == lowerQuery[i]) ++i;
     if(i == lowerQuery.size()) return at;
   }
   return std::string_view::npos;

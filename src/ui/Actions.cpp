@@ -1,6 +1,9 @@
 #include "ui/Actions.h"
 
-#include <algorithm>
+#include "CoreAliases.h"
+
+#include "core/util/StringUtil.h"
+
 #include <array>
 #include <cctype>
 
@@ -104,12 +107,6 @@ constexpr NamedKey kNamedKeys[] = {
   {"F2", SDLK_F2},
 };
 
-bool equalsIgnoringCase(std::string_view a, std::string_view b) {
-  return a.size() == b.size() &&
-         std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-           return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
-         });
-}
 
 }
 
@@ -136,15 +133,15 @@ std::optional<KeyChord> parseKeyChord(std::string_view text) {
     const auto plus = rest.substr(0, rest.size() - 1).find('+');
     if(plus == std::string_view::npos) break;
     const std::string_view token = rest.substr(0, plus);
-    if(equalsIgnoringCase(token, "Ctrl")) chord.ctrl = true;
-    else if(equalsIgnoringCase(token, "Shift")) chord.shift = true;
-    else if(equalsIgnoringCase(token, "Alt")) chord.alt = true;
+    if(util::equalsIgnoringAsciiCase(token, "Ctrl")) chord.ctrl = true;
+    else if(util::equalsIgnoringAsciiCase(token, "Shift")) chord.shift = true;
+    else if(util::equalsIgnoringAsciiCase(token, "Alt")) chord.alt = true;
     else return std::nullopt;
     rest = rest.substr(plus + 1);
   }
   if(rest.empty()) return std::nullopt;
   for(const auto& named : kNamedKeys) {
-    if(equalsIgnoringCase(rest, named.name)) {
+    if(util::equalsIgnoringAsciiCase(rest, named.name)) {
       chord.key = named.key;
       return chord;
     }
@@ -152,7 +149,7 @@ std::optional<KeyChord> parseKeyChord(std::string_view text) {
   if(rest.size() != 1) return std::nullopt;
   // Keycodes are the unshifted character, so "Ctrl+P" and "Ctrl+p" are one
   // chord and both spell the keycode 'p'.
-  chord.key = static_cast<SDL_Keycode>(std::tolower(static_cast<unsigned char>(rest[0])));
+  chord.key = static_cast<SDL_Keycode>(util::toLowerAscii(rest[0]));
   return chord;
 }
 

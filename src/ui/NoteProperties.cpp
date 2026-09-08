@@ -1,22 +1,13 @@
 #include "ui/NoteProperties.h"
 
+#include "CoreAliases.h"
+
+#include "core/util/StringUtil.h"
+
 #include <string_view>
 
 namespace micronotes::ui {
 namespace {
-
-std::string_view trimmedView(std::string_view value) {
-  const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r'; };
-  std::size_t from = 0;
-  std::size_t to = value.size();
-  while(from < to && space(value[from])) ++from;
-  while(to > from && space(value[to - 1])) --to;
-  return value.substr(from, to - from);
-}
-
-std::string trimmed(std::string_view value) {
-  return std::string(trimmedView(value));
-}
 
 // Whether a front-matter line continues the key above it rather than opening
 // one of its own. The same rule the parser used to gather these lines, applied
@@ -42,9 +33,9 @@ std::vector<NoteProperty> notePropertiesOf(const library::NoteMetadata& metadata
       // Trimmed before the sequence dash is looked for, not after: the dash of
       // a block item is indented under its key, so testing the raw line for
       // "- " finds it only on the one item that happens to sit at column zero.
-      std::string_view piece = trimmedView(line);
+      std::string_view piece = util::trim(line);
       if(piece.starts_with("- ")) piece.remove_prefix(2);
-      const std::string item = trimmed(piece);
+      const std::string item = std::string(util::trim(piece));
       if(item.empty()) continue;
       // Flattened onto one line on purpose. The header is a summary of what the
       // note carries; a page that reserves eleven rows for an eleven-item list
@@ -56,9 +47,9 @@ std::vector<NoteProperty> notePropertiesOf(const library::NoteMetadata& metadata
     const auto colon = line.find(':');
     if(colon == std::string::npos) continue;
     NoteProperty row;
-    row.key = trimmed(std::string_view(line).substr(0, colon));
+    row.key = std::string(util::trim(std::string_view(line).substr(0, colon)));
     if(row.key.empty()) continue;
-    row.value = trimmed(std::string_view(line).substr(colon + 1));
+    row.value = std::string(util::trim(std::string_view(line).substr(colon + 1)));
     rows.push_back(std::move(row));
   }
   return rows;

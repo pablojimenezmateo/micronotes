@@ -1,30 +1,18 @@
 #include "ui/WikiLink.h"
 
+#include "CoreAliases.h"
+
+#include "core/util/StringUtil.h"
+
 #include "doc/BlockScan.h"
 #include "doc/InlineScan.h"
 
-#include <algorithm>
-#include <cctype>
 #include <limits>
 
 namespace micronotes::ui {
 namespace {
 
 constexpr std::size_t kNone = std::numeric_limits<std::size_t>::max();
-
-std::string lowered(std::string_view value) {
-  std::string out(value);
-  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  return out;
-}
-
-std::string trimmed(std::string_view value) {
-  while(!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.remove_prefix(1);
-  while(!value.empty() && (value.back() == ' ' || value.back() == '\t')) value.remove_suffix(1);
-  return std::string(value);
-}
 
 std::string stem(const std::filesystem::path& path) {
   return path.stem().string();
@@ -93,14 +81,15 @@ std::string plainWikiText(std::string_view text) {
 
 WikiTarget splitWikiTarget(std::string_view target) {
   const auto hash = target.find('#');
-  if(hash == std::string_view::npos) return {trimmed(target), {}};
-  return {trimmed(target.substr(0, hash)), trimmed(target.substr(hash + 1))};
+  if(hash == std::string_view::npos) return {std::string(util::trim(target)), {}};
+  return {std::string(util::trim(target.substr(0, hash))),
+          std::string(util::trim(target.substr(hash + 1)))};
 }
 
 std::size_t resolveWikiLink(std::string_view rawTarget, const std::vector<library::NoteListItem>& notes) {
   const auto target = splitWikiTarget(rawTarget);
   if(target.note.empty()) return kNone;
-  const std::string wanted = lowered(target.note);
+  const std::string wanted = util::toLowerAscii(target.note);
 
   // Tried in order, so an exact title always beats a case-insensitive file
   // name. Each rule scans the whole library before the next is tried, or a
@@ -119,7 +108,7 @@ std::size_t resolveWikiLink(std::string_view rawTarget, const std::vector<librar
      }); hit != kNone) return hit;
 
   if(const auto hit = search([&](const library::NoteListItem& note) {
-       return lowered(note.title) == wanted;
+       return util::toLowerAscii(note.title) == wanted;
      }); hit != kNone) return hit;
 
   if(const auto hit = search([&](const library::NoteListItem& note) {
@@ -127,7 +116,7 @@ std::size_t resolveWikiLink(std::string_view rawTarget, const std::vector<librar
      }); hit != kNone) return hit;
 
   if(const auto hit = search([&](const library::NoteListItem& note) {
-       return lowered(stem(note.path)) == wanted;
+       return util::toLowerAscii(stem(note.path)) == wanted;
      }); hit != kNone) return hit;
 
   // A target with a slash in it is a path. `.md` is optional, because nobody
@@ -135,7 +124,7 @@ std::size_t resolveWikiLink(std::string_view rawTarget, const std::vector<librar
   if(target.note.find('/') == std::string::npos) return kNone;
   const std::string withExtension = target.note.ends_with(".md") ? target.note : target.note + ".md";
   return search([&](const library::NoteListItem& note) {
-    return lowered(note.path.generic_string()).ends_with(lowered(withExtension));
+    return util::toLowerAscii(note.path.generic_string()).ends_with(util::toLowerAscii(withExtension));
   });
 }
 
@@ -191,7 +180,7 @@ std::vector<WikiReference> wikiReferences(std::string_view source) {
       const auto lineEnd = source.find('\n', span.start);
       const std::size_t from = lineStart == std::string_view::npos ? 0 : lineStart + 1;
       const std::size_t to = lineEnd == std::string_view::npos ? source.size() : lineEnd;
-      references.push_back({span.target, trimmed(source.substr(from, to - from))});
+      references.push_back({span.target, std::string(util::trim(source.substr(from, to - from)))});
     }
   }
   return references;

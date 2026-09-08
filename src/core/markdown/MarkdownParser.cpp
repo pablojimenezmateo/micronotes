@@ -1,5 +1,7 @@
 #include "core/markdown/MarkdownParser.h"
 
+#include "core/util/StringUtil.h"
+
 #include "core/markdown/BareUrl.h"
 
 #include "core/AppIdentity.h"
@@ -672,7 +674,7 @@ void promoteAlerts(Document& document) {
     const std::size_t close = lead.find(']');
     std::string kind = lead.substr(2, close - 2);
     if(kind.empty()) continue;
-    for(char& c : kind) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    util::toLowerAsciiInPlace(kind);
     if(kind.find_first_not_of("abcdefghijklmnopqrstuvwxyz") != std::string::npos) continue;
 
     block.type = BlockType::Admonition;

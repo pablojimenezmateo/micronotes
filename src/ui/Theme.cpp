@@ -1,5 +1,9 @@
 #include "ui/Theme.h"
 
+#include "CoreAliases.h"
+
+#include "core/util/StringUtil.h"
+
 #include "ui/ColorMath.h"
 
 #include <cctype>
@@ -286,7 +290,7 @@ std::string calloutLabel(std::string_view kind) {
   std::string name(kind);
   name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
   for(std::size_t i = 1; i < name.size(); ++i) {
-    name[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(name[i])));
+    name[i] = util::toLowerAscii(name[i]);
   }
   return name;
 }

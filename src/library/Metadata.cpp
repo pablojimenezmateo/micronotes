@@ -1,5 +1,7 @@
 #include "library/Metadata.h"
 
+#include "core/util/StringUtil.h"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -50,12 +52,13 @@ std::size_t findClosingFence(std::string_view markdown) {
 }
 
 
+// The one definition, from `core/util/StringUtil.h`. This file used to carry a
+// third: leading space and tab, trailing space, tab and CR. The asymmetry was
+// not a decision -- it is what a leading `\r` cannot be, since these are lines
+// read a line at a time -- so folding it into the shared trim changes nothing
+// here and removes a copy that read as though it meant something.
 static std::string trim(std::string_view value) {
-  std::size_t from = 0;
-  std::size_t to = value.size();
-  while(from < to && (value[from] == ' ' || value[from] == '\t')) ++from;
-  while(to > from && (value[to - 1] == ' ' || value[to - 1] == '\t' || value[to - 1] == '\r')) --to;
-  return std::string(value.substr(from, to - from));
+  return std::string(util::trim(value));
 }
 
 // A front-matter entry is a `key:` line plus the lines that continue its value:

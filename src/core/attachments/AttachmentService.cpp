@@ -1,11 +1,12 @@
 #include "core/attachments/AttachmentService.h"
 
+#include "core/util/StringUtil.h"
+
 #include "core/AppIdentity.h"
 #include "core/perf/PerformanceCounters.h"
 #include "core/platform/PathUtils.h"
 #include "core/platform/DefaultOpener.h"
 
-#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -76,7 +77,7 @@ std::vector<std::string> AttachmentService::openCommand(const std::filesystem::p
 
 bool AttachmentService::isSupportedImage(const std::filesystem::path& path) const {
   auto ext = path.extension().string();
-  std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  util::toLowerAsciiInPlace(ext);
   return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif" || ext == ".webp";
 }
 

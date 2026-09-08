@@ -1,13 +1,12 @@
 #include "ui/Fuzzy.h"
 
-#include <cctype>
+#include "CoreAliases.h"
+
+#include "core/util/StringUtil.h"
+
 
 namespace micronotes::ui {
 namespace {
-
-char lower(char c) {
-  return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-}
 
 bool isBoundary(std::string_view text, std::size_t index) {
   if(index == 0) return true;
@@ -25,10 +24,10 @@ std::optional<int> fuzzyScore(std::string_view text, std::string_view query) {
   int run = 0;
   std::size_t at = 0;
   for(const char raw : query) {
-    const char needle = lower(raw);
+    const char needle = util::toLowerAscii(raw);
     bool found = false;
     while(at < text.size()) {
-      const bool hit = lower(text[at]) == needle;
+      const bool hit = util::toLowerAscii(text[at]) == needle;
       if(hit) {
         score += 10;
         if(isBoundary(text, at)) score += 15;
