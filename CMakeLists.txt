@@ -178,6 +178,7 @@ set(MICRONOTES_APP_SOURCES
   src/doc/LinkTarget.cpp
   src/doc/WikiLink.cpp
   src/doc/Layout.cpp
+  src/doc/LayoutQueries.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp

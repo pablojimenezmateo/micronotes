@@ -231,42 +231,69 @@ be distinguished from `Alt` held as part of a chord, which is a keyup-driven
 state machine rather than a branch. F10 alone would be a third of a fix and
 would sit oddly next to a bar that does not underline anything.
 
-## TD-23 — `DocumentLayout::update` is four hundred lines and one function
+## TD-23 — `DocumentLayout::update` is one algorithm in one function
 
-`src/doc/Layout.cpp`. `update` is 409 lines, `layoutBlock` is 304, and the class
-has 42 methods.
+`src/doc/Layout.cpp`. `update` is 353 lines and `layoutBlock` is 310.
 
-**What it costs today.** Not correctness — this is the most heavily instrumented
-code in the tree and the counters cover it densely. What it costs is that the
-five phases inside `update` are only distinguishable by reading it: hash the
-geometry inputs, decide whether the standing partition still describes the
-source, work out which blocks moved and by how much, walk them, then sweep the
-layout cache to its ceiling. Each phase reads and writes locals the next one
-depends on, so a change to any of them is a change made while holding four
-hundred lines in your head.
+Down from 409 and 1,867 respectively: the three pieces that were self-contained
+have been taken (`geometryKey`, `mergeDirtyRanges`, `sweepLayoutCache`), the
+read-only half of the class is `LayoutQueries.cpp`, and the file is 1,541 lines
+rather than 1,867. What is left in `update` is the incremental algorithm itself.
 
-It also means the class's *read* half — `caretRect`, `offsetAt`, the four
-selection-rect functions, `blockAt`, `blockRange`, and the six `flatLine*`
-queries, about 330 lines — is only reachable through the engine that produced
-the state, so the geometry arithmetic in it can be tested only by laying a
-document out first.
+**What it costs today.** The five phases inside it -- decide whether the
+standing partition still describes the source, absorb the edit, align the
+placement to the new indexing, walk the dirty ranges, carry the outstanding
+shift down -- read and write locals the next one depends on. `head`, `tail`,
+`patchable`, `geometry`, `caretBlock`, `rawBlock`, `count`, `previousCount`,
+`shift`, `pendingTop`, `pendingRows`, `settled`. Extracting a phase means
+passing eight or nine of those, which is the shape that says a function is one
+algorithm rather than several.
 
-**Why it has not been paid.** Because the failure mode of getting it wrong is
-the one this codebase has learnt to fear most, and a split is exactly the shape
-of change that triggers it. Every phase of `update` exists to *avoid* work, and
-whether it succeeded is invisible: the pixels are identical either way, every
-unit test passes either way, and the only evidence is a counter ratio in a
-session nobody is running. `docs/performance.md` records the scroll relayout
-that sat fully cached in the hottest path in the app, passing every budget,
-doing 70% of every frame — found only when a counter went in. A refactor that
-quietly moves a reuse check to the wrong side of an assignment reproduces that
-exactly, and `ctest` stays green.
+**Why it has not been paid.** Because the honest fix is a carrier -- an
+`UpdatePass` holding the per-call state, with the phases as its methods -- and
+that is a bigger change than it looks: the state is exactly what makes the
+phases *phases*, so the carrier has to get the ownership right or the split is
+worse than the function.
 
-So the order is: the harness lane first (`TD-19`), then the split. Two pieces
-are safe to take ahead of it and are worth taking when this file is next
-opened, because both are self-contained and neither is on the reuse path: the
-geometry hash at the top, which is fifteen lines of `hashValue` and a
-`static_assert`, and the cache sweep at the bottom, which is a bounded-memory
-policy with its own measured commentary and no interaction with the walk above
-it. The read half can move to a second translation unit of the same class
-without touching a declaration, which is the cheapest third of the entry.
+The verification is no longer the problem, and that is worth recording because
+it was the reason given last time. The layout's counters are deterministic and
+they cover the reuse paths densely: `blocks_relaid`, `blocks_walked`,
+`blocks_shifted`, `blocks_key_reused`, `cache_hits`, `cache_sweeps`,
+`cache_evictions`, `placement_patches` against `placement_rebuilds`,
+`fold_resolutions_skipped`. A `tools/session-compare.sh` run across the three
+panes reports every one of them byte-identical or it does not, and that is
+exactly what caught nothing and confirmed everything in the three splits above.
+So the instrument is there; what is missing is the design decision about the
+carrier.
+
+`layoutBlock` is a separate entry waiting to be written: it is 310 lines of
+typesetting -- one arm per block kind -- and unlike `update` it has no shared
+mutable state, so it splits by kind whenever anybody wants to.
+
+## TD-24 — two perf counters are not deterministic
+
+`layout.caret_queries` and `layout.caret_probes`.
+
+AGENTS.md says of the counters: "**Deterministic**: the same workload gives
+byte-identical values every run and in every build type, which is what makes
+them proof rather than evidence." That is true of every counter but these two.
+
+**What it costs today.** They appear in the diff of about half of all
+`session-compare.sh` runs, in both directions -- 114 against 99 one run, 96
+against 114 the next -- on changes that cannot possibly have touched them. Which
+is worse than useless: it trains whoever is reading the diff to skim past
+counter changes, on the instrument whose whole value is that a changed number
+means something happened.
+
+The cause is that `PageView` asks `caretRect` only when the caret is *painted*,
+and whether it is painted is `ui::CaretBlink`'s answer to `SDL_GetTicks()`. A
+capture draws sixty frames as fast as it can, so how many of them land in the
+caret's on-phase is a function of how fast the machine was that second.
+
+**Why it has not been paid.** The fix is to make the capture's clock
+deterministic rather than to move the counter, because the counter is measuring
+the right thing -- and a blink that does not advance during a capture is also
+what would make a *screenshot* of a caret reproducible, which is the same
+problem one step further on. That is a seam through `CaretBlink` and the
+capture path, and it is worth doing with `TD-21`'s readiness signal, which is
+in the same file for the same reason.

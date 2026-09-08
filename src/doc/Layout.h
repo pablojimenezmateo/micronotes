@@ -474,6 +474,15 @@ private:
   // which blocks a fold change moved, and a byte-wise diff is a `memcmp`.
   // Returns whether anything came out hidden, which is the state that lets the
   // next call skip the resolution altogether.
+  // Everything about the shape a block would be laid out in, as one number; see
+  // the definition.
+  static std::uint64_t geometryKey(const LayoutOptions& options);
+  // Sorts and merges `dirty_` so the walk sees each block at most once.
+  void mergeDirtyRanges();
+  // Drops every cached block layout no live key names any more. Bounded memory,
+  // and the reason it is its own function is that it is where a resize spends
+  // its worst frame -- see the definition for the numbers.
+  void sweepLayoutCache();
   // The walk both resolvers share; see the definition.
   bool hideFoldedFrom(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
                       std::size_t from, std::vector<std::uint8_t>& hidden) const;
