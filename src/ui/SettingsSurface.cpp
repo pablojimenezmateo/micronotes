@@ -85,7 +85,12 @@ std::vector<int> settingsRowsIn(const std::vector<SettingsRow>& rows, std::strin
 
 bool settingsCategoryMatches(const std::vector<SettingsRow>& rows, std::string_view category,
                              std::string_view query) {
-  return !settingsRowsIn(rows, category, query).empty();
+  // Not `!settingsRowsIn(...).empty()`, which is how it was written: the rail
+  // asks this per category on every frame the card is up, and that spelling
+  // builds a vector of the whole category to find out whether one row survived.
+  return std::any_of(rows.begin(), rows.end(), [&](const SettingsRow& row) {
+    return row.category == category && matches(row.label, row.category, row.description, query);
+  });
 }
 
 SettingsSelection settingsSelection(const std::vector<SettingsRow>& rows, int category, int row,
