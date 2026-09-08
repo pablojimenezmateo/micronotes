@@ -25,12 +25,10 @@ namespace micronotes::app {
 void handleFieldKey(UiRuntime& ui, editor::TextField& field, SDL_Keycode key, bool ctrl,
                     bool shift) {
   if(key == SDLK_RETURN) {
-    switch(ui.focus) {
-      case FocusArea::TagEditor: saveTags(ui); break;
-      case FocusArea::RenameNote: saveRename(ui); break;
-      case FocusArea::RenameFolder: saveFolderRename(ui); break;
-      default: ui.focus = FocusArea::Editor; break;
-    }
+    // The three prompts commit; the two search boxes have nothing to commit, so
+    // Enter is how you leave them. See `app/Fields.h`.
+    if(const auto commit = fieldCommit(ui.focus)) commit(ui);
+    else ui.focus = FocusArea::Editor;
     return;
   }
   const auto result = editor::applyKeyToField(field, key, ctrl, shift);

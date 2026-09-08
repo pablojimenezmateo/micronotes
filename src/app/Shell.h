@@ -13,6 +13,8 @@
 #include "app/PointerState.h"
 #include "app/ChromeState.h"
 #include "app/EditingState.h"
+#include "app/Fields.h"
+#include "app/Focus.h"
 #include "app/RawPaneState.h"
 #include "app/TextFields.h"
 #include "app/SidebarState.h"
@@ -79,17 +81,6 @@ namespace micronotes::app {
 using micronotes::ui::Rect;
 using micronotes::ui::ShellLayout;
 using micronotes::ui::TextRenderer;
-
-enum class FocusArea {
-  Folders,
-  Editor,
-  Search,
-  Find,
-  Viewer,
-  TagEditor,
-  RenameNote,
-  RenameFolder
-};
 
 enum class CursorKind {
   Default,
@@ -310,16 +301,7 @@ inline std::uint64_t caretStateKey(const UiRuntime& ui) {
   // Whichever single-line field has the keyboard. Its length stands in for its
   // text: this only has to *change* when the field does, and a field cannot
   // change its contents without changing its length or its caret.
-  const editor::TextField* field = nullptr;
-  switch(ui.focus) {
-    case FocusArea::Search: field = &ui.fields.search; break;
-    case FocusArea::Find: field = &ui.fields.find; break;
-    case FocusArea::TagEditor: field = &ui.fields.tag; break;
-    case FocusArea::RenameNote: field = &ui.fields.rename; break;
-    case FocusArea::RenameFolder: field = &ui.fields.folderRename; break;
-    default: break;
-  }
-  if(field) {
+  if(const editor::TextField* field = focusedField(ui)) {
     key = util::hashValue(key, field->text().size());
     key = util::hashValue(key, field->editor.cursor());
   }

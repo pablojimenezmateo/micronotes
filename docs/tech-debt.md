@@ -337,30 +337,6 @@ move -- and it overlaps `TD-30`, because the reason the feeding sequence is
 seven calls long is that `PageView` has sixteen setters and no one call to
 make.
 
-## TD-29 — which field the focus names is answered by three switches
-
-`focusedField` in `src/app/Fields.cpp`, `caretStateKey` in `src/app/Shell.h`,
-and `handleFieldKey`'s Enter arm in `src/app/KeySurfaces.cpp`.
-
-The first two are the same switch over the same five `FocusArea` values
-returning the same five `TextFields` members, once mutable and once const. The
-third maps three of the five to their commit verb.
-
-**What it costs today.** A sixth field is three edits, and the one that is
-forgotten is `caretStateKey` -- where the symptom is a caret that blinks through
-a burst of typing in the new field and nothing else. That is the failure the
-key was introduced to prevent, so the shape currently reintroduces it once per
-field added.
-
-**Why it has not been paid.** The mutable/const pair wants an overload, which is
-two lines and could be done now. The Enter arm is the interesting half: it says
-that `FocusArea` is carrying two things at once -- which surface has the
-keyboard, and which of five prompts is open -- and the honest fix is to give
-`TextFields` a way to name its own members so the three switches become one
-table. That is a change to `FocusArea`, which has eight values and 88 mentions
-across
-22 files.
-
 ## TD-30 — `PageView` has sixteen setters and no one call to make
 
 `src/app/PageView.h`, 51 methods.

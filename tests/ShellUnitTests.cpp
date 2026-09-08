@@ -11,6 +11,7 @@
 #include "doc/LinkTarget.h"
 #include "app/SidebarModel.h"
 #include "app/Dismiss.h"
+#include "app/Fields.h"
 #include "app/Notes.h"
 #include "app/SessionState.h"
 #include "app/WikiLinks.h"
@@ -1287,4 +1288,52 @@ MICRONOTES_TEST(shell_a_note_reports_both_spellings_of_its_path) {
   MICRONOTES_REQUIRE(ui.status == "No note to locate");
 
   std::filesystem::remove_all(root);
+}
+
+// --- the field table ---------------------------------------------------
+//
+// `app/Fields.h`'s table replaced three hand-written switches over the same
+// five `FocusArea` values -- `focusedField`, `caretStateKey` and
+// `handleFieldKey`'s Enter arm. A sixth field used to be three edits with no
+// compiler help; these two cases are what makes it one.
+
+MICRONOTES_TEST(field_table_names_every_focus_that_is_a_field_exactly_once) {
+  using micronotes::app::FocusArea;
+  const auto specs = micronotes::app::fieldSpecs();
+  // Every value of the enum is either a field with exactly one row, or a
+  // surface with none. Listed here rather than derived, so that adding a value
+  // to `FocusArea` makes somebody decide which it is.
+  const std::pair<FocusArea, int> expected[] = {
+    {FocusArea::Folders, 0},      {FocusArea::Editor, 0},
+    {FocusArea::Viewer, 0},       {FocusArea::Search, 1},
+    {FocusArea::Find, 1},         {FocusArea::TagEditor, 1},
+    {FocusArea::RenameNote, 1},   {FocusArea::RenameFolder, 1},
+  };
+  int rows = 0;
+  for(const auto& [focus, want] : expected) {
+    int found = 0;
+    for(const auto& spec : specs) {
+      if(spec.focus == focus) ++found;
+    }
+    MICRONOTES_REQUIRE(found == want);
+    rows += found;
+  }
+  MICRONOTES_REQUIRE(rows == static_cast<int>(specs.size()));
+}
+
+// Each row points at a different member, which is the part a table cannot get
+// wrong by omission but can get wrong by copy-paste: two rows sharing a member
+// is a field the focus can reach and never edit.
+MICRONOTES_TEST(field_table_gives_each_focus_its_own_field) {
+  micronotes::app::UiRuntime ui;
+  std::vector<const micronotes::editor::TextField*> seen;
+  for(const auto& spec : micronotes::app::fieldSpecs()) {
+    ui.focus = spec.focus;
+    const auto* field = micronotes::app::focusedField(ui);
+    MICRONOTES_REQUIRE(field != nullptr);
+    MICRONOTES_REQUIRE(std::find(seen.begin(), seen.end(), field) == seen.end());
+    seen.push_back(field);
+  }
+  ui.focus = micronotes::app::FocusArea::Editor;
+  MICRONOTES_REQUIRE(micronotes::app::focusedField(ui) == nullptr);
 }

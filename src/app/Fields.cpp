@@ -1,22 +1,52 @@
 #include "app/Fields.h"
 
 #include "app/Notes.h"
+#include "app/Prompts.h"
 #include "app/Shell.h"
 
 #include <algorithm>
+#include <array>
 #include <string>
 
 namespace micronotes::app {
+namespace {
+
+// The five fields, once. Every question any surface asks about "the field the
+// focus is in" is a lookup here.
+constexpr std::array<FieldSpec, 5> kFields {{
+  {FocusArea::Search, &TextFields::search, nullptr},
+  {FocusArea::Find, &TextFields::find, nullptr},
+  {FocusArea::TagEditor, &TextFields::tag, saveTags},
+  {FocusArea::RenameNote, &TextFields::rename, saveRename},
+  {FocusArea::RenameFolder, &TextFields::folderRename, saveFolderRename},
+}};
+
+const FieldSpec* specFor(FocusArea focus) {
+  for(const auto& spec : kFields) {
+    if(spec.focus == focus) return &spec;
+  }
+  return nullptr;
+}
+
+}
+
+std::span<const FieldSpec> fieldSpecs() {
+  return kFields;
+}
 
 editor::TextField* focusedField(UiRuntime& ui) {
-  switch(ui.focus) {
-    case FocusArea::Search: return &ui.fields.search;
-    case FocusArea::Find: return &ui.fields.find;
-    case FocusArea::TagEditor: return &ui.fields.tag;
-    case FocusArea::RenameNote: return &ui.fields.rename;
-    case FocusArea::RenameFolder: return &ui.fields.folderRename;
-    default: return nullptr;
-  }
+  const FieldSpec* spec = specFor(ui.focus);
+  return spec ? &(ui.fields.*(spec->member)) : nullptr;
+}
+
+const editor::TextField* focusedField(const UiRuntime& ui) {
+  const FieldSpec* spec = specFor(ui.focus);
+  return spec ? &(ui.fields.*(spec->member)) : nullptr;
+}
+
+void (*fieldCommit(FocusArea focus))(UiRuntime&) {
+  const FieldSpec* spec = specFor(focus);
+  return spec ? spec->commit : nullptr;
 }
 
 void syncFocusedInput(UiRuntime& ui) {
