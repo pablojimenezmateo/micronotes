@@ -9,6 +9,10 @@ First-stop operating guide for agents working in this repository.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
 - `src/core/` is the app-agnostic layer. Read the rule below before touching it.
+- The tree is layered and the layers only point one way: **core < doc < library
+  < ui < app**. `architecture_the_layers_only_point_one_way` checks it, because
+  it had already broken -- one include, for one function -- and made `ui` and
+  `library` a cycle without anything failing.
 - Build with `cmake`, test with `ctest`, and prefer `tools/run-checks.sh` so output lands in a readable log.
 - Performance work is measured, not guessed: `docs/performance.md` explains the three instruments and the harness.
 
@@ -30,8 +34,23 @@ Two invariants hold inside it:
   `src/CoreAliases.h` aliases the subsystems into `namespace micronotes`, so app
   code still writes `platform::`, `perf::`, `markdown::` unqualified.
 
-App-only code stays outside: `src/library/` (note library), `src/ui/AppState`,
-`src/app/`.
+App-only code stays outside, in the layer that owns the concept:
+
+- `src/doc/` -- the Markdown *document*: the block and inline scanners, the
+  incremental layout, the edits, `[[wikilink]]` syntax, what a link target means.
+- `src/library/` -- the *folder of notes*: the index, front matter, search
+  scope, trash, and which note a `[[target]]` resolves to.
+- `src/ui/` -- what draws and what models a surface. Everything in here either
+  paints, measures, or is state a surface keeps. A helper that only counts
+  bytes belongs in `core/util/`; one that takes a `measure` belongs here.
+- `src/app/` -- the surfaces themselves, the routers and the loop.
+
+That list is not a description, it is where things go. `src/ui/` had become a
+second grab-bag -- a trim, a lowercase, a fuzzy matcher, colour arithmetic, a
+URL decoder, a MIME table, a tag parser -- and the tell was that twenty of its
+twenty-four files compiled into `micronotes_core` and four into
+`micronotes_shell`. A directory whose contents land in two targets is two
+layers wearing one name.
 
 **`src/core/` used to be a byte-identical vendored copy shared with a sibling
 repo, kept in step by `tools/sync-core.sh` and a `CORE.sha256` manifest that a
@@ -182,6 +201,19 @@ when the counters went in it turned out to be 70% of every frame.
   `docs/library-format.md`, "Changes Made Outside micronotes".
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
   only at a durable polymorphic boundary.
+- Before writing a helper, look for it. `core/util/StringUtil.h` has `trim`,
+  the ASCII case fold, `splitLines` and `ellipsize`; `core/util/Utf8.h` has the
+  boundary walks; `core/util/Hash.h` is the one FNV; `core/platform/PathUtils.h`
+  has `uniquePath`, `sanitizeFileStem` and `displayPath`; `ui/Memo.h` is how a
+  memoised value is spelled; `ui/TextFit.h` is the measured text helpers. Every
+  one of those exists because the same thing had been written two or three
+  times, and in most cases the copies had drifted -- three different `trim`s,
+  two spellings of FNV, four `nextBoundary`s, three `uniquePath`s.
+- A press or a keystroke is routed by one chain whose *order is the design*, and
+  each band or surface owns what it means: `app/PointerRouter.h` into
+  `app/PagePress.h` / `Sidebar::pressSidebar` / the panels, and
+  `app/KeyRouter.h` into `app/KeySurfaces.h`. Put new behaviour in the surface,
+  not in the router. `../microide` is the reference for both shapes.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
 - `src/app/Application.cpp` is the window, the renderer and the event loop, and
