@@ -241,6 +241,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Frame.cpp
   src/app/InlineText.cpp
   src/app/KeyRouter.cpp
+  src/app/KeySurfaces.cpp
   src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
   src/app/MenuBar.cpp
