@@ -317,6 +317,11 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
 // was ~0.7 ms of a ~1.0 ms frame on a 400-note library, which is most of the
 // frame spent re-deriving three dozen visible rows from four hundred notes.
 void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
+  // The rows and the rectangle they were placed in are one fact, so the build
+  // records it. The draw used to, one line before calling this, which made it
+  // possible -- and for a while true -- for a reader of `ui.sidebar.rect` to be
+  // looking at a rect no row had been placed against.
+  ui.sidebar.rect = rect;
   const auto& workspace = ui.state.workspace();
   const auto& previous = ui.sidebar.rowsKey;
   const bool reusable = previous.valid &&
@@ -636,8 +641,15 @@ std::pair<std::size_t, std::size_t> sidebarRowRange(const std::vector<SidebarRow
 }
 
 // The row under the pointer, or nothing when the pointer is off the list.
-std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, Rect sidebar, float x, float y) {
-  if(!contains(sidebar, x, y)) return std::nullopt;
+std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, float x, float y) {
+  // The list rect the draw recorded, not one the caller works out. It used to
+  // be a parameter, and three of the four callers passed `sidebarListRect(...)`
+  // while the fourth -- the drop at the end of a note drag -- passed the whole
+  // panel. Nothing went visibly wrong, because the rows only occupy the list
+  // and a `y` in the search box above them matches none; but the drop was
+  // hit-testing a different rect from the one that had highlighted the row
+  // under the pointer on the way there, for no reason anybody chose.
+  if(!contains(ui.sidebar.rect, x, y)) return std::nullopt;
   // A band of zero height is the rows the pointer's y is inside. Rows tile, so
   // a pointer exactly on a boundary is inside two of them and the first one
   // wins -- which is the answer the walk gave.

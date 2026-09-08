@@ -230,7 +230,7 @@ int run(ApplicationOptions options) {
       } else if(event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         ui.pointer.x = event.button.x;
         ui.pointer.y = event.button.y;
-        handleMouseUp(ui, event.button.x, event.button.y, event.button.button, width, height);
+        handleMouseUp(ui, event.button.x, event.button.y, event.button.button);
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_MOTION) {
         ui.pointer.x = event.motion.x;

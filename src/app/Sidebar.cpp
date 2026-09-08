@@ -1,4 +1,5 @@
 #include "app/Sidebar.h"
+#include "app/ContextMenus.h"
 
 #include "app/Chrome.h"
 #include "app/SidebarModel.h"
@@ -94,7 +95,6 @@ static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
                      x, y, width, ui::keysFor(ui::ActionId::NewNote) + "  write the first one");
   }
 }
-
 
 }
 
@@ -196,7 +196,6 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + ui::kSidebarSearchBand - 1.0f, theme().border);
 
   const Rect list = sidebarListRect(rect);
-  ui.sidebar.rect = list;
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const ui::TextStyle snippetStyle = snippetTextStyle();
   // Measured here and handed to the model, which stays free of the font: the
@@ -379,6 +378,63 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   }
   drawVerticalScrollbar(renderer, list, ui.sidebar.scroll, ui.sidebar.maxScroll,
                         ui.pointer.scrollDrag == ScrollDrag::Sidebar);
+}
+
+bool pressSidebar(TextRenderer& text, UiRuntime& ui, Rect sidebar, float x, float y,
+                  Uint8 button) {
+  if(button == SDL_BUTTON_LEFT) {
+    if(std::abs(x - (sidebar.x + sidebar.w)) <= 4.0f) {
+      ui.sidebar.resizing = true;
+      return true;
+    }
+  }
+
+  if(contains(sidebar, x, y)) {
+    // The scrollbar first: its thumb overlaps the trailing edge of every row it
+    // covers, and a press on a handle has to move the handle rather than select
+    // whatever it happens to be lying on.
+    if(button == SDL_BUTTON_LEFT) {
+      const Rect list = sidebarListRect(sidebar);
+      const auto bar = ui::scrollbarGeometry(list, ui.sidebar.scroll, ui.sidebar.maxScroll);
+      if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
+        ui.pointer.scrollDrag = ScrollDrag::Sidebar;
+        ui.pointer.scrollDragOffsetY = y - bar->thumb.y;
+        return true;
+      }
+    }
+    // The search field is part of the sidebar but not part of its row list, so
+    // it takes the click before any row arithmetic happens.
+    if(contains(searchBoxRect(sidebar), x, y)) {
+      if(contains(ui.sidebar.scopeToggle, x, y)) {
+        ui.fields.searchScope = library::nextSearchScope(ui.fields.searchScope);
+        ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
+        ui.status = "Searching " + std::string(library::searchScopeName(ui.fields.searchScope));
+        return true;
+      }
+      // Clicking a text field puts the caret where you clicked. Before, it only
+      // moved focus, and the insertion point stayed pinned to the end.
+      const Rect fieldRect = searchTextRect(sidebar, text);
+      ui.focus = FocusArea::Search;
+      const auto offset = fieldOffsetAtX(text, ui.fields.search, fieldRect, x);
+      ui.fields.search.editor.moveCursor(offset);
+      ui.fieldSelect.active = true;
+      ui.fieldSelect.anchor = offset;
+      return true;
+    }
+
+    ui.focus = FocusArea::Folders;
+    const auto index = sidebarRowAt(ui, x, y);
+    if(!index) {
+      if(button == SDL_BUTTON_RIGHT) openFolderMenu(ui, x, y);
+      return true;
+    }
+    const SidebarRow row = ui.sidebar.rows[*index];
+    ui.sidebar.cursor = static_cast<int>(*index);
+    // What a press on a row means lives with the rows. See `pressSidebarRow`.
+    pressSidebarRow(ui, row, x, y, button);
+    return true;
+  }
+  return false;
 }
 
 }

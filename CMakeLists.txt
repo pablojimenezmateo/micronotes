@@ -250,6 +250,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/PageChrome.cpp
   src/app/PageHeader.cpp
   src/app/PageImages.cpp
+  src/app/PagePress.cpp
   src/app/PageView.cpp
   src/app/PointerRouter.cpp
   src/app/Prompts.cpp

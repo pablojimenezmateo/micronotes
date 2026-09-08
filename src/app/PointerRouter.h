@@ -28,7 +28,10 @@ void handleMouse(ui::TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 
 
 // A release: commits a block drag, a note or notebook drop, and drops every
 // "still dragging" flag.
-void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button, int width, int height);
+//
+// No window size, unlike the other two: everything it hit-tests is a rect the
+// frame recorded, so it has no layout to compute.
+void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button);
 
 // A motion. Answers to whichever gesture is in flight -- an open menu, a text
 // selection, a scrollbar thumb, a block or a sidebar row being dragged, the

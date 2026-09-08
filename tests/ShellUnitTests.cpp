@@ -1031,7 +1031,7 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   // control. `sidebarRowAt` used to skip every section label, which is why the
   // old headings could not have been made clickable.
   const auto* band = bandFor(SidebarSection::Tags);
-  const auto hit = micronotes::app::sidebarRowAt(ui, list, band->rect.x + band->rect.w / 2.0f,
+  const auto hit = micronotes::app::sidebarRowAt(ui, band->rect.x + band->rect.w / 2.0f,
                                                  band->rect.y + band->rect.h / 2.0f);
   MICRONOTES_REQUIRE(hit.has_value());
   MICRONOTES_REQUIRE(ui.sidebar.rows[*hit].section.has_value());
@@ -1056,7 +1056,7 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
     // And with no `#` in front of it: the sidebar draws a tag's colour beside
     // its name everywhere else, so a sigil as well says the same thing twice.
     MICRONOTES_REQUIRE(row.label == "work");
-    const auto missed = micronotes::app::sidebarRowAt(ui, list, row.rect.x + 4.0f,
+    const auto missed = micronotes::app::sidebarRowAt(ui, row.rect.x + 4.0f,
                                                       row.rect.y + row.rect.h / 2.0f);
     MICRONOTES_REQUIRE(!missed || *missed != i);
   }

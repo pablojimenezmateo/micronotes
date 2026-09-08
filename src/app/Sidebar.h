@@ -50,6 +50,19 @@ void drawTextField(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui
 std::size_t fieldOffsetAtX(const ui::TextRenderer& text, const editor::TextField& field,
                            ui::Rect box, float x);
 
+// A press anywhere in the panel, including the run of empty list below the last
+// row: the panel owns its whole band, so a click in it never falls through to
+// the page behind.
+//
+// The order inside is the panel's design and is why this is one function rather
+// than three hit tests in the router. The scrollbar comes first, because its
+// thumb overlaps the trailing edge of every row it covers and a press on a
+// handle has to move the handle rather than select whatever is lying under it.
+// Then the search box, which is part of the panel but not part of its row list.
+// Then the rows.
+bool pressSidebar(ui::TextRenderer& text, UiRuntime& ui, ui::Rect sidebar, float x, float y,
+                  Uint8 button);
+
 void drawSidebar(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 
 }

@@ -121,7 +121,8 @@ using SnippetMeasure = std::function<int(std::string_view)>;
 // library has changed. Each query is a hit on SQLite.
 const std::vector<library::SearchResult>& searchResults(UiRuntime& ui);
 
-// Fills `ui.sidebar.rows` for a list occupying `rect`, reusing the standing list
+// Fills `ui.sidebar.rows` for a list occupying `rect`, and records that rect as
+// the one the rows were placed against, reusing the standing list
 // when nothing it depends on has moved. An empty result means the list holds
 // nothing worth drawing -- the caller draws its empty message instead, and
 // hit-testing finds nothing, which is the same answer.
@@ -169,7 +170,12 @@ std::pair<std::size_t, std::size_t> sidebarRowRange(const std::vector<SidebarRow
                                                     float top, float bottom);
 
 // The row under the pointer, or nothing when the pointer is off the list.
-std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, ui::Rect sidebar, float x, float y);
+//
+// Against the list rect the draw recorded (`ui.sidebar.rect`) rather than one
+// handed in, for the same reason the tab strip stopped taking a rect: four
+// callers each deciding which rectangle the rows live in is four chances to
+// pick a different one, and one of them did.
+std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, float x, float y);
 
 // How a sidebar row was reached. It decides two things that move together, and
 // which used to be two separate booleans passed side by side:

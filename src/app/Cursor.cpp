@@ -75,7 +75,7 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
     if(contains(search, x, y)) {
       return contains(ui.sidebar.scopeToggle, x, y) ? CursorKind::Pointer : CursorKind::Text;
     }
-    if(sidebarRowAt(ui, sidebarListRect(layout.sidebar), x, y)) return CursorKind::Pointer;
+    if(sidebarRowAt(ui, x, y)) return CursorKind::Pointer;
     return CursorKind::Default;
   }
 
