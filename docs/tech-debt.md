@@ -258,6 +258,12 @@ that is a bigger change than it looks: the state is exactly what makes the
 phases *phases*, so the carrier has to get the ownership right or the split is
 worse than the function.
 
+This entry used to be grouped with `TD-32` and `TD-35` as "the carrier problem
+in four places, worth doing once with one shape". It is not the same problem
+and is no longer waiting on them: those two are a column of bands with a
+running `y`, and this is an incremental algorithm whose locals are its phases.
+One shape covering both would fit neither.
+
 The verification is no longer the problem, and that is worth recording because
 it was the reason given last time. The layout's counters are deterministic and
 they cover the reuse paths densely: `blocks_relaid`, `blocks_walked`,
@@ -409,10 +415,16 @@ is really a small builder with its state in the enclosing scope.
 a better one than it looks: `sidebarRowRange` already depends on the rows
 tiling -- every push advancing the cursor by exactly the row's own height -- and
 that invariant is currently maintained by seven lambdas agreeing to. A type
-would own it. Not done because it is one instance of the same carrier problem
-in four places (`update`, this, `Overlay::draw` and `drawSettingsSurface` --
-`TD-23` and `TD-35`), and they are worth doing together once, with one shape,
-rather than four times with four.
+would own it, at both ends: `ui/RowBand.h` is the *query* over a tiled list and
+already documents the invariant, so the cursor that produces it belongs beside
+it.
+
+This was previously deferred as one of four instances worth doing together with
+one shape. That grouping was too wide. `TD-35` is the same cursor with a bound
+on it -- refuse a row the foot would cut -- so these two are worth doing in one
+commit. `DocumentLayout::update` is a different problem and should not be
+waited on: its shared state is an incremental algorithm's, not a column of
+bands. See `TD-23`.
 
 ## TD-33 — `AppState` is 55 methods, and one of them is the note-writing path
 
@@ -476,31 +488,58 @@ struct -- and it is worth making deliberately, in a commit of its own, with the
 hit test moved under `MenusTests` and `OverlayTests` together. Taken as a rider
 on a feature, the two would end up with a shared helper each.
 
-## TD-35 — `drawSettingsSurface` is the fourth carrier-in-a-function
+## TD-35 — `drawSettingsSurface` writes the same row walker twice
 
 `src/app/SettingsPane.cpp`, 772 lines, of which `drawSettingsSurface` is 262 in
-one function.
+one function -- and the specific thing wrong with it is narrower and more
+actionable than "it is long".
 
-**What it costs today.** The same shape `TD-23` and `TD-32` name, and the
-reason is the same: the function walks the rows advancing a running `y`, and the
-pieces it walks with -- the row's boxes, its wrapped help, its height, whether
-it is the selected one -- are locals shared by every band it draws, so no band
-can be moved out of the function on its own. It is also the file's own
-measurement of what fits: `surface.rowsShown` is written here because only the
-paint knows how many variable-height rows the pane held, and the wheel and the
-arrow keys then clamp against it.
+**What it costs today.** The function contains **two copies of the same
+variable-height row walker**, one for the About list and one for the settings
+list, identical on eleven statements and differing only in the body that draws
+a row:
 
-Nothing fails. The file is under the 1,000-line ceiling
-`architecture_no_shell_source_is_a_catch_all` enforces and the function is
-correct; the cost is that the second-largest source under `src/app/` is one
-paint, one click handler, one key handler and the settings store's write path
-in one place, and that the next setting added lands in a 262-line function.
+| | About | Settings |
+|---|---|---|
+| clamp | `aboutScroll` vs `size - aboutRowsShown` | `rowScroll` vs `size - rowsShown` |
+| bounds | `top = values.y + kSpace2`, `bottom = values.y + values.h` | the same two lines |
+| break | `if(drawn > 0 && y + height > bottom) break;` | `if(drawn > 0 && rect.y + rect.h > bottom) break;` |
+| advance | `y += height; ++drawn;` | `y += rect.h; ++drawn;` |
+| record | `aboutRowsShown = max(1, drawn)` | `rowsShown = max(1, drawn)` |
+| scrollbar | `pitch = (y - top) / drawn`, `hidden = size - drawn` | the same three lines |
 
-**Why it has not been paid.** It is the fourth instance of the carrier problem
--- `DocumentLayout::update`, `rebuildSidebarRows`, `Overlay::draw`, this -- and
-`TD-32` already says why they are worth doing together, once, with one shape:
-a cursor type that owns the vector, the running `y` and the metrics, with each
-band a method on it. Doing this one alone would be a fourth shape. What can be
-split out of this file first and independently is narrower and worth naming:
-`applySetting` and `resetSetting` are the settings *store's* write path wearing
-a paint file's name, and they have no dependency on the surface at all.
+The two halves already keep *separate* fields for the same two concepts
+(`aboutScroll`/`rowScroll`, `aboutRowsShown`/`rowsShown`), which is what a
+duplicated walker turns into once somebody needs to change one of them. And the
+measurement is load-bearing in both: `rowsShown` is written by the paint because
+only the paint knows how many variable-height rows fitted, and the wheel and the
+arrow keys then clamp against it -- so a discrepancy between the two copies is a
+list you cannot scroll to the end of, not a wrong pixel.
+
+**Why it has not been paid.** The previous entry framed this as the fourth
+instance of a carrier problem (`DocumentLayout::update`, `rebuildSidebarRows`,
+`Overlay::draw`, this) that was only worth doing once, with one shape, for all
+four -- which made it a coordinated design exercise nobody was going to start.
+That framing was wrong about this file. The duplication above is inside *one
+function*, and extracting it does not require agreeing on a shape for the other
+three.
+
+What it wants is a bounded row cursor: a viewport, a running `y`, a count of
+what was granted, and a `take(height)` that refuses a row the foot would cut --
+except the first, because a list showing nothing is worse than one showing a
+clipped row. `src/ui/RowBand.h` is where it goes, and not arbitrarily:
+`rowBand()` is the *query* over a list that tiles, and its header already
+documents the tiling invariant -- "each row's box starting where the one before
+it ended" -- that such a cursor is the *producer* of. Today that invariant is
+maintained by call sites agreeing to; a cursor would own it at both ends.
+
+`rebuildSidebarRows` (`TD-32`) is the same cursor with the bound removed: it
+builds the whole list because `rowBand` handles the viewport. So these two are
+worth doing together. `DocumentLayout::update` is **not** the same problem and
+should not be waited on -- its state is an incremental algorithm's, not a
+column of bands, and `TD-23` carries its own reasoning.
+
+What can be split out of this file first and independently is narrower and
+still worth naming: `applySetting` and `resetSetting` are the settings *store's*
+write path wearing a paint file's name, and they have no dependency on the
+surface at all.
