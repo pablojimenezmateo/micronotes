@@ -3,6 +3,7 @@
 #include "ui/AppState.h"
 #include "ui/Settings.h"
 #include "ui/Theme.h"
+#include "ui/UiStateFile.h"
 
 #include <filesystem>
 #include <fstream>
@@ -218,4 +219,83 @@ MICRONOTES_TEST(sidebar_section_names_round_trip) {
   // Four distinct names, or two bands would share a line in the state file and
   // shutting one would shut the other.
   MICRONOTES_REQUIRE(names.size() == count);
+}
+
+// The compatibility story the format promises: keys are added, never
+// redefined, so a file written before tabs existed still opens the note it
+// names.
+//
+// This is the half of `ui/UiStateFile.h` that no round trip can reach --
+// writing and reading with the same binary never produces a file without
+// `tab=` lines -- so it has to be written out by hand. It is also the half most
+// likely to be broken by a change to the format, because the code that honours
+// it looks like dead weight.
+MICRONOTES_TEST(ui_state_opens_a_file_written_before_tabs_existed) {
+  const auto dir = scratchDir("ui-state-legacy");
+  const auto statePath = dir / "ui.state";
+  {
+    std::ofstream out(statePath);
+    out << "pane=1\n";           // reading
+    out << "note=some-note-id\n";
+    out << "sidebar=240\n";
+  }
+
+  micronotes::ui::WorkspaceModel workspace;
+  micronotes::ui::UiSelection selection;
+  MICRONOTES_REQUIRE(micronotes::ui::readUiState(statePath, workspace, selection));
+
+  // One tab, synthesised from the two legacy keys rather than an empty session.
+  MICRONOTES_REQUIRE(workspace.tabs.size() == 1);
+  MICRONOTES_REQUIRE(workspace.tabs[0].noteId == "some-note-id");
+  MICRONOTES_REQUIRE(workspace.tabs[0].paneMode == micronotes::ui::PaneMode::Viewer);
+  MICRONOTES_REQUIRE(workspace.activeTab == 0);
+  MICRONOTES_REQUIRE(selection.noteId == "some-note-id");
+  // And a key it has never heard of does not stop it reading the rest.
+  MICRONOTES_REQUIRE(workspace.sidebarWidth == 240.0f);
+}
+
+// The other direction: a file with `tab=` lines was written by a version that
+// has tabs, so its legacy `pane=` echo must not override the active tab's own
+// pane. Getting this wrong makes every tab open in whatever pane the *first*
+// session used.
+MICRONOTES_TEST(ui_state_ignores_the_legacy_pane_when_tabs_are_present) {
+  const auto dir = scratchDir("ui-state-legacy-echo");
+  const auto statePath = dir / "ui.state";
+  {
+    std::ofstream out(statePath);
+    out << "pane=1\n";                   // the echo: reading
+    out << "tab=3|0|first\n";            // live
+    out << "tab=0|1|second\n";           // raw, pinned
+    out << "active_tab=1\n";
+    out << "note=first\n";               // the legacy echo of the open note
+  }
+
+  micronotes::ui::WorkspaceModel workspace;
+  micronotes::ui::UiSelection selection;
+  MICRONOTES_REQUIRE(micronotes::ui::readUiState(statePath, workspace, selection));
+
+  MICRONOTES_REQUIRE(workspace.tabs.size() == 2);
+  MICRONOTES_REQUIRE(workspace.tabs[0].paneMode == micronotes::ui::PaneMode::Live);
+  MICRONOTES_REQUIRE(workspace.tabs[1].paneMode == micronotes::ui::PaneMode::Editor);
+  MICRONOTES_REQUIRE(workspace.tabs[1].pinned);
+  MICRONOTES_REQUIRE(workspace.activeTab == 1);
+  // The active tab is what is open, whatever the legacy `note=` line said.
+  MICRONOTES_REQUIRE(selection.noteId == "second");
+}
+
+// An out-of-range active tab in a hand-edited or truncated file must clamp
+// rather than index past the end.
+MICRONOTES_TEST(ui_state_clamps_an_active_tab_past_the_end) {
+  const auto dir = scratchDir("ui-state-clamp");
+  const auto statePath = dir / "ui.state";
+  {
+    std::ofstream out(statePath);
+    out << "tab=3|0|only\n";
+    out << "active_tab=9\n";
+  }
+  micronotes::ui::WorkspaceModel workspace;
+  micronotes::ui::UiSelection selection;
+  MICRONOTES_REQUIRE(micronotes::ui::readUiState(statePath, workspace, selection));
+  MICRONOTES_REQUIRE(workspace.activeTab == 0);
+  MICRONOTES_REQUIRE(selection.noteId == "only");
 }

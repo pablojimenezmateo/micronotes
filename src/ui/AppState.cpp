@@ -1,8 +1,7 @@
 #include "CoreAliases.h"
 #include "ui/AppState.h"
 
-#include "ui/Settings.h"
-#include "ui/Theme.h"
+#include "ui/UiStateFile.h"
 
 #include "library/Metadata.h"
 #include "core/perf/Perf.h"
@@ -599,161 +598,12 @@ std::uint64_t AppState::revision() const {
 }
 
 bool AppState::saveUiState(const std::filesystem::path& path) const {
-  std::ostringstream out;
-  // Written for a version that predates tabs: it reads the pane mode and the
-  // open note from these two and gets a working single-tab session. Keys are
-  // added rather than redefined, so an older binary keeps working too.
-  out << "pane=" << static_cast<int>(workspace_.paneMode()) << "\n";
-  for(const auto& tab : workspace_.tabs) {
-    out << "tab=" << static_cast<int>(tab.paneMode) << "|" << (tab.pinned ? 1 : 0) << "|" << tab.noteId << "\n";
-  }
-  out << "active_tab=" << workspace_.activeTab << "\n";
-  // Rounded on the way out: an older binary parses these with from_chars into
-  // an int, and "240.5" would make it fall back to its default instead.
-  out << "sidebar=" << static_cast<int>(std::lround(workspace_.sidebarWidth)) << "\n";
-  out << "rightpanel=" << static_cast<int>(std::lround(workspace_.rightPanelWidth)) << "\n";
-  out << "panel_sidebar=" << (workspace_.sidebarVisible ? 1 : 0) << "\n";
-  out << "panel_right=" << (workspace_.rightPanelVisible ? 1 : 0) << "\n";
-  out << "right_view=" << rightPanelViewName(workspace_.rightPanelView) << "\n";
-  out << "folder=" << selection_.folder.generic_string() << "\n";
-  out << "tag=" << selection_.tag << "\n";
-  out << "note=" << selection_.noteId << "\n";
-  out << "search_scope=" << static_cast<int>(selection_.searchScope) << "\n";
-  out << "theme=" << themeModeName(themeMode()) << "\n";
-  out << "text_size=" << textSizeName(textSize()) << "\n";
-  out << "page_width=" << pageWidthName(pageWidth()) << "\n";
-  // One line each rather than a delimited list: a note id never contains a
-  // newline, and any other separator would eventually appear inside one.
-  for(const auto& id : workspace_.favorites) out << "favorite=" << id << "\n";
-  for(const auto& id : workspace_.recents) out << "recent=" << id << "\n";
-  // Only the sections that are shut, so the common state -- all four open --
-  // writes nothing and an older file reads as all four open, which is the
-  // arrangement it was written under.
-  std::size_t sectionCount = 0;
-  const auto* sections = sidebarSections(&sectionCount);
-  for(std::size_t i = 0; i < sectionCount; ++i) {
-    if(workspace_.sectionCollapsed(sections[i])) {
-      out << "collapsed=" << sidebarSectionName(sections[i]) << "\n";
-    }
-  }
-  // "<swatch index>|<tag>", the index first because a tag name is the only
-  // field that could contain a separator. Only picked colours are written: a
-  // tag following `defaultTagSwatch` has made no choice to persist, and
-  // writing the default out would freeze it against a future palette.
-  for(const auto& [tag, swatch] : workspace_.tagColors.choices()) {
-    out << "tag_color=" << swatch << "|" << tag << "\n";
-  }
-  return platform::writeFileDurably(path, out.str());
+  return writeUiState(path, workspace_, selection_);
 }
 
 bool AppState::loadUiState(const std::filesystem::path& path) {
-  // Cleared before the file is even opened: this is "the view state is now
-  // whatever that file says", and a library with no state file of its own must
-  // not inherit the favorites and the open note of the one before it.
-  workspace_.favorites.clear();
-  workspace_.recents.clear();
-  workspace_.tagColors.clearAll();
-  workspace_.collapsedSections = {};
-  // A file written before panels could be hidden says nothing about them, and
-  // the arrangement it was written under is the one the defaults describe.
-  workspace_.sidebarVisible = true;
-  workspace_.rightPanelVisible = false;
-  workspace_.tabs.clear();
-  workspace_.activeTab = 0;
-  selection_ = {};
-  std::ifstream in(path);
-  if(!in) return false;
-  std::string line;
-  // A file written before tabs existed carries `pane=` and `note=` instead; one
-  // tab is synthesised from them below rather than the session opening empty.
-  std::optional<PaneMode> legacyPane;
-  int activeTab = 0;
-  const auto parseInt = [](const std::string& value, int fallback) {
-    int result = fallback;
-    const auto* first = value.data();
-    const auto* last = value.data() + value.size();
-    const auto [ptr, ec] = std::from_chars(first, last, result);
-    if(ec != std::errc {} || ptr != last) return fallback;
-    return result;
-  };
-  while(std::getline(in, line)) {
-    const auto eq = line.find('=');
-    if(eq == std::string::npos) continue;
-    const auto key = line.substr(0, eq);
-    const auto value = line.substr(eq + 1);
-    if(key == "pane") {
-      const int mode = parseInt(value, static_cast<int>(PaneMode::Live));
-      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
-        legacyPane = static_cast<PaneMode>(mode);
-      }
-    }
-    else if(key == "tab") {
-      // "<pane>|<pinned>|<note id>". The id is last and unsplit, because it is
-      // the only field that could contain a separator.
-      const auto firstBar = value.find('|');
-      const auto secondBar = firstBar == std::string::npos ? std::string::npos : value.find('|', firstBar + 1);
-      if(secondBar == std::string::npos) continue;
-      NoteTab tab;
-      const int mode = parseInt(value.substr(0, firstBar), static_cast<int>(PaneMode::Live));
-      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
-        tab.paneMode = static_cast<PaneMode>(mode);
-      }
-      tab.pinned = parseInt(value.substr(firstBar + 1, secondBar - firstBar - 1), 0) != 0;
-      tab.noteId = value.substr(secondBar + 1);
-      if(!tab.noteId.empty()) workspace_.tabs.push_back(std::move(tab));
-    }
-    else if(key == "active_tab") activeTab = parseInt(value, 0);
-    else if(key == "sidebar") workspace_.sidebarWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.sidebarWidth)));
-    else if(key == "rightpanel") workspace_.rightPanelWidth = static_cast<float>(parseInt(value, static_cast<int>(workspace_.rightPanelWidth)));
-    else if(key == "panel_sidebar") workspace_.sidebarVisible = parseInt(value, 1) != 0;
-    else if(key == "panel_right") workspace_.rightPanelVisible = parseInt(value, 0) != 0;
-    else if(key == "right_view") workspace_.rightPanelView = rightPanelViewFromName(value);
-    else if(key == "folder") selection_.folder = value;
-    else if(key == "tag") selection_.tag = value;
-    else if(key == "note") selection_.noteId = value;
-    else if(key == "theme") setThemeMode(themeModeFromName(value));
-    else if(key == "text_size") setTextSize(textSizeFromName(value));
-    else if(key == "page_width") setPageWidth(pageWidthFromName(value));
-    else if(key == "favorite" && !value.empty()) workspace_.favorites.push_back(value);
-    else if(key == "recent" && !value.empty()) workspace_.recents.push_back(value);
-    else if(key == "collapsed") {
-      std::size_t sectionCount = 0;
-      const auto* sections = sidebarSections(&sectionCount);
-      for(std::size_t i = 0; i < sectionCount; ++i) {
-        if(sidebarSectionName(sections[i]) == value) workspace_.setSectionCollapsed(sections[i], true);
-      }
-    }
-    else if(key == "tag_color") {
-      const auto bar = value.find('|');
-      if(bar == std::string::npos || bar + 1 >= value.size()) continue;
-      // A line whose index will not parse is dropped rather than defaulted to
-      // swatch 0: a hand-edited file must not be able to silently repaint a
-      // tag, and dropping it leaves that tag on its derived colour.
-      const int swatch = parseInt(value.substr(0, bar), -1);
-      if(swatch >= 0) workspace_.tagColors.set(value.substr(bar + 1), swatch);
-    }
-    else if(key == "search_scope") {
-      const int scope = parseInt(value, static_cast<int>(selection_.searchScope));
-      if(scope >= static_cast<int>(library::SearchScope::All) && scope <= static_cast<int>(library::SearchScope::Content)) {
-        selection_.searchScope = static_cast<library::SearchScope>(scope);
-      }
-    }
-  }
-  if(workspace_.tabs.empty() && !selection_.noteId.empty()) {
-    NoteTab tab;
-    tab.noteId = selection_.noteId;
-    tab.paneMode = legacyPane.value_or(PaneMode::Live);
-    workspace_.tabs.push_back(std::move(tab));
-  } else if(legacyPane && !workspace_.tabs.empty()) {
-    // A file with tabs was written by a version that has them, so `pane=` is
-    // only the legacy echo of the active tab and must not override it.
-  }
-  workspace_.activeTab = workspace_.tabs.empty()
-    ? 0
-    : std::min(static_cast<std::size_t>(std::max(activeTab, 0)), workspace_.tabs.size() - 1);
-  // The active tab is what is open, whatever the legacy `note=` line said.
-  if(const auto* tab = workspace_.activeTab_()) selection_.noteId = tab->noteId;
-  return true;
+  return readUiState(path, workspace_, selection_);
 }
+
 
 }

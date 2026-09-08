@@ -1,5 +1,4 @@
 #include "app/SessionState.h"
-
 #include "CoreAliases.h"
 
 #include "app/Notes.h"

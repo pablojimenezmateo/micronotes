@@ -201,6 +201,19 @@ public:
   // every mutation that could have invalidated it.
   std::uint64_t revision() const;
 
+  // The view-state file beside the library: which notes are in tabs, how wide
+  // the panels are, which bands are shut.
+  //
+  // Two lines each, and they are here rather than gone because *restoring*
+  // moves the selection, and the selection is this class's to move. The format
+  // itself -- a hundred and sixty lines of it, with its own
+  // keys-are-added-never-redefined compatibility story -- is
+  // `ui/UiStateFile.h`, which is where it belongs: it had nothing to do with
+  // deciding whether a note can safely be written to disk, and shared a
+  // translation unit with that only because it had `workspace_` in scope.
+  bool saveUiState(const std::filesystem::path& path) const;
+  bool loadUiState(const std::filesystem::path& path);
+
   bool favorite(std::string_view noteId) const;
   bool toggleFavorite(const std::string& noteId);
   // Records a note as just opened. Newest first, and capped, so the list stays
@@ -209,9 +222,6 @@ public:
 
   std::vector<library::TrashEntry> trashEntries() const;
   bool restoreFromTrash(const std::string& name);
-
-  bool saveUiState(const std::filesystem::path& path) const;
-  bool loadUiState(const std::filesystem::path& path);
 
 private:
   // Establishes `openNote_` for whatever the selection names, reading the file

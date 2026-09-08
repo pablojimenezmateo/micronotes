@@ -192,6 +192,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/ShellLayout.cpp
   src/ui/TagColors.cpp
   src/ui/Tabs.cpp
+  src/ui/UiStateFile.cpp
   src/ui/TextUtil.cpp
   src/ui/Tooltip.cpp
   src/ui/WikiLink.cpp
