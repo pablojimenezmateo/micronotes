@@ -3,6 +3,7 @@
 #include "app/Notes.h"
 
 #include <algorithm>
+#include <cctype>
 
 namespace micronotes::app {
 
@@ -212,6 +213,28 @@ bool redoEditorEdit(UiRuntime& ui) {
   ui.revealEditorCursor = true;
   ui.status = "Redo";
   return true;
+}
+
+
+void selectWordAtCursor(UiRuntime& ui) {
+  const auto& value = ui.editor.text();
+  std::size_t cursor = std::min(ui.editor.cursor(), value.size());
+  if(cursor > 0 && (cursor == value.size() || !std::isalnum(static_cast<unsigned char>(value[cursor])))) --cursor;
+  std::size_t start = cursor;
+  std::size_t end = cursor;
+  while(start > 0 && (std::isalnum(static_cast<unsigned char>(value[start - 1])) || value[start - 1] == '_')) --start;
+  while(end < value.size() && (std::isalnum(static_cast<unsigned char>(value[end])) || value[end] == '_')) ++end;
+  ui.editor.selectRange(start, end);
+}
+
+void selectLineAtCursor(UiRuntime& ui) {
+  const auto& value = ui.editor.text();
+  const auto cursor = std::min(ui.editor.cursor(), value.size());
+  const auto lineStart = value.rfind('\n', cursor == 0 ? 0 : cursor - 1);
+  const auto lineEnd = value.find('\n', cursor);
+  const std::size_t start = lineStart == std::string::npos ? 0 : lineStart + 1;
+  const std::size_t end = lineEnd == std::string::npos ? value.size() : lineEnd;
+  ui.editor.selectRange(start, end);
 }
 
 }

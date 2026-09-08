@@ -56,6 +56,15 @@ bool redoEditorEdit(UiRuntime& ui);
 // otherwise the block holding the caret. Both ends are carets, not indices.
 std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui);
 
+// The word or the line the caret sits in, as the editor's selection.
+//
+// Here rather than with the key handler because both routers want them: a
+// double click selects a word and Ctrl+Shift+Left extends by one, and the two
+// were a `static` the pointer path could only reach because it happened to sit
+// in the same file.
+void selectWordAtCursor(UiRuntime& ui);
+void selectLineAtCursor(UiRuntime& ui);
+
 void selectBlockAtCursor(UiRuntime& ui);
 
 // A range transform hands back its result as a text selection. A block

@@ -223,23 +223,32 @@ target_compile_definitions(micronotes_core PUBLIC
 # testable at all.
 set(MICRONOTES_SHELL_SOURCES
   src/app/Application.cpp
+  src/app/BlockMenus.cpp
   src/app/Breadcrumb.cpp
   src/app/Chrome.cpp
+  src/app/Clipboard.cpp
+  src/app/Commands.cpp
   src/app/ContextMenus.cpp
   src/app/Cursor.cpp
   src/app/Desktop.cpp
   src/app/Dismiss.cpp
+  src/app/Fields.cpp
   src/app/Folds.cpp
+  src/app/Frame.cpp
   src/app/InlineText.cpp
+  src/app/KeyRouter.cpp
   src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
   src/app/MenuBar.cpp
   src/app/Notes.cpp
   src/app/Options.cpp
+  src/app/OverlayRouter.cpp
   src/app/PageChrome.cpp
   src/app/PageHeader.cpp
   src/app/PageImages.cpp
   src/app/PageView.cpp
+  src/app/PointerRouter.cpp
+  src/app/Prompts.cpp
   src/app/RawPane.cpp
   src/app/ReadingPage.cpp
   src/app/RightPanel.cpp
@@ -249,6 +258,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/SettingsDialog.cpp
   src/app/Sidebar.cpp
   src/app/SidebarModel.cpp
+  src/app/Startup.cpp
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
   src/app/WindowChrome.cpp

@@ -232,22 +232,59 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // was written and the file had reached 4,820 by the time anyone checked, which
 // is what a rule with no test attached is worth.
 //
-// This is that test. The number below is a ratchet, not a target: a change that
-// moves behaviour out of the file lowers it in the same commit, and nothing
-// raises it. If this fails, the fix is a named unit under src/ -- not a bigger
-// budget.
-constexpr int kApplicationLineBudget = 2288;
+// This is that test, and it is now two rules rather than one. The first is
+// Application.cpp's own ratchet, which only ever goes down. The second is the
+// lesson of the first: a budget on one file by name does not stop a catch-all,
+// it only stops *that* catch-all -- the input routing and the frame were free to
+// pile up in whichever neighbouring file they were moved to. So every source
+// the shell draws through carries a ceiling, and Application.cpp's is simply
+// the tightest one.
+//
+// Both numbers are ratchets, not targets: a change that moves behaviour into a
+// named unit lowers them in the same commit, and nothing raises them. If either
+// fails, the fix is a named unit under src/ -- not a bigger budget.
+constexpr int kApplicationLineBudget = 366;
+constexpr int kShellFileLineBudget = 1000;
+
+namespace {
+
+int lineCount(const std::filesystem::path& path) {
+  const std::string text = readText(path);
+  return static_cast<int>(std::count(text.begin(), text.end(), '\n'));
+}
+
+}
 
 MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
   const auto path = repoRoot() / "src" / "app" / "Application.cpp";
-  const std::string text = readText(path);
-  const auto lines = static_cast<int>(std::count(text.begin(), text.end(), '\n'));
+  const int lines = lineCount(path);
   micronotes::tests::require(
     lines <= kApplicationLineBudget,
     "src/app/Application.cpp is " + std::to_string(lines) + " lines, over its budget of " +
       std::to_string(kApplicationLineBudget) +
-      ". This file is being decomposed and the budget only goes down: put the new behaviour in a "
-      "named unit under src/ and lower the budget instead of raising it.");
+      ". This file is the window, the renderer and the event loop, and nothing else: put the new "
+      "behaviour in a named unit under src/ and lower the budget instead of raising it.");
+}
+
+// The same rule, over the whole shell. Application.cpp got a budget because it
+// had grown to 4,820 lines; nothing stopped the next file from doing the same,
+// and a decomposition that moves 1,900 lines from one file into one other file
+// passes the test above while changing nothing.
+MICRONOTES_TEST(architecture_no_shell_source_is_a_catch_all) {
+  std::string offenders;
+  for(const auto& entry : std::filesystem::directory_iterator(repoRoot() / "src" / "app")) {
+    if(entry.path().extension() != ".cpp") continue;
+    const int lines = lineCount(entry.path());
+    if(lines <= kShellFileLineBudget) continue;
+    if(!offenders.empty()) offenders += ", ";
+    offenders += entry.path().filename().string() + " (" + std::to_string(lines) + ")";
+  }
+  micronotes::tests::require(
+    offenders.empty(),
+    "these src/app/ sources are over the " + std::to_string(kShellFileLineBudget) +
+      "-line ceiling: " + offenders +
+      " -- a file this size is doing more than one thing; split the thing that has the fewest "
+      "callers into a named unit of its own");
 }
 
 // The right panel is drawn after the content, and that is a performance
@@ -267,7 +304,7 @@ MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
 // running. So the order is asserted here, where it is cheap, rather than left
 // to be rediscovered.
 MICRONOTES_TEST(architecture_the_right_panel_is_drawn_after_the_content) {
-  const std::string text = readText(repoRoot() / "src" / "app" / "Application.cpp");
+  const std::string text = readText(repoRoot() / "src" / "app" / "Frame.cpp");
   const auto content = text.find("\"shell.content\"");
   const auto rightPanel = text.find("\"shell.right_panel\"");
   micronotes::tests::require(content != std::string::npos && rightPanel != std::string::npos,
@@ -351,7 +388,7 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
   // Anchor on the chain itself. Were performCommand rewritten into a table,
   // this test would otherwise scan for a spelling nothing uses any more and
   // pass forever.
-  MICRONOTES_REQUIRE(dispatch.find("static void performCommand(UiRuntime& ui, const std::string& id) {") !=
+  MICRONOTES_REQUIRE(dispatch.find("void performCommand(UiRuntime& ui, const std::string& id) {") !=
                      std::string::npos);
 
   std::set<std::string> offered;
