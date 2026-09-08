@@ -183,9 +183,7 @@ struct SidebarState {
   // Last frame's rect, so keyboard navigation can scroll a row into view
   // without recomputing the whole window layout.
   Rect rect;
-  int scroll = 0;
-  int maxScroll = 0;
-  WheelAccumulator wheel;
+  ScrollList list;
   // Which row the keyboard is on, as an index into `rows`.
   int cursor = 0;
 

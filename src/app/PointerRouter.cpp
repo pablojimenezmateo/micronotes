@@ -255,13 +255,13 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
           scrollFromThumbY(ui.livePage.pageRect(), y, ui.pointer.scrollDragOffsetY, ui.livePage.maxScroll()));
         break;
       case ScrollDrag::Sidebar:
-        ui.sidebar.scroll = scrollFromThumbY(sidebarListRect(layout.sidebar), y, ui.pointer.scrollDragOffsetY,
-                                            ui.sidebar.maxScroll);
+        ui.sidebar.list.scrollTo(scrollFromThumbY(sidebarListRect(layout.sidebar), y, ui.pointer.scrollDragOffsetY,
+                                                 ui.sidebar.list.maxScroll()));
         break;
       case ScrollDrag::RawPane: {
         const Rect editorRect = contentPanes(ui, layout.content).editor;
-        ui.raw.scroll = scrollFromThumbY(editorWritingRect(editorRect), y, ui.pointer.scrollDragOffsetY,
-                                           editorMaxScroll(text, ui, editorRect));
+        ui.raw.list.scrollTo(scrollFromThumbY(editorWritingRect(editorRect), y, ui.pointer.scrollDragOffsetY,
+                                              ui.raw.list.maxScroll()));
         ui.revealEditorCursor = false;
         break;
       }

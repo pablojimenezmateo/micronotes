@@ -37,8 +37,11 @@ than left as open sections somebody has to re-measure to act on:
 
 The live page and the reading pane are one renderer now (`doc::Layout`'s token
 flow through `PageView`). The raw pane is the third engine, and it is still
-there: its own soft wrap over `editor::WrappedLines`, its own line stepping, its
-own scrollbar arithmetic against the page rect the other two share.
+there: its own soft wrap over `editor::WrappedLines`, and its own line
+stepping. The scrollbar arithmetic is no longer its own -- it holds a
+`ui::ScrollList` like every other scrolling surface, which also took the whole-
+note rewrap off the wheel, the cursor-shape query and the scrollbar drag: all
+three asked `editorMaxScroll`, and answering cost a full soft wrap.
 
 **What it costs today.** Every typographic decision that reaches all three panes
 is two decisions rather than one. That is down from three, and the one that is
@@ -334,36 +337,6 @@ move -- and it overlaps `TD-30`, because the reason the feeding sequence is
 seven calls long is that `PageView` has sixteen setters and no one call to
 make.
 
-## TD-28 — three panels each spell "a scrolling list"
-
-`SidebarState`, `RightPanelState` and `RawPaneState` each carry `scroll`,
-`maxScroll` and a `WheelAccumulator`, and `PageView` carries its own pair.
-
-The three operations on that triple are written out per panel:
-
-- **the ceiling**, `max(0, ceil(contentHeight - viewportHeight))` -- and the
-  viewport inset differs per panel with nothing saying why: the sidebar takes
-  `rect.h - 24.0f`, the right panel `list.h - kSpace2`.
-- **the clamp**, `scroll = clamp(scroll, 0, maxScroll)`, at six sites.
-- **the wheel**, `scroll = clamp(scroll + wheel.take(notches, perNotch), 0,
-  maxScroll)`,
-  at three sites in `Scroll.cpp` plus two spellings for the pages.
-
-**What it costs today.** Not much *today*: `WheelAccumulator` already fixed the
-part that was actually broken, which was the trackpad. What it costs is per
-panel added, and it has already cost once -- the comment on
-`ScrollDrag::Sidebar`
-records that the sidebar had no working scrollbar at all, because a panel is
-only scrollable once somebody remembers all three operations for it.
-
-**Why it has not been paid.** A `ui::ScrollList` value with
-`setContent(viewport, content)`, `wheel(notches, perNotch)` and `dragTo(...)`
-is a small type and an obvious win, but it wants the fourth reader --
-`PageView`, which owns its own scroll behind an accessor pair and computes
-`maxScroll` from the layout rather than from a content height -- to either join
-it or be deliberately left out. Doing three of four is how you end up with two
-spellings instead of one.
-
 ## TD-29 — which field the focus names is answered by three switches
 
 `focusedField` in `src/app/Fields.cpp`, `caretStateKey` in `src/app/Shell.h`,
@@ -388,36 +361,33 @@ table. That is a change to `FocusArea`, which has eight values and 88 mentions
 across
 22 files.
 
-## TD-30 — `PageView` is a god-class one line under its own ceiling
+## TD-30 — `PageView` has sixteen setters and no one call to make
 
-`src/app/PageView.h`, 51 methods, sixteen of them setters. `PageView.cpp` is
-**999 lines against the 1,000-line ceiling**
-`architecture_no_shell_source_is_a_catch_all` enforces.
+`src/app/PageView.h`, 51 methods.
 
-**What it costs today.** The next line added to that file fails the build, and
-the honest response will be to raise the ceiling unless the split is already
-understood -- which is exactly the pressure the ceiling exists to create, so it
-is worth having the answer written down before somebody is standing in front of
-it.
+The file split is done. `PageView.cpp` reached 1,003 lines,
+`architecture_no_shell_source_is_a_catch_all` failed the build, and the paint
+half went to `PageViewPaint.cpp` -- `draw` plus the eight `draw*` methods, the
+only part that touches an `SDL_Renderer` -- with the vocabulary the two halves
+share (`toTextStyle`, `colorFor`, `toRect`, the gutter offsets) in
+`PageViewStyle.h`. Same class, private state untouched; the split is
+`Layout.cpp` / `LayoutQueries.cpp` again.
 
-The class is three things. There is a **feeding surface**: sixteen setters that
-exist because a caller has to assemble the inputs for one layout, which is what
-makes `TD-27` two eight-call sequences. There is a **layout and query surface**:
-`layout`, `offsetAt`, `blockAt`, `linkAt`, `checkboxAt`, `gutterAt`, `foldAt`,
-`copyButtonAt`, `toolbarAt`, `dropOffsetAt`, `visibleBlocks`, `blockRect`,
-`rowRelative`, `revealCaret`, the anchors. And there is a **paint surface**:
-`draw` plus eight `draw*` methods -- find highlights, block decorations, code
-chrome, fold controls, the gutter, the drop indicator, the toolbar -- which are
-half the file and the only part that touches an `SDL_Renderer`.
+**What is left, and what it costs today.** The sixteen setters. They exist
+because a caller has to assemble the inputs for one layout by hand, which is
+what makes `TD-27` two eight-call sequences, and the failure mode there is
+silent: a page not told about a new revision does not break, it keeps a stale
+layout.
 
-It also holds 121 raw `N.0f` pixel literals, against a `ui::kSpace*` scale it
-names its own constants beside.
+It also holds raw `N.0f` pixel literals against a `ui::kSpace*` scale it names
+its own constants beside.
 
-**Why it has not been paid.** The split is `Layout.cpp` / `LayoutQueries.cpp`
-again -- the paint methods into `PageViewPaint.cpp`, same class, private state
-untouched -- and that part is mechanical. What it does not fix is the sixteen
-setters, and doing the file split first would take the ceiling pressure off
-without addressing the interface, which is the part `TD-27` needs.
+**Why it has not been paid.** The interface half is `TD-27`'s: the shared thing
+is the *frame contract*, "here is everything a `PageView` needs to know before
+it lays out", and naming that is a design decision rather than a code move.
+Doing the file split first deliberately took the ceiling pressure off without
+addressing it, which is why this entry stays open rather than closing with the
+split.
 
 ## TD-31 — `OverlayKind` is dispatched by `if` at seventeen sites
 

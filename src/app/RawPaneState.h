@@ -36,10 +36,9 @@ struct RawRowsKey {
 
 struct RawPaneState {
   ui::Memo<std::vector<editor::SoftWrapRow>, RawRowsKey> rows;
-  int scroll = 0;
+  ScrollList list;
   // Rows the pane last had room for, so PageUp/PageDown match the view.
   int visibleRows = kEditorPageLines;
-  WheelAccumulator wheel;
 };
 
 }

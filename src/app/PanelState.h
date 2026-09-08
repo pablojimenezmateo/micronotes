@@ -59,12 +59,10 @@ struct RightPanelState {
   // that did not: a note with more headings than the panel was tall simply
   // stopped listing them, with no scrollbar to say so and a wheel over it
   // scrolling the note behind instead.
-  int scroll = 0;
-  int maxScroll = 0;
+  ScrollList list;
   // Last frame's rect, so a wheel can be clamped to the same maximum the draw
   // computed without laying the panel out a second time.
   ui::Rect rect;
-  WheelAccumulator wheel;
 
   // Starts the list at the top when the view or the note has changed under it,
   // and reports whether it did.
@@ -79,8 +77,7 @@ struct RightPanelState {
     scrollKeyValid_ = true;
     scrollView_ = view;
     scrollNoteId_ = noteId;
-    scroll = 0;
-    wheel.remainder = 0.0f;
+    list.rebase();
     return true;
   }
 

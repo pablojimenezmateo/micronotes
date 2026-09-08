@@ -376,7 +376,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
       }
     }
   }
-  drawVerticalScrollbar(renderer, list, ui.sidebar.scroll, ui.sidebar.maxScroll,
+  drawVerticalScrollbar(renderer, list, ui.sidebar.list.scroll(), ui.sidebar.list.maxScroll(),
                         ui.pointer.scrollDrag == ScrollDrag::Sidebar);
 }
 
@@ -395,7 +395,7 @@ bool pressSidebar(TextRenderer& text, UiRuntime& ui, Rect sidebar, float x, floa
     // whatever it happens to be lying on.
     if(button == SDL_BUTTON_LEFT) {
       const Rect list = sidebarListRect(sidebar);
-      const auto bar = ui::scrollbarGeometry(list, ui.sidebar.scroll, ui.sidebar.maxScroll);
+      const auto bar = ui::scrollbarGeometry(list, ui.sidebar.list.scroll(), ui.sidebar.list.maxScroll());
       if(bar && contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
         ui.pointer.scrollDrag = ScrollDrag::Sidebar;
         ui.pointer.scrollDragOffsetY = y - bar->thumb.y;

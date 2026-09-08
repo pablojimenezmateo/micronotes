@@ -51,7 +51,7 @@ void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
   // as the file's contents -- which is what makes the next autosave commit it.
   if(unsaved) ui.editor.markDirty();
   if(resetView) {
-    ui.raw.scroll = 0;
+    ui.raw.list.rebase();
     resetPageScroll(ui);
     ui.revealEditorCursor = false;
   }
@@ -380,7 +380,7 @@ void createNote(UiRuntime& ui) {
   if(auto created = ui.state.createNote("Untitled", folder, "")) {
     ui.loadedNoteId = created->id;
     ui.editor.setText("");
-    ui.raw.scroll = 0;
+    ui.raw.list.rebase();
     resetPageScroll(ui);
     ui.revealEditorCursor = true;
     ui.focus = FocusArea::Editor;

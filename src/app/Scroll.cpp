@@ -57,19 +57,16 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
   // be taller than the window, so the pointer's column decides before the pane
   // mode does.
   if(contains(layout.sidebar, ui.pointer.x, ui.pointer.y)) {
-    ui.sidebar.scroll = std::clamp(ui.sidebar.scroll + ui.sidebar.wheel.take(notches, kSidebarScrollPixelsPerNotch),
-                                  0, ui.sidebar.maxScroll);
+    ui.sidebar.list.wheel(notches, kSidebarScrollPixelsPerNotch);
     return;
   }
   if(contains(layout.rightPanel, ui.pointer.x, ui.pointer.y)) {
-    ui.rightPanel.scroll = std::clamp(
-      ui.rightPanel.scroll + ui.rightPanel.wheel.take(notches, kRightPanelScrollPixelsPerNotch),
-      0, ui.rightPanel.maxScroll);
+    ui.rightPanel.list.wheel(notches, kRightPanelScrollPixelsPerNotch);
     return;
   }
 
   if(ui.state.workspace().paneMode() == ui::PaneMode::Live) {
-    ui.livePage.setScroll(ui.livePage.scroll() + ui.liveWheel.take(notches, kLiveScrollPixelsPerNotch));
+    ui.livePage.wheel(notches, kLiveScrollPixelsPerNotch);
     return;
   }
 
@@ -87,13 +84,11 @@ void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width,
     // The page owns its scroll and clamps it to what it last laid out, so the
     // wheel adds and the page decides -- rather than the runtime keeping a
     // second copy of both numbers and clamping them against each other.
-    ui.readingPage.setScroll(ui.readingPage.scroll() +
-                             ui.viewerWheel.take(notches, kViewerScrollPixelsPerNotch));
+    ui.readingPage.wheel(notches, kViewerScrollPixelsPerNotch);
     return;
   }
   if(wheelEditor) {
-    ui.raw.scroll = std::clamp(ui.raw.scroll + ui.raw.wheel.take(notches, kEditorScrollLinesPerNotch),
-                                 0, editorMaxScroll(text, ui, panes.editor));
+    ui.raw.list.wheel(notches, kEditorScrollLinesPerNotch);
     ui.revealEditorCursor = false;
   }
 }

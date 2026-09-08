@@ -71,8 +71,8 @@ namespace {
 // buildSidebarRows(), which is what keeps it off the frame path.
 void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   ui.sidebar.rows.clear();
-  const float top = rect.y + 12.0f;
-  float y = top - static_cast<float>(ui.sidebar.scroll);
+  const float top = rect.y + kSidebarListPadding;
+  float y = top - static_cast<float>(ui.sidebar.list.scroll());
 
   // A caption on what the list is showing: the result count, the tag being
   // filtered by. It heads the list the same way a band does and reads the same,
@@ -169,10 +169,9 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // Whatever the list ended up holding, it scrolls the same way.
   const auto finish = [&]() {
     perf::addCounter(perf::CounterId::SidebarRowsBuilt, ui.sidebar.rows.size());
-    const float contentHeight = y + static_cast<float>(ui.sidebar.scroll) - top;
+    const float contentHeight = y + static_cast<float>(ui.sidebar.list.scroll()) - top;
     ui.sidebar.rowsKey.contentHeight = contentHeight;
-    ui.sidebar.maxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight - (rect.h - 24.0f))));
-    ui.sidebar.scroll = std::clamp(ui.sidebar.scroll, 0, ui.sidebar.maxScroll);
+    ui.sidebar.list.setContent(rect.h - kSidebarListPadding * 2.0f, contentHeight);
   };
 
   // A running query replaces the tree rather than appearing beside it. The
@@ -343,10 +342,9 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   if(reusable) {
     // Clamp first: the scroll the rows are shifted by has to be the one they
     // will be drawn at, or a clamp after the shift leaves them a scroll behind.
-    ui.sidebar.maxScroll = std::max(0, static_cast<int>(std::ceil(previous.contentHeight - (rect.h - 24.0f))));
-    ui.sidebar.scroll = std::clamp(ui.sidebar.scroll, 0, ui.sidebar.maxScroll);
+    ui.sidebar.list.setContent(rect.h - kSidebarListPadding * 2.0f, previous.contentHeight);
     const float dx = rect.x - previous.originX;
-    const float dy = (rect.y - previous.originY) - static_cast<float>(ui.sidebar.scroll - previous.scroll);
+    const float dy = (rect.y - previous.originY) - static_cast<float>(ui.sidebar.list.scroll() - previous.scroll);
     if(dx != 0.0f || dy != 0.0f) {
       for(auto& row : ui.sidebar.rows) {
         row.rect.x += dx;
@@ -357,7 +355,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
     }
     ui.sidebar.rowsKey.originX = rect.x;
     ui.sidebar.rowsKey.originY = rect.y;
-    ui.sidebar.rowsKey.scroll = ui.sidebar.scroll;
+    ui.sidebar.rowsKey.scroll = ui.sidebar.list.scroll();
     perf::addCounter(perf::CounterId::SidebarRowsReused, ui.sidebar.rows.size());
     return;
   }
@@ -381,7 +379,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   key.originX = rect.x;
   key.originY = rect.y;
   // Read back rather than remembered: finish() clamps it.
-  key.scroll = ui.sidebar.scroll;
+  key.scroll = ui.sidebar.list.scroll();
 }
 
 // Scrolls the cursor row into view using last frame's geometry, which is all
@@ -391,9 +389,8 @@ void revealSidebarRow(UiRuntime& ui, std::size_t index) {
   const Rect row = ui.sidebar.rows[index].rect;
   const float top = ui.sidebar.rect.y + 8.0f;
   const float bottom = ui.sidebar.rect.y + ui.sidebar.rect.h - 8.0f;
-  if(row.y < top) ui.sidebar.scroll -= static_cast<int>(std::ceil(top - row.y));
-  else if(row.y + row.h > bottom) ui.sidebar.scroll += static_cast<int>(std::ceil(row.y + row.h - bottom));
-  ui.sidebar.scroll = std::clamp(ui.sidebar.scroll, 0, ui.sidebar.maxScroll);
+  if(row.y < top) ui.sidebar.list.scrollBy(-static_cast<int>(std::ceil(top - row.y)));
+  else if(row.y + row.h > bottom) ui.sidebar.list.scrollBy(static_cast<int>(std::ceil(row.y + row.h - bottom)));
 }
 
 void moveTreeCursor(UiRuntime& ui, int delta) {

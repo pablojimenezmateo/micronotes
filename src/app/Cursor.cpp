@@ -74,7 +74,7 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
   }
 
   if(contains(layout.sidebar, x, y)) {
-    if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebar.scroll, ui.sidebar.maxScroll, x, y)) {
+    if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebar.list.scroll(), ui.sidebar.list.maxScroll(), x, y)) {
       return CursorKind::Pointer;
     }
     const Rect search = searchBoxRect(layout.sidebar);
@@ -104,7 +104,7 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
 
   if(hasEditor && contains(editorRect, x, y)) {
     const Rect writing = editorWritingRect(editorRect);
-    if(scrollbarHit(writing, ui.raw.scroll, editorMaxScroll(text, ui, editorRect), x, y)) {
+    if(scrollbarHit(writing, ui.raw.list.scroll(), ui.raw.list.maxScroll(), x, y)) {
       return CursorKind::Pointer;
     }
     if(contains(writing, x, y)) return CursorKind::Text;

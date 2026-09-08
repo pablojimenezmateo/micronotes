@@ -29,6 +29,12 @@ constexpr float kHeaderHeight = 34.0f;
 // 24 was a row that clipped its own text at the large size.
 constexpr float kRowMinHeight = 24.0f;
 constexpr float kBacklinkMinHeight = 44.0f;
+// Clear space under the last row, and therefore the height the list loses out
+// of the panel. It was folded into the ceiling as `contentHeight + kSpace2 -
+// list.h`, which says the same thing about the content instead of about the
+// viewport and is the reason this panel and the sidebar looked like they were
+// computing two different ceilings.
+constexpr float kListBottomPadding = ui::kSpace2;
 // The panel's own inset, from the shell's spacing scale rather than from a
 // number local to this file. It used to be 14, which is neither of the two
 // insets the sidebar beside it uses.
@@ -94,8 +100,7 @@ Rect outlineRowRect(Rect rect, std::size_t index, float pitch, int scroll) {
 void setMaxScroll(UiRuntime& ui, Rect rect, float contentHeight) {
   const Rect list = listRect(rect);
   ui.rightPanel.rect = rect;
-  ui.rightPanel.maxScroll = std::max(0, static_cast<int>(std::ceil(contentHeight + ui::kSpace2 - list.h)));
-  ui.rightPanel.scroll = std::clamp(ui.rightPanel.scroll, 0, ui.rightPanel.maxScroll);
+  ui.rightPanel.list.setContent(list.h - kListBottomPadding, contentHeight);
 }
 
 }
@@ -208,7 +213,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     // the same order every list here uses.
     ui::ClipGuard clip(renderer, list);
     const float used = ui::drawEmptyMessage(text, title, detail, list.x,
-                                            list.y - static_cast<float>(ui.rightPanel.scroll), list.w, keys);
+                                            list.y - static_cast<float>(ui.rightPanel.list.scroll()), list.w, keys);
     setMaxScroll(ui, rect, used);
   };
 
@@ -220,7 +225,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   // Every view scrolls inside the list, so every view is clipped to it: a row
   // half off the bottom is cut at the edge rather than drawn over the tabs.
   ui::ClipGuard listClip(renderer, list);
-  const int scroll = ui.rightPanel.scroll;
+  const int scroll = ui.rightPanel.list.scroll();
 
   if(workspace.rightPanelView == ui::RightPanelView::Outline) {
     const auto& entries = outlineFor(ui);
@@ -252,7 +257,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       text.draw(ui::ellipsizeToWidth(text, entry.text, static_cast<int>(row.x + row.w - x - ui::kSpace2), rowStyle),
                 x, ui::textTop(row, text, rowStyle), colour, rowStyle);
     }
-    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.maxScroll);
+    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.list.maxScroll());
     return;
   }
 
@@ -296,7 +301,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
       }
       y += pitch;
     }
-    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.maxScroll);
+    ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.list.maxScroll());
     return;
   }
 
@@ -338,7 +343,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     }
     y += pitch;
   }
-  ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.maxScroll);
+  ui::drawVerticalScrollbar(renderer, list, scroll, ui.rightPanel.list.maxScroll());
 }
 
 // Non-const because the outline is cached lazily behind `outlineFor`, which is
@@ -352,7 +357,7 @@ bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect re
     if(ui::contains(tabRect(rect, i, tabCount), x, y)) return true;
   }
   const Rect list = listRect(rect);
-  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanel.scroll, ui.rightPanel.maxScroll);
+  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanel.list.scroll(), ui.rightPanel.list.maxScroll());
      bar && ui::contains(ui::scrollbarHitRect(bar->thumb), x, y)) {
     return true;
   }
@@ -374,11 +379,11 @@ bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect re
   const auto& entries = outlineFor(ui);
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const float pitch = rowPitch(text, rowStyle);
-  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.scroll);
+  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.list.scroll());
   if(offset < 0.0f) return false;
   const auto index = static_cast<std::size_t>(offset / pitch);
   return index < entries.size() &&
-         ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.scroll), x, y);
+         ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.list.scroll()), x, y);
 }
 
 bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rect, float x, float y) {
@@ -393,7 +398,7 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   // A click on the scrollbar is a click on the scrollbar, wherever the rows
   // under it happen to fall.
   const Rect list = listRect(rect);
-  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanel.scroll, ui.rightPanel.maxScroll);
+  if(const auto bar = ui::scrollbarGeometry(list, ui.rightPanel.list.scroll(), ui.rightPanel.list.maxScroll());
      bar && ui::contains(ui::scrollbarHitRect(bar->track), x, y)) {
     return true;
   }
@@ -421,10 +426,10 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   // would have been there before the list was scrolled.
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const float pitch = rowPitch(text, rowStyle);
-  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.scroll);
+  const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.list.scroll());
   if(offset >= 0.0f) {
     const auto index = static_cast<std::size_t>(offset / pitch);
-    if(index < entries.size() && ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.scroll), x, y)) {
+    if(index < entries.size() && ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.list.scroll()), x, y)) {
       // Clicking a heading is a way of scrolling to it, so the caret goes to its
       // text rather than to the marker in front of it.
       ui.editor.moveCursor(entries[index].offset);

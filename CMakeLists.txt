@@ -190,6 +190,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/NoteProperties.cpp
   src/ui/Menus.cpp
   src/ui/Outline.cpp
+  src/ui/ScrollList.cpp
   src/ui/Settings.cpp
   src/ui/SettingsSurface.cpp
   src/ui/ShellLayout.cpp
@@ -255,6 +256,8 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/PageImages.cpp
   src/app/PagePress.cpp
   src/app/PageView.cpp
+  src/app/PageViewPaint.cpp
+  src/app/PageViewStyle.cpp
   src/app/PointerRouter.cpp
   src/app/Prompts.cpp
   src/app/RawPane.cpp
@@ -337,7 +340,7 @@ add_executable(micronotes_tests
   tests/TagColorTests.cpp
   tests/ThemeTests.cpp
   tests/TextFieldTests.cpp
-  tests/WheelTests.cpp
+  tests/ScrollListTests.cpp
   tests/WikiLinkTests.cpp
   tests/WorkspaceModelTests.cpp
   tests/WrappedLinesTests.cpp

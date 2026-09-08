@@ -2,6 +2,7 @@
 
 #include "doc/Layout.h"
 #include "ui/Draw.h"
+#include "ui/ScrollList.h"
 
 #include <SDL3/SDL.h>
 
@@ -232,6 +233,10 @@ public:
   int scroll() const;
   void setScroll(int value);
   int maxScroll() const;
+  // One wheel event. The page owns its accumulator for the same reason it owns
+  // its ceiling: a remainder kept by the caller is a remainder the caller has
+  // to remember to keep.
+  void wheel(float notches, float pixelsPerNotch);
   ui::Rect pageRect() const;
   // Where the note's own text starts: the content column, at the top of the
   // page. What an empty note's placeholder has to line up with, so the first
@@ -252,6 +257,9 @@ public:
   const std::vector<PageLink>& links() const;
 
 private:
+  // Hand the page rect, the header and the document extent to the scroll, which
+  // is what turns them into a ceiling. Called at the end of `layout()`.
+  void recordScrollExtent();
   float originX() const;
   float originY() const;
   // Rect of the whole block in window coordinates.
@@ -285,7 +293,11 @@ private:
   float columnWidth_ = 640.0f;
   float contentTop_ = 0.0f;
   float headerHeight_ = 0.0f;
-  int scroll_ = 0;
+  // The offset, its ceiling and the wheel. The ceiling is recorded at the end
+  // of `layout()` -- the one place the page rect, the header height and the
+  // document extent all settle -- so a wheel or a scrollbar drag clamps against
+  // what was actually laid out.
+  ui::ScrollList scroll_;
   std::optional<std::size_t> rawOffset_;
   std::vector<PageLink> links_;
   std::vector<PageCheckbox> checkboxes_;

@@ -213,10 +213,6 @@ struct UiRuntime {
   PageView readingPage;
   // The third: the note as a monospaced file. See `app/RawPaneState.h`.
   RawPaneState raw;
-  // The two panes above scroll as pixels; the panels own their own
-  // accumulators. See `WheelAccumulator`.
-  WheelAccumulator liveWheel;
-  WheelAccumulator viewerWheel;
   // Where every link the panes drew this frame landed, so a click and the
   // cursor shape can find one without laying a page out again. Cleared at the
   // top of the frame; see `app/PageChrome.h`.

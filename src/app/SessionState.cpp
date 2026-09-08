@@ -120,8 +120,8 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   ui.loadedNoteId.clear();
   ui.editor.setText("");
   ui.editor.markSaved();
-  ui.sidebar.scroll = 0;
-  ui.raw.scroll = 0;
+  ui.sidebar.list.rebase();
+  ui.raw.list.rebase();
   ui.livePage.setScroll(0);
   ui.readingPage.setScroll(0);
   loadSelectedIntoEditor(ui);

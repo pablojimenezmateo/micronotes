@@ -83,8 +83,8 @@ bool pressPaneScrollbar(TextRenderer& text, UiRuntime& ui, Rect content, float x
   const ContentPanes panes = contentPanes(ui, content);
   if(panes.hasEditor) {
     const Rect editorRect = panes.editor;
-    if(grab(ScrollDrag::RawPane, editorWritingRect(editorRect), ui.raw.scroll,
-            editorMaxScroll(text, ui, editorRect))) {
+    if(grab(ScrollDrag::RawPane, editorWritingRect(editorRect), ui.raw.list.scroll(),
+            ui.raw.list.maxScroll())) {
       ui.focus = FocusArea::Editor;
       // A bar dragged deliberately must not be undone by the caret it left
       // behind on the row it came from.

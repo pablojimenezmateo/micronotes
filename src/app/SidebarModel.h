@@ -47,6 +47,14 @@ inline constexpr float kSidebarGutterX = ui::kSidebarInset;
 inline constexpr float kSidebarGutterWidth = ui::kTreeChevronSlotWidth;
 inline constexpr float kSidebarLabelX = kSidebarGutterX + kSidebarGutterWidth + ui::kTreeLabelGap;
 
+// The padding above the first row and below the last, and therefore the height
+// the list loses out of the panel. `rebuildSidebarRows` starts the first row at
+// `rect.y + kSidebarListPadding`, and the ceiling has to take the same amount
+// off the bottom or the last row cannot be scrolled clear of the edge. It was a
+// bare `24.0f` at the two ceiling sites and a bare `12.0f` at the row origin,
+// which is the same number written twice in two forms.
+inline constexpr float kSidebarListPadding = ui::kSpace3;
+
 // How many rows the two shortcut lists show. A shortcut list is a way back to
 // something recent, not a second library: past a handful it stops being faster
 // to read than the tree it sits above. Named because the count on the band has

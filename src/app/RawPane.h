@@ -19,8 +19,9 @@ void drawEditor(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, u
 std::size_t editorIndexAtPoint(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y);
 void placeEditorCursor(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y);
 
-// How far the pane can scroll, and the box the text is actually drawn in.
-int editorMaxScroll(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
+// The box the text is actually drawn in. How far the pane can scroll is
+// `ui.raw.list`, recorded by the draw: asking for it used to mean soft-wrapping
+// the whole note, at four call sites, one of which was the wheel.
 ui::Rect editorWritingRect(ui::Rect editorRect);
 
 }
