@@ -43,6 +43,26 @@ struct OverlayItem {
   std::string shortcut;   // right-aligned hint, e.g. "Ctrl+N"
   bool enabled = true;
   bool destructive = false;
+  // A tick in the mark column: this is the value in force, or the toggle that
+  // is on.
+  //
+  // The column is already reserved -- every row's label starts at
+  // `kMenuPopupLabelInset` so a palette row and a menu row for the same command
+  // line up -- but nothing could ask for the tick that column exists for. So the
+  // settings list wrote the *word* "current" in the accelerator column instead,
+  // where it read as a second value, and a context menu's toggle had to say
+  // "Toggle favorite" because it could not show which way it was set.
+  bool checked = false;
+  // A rule rather than a row. Menus group their items -- the harmless ones, then
+  // the one that deletes something -- and a group with no division between it
+  // and the next is not a group.
+  //
+  // Never highlighted, never committed, and given a shorter row of its own, so
+  // the panel's height stays the sum of its rows and one rule walks them all.
+  // The menu bar's own popups have had these since they were written; the
+  // overlay that backs every *context* menu did not, so the two kinds of menu
+  // looked unrelated.
+  bool separator = false;
 };
 
 struct Overlay {
@@ -84,6 +104,16 @@ struct Overlay {
   // rather than swallowing it. Such an overlay comes back with an empty itemId
   // and whatever was typed in `value`.
   bool reportDismissal = false;
+
+  // Whether the window behind is dimmed.
+  //
+  // Most overlays are a question you have to answer, and dimming what is behind
+  // says so. Two are not: the slash menu and the wikilink picker filter as you
+  // type *into the note*, so what is behind them is the sentence you are in the
+  // middle of writing -- and a wash over it hides the one thing you need in order
+  // to choose from the list. The completion popup in the sibling editor is drawn
+  // the same way and for the same reason.
+  bool dimsBehind = true;
 
   // Anchored overlays hang off a point (context menus); otherwise the overlay
   // is centred horizontally near the top of the window, like a palette.

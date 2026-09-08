@@ -82,6 +82,8 @@ void openSlashMenu(UiRuntime& ui, std::size_t slashStart) {
   overlay.filterable = true;
   overlay.placeholder = "Filter block types";
   overlay.hint = "Enter inserts, Esc keeps typing";
+  // The note behind stays lit: this list is about the line the caret is on.
+  overlay.dimsBehind = false;
   overlay.items = blockKindItems();
   ui.overlays.open(std::move(overlay));
 }

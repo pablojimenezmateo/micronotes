@@ -320,6 +320,7 @@ add_executable(micronotes_tests
   tests/MarkdownParserTests.cpp
   tests/NotePropertiesTests.cpp
   tests/OutlineTests.cpp
+  tests/OverlayTests.cpp
   tests/PathUtilsTests.cpp
   tests/PerfTraceTests.cpp
   tests/MenusTests.cpp

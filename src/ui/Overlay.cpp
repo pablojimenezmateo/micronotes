@@ -38,7 +38,21 @@ constexpr float kSwatchGap = 4.0f;
 // The header band a titled overlay wears -- see `drawTitledCard`. The menu
 // bar's height, because it is the same kind of surface and two chrome strips
 // that differ by three pixels read as a mistake.
-constexpr float kTitleBandHeight = kMenuBarHeight + kSpace1;
+
+// A row can be landed on when it is a real row that is not disabled. Section
+// headings are listed as disabled rows and separators are not rows at all, so
+// both are drawn and both are skipped -- which is the whole reason the
+// distinction is a field rather than an empty label.
+bool selectable(const OverlayItem& item) {
+  return item.enabled && !item.separator;
+}
+
+// A separator's row is shorter than a real one, which is what makes a group
+// read as a group rather than as one more item. The same two numbers the menu
+// bar's own popups use, so a context menu and a menu-bar menu are one shape.
+float rowHeight(const OverlayItem& item) {
+  return item.separator ? kMenuPopupSeparatorHeight : kRowHeight;
+}
 
 bool usesField(const Overlay& overlay) {
   return overlay.kind == OverlayKind::TextPrompt || (overlay.kind == OverlayKind::List && overlay.filterable);
@@ -147,11 +161,29 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   const float panelTop = overlay.anchored ? 8.0f : std::max(60.0f, static_cast<float>(windowHeight) * 0.18f);
   const float room = static_cast<float>(windowHeight) - panelTop - 8.0f
                    - titleH - (field ? kFieldHeight + kPadding : 0.0f) - hintProbe - kPadding * 2.0f;
-  const int fits = std::max(3, static_cast<int>(room / kRowHeight));
-  const int rowsShown = std::min({std::max(1, overlay.maxRows), fits, static_cast<int>(indices.size())});
-  lastRows_ = std::min(std::max(1, overlay.maxRows), fits);
-  const float rows = static_cast<float>(rowsShown);
-  const float listH = overlay.kind == OverlayKind::List ? rows * kRowHeight : 0.0f;
+  // How much of the list fits, walked rather than divided.
+  //
+  // A separator's row is shorter than a real one, so `room / kRowHeight` both
+  // understates what fits and -- once the panel was sized from that count --
+  // would leave a gap under a ruled menu's last item.
+  //
+  // The first row always goes in, however little room there is: a panel with one
+  // row too tall for the window is wrong, but a panel with no rows at all is a
+  // card with nothing in it and nothing to say why.
+  const int cap = std::max(1, overlay.maxRows);
+  const int first = std::clamp(overlay.scroll, 0, std::max(0, static_cast<int>(indices.size()) - 1));
+  int rowsShown = 0;
+  float listH = 0.0f;
+  if(overlay.kind == OverlayKind::List) {
+    for(std::size_t i = static_cast<std::size_t>(first); i < indices.size() && rowsShown < cap; ++i) {
+      const float step = rowHeight(overlay.items[static_cast<std::size_t>(indices[i])]);
+      if(rowsShown > 0 && listH + step > room) break;
+      listH += step;
+      ++rowsShown;
+    }
+  }
+  // Rows the panel actually held, which is what scrolling has to agree with.
+  lastRows_ = std::max(1, rowsShown);
   // The grid's own height, from how many rows the swatches fill.
   const int swatchRows = isGridOverlay(overlay.kind)
                            ? static_cast<int>((indices.size() + kSwatchColumns - 1) / kSwatchColumns)
@@ -225,12 +257,12 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
     }
     return layout;
   }
-  const int first = std::clamp(overlay.scroll, 0, std::max(0, static_cast<int>(indices.size()) - rowsShown));
-  for(std::size_t i = static_cast<std::size_t>(first);
-      i < indices.size() && static_cast<int>(i) - first < rowsShown; ++i) {
-    layout.itemRects.push_back({x + kSpace2 - 2.0f, cursorY, width - (kSpace2 - 2.0f) * 2.0f, kRowHeight});
+  for(int taken = 0; taken < rowsShown; ++taken) {
+    const std::size_t i = static_cast<std::size_t>(first + taken);
+    const float step = rowHeight(overlay.items[static_cast<std::size_t>(indices[i])]);
+    layout.itemRects.push_back({x + kSpace2 - 2.0f, cursorY, width - (kSpace2 - 2.0f) * 2.0f, step});
     layout.itemIndices.push_back(indices[i]);
-    cursorY += kRowHeight;
+    cursorY += step;
   }
   if(overlay.kind == OverlayKind::Confirm) {
     // The consequence, then the buttons. It used to be the other way round --
@@ -276,7 +308,7 @@ void OverlayStack::moveHighlight(int delta) {
   for(int move = 0; move < std::max(1, std::abs(delta)); ++move) {
     for(int taken = 0; taken < count; ++taken) {
       position = (position + step % count + count) % count;
-      if(overlay->items[static_cast<std::size_t>(indices[static_cast<std::size_t>(position)])].enabled) break;
+      if(selectable(overlay->items[static_cast<std::size_t>(indices[static_cast<std::size_t>(position)])])) break;
     }
   }
   overlay->highlighted = indices[static_cast<std::size_t>(position)];
@@ -290,7 +322,7 @@ void OverlayStack::resetHighlight() {
   const auto indices = visibleIndices(*overlay);
   overlay->highlighted = indices.empty() ? 0 : indices.front();
   for(const int index : indices) {
-    if(!overlay->items[static_cast<std::size_t>(index)].enabled) continue;
+    if(!selectable(overlay->items[static_cast<std::size_t>(index)])) continue;
     overlay->highlighted = index;
     break;
   }
@@ -339,7 +371,7 @@ std::optional<OverlayResult> OverlayStack::commit() {
     int chosen = overlay->highlighted;
     if(std::find(indices.begin(), indices.end(), chosen) == indices.end()) chosen = indices.front();
     const auto& item = overlay->items[static_cast<std::size_t>(chosen)];
-    if(!item.enabled) return std::nullopt;
+    if(!selectable(item)) return std::nullopt;
     result.itemId = item.id;
   } else if(overlay->kind == OverlayKind::Confirm) {
     result.itemId = "confirm";
@@ -424,7 +456,7 @@ OverlayCursor OverlayStack::cursorAt(float x, float y) const {
     // cursor lying about the one thing it is for.
     const int index = lastLayout_.itemIndices[i];
     if(index >= 0 && index < static_cast<int>(stack_.back().items.size()) &&
-       !stack_.back().items[static_cast<std::size_t>(index)].enabled) {
+       !selectable(stack_.back().items[static_cast<std::size_t>(index)])) {
       return OverlayCursor::Panel;
     }
     return OverlayCursor::Pointer;
@@ -455,7 +487,7 @@ std::optional<OverlayResult> OverlayStack::handleClick(float x, float y, bool& h
       close();
       return result;
     }
-    if(!overlay->items[static_cast<std::size_t>(index)].enabled) return std::nullopt;
+    if(!selectable(overlay->items[static_cast<std::size_t>(index)])) return std::nullopt;
     overlay->highlighted = index;
     return commit();
   }
@@ -470,7 +502,7 @@ void OverlayStack::handleMotion(float x, float y) {
   for(std::size_t i = 0; i < lastLayout_.itemRects.size(); ++i) {
     if(!contains(lastLayout_.itemRects[i], x, y)) continue;
     const int index = lastLayout_.itemIndices[i];
-    if(index >= 0 && overlay->items[static_cast<std::size_t>(index)].enabled) overlay->highlighted = index;
+    if(index >= 0 && selectable(overlay->items[static_cast<std::size_t>(index)])) overlay->highlighted = index;
     return;
   }
 }
@@ -498,8 +530,13 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   // alpha per theme: the light theme wants a cooler, lighter dim than the dark
   // one, and picking two numbers here is how the two drifted apart from the
   // rest of the palette.
-  fill(renderer, {0, 0, static_cast<float>(windowWidth), static_cast<float>(windowHeight)},
-       theme().overlayBackdrop);
+  // Not every overlay dims. An anchored menu costs one click to dismiss, and an
+  // overlay that filters as you type into the note is showing a list *about* the
+  // sentence behind it: see `Overlay::dimsBehind`.
+  if(overlay->dimsBehind && !overlay->anchored) {
+    fill(renderer, {0, 0, static_cast<float>(windowWidth), static_cast<float>(windowHeight)},
+         theme().overlayBackdrop);
+  }
 
   const auto layout = layoutFor(*overlay, text, windowWidth, windowHeight);
   lastLayout_ = layout;
@@ -619,11 +656,27 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     }
 
     const auto& item = overlay->items[static_cast<std::size_t>(index)];
+    if(item.separator) {
+      // A rule inset from both edges, down the middle of the row it owns --
+      // the same shape the menu bar's own popups draw, so a context menu and a
+      // menu-bar menu divide their groups identically. Full width would cut the
+      // popup into unrelated cards.
+      hLine(renderer, rect.x + kSpace2, rect.x + rect.w - kSpace2,
+            std::round(rect.y + rect.h / 2.0f), theme().border);
+      continue;
+    }
     const bool selected = index == overlay->highlighted;
     if(selected) {
       fill(renderer, rect, theme().rowHighlight);
     } else if(contains(rect, mouseX_, mouseY_) && item.enabled) {
       fill(renderer, rect, theme().rowHighlight);
+    }
+    // The tick, in the column every row already reserves for it. Drawn from two
+    // lines rather than typeset: the vendored UI face has no check glyph, which
+    // is why this used to be the word "current" in the accelerator column.
+    if(item.checked) {
+      drawCheckGlyph(renderer, {rect.x + kSpace2, rect.y + 3.0f, 10.0f, std::max(0.0f, rect.h - 6.0f)},
+                     item.enabled ? theme().accent : theme().textDisabled);
     }
     const SDL_Color label = !item.enabled ? theme().textDisabled
                           : item.destructive ? theme().warn

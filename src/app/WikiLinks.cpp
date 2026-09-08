@@ -88,6 +88,8 @@ void openWikiMenu(UiRuntime& ui, std::size_t wikiStart) {
   overlay.reportDismissal = true;
   overlay.placeholder = "Type a note title";
   overlay.hint = "Enter links, Esc keeps typing";
+  // The note behind stays lit: this list is about the line the caret is on.
+  overlay.dimsBehind = false;
   const auto root = ui.state.libraryRoot();
   for(const auto& note : ui.state.allNotes()) {
     const auto folder = note.folder.generic_string();

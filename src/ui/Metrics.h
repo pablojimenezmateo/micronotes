@@ -150,6 +150,15 @@ inline constexpr float kSpace3 = 12.0f;
 inline constexpr float kSpace4 = 16.0f;
 inline constexpr float kSpace6 = 24.0f;
 
+// The band across the head of a floating card, which is where its title goes.
+//
+// The menu bar's height plus a hair, so a palette's header and the bar read as
+// the same kind of surface. It was a constant private to `ui/Overlay.cpp`, which
+// left the Settings card no way to ask for the same band without writing the
+// arithmetic out a second time -- and two numbers that happen to match are two
+// numbers that will stop matching.
+inline constexpr float kTitleBandHeight = kMenuBarHeight + kSpace1;
+
 // A section band's two columns, which are deliberately *not* the row columns
 // above: a band spans the panel where a row is inset, and its chevron and label
 // sit an indent step ahead of the column the rows use.

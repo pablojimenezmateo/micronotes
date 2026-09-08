@@ -19,23 +19,41 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
   overlay.anchorX = x;
   overlay.anchorY = y;
   overlay.width = 220.0f;
-  const bool hasNote = !ui.state.selection().noteId.empty();
+  const auto noteId = ui.state.selection().noteId;
+  const bool hasNote = !noteId.empty();
+  // Four groups, ruled off from each other: what makes a note, what changes the
+  // one you have, what the file underneath it is, and the one row that destroys
+  // it. Without the rules the destructive row sat flush against "Copy absolute
+  // path" and read as one more thing you could do to a path.
+  //
+  // The star is a tick rather than the word "Toggle": a row that says "Toggle
+  // favorite" makes you open the menu to find out which way it is set, which is
+  // the one thing the menu could have told you without being opened.
   overlay.items = {
-    {"new", "New note", "", ui::keysFor(ui::ActionId::NewNote), true, false},
-    {"rename", "Rename", "", "", hasNote, false},
-    {"icon", "Set icon", "", "", hasNote, false},
-    {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false},
-    {"favorite", "Toggle favorite", "", "", hasNote, false},
-    {"move", "Move to notebook", "", "", hasNote, false},
+    {"new", "New note", "", ui::keysFor(ui::ActionId::NewNote), true, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"rename", "Rename", "", ui::keysFor(ui::ActionId::RenameNote), hasNote, false, false, false},
+    {"icon", "Set icon", "", "", hasNote, false, false, false},
+    {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false, false, false},
+    {"favorite", "Favorite", "", "", hasNote, false, hasNote && ui.state.favorite(noteId), false},
+    {"move", "Move to notebook", "", "", hasNote, false, false, false},
+    {"", "", "", "", false, false, false, true},
     // A note is a file, and these are the questions a reader asks about one.
     // The ids are the action names, so the menu row, the palette row and any
     // future key binding are one entry -- which is the rule the whole action
     // table exists to keep.
-    {"show-on-disk", "Show on disk", "", "", hasNote, false},
-    {"copy-relative-path", "Copy relative path", "", "", hasNote, false},
-    {"copy-absolute-path", "Copy absolute path", "", "", hasNote, false},
-    {"delete", "Delete", "", "", hasNote, true},
+    {"show-on-disk", "Show on disk", "", "", hasNote, false, false, false},
+    {"copy-relative-path", "Copy relative path", "", "", hasNote, false, false, false},
+    {"copy-absolute-path", "Copy absolute path", "", "", hasNote, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"delete", "Delete", "", "", hasNote, true, false, false},
   };
+  // A context menu shows all of itself. The default row cap is a palette's --
+  // twelve, with the rest scrolled -- and once the rules above were added the
+  // note menu ran to thirteen rows, which put Delete below the fold behind a
+  // scrollbar nobody expects on a menu. The window-height clamp still applies,
+  // so this cannot run a menu off the screen.
+  overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
 }
 
@@ -171,11 +189,14 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
   overlay.width = 220.0f;
   const bool hasFolder = !ui.state.selection().folder.empty();
   overlay.items = {
-    {"new-folder", "New notebook", "", "", true, false},
-    {"new-note", "New note here", "", "", hasFolder, false},
-    {"rename", "Rename", "", "", hasFolder, false},
-    {"delete", "Delete", "", "", hasFolder, true},
+    {"new-folder", "New notebook", "", ui::keysFor(ui::ActionId::NewFolder), true, false, false, false},
+    {"new-note", "New note here", "", "", hasFolder, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"rename", "Rename", "", "", hasFolder, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"delete", "Delete", "", "", hasFolder, true, false, false},
   };
+  overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
 }
 
