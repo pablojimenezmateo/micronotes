@@ -179,6 +179,35 @@ std::vector<int> settingsRowsIn(const std::vector<SettingsRow>& rows, std::strin
 bool settingsCategoryMatches(const std::vector<SettingsRow>& rows, std::string_view category,
                              std::string_view query);
 
+// The category the selection names, and the rows visible under it.
+//
+// One function because it was six copies. "Which rows can the keyboard move
+// through" is four steps -- list the categories, clamp the selected one into
+// that list, filter its rows, clamp the selected row into what survived -- and
+// the click, the keys, the wheel, the paint and the clamp each wrote all four
+// out. A seventh copy had already been written as a `selectedRow` helper and
+// then not called by any of them, which is how a duplicated sequence announces
+// itself: the shared version exists and nobody reaches it.
+//
+// `category` and `row` are what the surface currently holds, which may be past
+// the end after a filter has emptied a category; the returned pair is inside
+// the lists or names nothing.
+struct SettingsSelection {
+  // `category` clamped into the category list, and the index into `visible`.
+  // Both zero when there is nothing to select.
+  int category = 0;
+  int row = 0;
+  // Rows of that category that survive the filter, as indices into `rows`.
+  std::vector<int> visible;
+
+  bool empty() const { return visible.empty(); }
+  // The row the selection names, as an index into `rows`, or -1.
+  int selected() const { return visible.empty() ? -1 : visible[static_cast<std::size_t>(row)]; }
+};
+
+SettingsSelection settingsSelection(const std::vector<SettingsRow>& rows, int category, int row,
+                                    std::string_view query);
+
 // Every row that survives the filter, across all categories, for the count
 // along the foot.
 std::size_t settingsMatchCount(const std::vector<SettingsRow>& rows, std::string_view query);

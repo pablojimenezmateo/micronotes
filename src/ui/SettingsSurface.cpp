@@ -89,6 +89,19 @@ bool settingsCategoryMatches(const std::vector<SettingsRow>& rows, std::string_v
   return !settingsRowsIn(rows, category, query).empty();
 }
 
+SettingsSelection settingsSelection(const std::vector<SettingsRow>& rows, int category, int row,
+                                    std::string_view query) {
+  SettingsSelection selection;
+  const auto categories = settingsCategories(rows);
+  if(categories.empty()) return selection;
+  selection.category = std::clamp(category, 0, static_cast<int>(categories.size()) - 1);
+  selection.visible =
+    settingsRowsIn(rows, categories[static_cast<std::size_t>(selection.category)], query);
+  if(selection.visible.empty()) return selection;
+  selection.row = std::clamp(row, 0, static_cast<int>(selection.visible.size()) - 1);
+  return selection;
+}
+
 std::size_t settingsMatchCount(const std::vector<SettingsRow>& rows, std::string_view query) {
   std::size_t count = 0;
   for(const auto& row : rows) {

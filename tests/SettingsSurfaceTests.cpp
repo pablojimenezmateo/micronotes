@@ -161,3 +161,36 @@ MICRONOTES_TEST(both_modes_keep_the_filter_and_the_footer) {
     micronotes::tests::require(layout.values.h > 0.0f, "a mode was laid out with no room for content");
   }
 }
+
+// The four steps the click, the keys, the wheel and the clamp each used to
+// write out for themselves. What is being checked is the clamping: the surface
+// holds a category and a row from *before* the filter was typed into, so both
+// can be past the end of what now survives.
+MICRONOTES_TEST(a_selection_is_clamped_into_the_categories_and_the_rows_that_survive) {
+  const auto rows = sampleRows();
+  const auto selection = micronotes::ui::settingsSelection(rows, 9, 9, "");
+  // Three categories, and the last of them has one row.
+  MICRONOTES_REQUIRE(selection.category == 2);
+  MICRONOTES_REQUIRE(selection.visible.size() == 1);
+  MICRONOTES_REQUIRE(selection.row == 0);
+  MICRONOTES_REQUIRE(rows[static_cast<std::size_t>(selection.selected())].id == "library");
+}
+
+MICRONOTES_TEST(a_selection_in_a_category_the_filter_has_emptied_names_no_row) {
+  const auto rows = sampleRows();
+  // "Appearance" has two rows and neither of them is a library folder.
+  const auto selection = micronotes::ui::settingsSelection(rows, 0, 1, "folder");
+  MICRONOTES_REQUIRE(selection.empty());
+  MICRONOTES_REQUIRE(selection.selected() == -1);
+  // The category itself is still the one the surface was on, so the rail does
+  // not jump while somebody is typing.
+  MICRONOTES_REQUIRE(selection.category == 0);
+}
+
+MICRONOTES_TEST(a_selection_over_no_rows_at_all_names_nothing_rather_than_row_zero) {
+  const auto selection = micronotes::ui::settingsSelection({}, 3, 3, "");
+  MICRONOTES_REQUIRE(selection.empty());
+  MICRONOTES_REQUIRE(selection.category == 0);
+  MICRONOTES_REQUIRE(selection.row == 0);
+  MICRONOTES_REQUIRE(selection.selected() == -1);
+}

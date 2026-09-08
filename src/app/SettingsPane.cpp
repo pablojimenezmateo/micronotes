@@ -120,16 +120,10 @@ std::string_view categoryHelp(std::string_view category) {
 
 void clampSelection(UiRuntime& ui, const std::vector<ui::SettingsRow>& rows) {
   auto& surface = ui.settings;
-  const auto categories = ui::settingsCategories(rows);
-  if(categories.empty()) {
-    surface.category = 0;
-    surface.row = 0;
-    return;
-  }
-  surface.category = std::clamp(surface.category, 0, static_cast<int>(categories.size()) - 1);
-  const auto visible = ui::settingsRowsIn(rows, categories[static_cast<std::size_t>(surface.category)],
-                                          surface.query.text());
-  surface.row = visible.empty() ? 0 : std::clamp(surface.row, 0, static_cast<int>(visible.size()) - 1);
+  const auto selection =
+    ui::settingsSelection(rows, surface.category, surface.row, surface.query.text());
+  surface.category = selection.category;
+  surface.row = selection.row;
 }
 
 }
@@ -554,19 +548,6 @@ void resetSetting(UiRuntime& ui, const std::string& id) {
   ui.status = "Back to the default";
 }
 
-// The row the selection names, or nothing when the filter has emptied the
-// category under it.
-const ui::SettingsRow* selectedRow(const UiRuntime& ui, const std::vector<ui::SettingsRow>& rows) {
-  const auto categories = ui::settingsCategories(rows);
-  if(categories.empty()) return nullptr;
-  const int at = std::clamp(ui.settings.category, 0, static_cast<int>(categories.size()) - 1);
-  const auto visible = ui::settingsRowsIn(rows, categories[static_cast<std::size_t>(at)],
-                                          ui.settings.query.text());
-  if(visible.empty()) return nullptr;
-  const int row = std::clamp(ui.settings.row, 0, static_cast<int>(visible.size()) - 1);
-  return &rows[static_cast<std::size_t>(visible[static_cast<std::size_t>(row)])];
-}
-
 SettingsRequest requestFor(const std::string& id) {
   if(id == "library") return SettingsRequest::LibraryFolder;
   if(id == "shortcuts") return SettingsRequest::Shortcuts;
@@ -601,11 +582,9 @@ SettingsOutcome handleSettingsClick(UiRuntime& ui, float x, float y) {
   }
 
   const auto rows = settingsRows(ui);
-  const auto categories = ui::settingsCategories(rows);
-  if(categories.empty()) return outcome;
-  const int at = std::clamp(surface.category, 0, static_cast<int>(categories.size()) - 1);
-  const auto visible = ui::settingsRowsIn(rows, categories[static_cast<std::size_t>(at)],
-                                          surface.query.text());
+  const auto selection =
+    ui::settingsSelection(rows, surface.category, surface.row, surface.query.text());
+  const auto& visible = selection.visible;
   for(std::size_t i = 0; i < surface.rowBoxes.size(); ++i) {
     const auto& boxes = surface.rowBoxes[i];
     if(!ui::contains(boxes.row, x, y)) continue;
@@ -708,18 +687,16 @@ SettingsOutcome handleSettingsKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, boo
   }
 
   // The values pane.
-  if(categories.empty()) return outcome;
-  const int at = std::clamp(surface.category, 0, static_cast<int>(categories.size()) - 1);
-  const auto visible = ui::settingsRowsIn(rows, categories[static_cast<std::size_t>(at)],
-                                          surface.query.text());
-  if(key == SDLK_LEFT && visible.empty()) {
+  const auto selection =
+    ui::settingsSelection(rows, surface.category, surface.row, surface.query.text());
+  if(key == SDLK_LEFT && selection.empty()) {
     surface.focus = SettingsPaneFocus::Categories;
     return outcome;
   }
-  if(visible.empty()) return outcome;
-  const int count = static_cast<int>(visible.size());
-  surface.row = std::clamp(surface.row, 0, count - 1);
-  const auto& row = rows[static_cast<std::size_t>(visible[static_cast<std::size_t>(surface.row)])];
+  if(selection.empty()) return outcome;
+  const int count = static_cast<int>(selection.visible.size());
+  surface.row = selection.row;
+  const auto& row = rows[static_cast<std::size_t>(selection.selected())];
 
   if(key == SDLK_DOWN || key == SDLK_UP) {
     surface.row = (surface.row + (key == SDLK_DOWN ? 1 : -1) + count) % count;
@@ -785,11 +762,8 @@ bool handleSettingsWheel(UiRuntime& ui, float dy) {
     return true;
   }
   const auto rows = settingsRows(ui);
-  const auto categories = ui::settingsCategories(rows);
-  if(categories.empty()) return true;
-  const int at = std::clamp(surface.category, 0, static_cast<int>(categories.size()) - 1);
-  const int count = static_cast<int>(ui::settingsRowsIn(rows, categories[static_cast<std::size_t>(at)],
-                                                        surface.query.text()).size());
+  const int count = static_cast<int>(
+    ui::settingsSelection(rows, surface.category, surface.row, surface.query.text()).visible.size());
   surface.rowScroll = std::clamp(surface.rowScroll - notches, 0,
                                  std::max(0, count - surface.rowsShown));
   return true;
