@@ -534,9 +534,10 @@ is really a small builder with its state in the enclosing scope.
 a better one than it looks: `sidebarRowRange` already depends on the rows
 tiling -- every push advancing the cursor by exactly the row's own height -- and
 that invariant is currently maintained by seven lambdas agreeing to. A type
-would own it. Not done because it is the third instance of the same carrier
-problem (`update`, this, and `Overlay::draw`), and they are worth doing together
-once, with one shape, rather than three times with three.
+would own it. Not done because it is one instance of the same carrier problem
+in four places (`update`, this, `Overlay::draw` and `drawSettingsSurface` --
+`TD-23` and `TD-35`), and they are worth doing together once, with one shape,
+rather than four times with four.
 
 ## TD-33 — `AppState` is 55 methods, and the widest is `workspace()`
 
@@ -567,3 +568,67 @@ is either a `paneMode()` on `UiRuntime` or a `const WorkspaceModel&` overload
 used by default, and it is 62 mechanical sites -- which is why it wants to be
 its own commit rather than a rider on something else.
 
+
+## TD-34 — one popup shape, laid out by two engines
+
+`src/ui/Menus.cpp` (`menuPopupRect`, `menuPopupItemRect`, `menuPopupItemAt`,
+over `MenuItemSpec`) and `src/ui/Overlay.cpp` (`OverlayStack::layout`, over
+`OverlayItem`).
+
+**What it costs today.** A menu-bar popup, a context menu and the command
+palette are one object -- a card holding a list of commands, each with an
+accelerator, a tick column, a disabled state and rules between the groups --
+and two independent pieces of code decide where its rows go and which row a
+click landed on. The two item structs have converged field by field:
+`MenuItemSpec` has `label`, `separator` and `checkable`, `OverlayItem` has
+`label`, `shortcut`, `separator`, `checked`, `enabled` and `destructive`, and
+the accelerator is spelled `menuItemAccelerator(spec)` on one side and carried
+in the struct on the other.
+
+They already share what was cheapest to share: `ui::drawMenuRow` paints a row
+for both, and `ui::menuRowHeight` and the `kMenuPopup*` constants are now read
+by both. What is still written twice is the stacking -- walk the items, add each
+one's height, and hand back a rect per index -- and the hit test over it, which
+is the part where a discrepancy is a wrong command run rather than a wrong
+pixel.
+
+**Why it has not been paid.** The two are not the same function with two
+callers; the overlay's layout also places a filter field, a swatch grid, two
+confirm buttons and a hint, and it scrolls, while a menu-bar popup is capped to
+the window and deliberately never scrolls. So the merge is not "delete one" but
+"extract the row band both build" -- a `rowBand(items, top, width)` over a span
+of something both item types can present as, plus the hit test on it. That is a
+real interface decision -- which type the band walks, and whether
+`MenuItemSpec` becomes a projection into `OverlayItem` rather than a second item
+struct -- and it is worth making deliberately, in a commit of its own, with the
+hit test moved under `MenusTests` and `OverlayTests` together. Taken as a rider
+on a feature, the two would end up with a shared helper each.
+
+## TD-35 — `drawSettingsSurface` is the fourth carrier-in-a-function
+
+`src/app/SettingsPane.cpp`, 772 lines, of which `drawSettingsSurface` is 262 in
+one function.
+
+**What it costs today.** The same shape `TD-23` and `TD-32` name, and the
+reason is the same: the function walks the rows advancing a running `y`, and the
+pieces it walks with -- the row's boxes, its wrapped help, its height, whether
+it is the selected one -- are locals shared by every band it draws, so no band
+can be moved out of the function on its own. It is also the file's own
+measurement of what fits: `surface.rowsShown` is written here because only the
+paint knows how many variable-height rows the pane held, and the wheel and the
+arrow keys then clamp against it.
+
+Nothing fails. The file is under the 1,000-line ceiling
+`architecture_no_shell_source_is_a_catch_all` enforces and the function is
+correct; the cost is that the second-largest source under `src/app/` is one
+paint, one click handler, one key handler and the settings store's write path
+in one place, and that the next setting added lands in a 262-line function.
+
+**Why it has not been paid.** It is the fourth instance of the carrier problem
+-- `DocumentLayout::update`, `rebuildSidebarRows`, `Overlay::draw`, this -- and
+`TD-32` already says why they are worth doing together, once, with one shape:
+a cursor type that owns the vector, the running `y` and the metrics, with each
+band a method on it. Doing this one alone would be a fourth shape. What can be
+split out of this file first and independently is narrower and worth naming:
+`applySetting` and `resetSetting` are the settings *store's* write path wearing
+a paint file's name, and they have no dependency on the surface at all.
