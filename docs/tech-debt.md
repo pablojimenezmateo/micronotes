@@ -230,3 +230,43 @@ binds `Ctrl+Alt+Left`/`Right` to the panel toggles, so a bare `Alt` press has to
 be distinguished from `Alt` held as part of a chord, which is a keyup-driven
 state machine rather than a branch. F10 alone would be a third of a fix and
 would sit oddly next to a bar that does not underline anything.
+
+## TD-23 — `DocumentLayout::update` is four hundred lines and one function
+
+`src/doc/Layout.cpp`. `update` is 409 lines, `layoutBlock` is 304, and the class
+has 42 methods.
+
+**What it costs today.** Not correctness — this is the most heavily instrumented
+code in the tree and the counters cover it densely. What it costs is that the
+five phases inside `update` are only distinguishable by reading it: hash the
+geometry inputs, decide whether the standing partition still describes the
+source, work out which blocks moved and by how much, walk them, then sweep the
+layout cache to its ceiling. Each phase reads and writes locals the next one
+depends on, so a change to any of them is a change made while holding four
+hundred lines in your head.
+
+It also means the class's *read* half — `caretRect`, `offsetAt`, the four
+selection-rect functions, `blockAt`, `blockRange`, and the six `flatLine*`
+queries, about 330 lines — is only reachable through the engine that produced
+the state, so the geometry arithmetic in it can be tested only by laying a
+document out first.
+
+**Why it has not been paid.** Because the failure mode of getting it wrong is
+the one this codebase has learnt to fear most, and a split is exactly the shape
+of change that triggers it. Every phase of `update` exists to *avoid* work, and
+whether it succeeded is invisible: the pixels are identical either way, every
+unit test passes either way, and the only evidence is a counter ratio in a
+session nobody is running. `docs/performance.md` records the scroll relayout
+that sat fully cached in the hottest path in the app, passing every budget,
+doing 70% of every frame — found only when a counter went in. A refactor that
+quietly moves a reuse check to the wrong side of an assignment reproduces that
+exactly, and `ctest` stays green.
+
+So the order is: the harness lane first (`TD-19`), then the split. Two pieces
+are safe to take ahead of it and are worth taking when this file is next
+opened, because both are self-contained and neither is on the reuse path: the
+geometry hash at the top, which is fifteen lines of `hashValue` and a
+`static_assert`, and the cache sweep at the bottom, which is a bounded-memory
+policy with its own measured commentary and no interaction with the walk above
+it. The read half can move to a second translation unit of the same class
+without touching a declaration, which is the cheapest third of the entry.
