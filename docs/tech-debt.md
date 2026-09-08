@@ -297,3 +297,273 @@ what would make a *screenshot* of a caret reproducible, which is the same
 problem one step further on. That is a seam through `CaretBlink` and the
 capture path, and it is worth doing with `TD-21`'s readiness signal, which is
 in the same file for the same reason.
+
+## TD-25 — `src/core/viewer/` is a renderer nothing renders with
+
+`src/core/viewer/MarkdownViewer.{h,cpp}` and `SdlMarkdownRenderer.{h,cpp}`, 83
+lines across four files, both listed in `MICRONOTES_CORE_SOURCES`.
+
+**What it costs today.** It is the *fourth* Markdown renderer in a tree whose
+`TD-14` is about there being a third. `MarkdownViewer::layout` is called by one
+line of `tests/EditorViewerTests.cpp` and by nothing else;
+`SdlMarkdownRenderer::draw` is called by nothing at all, including the tests.
+The reading pane went through it once and goes through `doc::Layout` and
+`PageView` now.
+
+The cost is not the 83 lines. It is that `src/core/` is the app-agnostic layer,
+so anyone reading it to learn how a note gets drawn finds two plausible-looking
+renderers and has to work out from call sites that both are ghosts -- and that
+one of them is *tested*, which is the strongest possible signal that it is
+load-bearing.
+
+**Why it has not been paid.** Only because nobody has checked. There is no
+argument for keeping it: `git log` will hold it, `RenderModel.h` (which it
+includes, and which is the live md4c document model) stays either way, and the
+one test that touches it asserts a block count and a total height that no
+surface consults. Deleting it is a `git rm`, two lines out of `CMakeLists.txt`
+and one test case out of `EditorViewerTests.cpp`.
+
+## TD-26 — ten public functions have a definition and no caller
+
+Found by a sweep for declarations whose only two mentions in the tree are the
+declaration and the definition:
+
+| | |
+|---|---|
+| `MarkdownEditor::selectionAnchor()` | `core/editor/MarkdownEditor.h` |
+| `TraceChannel::setStreamEnabled(bool)` | `core/perf/TraceChannel.h` |
+| `SqliteDb::lastError()` | `core/persistence/SqliteDb.h` |
+| `render::hasFontconfig()` | `core/render/FontResolver.h` |
+| `util::previousBoundary()` | `core/util/Utf8.h` |
+| `util::offsetForCodePoint()` | `core/util/Utf8.h` |
+| `util::ellipsize()` | `core/util/StringUtil.h` |
+| `DocumentLayout::cachedBlockCount()` | `doc/Layout.h` |
+| `ui::drawFocusRing()` | `ui/Draw.h` |
+| `OverlayStack::closeAll()` | `ui/Overlay.h` |
+
+Plus, in `core/ui/ShellModel.h`, `struct ShellModel` -- whose `sidebarWidth`,
+`noteListWidth`, `favorites` and `recents` were superseded by
+`ui::WorkspaceModel` -- with no user anywhere, and `PaneController` and
+`DebouncedRefresh`, each used by one test and nothing else. That header now
+exists to carry `enum class PaneMode`, which is the only live thing in it and is
+why two `src/ui/` headers include it.
+
+**What it costs today.** Each one is a small lie about the interface. Three are
+worse than that:
+
+- `SqliteDb::lastError()` looks like the way to find out why a query failed, and
+  nothing calls it -- so the answer to "how does this code report a SQL error"
+  is "it does not", and the method is what stops you noticing.
+- `util::ellipsize()` was moved into `StringUtil.h` by the layering pass on the
+  strength of a grep that found `ellipsize` in `tests/TextUtilTests.cpp`, where
+  every hit is `ellipsizeToFit` -- a different function. Dead code was relocated
+  rather than deleted, and it is recorded here because that is what a move done
+  by substring match does: the layer is now right and the function is still
+  dead.
+- `DocumentLayout::cachedBlockCount()` reaches into the layout's cache, which
+  is exactly the sort of accessor that exists for a test and then keeps a
+  private member public-ish forever.
+
+**Why it has not been paid.** Two of them need a judgement rather than a
+deletion. `util::previousBoundary` is the mirror of `nextBoundary` and an
+absent half of a pair is a trap of its own; `hasFontconfig` is a build-time
+capability query that a diagnostic would reasonably want. The rest delete.
+
+## TD-27 — the two pages wire and feed themselves separately
+
+`src/app/LivePage.cpp` and `src/app/ReadingPage.cpp`.
+
+`wireLivePage` and `wireReadingPage` install the same three `PageViewHooks`
+(`measureComplex`, `wikiLinkResolves`, `drawComplex`) with the same three
+lambda bodies, in a different order, then both call `wirePageImages`.
+
+And `drawLive` and `drawReading` call fifteen of the same `PageView` methods,
+in the same order, opening with the same seven-call feeding sequence -- wiki
+revision, image revision, source revision, edited span, pointer, header
+height, layout -- followed by the same
+`applyQueuedAnchorJump`, the same `sweepComplexCache`, and the same push of
+`links()` into `ui.linkRegions`.
+
+The nine calls that are the live page's alone are the ones that say what the
+difference actually is: `setFolds`, `setFoldsActive`, `setBlockSelection`,
+`setDropOffset`, `setSelecting`, `setCaretVisible`, `setRawOffset`, `rawOffset`
+and `revealCaret`.
+
+**What it costs today.** Every input a page needs is added twice, and the
+failure mode is silent and asymmetric: a page that is not told about a new
+revision does not break, it *keeps a stale layout*. The header already records
+one instance of exactly that -- the reading pane rendered `[[Some Note]]` as
+literal brackets for as long as it did because it had not been given the
+wikilink pass the live surface had.
+
+**Why it has not been paid.** The two are genuinely not the same page -- the
+nine calls above are the proof, and any shared helper has to leave room for
+them. So the shared part is the *frame contract*: "here is everything a
+`PageView` needs to know before it lays out". Factoring it means naming that,
+which is a design decision about `PageView`'s interface rather than a code
+move -- and it overlaps `TD-30`, because the reason the feeding sequence is
+seven calls long is that `PageView` has sixteen setters and no one call to
+make.
+
+## TD-28 — three panels each spell "a scrolling list"
+
+`SidebarState`, `RightPanelState` and `RawPaneState` each carry `scroll`,
+`maxScroll` and a `WheelAccumulator`, and `PageView` carries its own pair.
+
+The three operations on that triple are written out per panel:
+
+- **the ceiling**, `max(0, ceil(contentHeight - viewportHeight))` -- and the
+  viewport inset differs per panel with nothing saying why: the sidebar takes
+  `rect.h - 24.0f`, the right panel `list.h - kSpace2`.
+- **the clamp**, `scroll = clamp(scroll, 0, maxScroll)`, at six sites.
+- **the wheel**, `scroll = clamp(scroll + wheel.take(notches, perNotch), 0,
+  maxScroll)`,
+  at three sites in `Scroll.cpp` plus two spellings for the pages.
+
+**What it costs today.** Not much *today*: `WheelAccumulator` already fixed the
+part that was actually broken, which was the trackpad. What it costs is per
+panel added, and it has already cost once -- the comment on
+`ScrollDrag::Sidebar`
+records that the sidebar had no working scrollbar at all, because a panel is
+only scrollable once somebody remembers all three operations for it.
+
+**Why it has not been paid.** A `ui::ScrollList` value with
+`setContent(viewport, content)`, `wheel(notches, perNotch)` and `dragTo(...)`
+is a small type and an obvious win, but it wants the fourth reader --
+`PageView`, which owns its own scroll behind an accessor pair and computes
+`maxScroll` from the layout rather than from a content height -- to either join
+it or be deliberately left out. Doing three of four is how you end up with two
+spellings instead of one.
+
+## TD-29 — which field the focus names is answered by three switches
+
+`focusedField` in `src/app/Fields.cpp`, `caretStateKey` in `src/app/Shell.h`,
+and `handleFieldKey`'s Enter arm in `src/app/KeySurfaces.cpp`.
+
+The first two are the same switch over the same five `FocusArea` values
+returning the same five `TextFields` members, once mutable and once const. The
+third maps three of the five to their commit verb.
+
+**What it costs today.** A sixth field is three edits, and the one that is
+forgotten is `caretStateKey` -- where the symptom is a caret that blinks through
+a burst of typing in the new field and nothing else. That is the failure the
+key was introduced to prevent, so the shape currently reintroduces it once per
+field added.
+
+**Why it has not been paid.** The mutable/const pair wants an overload, which is
+two lines and could be done now. The Enter arm is the interesting half: it says
+that `FocusArea` is carrying two things at once -- which surface has the
+keyboard, and which of five prompts is open -- and the honest fix is to give
+`TextFields` a way to name its own members so the three switches become one
+table. That is a change to `FocusArea`, which has eight values and 88 mentions
+across
+22 files.
+
+## TD-30 — `PageView` is a god-class one line under its own ceiling
+
+`src/app/PageView.h`, 51 methods, sixteen of them setters. `PageView.cpp` is
+**999 lines against the 1,000-line ceiling**
+`architecture_no_shell_source_is_a_catch_all` enforces.
+
+**What it costs today.** The next line added to that file fails the build, and
+the honest response will be to raise the ceiling unless the split is already
+understood -- which is exactly the pressure the ceiling exists to create, so it
+is worth having the answer written down before somebody is standing in front of
+it.
+
+The class is three things. There is a **feeding surface**: sixteen setters that
+exist because a caller has to assemble the inputs for one layout, which is what
+makes `TD-27` two eight-call sequences. There is a **layout and query surface**:
+`layout`, `offsetAt`, `blockAt`, `linkAt`, `checkboxAt`, `gutterAt`, `foldAt`,
+`copyButtonAt`, `toolbarAt`, `dropOffsetAt`, `visibleBlocks`, `blockRect`,
+`rowRelative`, `revealCaret`, the anchors. And there is a **paint surface**:
+`draw` plus eight `draw*` methods -- find highlights, block decorations, code
+chrome, fold controls, the gutter, the drop indicator, the toolbar -- which are
+half the file and the only part that touches an `SDL_Renderer`.
+
+It also holds 121 raw `N.0f` pixel literals, against a `ui::kSpace*` scale it
+names its own constants beside.
+
+**Why it has not been paid.** The split is `Layout.cpp` / `LayoutQueries.cpp`
+again -- the paint methods into `PageViewPaint.cpp`, same class, private state
+untouched -- and that part is mechanical. What it does not fix is the sixteen
+setters, and doing the file split first would take the ceiling pressure off
+without addressing the interface, which is the part `TD-27` needs.
+
+## TD-31 — `OverlayKind` is dispatched by `if` at seventeen sites
+
+`src/ui/Overlay.cpp`. Five kinds -- `TextPrompt`, `List`, `Confirm`,
+`GlyphPicker` and the tag grid -- asked about seventeen times: ten
+`kind == OverlayKind::X` comparisons plus seven calls to the `isGridOverlay`
+helper, spread across `layoutFor`, `handleKey`, `handleClick` and `draw`, each
+of which asks more than once.
+
+**What it costs today.** `OverlayStack::draw` is 210 lines and `layoutFor` is
+129, and in both the per-kind arms are interleaved with the parts that are
+common to every kind. A sixth kind means finding all seventeen, and the
+compiler helps with none of them -- these are `if` chains over an enum, not
+switches, so there is no `-Wswitch` to fall back on.
+
+**Why it has not been paid.** The obvious fix -- a `struct OverlayBehaviour`
+per kind, or virtual dispatch -- is more machinery than five kinds justify, and
+`AGENTS.md` is explicit that inheritance is for a durable polymorphic boundary.
+The cheaper and probably better fix is to make the *questions* explicit rather
+than the kinds: `takesTypedText`, `hasRows`, `isGrid`, `hasConfirmButton` are
+what the sites are actually asking, `isGridOverlay` is already one of them --
+and it is
+the seven-call half, which is the evidence that this is the direction that
+works. Four such predicates would turn seventeen enum comparisons into four
+named facts
+about the overlay. That is a naming exercise, and worth doing next time this
+file is opened for another reason.
+
+## TD-32 — `rebuildSidebarRows` is a builder written as seven lambdas
+
+`src/app/SidebarModel.cpp`, 236 lines, of which about 200 are seven lambdas --
+`pushCaption`, `pushSection`, `pushNoteShortcuts`, `pushTree`,
+`pushSearchResults`, `resolvable`, `finish` -- capturing the same running
+cursor, and about 35 are the band sequence that calls them.
+
+**What it costs today.** The same shape as `TD-23` and for the same reason: the
+lambdas share mutable state (`y`, the row vector, the metrics), so the function
+cannot be split by moving pieces out of it. It reads as a 236-line function and
+is really a small builder with its state in the enclosing scope.
+
+**Why it has not been paid.** A `RowCursor` type holding the vector, the running
+`y` and the metrics, with the seven pushes as methods, is the answer, and it is
+a better one than it looks: `sidebarRowRange` already depends on the rows
+tiling -- every push advancing the cursor by exactly the row's own height -- and
+that invariant is currently maintained by seven lambdas agreeing to. A type
+would own it. Not done because it is the third instance of the same carrier
+problem (`update`, this, and `Overlay::draw`), and they are worth doing together
+once, with one shape, rather than three times with three.
+
+## TD-33 — `AppState` is 55 methods, and the widest is `workspace()`
+
+`src/ui/AppState.h`.
+
+**What it costs today.** `WorkspaceModel& workspace()` hands out a mutable
+reference to the whole view model, and it is reached through at **62 sites** as
+`ui.state.workspace().something`. So `AppState`'s encapsulation is whatever
+`WorkspaceModel` chooses to make public, and 21 of those 62 are
+`ui.state.workspace().paneMode()` -- a question the shell asks constantly, three
+objects deep, about the thing it is drawing.
+
+The 55 methods themselves are mostly fine: `AppState` is an aggregate root and
+most of them are one-line delegations to `library_`, `index_` or
+`organization_`. What is not fine is that a reader cannot tell which is which,
+and that the note-writing path -- `saveSelectedNote`, which stats a file before
+overwriting it so that an edit made in another program is filed beside the note
+rather than destroyed, and which `AGENTS.md` singles out as the rule never to
+bypass -- sits in the same list as `toggleFavorite`.
+
+**Why it has not been paid.** Splitting the class is the wrong first move: the
+selection, the library, the index and the workspace really are one thing with
+one revision counter, and pulling them apart would put the revision in two
+places. The first move is narrower and worth doing on its own: the reach-through
+is a Law-of-Demeter problem, not an ownership one, so the fix is that callers
+which only *read* the pane mode should not be handed a mutable workspace. That
+is either a `paneMode()` on `UiRuntime` or a `const WorkspaceModel&` overload
+used by default, and it is 62 mechanical sites -- which is why it wants to be
+its own commit rather than a rider on something else.
+
