@@ -30,10 +30,9 @@ SettingsLayout settingsLayout(float windowWidth, float windowHeight, SettingsMod
                                  kSettingsMaxWidth);
   const float height = std::max(std::min(kSettingsMinHeight, std::max(0.0f, windowHeight - 32.0f)),
                                 std::round(windowHeight * kSettingsHeightFraction));
-  layout.panel = {std::round((windowWidth - width) / 2.0f), std::round((windowHeight - height) / 2.0f),
+  layout.panel = {cardInsideWindow(std::round((windowWidth - width) / 2.0f), width, windowWidth),
+                  cardInsideWindow(std::round((windowHeight - height) / 2.0f), height, windowHeight),
                   width, height};
-  layout.panel.x = std::max(8.0f, layout.panel.x);
-  layout.panel.y = std::max(8.0f, layout.panel.y);
 
   const Rect& panel = layout.panel;
   layout.header = {panel.x, panel.y, panel.w, kTitleBandHeight};

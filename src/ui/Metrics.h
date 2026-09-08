@@ -76,6 +76,39 @@ inline constexpr float kMenuPopupLabelInset = 24.0f;
 inline constexpr float kMenuPopupAcceleratorInset = 10.0f;
 inline constexpr float kMenuPopupTextReserve = 68.0f;
 
+// How tall one row of a popup is. A separator's row is shorter than a real one,
+// which is what makes a group read as a group rather than as one more item.
+//
+// Both kinds of menu stack their rows with this: the menu bar's own popups
+// (`menuPopupRect`, over `MenuItemSpec`) and the overlay behind every context
+// menu and the palette (`OverlayStack::layout`, over `OverlayItem`). They were
+// two copies of the same conditional over the same two constants, and two menus
+// that agree only by coincidence are two menus that will stop agreeing -- which
+// is what "a context menu and a menu-bar menu look unrelated" was the last time.
+inline constexpr float menuRowHeight(bool separator) {
+  return separator ? kMenuPopupSeparatorHeight : kMenuPopupItemHeight;
+}
+
+// How close a floating card -- an overlay, a context menu, the settings card --
+// may come to the edge of the window.
+//
+// It was `8.0f` written out at six sites across two files, on both axes and in
+// both directions, which is a number with a meaning and no name. The meaning is
+// that a card flush against the window edge reads as clipped rather than as
+// placed, and that the shadow the compositor draws needs somewhere to fall.
+inline constexpr float kCardWindowInset = 8.0f;
+
+// A card of `size` wanted at `wanted`, kept inside a window of `window`.
+//
+// Written without `std::min`/`std::max` on purpose: this header is every fixed
+// size the shell lays itself out with and nothing else, and it carries no
+// includes so that anything may read a number from it.
+inline constexpr float cardInsideWindow(float wanted, float size, float window) {
+  const float furthest = window - size - kCardWindowInset;
+  const float placed = wanted < furthest ? wanted : furthest;
+  return placed > kCardWindowInset ? placed : kCardWindowInset;
+}
+
 // The band a callout reserves above its first line for the kind's icon and
 // name. Layout reserves it and the draw fills it, so the number is here rather
 // than in either of them.

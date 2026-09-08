@@ -47,11 +47,11 @@ bool selectable(const OverlayItem& item) {
   return item.enabled && !item.separator;
 }
 
-// A separator's row is shorter than a real one, which is what makes a group
-// read as a group rather than as one more item. The same two numbers the menu
-// bar's own popups use, so a context menu and a menu-bar menu are one shape.
+// The menu bar's own popups measure their rows with `menuRowHeight` too, so a
+// context menu and a menu-bar menu are one shape rather than two that happen to
+// use the same numbers.
 float rowHeight(const OverlayItem& item) {
-  return item.separator ? kMenuPopupSeparatorHeight : kRowHeight;
+  return menuRowHeight(item.separator);
 }
 
 bool usesField(const Overlay& overlay) {
@@ -158,8 +158,9 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   // What is left of the window below where the panel starts, once its own
   // chrome is paid for. Measured from the top the panel will actually take, or
   // a tall list would be laid out past the bottom of the window.
-  const float panelTop = overlay.anchored ? 8.0f : std::max(60.0f, static_cast<float>(windowHeight) * 0.18f);
-  const float room = static_cast<float>(windowHeight) - panelTop - 8.0f
+  const float panelTop =
+    overlay.anchored ? kCardWindowInset : std::max(60.0f, static_cast<float>(windowHeight) * 0.18f);
+  const float room = static_cast<float>(windowHeight) - panelTop - kCardWindowInset
                    - titleH - (field ? kFieldHeight + kPadding : 0.0f) - hintProbe - kPadding * 2.0f;
   // How much of the list fits, walked rather than divided.
   //
@@ -220,14 +221,18 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   float x = 0.0f;
   float y = 0.0f;
   if(overlay.anchored) {
-    x = std::min(overlay.anchorX, static_cast<float>(windowWidth) - width - 8.0f);
-    y = std::min(overlay.anchorY, static_cast<float>(windowHeight) - height - 8.0f);
+    x = cardInsideWindow(overlay.anchorX, width, static_cast<float>(windowWidth));
+    y = cardInsideWindow(overlay.anchorY, height, static_cast<float>(windowHeight));
   } else {
-    x = std::round((static_cast<float>(windowWidth) - width) / 2.0f);
+    x = cardInsideWindow(std::round((static_cast<float>(windowWidth) - width) / 2.0f), width,
+                         static_cast<float>(windowWidth));
+    // Not `cardInsideWindow` on this axis: a panel taller than the window is
+    // pinned to the top and allowed to run past the bottom, because the list
+    // above was already sized to `room` and pulling the panel *up* from a
+    // proportional top would move a list that fits. The inset needs no clamp
+    // here either -- this floor is 60, and 60 is already past it.
     y = std::max(60.0f, static_cast<float>(windowHeight) * 0.18f);
   }
-  x = std::max(8.0f, x);
-  y = std::max(8.0f, y);
   layout.panel = {x, y, width, height};
 
   // The band spans the panel, so the title reads as chrome across the top of

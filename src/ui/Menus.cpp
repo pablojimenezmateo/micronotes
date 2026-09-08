@@ -254,15 +254,13 @@ Rect menuPopupRect(Rect anchor, std::span<const MenuItemSpec> items, Rect bounds
   float height = kMenuPopupPadY * 2.0f;
 
   for(const MenuItemSpec& spec : items) {
-    if(spec.separator) {
-      height += kMenuPopupSeparatorHeight;
-      continue;
-    }
+    height += menuRowHeight(spec.separator);
+    // A rule has no label and no accelerator, so it asks the popup for no width.
+    if(spec.separator) continue;
     const std::string accelerator = menuItemAccelerator(spec);
     const float row = static_cast<float>(measure(menuItemLabel(spec))) +
                       static_cast<float>(measure(accelerator)) + kMenuPopupTextReserve;
     wanted = std::max(wanted, row);
-    height += kMenuPopupItemHeight;
   }
 
   const float maxWidth = std::max(kMenuPopupMinWidth, bounds.w - kSpace2);
@@ -287,10 +285,9 @@ Rect menuPopupItemRect(Rect popup, std::span<const MenuItemSpec> items, std::siz
   if(index >= items.size()) return {};
   float y = popup.y + kMenuPopupPadY;
   for(std::size_t i = 0; i < index; ++i) {
-    y += items[i].separator ? kMenuPopupSeparatorHeight : kMenuPopupItemHeight;
+    y += menuRowHeight(items[i].separator);
   }
-  const float height = items[index].separator ? kMenuPopupSeparatorHeight : kMenuPopupItemHeight;
-  return {popup.x, y, popup.w, height};
+  return {popup.x, y, popup.w, menuRowHeight(items[index].separator)};
 }
 
 std::optional<std::size_t> menuPopupItemAt(Rect popup, std::span<const MenuItemSpec> items,
