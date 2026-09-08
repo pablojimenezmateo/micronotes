@@ -228,42 +228,6 @@ void openLibraryPrompt(UiRuntime& ui) {
   ui.overlays.open(std::move(overlay));
 }
 
-// Every binding the shell has, grouped, from the one table that also feeds the
-// palette and the key handler. A row with no keys is a section heading: it is
-// listed as a disabled item, so the arrows step over it and Enter cannot land
-// on it.
-
-void openShortcutHelp(UiRuntime& ui) {
-  ui::Overlay overlay;
-  overlay.id = "shortcuts";
-  overlay.title = "Keyboard shortcuts";
-  overlay.filterable = true;
-  overlay.placeholder = "Type to filter";
-  overlay.hint = "Esc close";
-  overlay.width = 520.0f;
-  // Reference material, not a menu: as much of it on screen at once as the
-  // window will hold.
-  overlay.maxRows = 20;
-  for(int i = 0; i < static_cast<int>(ui::ActionSection::Count); ++i) {
-    const auto section = static_cast<ui::ActionSection>(i);
-    std::vector<ui::OverlayItem> rows;
-    for(const auto& spec : ui::actionSpecs()) {
-      if(spec.section != section) continue;
-      const auto keys = ui::acceleratorText(spec);
-      if(keys.empty()) continue;
-      rows.push_back({"", std::string(spec.label), "", keys, true, false});
-    }
-    for(const auto& row : ui::helpRows()) {
-      if(row.section != section) continue;
-      rows.push_back({"", std::string(row.what), "", std::string(row.keys), true, false});
-    }
-    if(rows.empty()) continue;
-    overlay.items.push_back({"", std::string(ui::sectionLabel(section)), "", "", false, false});
-    for(auto& row : rows) overlay.items.push_back(std::move(row));
-  }
-  ui.overlays.open(std::move(overlay));
-}
-
 void openDeleteNoteConfirm(UiRuntime& ui) {
   const auto& note = ui.state.openNote();
   if(note.noteId.empty()) {

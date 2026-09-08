@@ -10,7 +10,7 @@
 #include "app/Prompts.h"
 #include "app/RightPanel.h"
 #include "app/SessionState.h"
-#include "app/SettingsDialog.h"
+#include "app/SettingsPane.h"
 #include "app/Shell.h"
 #include "app/TabStrip.h"
 #include "app/WikiLinks.h"
@@ -114,12 +114,14 @@ void performCommand(UiRuntime& ui, const std::string& id) {
     ui::setThemeMode(ui::themeMode() == ui::ThemeMode::Light ? ui::ThemeMode::Dark : ui::ThemeMode::Light);
     ui.status = ui::themeMode() == ui::ThemeMode::Light ? "Light theme" : "Dark theme";
   }
-  else if(id == "settings") openSettings(ui);
+  else if(id == "settings") openSettingsSurface(ui);
+  else if(id == "about") openAboutSurface(ui);
   // Through the same pending action the close button raises, so the one place
   // that knows how to shut the window down -- flushing the open note and the
   // library's state on the way out -- stays the only one.
   else if(id == "quit") ui.chrome.pendingWindowAction = WindowAction::Close;
-  else if(id == "shortcuts") openShortcutHelp(ui);
+  // The key reference is the About page: see `aboutRows`.
+  else if(id == "shortcuts") openAboutSurface(ui);
   // The editing verbs. They used to be reachable only from the key chain, on
   // the reasoning that a palette row for one is useless -- the palette has
   // taken the keyboard away from the editor, so there is no selection left to

@@ -44,6 +44,5 @@ void openCommandPalette(UiRuntime& ui);
 void openNotePalette(UiRuntime& ui, std::string overlayId, std::string title);
 void openFolderPalette(UiRuntime& ui);
 void openTrashPalette(UiRuntime& ui);
-void openShortcutHelp(UiRuntime& ui);
 
 }

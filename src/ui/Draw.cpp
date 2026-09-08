@@ -189,6 +189,20 @@ void drawCheckGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   }
 }
 
+void drawResetGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  if(!renderer) return;
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  // Whole pixels: line art whose vertices land on halves is line art drawn
+  // twice at half opacity, which at this size reads as a smudge.
+  const float cx = std::floor(box.x + box.w * 0.5f);
+  const float cy = std::floor(box.y + box.h * 0.5f);
+  SDL_RenderLine(renderer, cx - 3.0f, cy - 3.0f, cx + 3.0f, cy - 3.0f);
+  SDL_RenderLine(renderer, cx + 3.0f, cy - 3.0f, cx + 3.0f, cy + 3.0f);
+  SDL_RenderLine(renderer, cx + 3.0f, cy + 3.0f, cx - 2.0f, cy + 3.0f);
+  SDL_RenderLine(renderer, cx - 3.0f, cy - 3.0f, cx - 1.0f, cy - 5.0f);
+  SDL_RenderLine(renderer, cx - 3.0f, cy - 3.0f, cx, cy - 1.0f);
+}
+
 void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   const float cx = std::round(box.x + box.w / 2.0f);

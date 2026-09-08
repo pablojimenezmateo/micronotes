@@ -194,6 +194,7 @@ set(MICRONOTES_APP_SOURCES
   src/ui/Menus.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
+  src/ui/SettingsSurface.cpp
   src/ui/ShellLayout.cpp
   src/ui/TagColors.cpp
   src/ui/Tabs.cpp
@@ -215,6 +216,9 @@ endif()
 target_compile_definitions(micronotes_core PUBLIC
   MICROCORE_HAS_FONTCONFIG=$<BOOL:${MICRONOTES_FONTCONFIG_TARGET}>
   MICROCORE_APP_NAME="micronotes"
+  # What the About page prints. From the project version rather than a string in
+  # a source file, so the packaged version and the reported one cannot differ.
+  MICRONOTES_VERSION="${PROJECT_VERSION}"
   MICRONOTES_HAS_SDL3_IMAGE=$<BOOL:${MICRONOTES_SDL3_IMAGE_TARGET}>
   MICRONOTES_HAS_SDL3_TTF=$<BOOL:${MICRONOTES_SDL3_TTF_TARGET}>
 )
@@ -262,7 +266,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Screenshot.cpp
   src/app/Scroll.cpp
   src/app/SessionState.cpp
-  src/app/SettingsDialog.cpp
+  src/app/SettingsPane.cpp
   src/app/Sidebar.cpp
   src/app/SidebarModel.cpp
   src/app/Startup.cpp
@@ -326,6 +330,7 @@ add_executable(micronotes_tests
   tests/MenusTests.cpp
   tests/SearchTests.cpp
   tests/SettingsTests.cpp
+  tests/SettingsSurfaceTests.cpp
   tests/ShellLayoutTests.cpp
   tests/ShellUnitTests.cpp
   tests/SidebarRowsTests.cpp

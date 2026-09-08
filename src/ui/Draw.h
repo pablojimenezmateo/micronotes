@@ -85,6 +85,10 @@ void drawChevron(SDL_Renderer* renderer, float x, float centerY, bool open, SDL_
 // A close cross, and a tick. Both drawn for the same reason as the chevron.
 void drawCloseGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 void drawCheckGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
+// The revert mark on a setting that has been moved off its default: three sides
+// of a square with an arrowhead where the fourth would close it. Drawn open, so
+// it does not read as the checkbox two rows up.
+void drawResetGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 // A single-headed arrow pointing left or right, for the tab strip's overflow
 // buttons and anything else that scrolls a strip.
 void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color);

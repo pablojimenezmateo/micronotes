@@ -15,7 +15,7 @@
 #include "app/OverlayRouter.h"
 #include "app/PageView.h"
 #include "app/Prompts.h"
-#include "app/SettingsDialog.h"
+#include "app/SettingsPane.h"
 #include "app/Shell.h"
 #include "app/SidebarModel.h"
 #include "app/WikiLinks.h"
@@ -40,6 +40,7 @@ void handleText(UiRuntime& ui, const char* input) {
     ui.overlays.handleText(input);
     return;
   }
+  if(handleSettingsText(ui, input)) return;
   if(auto* field = focusedField(ui)) {
     // insert() replaces the selection, so a select-all followed by a keystroke
     // overwrites without any separate "all selected" flag to keep in step.
@@ -86,6 +87,13 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     const auto result = ui.overlays.handleKey(key, ctrl, shift, handled);
     if(result) handleOverlayResult(ui, *result);
     if(handled) return;
+  }
+  // The card is modal and takes every key while it is open, below the overlay
+  // stack for the reason the press router gives.
+  if(ui.settings.visible) {
+    const SettingsOutcome outcome = handleSettingsKey(ui, key, ctrl, shift);
+    carryOutSettingsRequest(ui, outcome.request);
+    if(outcome.handled) return;
   }
   if(inputDebugEnabled()) {
     std::cerr << "input keydown"

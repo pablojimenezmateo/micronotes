@@ -6,7 +6,7 @@
 #include "app/Notes.h"
 #include "app/Prompts.h"
 #include "app/SessionState.h"
-#include "app/SettingsDialog.h"
+#include "app/SettingsPane.h"
 #include "app/Shell.h"
 #include "app/WikiLinks.h"
 #include "ui/WorkspaceModel.h"
@@ -92,8 +92,9 @@ void applyWindowOptions(UiRuntime& ui, const ApplicationOptions& options) {
   else if(which == "note-menu") openNoteMenu(ui, 420.0f, 200.0f);
   else if(which == "folder-menu") openFolderMenu(ui, 60.0f, 160.0f);
   else if(which == "delete-note") openDeleteNoteConfirm(ui);
-  else if(which == "settings") openSettings(ui);
-  else if(which == "shortcuts") openShortcutHelp(ui);
+  else if(which == "settings") openSettingsSurface(ui);
+  else if(which == "about") openAboutSurface(ui);
+  else if(which == "shortcuts") openAboutSurface(ui);
   else if(which == "command-palette") openCommandPalette(ui);
   else if(which == "wiki-menu") openWikiMenu(ui, ui.editor.cursor());
   else if(which == "icon") openIconPicker(ui);

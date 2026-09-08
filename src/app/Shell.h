@@ -33,6 +33,7 @@
 #include "ui/Memo.h"
 #include "ui/Rect.h"
 #include "ui/Settings.h"
+#include "ui/SettingsSurface.h"
 #include "ui/ShellLayout.h"
 
 #include "ui/Tooltip.h"
@@ -239,6 +240,8 @@ struct UiRuntime {
   TabStripState tabStrip;
   ChromeState chrome;
   ui::OverlayStack overlays;
+  // The Settings card, or About in the same card. See `app/SettingsPane.h`.
+  ui::SettingsSurfaceState settings;
   // The mode the last computed layout settled in. Fed back into the next one so
   // the compact breakpoint has hysteresis rather than flipping mid-drag.
   ui::LayoutMode layoutMode = ui::LayoutMode::Regular;

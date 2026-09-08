@@ -108,6 +108,11 @@ constexpr MenuItemSpec kNoteItems[] {
 
 constexpr MenuItemSpec kHelpItems[] {
   item(ActionId::Shortcuts, "Keyboard shortcuts..."),
+  sep(),
+  // The keys and the version are two halves of one page -- the shortcut list
+  // *is* the About page -- but both are things people look for by name, so both
+  // are offered by name and both land here.
+  item(ActionId::About),
 };
 
 constexpr MenuSpec kMenus[] {

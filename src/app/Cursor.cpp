@@ -5,6 +5,7 @@
 #include "app/RawPane.h"
 #include "app/RightPanel.h"
 #include "app/Scroll.h"
+#include "app/SettingsPane.h"
 #include "app/Shell.h"
 #include "app/Sidebar.h"
 #include "app/SidebarModel.h"
@@ -66,6 +67,11 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
 
   // Which part of the overlay, rather than one answer for the whole window.
   if(ui.overlays.active()) return cursorForOverlay(ui.overlays.cursorAt(x, y));
+  // The card covers the panes below, so the pointer resting on one of its rows
+  // is not resting on the note underneath.
+  if(ui.settings.visible) {
+    return contains(ui.settings.filter, x, y) ? CursorKind::Text : CursorKind::Pointer;
+  }
 
   if(contains(layout.sidebar, x, y)) {
     if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebar.scroll, ui.sidebar.maxScroll, x, y)) {

@@ -20,6 +20,7 @@
 #include "app/RawPane.h"
 #include "app/RightPanel.h"
 #include "app/Scroll.h"
+#include "app/SettingsPane.h"
 #include "app/Shell.h"
 #include "app/Sidebar.h"
 #include "app/SidebarModel.h"
@@ -107,6 +108,15 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
     if(result) handleOverlayResult(ui, *result);
     if(handled) return;
   }
+  // The Settings card is modal: while it is open it owns every press, either as
+  // one of its own controls or as the press that dismisses it. Below the overlay
+  // stack, because a row of it can open one.
+  if(ui.settings.visible) {
+    const SettingsOutcome outcome = handleSettingsClick(ui, x, y);
+    carryOutSettingsRequest(ui, outcome.request);
+    if(outcome.handled) return;
+  }
+
   const ShellLayout layout = shellLayout(ui, width, height);
 
   // The menu bar first, and its popup before that: the popup is drawn over

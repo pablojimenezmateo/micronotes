@@ -5,7 +5,6 @@
 #include "app/EditCommands.h"
 #include "app/Notes.h"
 #include "app/Prompts.h"
-#include "app/SettingsDialog.h"
 #include "app/Shell.h"
 #include "app/TabStrip.h"
 #include "app/WikiLinks.h"
@@ -79,21 +78,6 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     ui.status = ui.state.setSelectedNoteIcon(result.itemId)
                   ? (result.itemId.empty() ? "Removed icon" : "Set icon")
                   : "Could not set icon";
-  } else if(result.overlayId == "settings") {
-    if(result.itemId == "library") openLibraryPrompt(ui);
-    else if(result.itemId == "shortcuts") openShortcutHelp(ui);
-    else openSettingsValues(ui, result.itemId);
-  } else if(result.overlayId == "settings-theme") {
-    ui::setThemeMode(result.itemId == "light" ? ui::ThemeMode::Light : ui::ThemeMode::Dark);
-    // The list comes back with the new value on it: changing two settings
-    // should not need the dialog opened twice.
-    openSettings(ui);
-  } else if(result.overlayId == "settings-text-size") {
-    ui::setTextSize(ui::textSizeFromName(result.itemId));
-    openSettings(ui);
-  } else if(result.overlayId == "settings-page-width") {
-    ui::setPageWidth(ui::pageWidthFromName(result.itemId));
-    openSettings(ui);
   } else if(result.overlayId == "settings-library") {
     switchLibrary(ui, result.value);
   } else if(result.overlayId == "folder-menu") {

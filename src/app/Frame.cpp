@@ -10,6 +10,7 @@
 #include "app/RightPanel.h"
 #include "app/Screenshot.h"
 #include "app/Shell.h"
+#include "app/SettingsPane.h"
 #include "app/Sidebar.h"
 #include "app/TabStrip.h"
 #include "core/perf/Perf.h"
@@ -112,12 +113,20 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
     drawStatus(renderer, text, ui, layout.status);
   }
   // An open overlay is a conversation; a tooltip about what is behind it would
-  // be answering a question nobody is asking any more.
-  if(ui.overlays.active()) ui.pointer.tooltip = {};
+  // be answering a question nobody is asking any more. So is an open menu -- but
+  // not the Settings card, whose own reset buttons offer tooltips of their own.
+  if(ui.overlays.active() || ui.chrome.openMenu != ui::MenuId::None) ui.pointer.tooltip = {};
   {
     // After every panel, so it lands on top of whichever one it hangs over.
     const perf::ScopeTimer timer("shell.menu");
     drawOpenMenu(renderer, text, ui, {0, 0, static_cast<float>(width), static_cast<float>(height)});
+  }
+  {
+    // Under the overlay stack, because one of the card's rows opens an overlay --
+    // the library prompt -- and that prompt has to be readable over the card
+    // that asked for it.
+    const perf::ScopeTimer timer("shell.settings");
+    drawSettingsSurface(renderer, text, ui, width, height);
   }
   {
     const perf::ScopeTimer timer("shell.overlays");

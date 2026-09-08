@@ -22,6 +22,7 @@ enum class ActionId {
   FindInNote,
   SearchAllNotes,
   Shortcuts,
+  About,
   Settings,
   Quit,
 

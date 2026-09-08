@@ -1,6 +1,7 @@
 #include "app/Scroll.h"
 
 #include "app/RawPane.h"
+#include "app/SettingsPane.h"
 #include "app/Sidebar.h"
 
 #include "core/perf/PerformanceCounters.h"
@@ -41,11 +42,14 @@ ContentPanes contentPanes(const UiRuntime& ui, Rect content) {
 void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width, int height) {
   perf::addCounter(perf::CounterId::InputWheelEvents);
 
-  // An open overlay owns the wheel outright.
+  // An open overlay owns the wheel outright, and so does the Settings card:
+  // both are modal, and a list scrolling behind a modal is a list nobody asked
+  // to scroll.
   if(ui.overlays.active()) {
     ui.overlays.handleWheel(notches);
     return;
   }
+  if(handleSettingsWheel(ui, notches)) return;
 
   const ShellLayout layout = shellLayout(ui, width, height);
 
