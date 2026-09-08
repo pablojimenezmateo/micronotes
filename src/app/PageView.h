@@ -217,7 +217,7 @@ public:
   // Where an in-note `[#heading]` link or a footnote reference lands, as a
   // scroll offset, or nothing when the note has no anchor by that name. Built
   // once per buffer: the note's headings and its footnote definitions, keyed by
-  // the slug `ui::headingAnchor` makes of them.
+  // the slug `doc::headingAnchor` makes of them.
   std::optional<int> anchorScroll(std::string_view anchor) const;
 
   void revealCaret(std::size_t offset);

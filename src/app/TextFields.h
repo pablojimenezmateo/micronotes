@@ -3,7 +3,7 @@
 #include "CoreAliases.h"
 
 #include "core/editor/TextField.h"
-#include "ui/SearchScope.h"
+#include "library/SearchScope.h"
 
 // The five one-line text fields the shell keeps.
 //

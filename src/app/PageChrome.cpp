@@ -5,7 +5,7 @@
 #include "app/WikiLinks.h"
 #include "core/attachments/AttachmentService.h"
 #include "doc/BlockScan.h"
-#include "ui/TextUtil.h"
+#include "doc/LinkTarget.h"
 
 #include <exception>
 #include <filesystem>
@@ -46,7 +46,7 @@ bool followLinkAt(UiRuntime& ui, float x, float y) {
                                                : "Anchor not found: " + anchorPart;
       return true;
     }
-    if(ui::isRemoteTarget(target)) {
+    if(doc::isRemoteTarget(target)) {
       ui.status = openWithDesktop(target) ? "Opened " + target : "Open failed";
       return true;
     }

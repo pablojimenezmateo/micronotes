@@ -1,7 +1,7 @@
 #include "app/InlineText.h"
 
-#include "ui/TextUtil.h"
-#include "ui/WikiLink.h"
+
+#include "doc/WikiLink.h"
 
 #include <cctype>
 #include <cmath>
@@ -99,7 +99,7 @@ void appendWithWikiLinks(std::vector<InlineRun>& runs, InlineRun&& run,
     return;
   }
   std::size_t copied = 0;
-  while(const auto span = ui::findWikiLink(run.text, copied)) {
+  while(const auto span = doc::findWikiLink(run.text, copied)) {
     if(span->start > copied) {
       InlineRun before = run;
       before.text = run.text.substr(copied, span->start - copied);

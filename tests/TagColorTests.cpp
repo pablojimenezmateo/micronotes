@@ -1,15 +1,15 @@
 #include "TestSupport.h"
 
-#include "ui/ColorMath.h"
+#include "core/render/ColorMath.h"
 #include "ui/TagColors.h"
 #include "ui/Theme.h"
 
 #include <set>
 #include <string>
 
-using micronotes::ui::contrast;
+using microcore::render::contrast;
 using micronotes::ui::defaultTagSwatch;
-using micronotes::ui::kIncidentalContrast;
+using microcore::render::kIncidentalContrast;
 using micronotes::ui::kTagSwatchCount;
 using micronotes::ui::setThemeMode;
 using micronotes::ui::TagColors;

@@ -5,7 +5,7 @@
 #include "core/AppIdentity.h"
 
 #include "ui/Metrics.h"
-#include "ui/TextUtil.h"
+
 #include "ui/Theme.h"
 
 #include <algorithm>

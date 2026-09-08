@@ -1,14 +1,23 @@
 #pragma once
 
-#include "library/Organization.h"
-
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace micronotes::ui {
+// What a `[[wikilink]]` says, as a question about the text alone.
+//
+// This was `ui/WikiLink.h`, and it did not belong there for a reason that was
+// not a matter of taste: `library/LibraryIndex.cpp` needs `wikiReferences` to
+// build the backlink table, so the library layer included the UI layer -- and
+// the UI layer includes the library, so the two directories were a cycle. The
+// syntax of a link is a fact about a Markdown document, which is what `doc/` is
+// for, and `library` may depend on `doc`.
+//
+// What is *not* here is resolution: which note a target names is a question
+// about the library, and it lives in `library/WikiResolve.h`.
+namespace micronotes::doc {
 
 // One `[[target]]`, or `[[target|what to call it here]]`, found in a run of
 // plain text.
@@ -44,19 +53,6 @@ struct WikiTarget {
 };
 
 WikiTarget splitWikiTarget(std::string_view target);
-
-// The note a `[[target]]` names, or npos.
-//
-// Resolution is by title, then by file name, each tried exactly and then
-// case-insensitively, and finally as a library-relative path. **Never by the
-// front-matter id.** An id is invisible in the file: a link keyed on one is
-// unreadable in any other editor and unfixable by hand, which is the opposite
-// of what "the notes are plain Markdown files you could have written yourself"
-// promises.
-//
-// Ties go to the shortest path, so a note at the root beats a deeply filed one
-// with the same name.
-std::size_t resolveWikiLink(std::string_view target, const std::vector<library::NoteListItem>& notes);
 
 // Rewrites every `[[old]]` in `source` to `[[new]]`, keeping any `|alias` and
 // any `#heading` exactly as they were. Used after a rename, and only with the

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 // The three string primitives the tree kept writing out by hand.
 //
@@ -52,6 +53,16 @@ inline constexpr char toLowerAscii(char c) {
 
 [[nodiscard]] std::string toLowerAscii(std::string_view value);
 void toLowerAsciiInPlace(std::string& value);
+
+// The text split on newlines, with the trailing piece kept even when empty --
+// so a buffer ending in a newline yields one more line than it has newlines,
+// which is what a text editor means by "the last line".
+[[nodiscard]] std::vector<std::string> splitLines(std::string_view text);
+
+// Truncated to `limit` bytes with an ellipsis, when it does not fit. By *count*
+// rather than by measured width: for a log line, a status message or an id,
+// where there is no font in scope. The width-aware form is `ui::ellipsizeToFit`.
+[[nodiscard]] std::string ellipsize(std::string text, std::size_t limit);
 
 // Equal but for ASCII case. One pass, and no allocation: the two sites that
 // wanted this each lowered a copy of both sides first.

@@ -34,7 +34,7 @@
 #include "ui/Rect.h"
 #include "ui/Settings.h"
 #include "ui/ShellLayout.h"
-#include "ui/TextUtil.h"
+
 #include "ui/Tooltip.h"
 #include "ui/TreeModel.h"
 

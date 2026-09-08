@@ -3,7 +3,7 @@
 #include <optional>
 #include <string_view>
 
-namespace micronotes::ui {
+namespace microcore::util {
 
 // Case-insensitive subsequence match used by the command palette, the slash
 // menu, and any filterable list overlay.

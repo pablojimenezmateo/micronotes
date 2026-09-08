@@ -1,5 +1,7 @@
 #include "app/Notes.h"
 
+#include "doc/LinkTarget.h"
+
 #include "app/ContextMenus.h"
 #include "app/Desktop.h"
 #include "app/Shell.h"
@@ -171,8 +173,8 @@ const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view re
   if(relative.empty() || !ui.state.hasLibrary()) return nullptr;
   // A URL is somebody else's business, and so is an absolute path: a link out
   // of the library is not a link to a note in it.
-  if(ui::isRemoteTarget(relative)) return nullptr;
-  const std::string decoded = ui::decodeLinkTarget(relative);
+  if(doc::isRemoteTarget(relative)) return nullptr;
+  const std::string decoded = doc::decodeLinkTarget(relative);
   if(decoded.empty() || decoded.front() == '/') return nullptr;
 
   const auto root = ui.state.libraryRoot();

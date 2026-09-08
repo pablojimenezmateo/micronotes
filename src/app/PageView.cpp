@@ -9,7 +9,7 @@
 #include "ui/Metrics.h"
 #include "ui/Settings.h"
 #include "ui/ShellLayout.h"
-#include "ui/TextUtil.h"
+#include "doc/LinkTarget.h"
 #include "ui/Theme.h"
 
 #include <algorithm>
@@ -287,7 +287,7 @@ Rect PageView::headerRect() const {
 }
 
 // The anchors an in-note link can land on: every heading, by the slug
-// `ui::headingAnchor` makes of its text, and every footnote definition, by its
+// `doc::headingAnchor` makes of its text, and every footnote definition, by its
 // own label and by its ordinal. Built from the block partition rather than from
 // a second parse of the note -- which is what the reading pane used to do, in a
 // walk it made once a frame.
@@ -308,7 +308,7 @@ void PageView::buildAnchors() const {
       text = text.substr(block.contentStart(), block.contentEnd() - block.contentStart());
       // A closing run of hashes is decoration in an ATX heading, not title.
       while(!text.empty() && (text.back() == '#' || text.back() == ' ')) text.remove_suffix(1);
-      auto anchor = ui::headingAnchor(text);
+      auto anchor = doc::headingAnchor(text);
       if(anchor.empty()) continue;
       anchors_.emplace(std::move(anchor), document_.blockTop(i));
       continue;

@@ -82,4 +82,15 @@ std::size_t metadataHeaderLength(std::string_view markdown);
 // into the file byte for byte.
 std::size_t titleHeadingLength(std::string_view body, std::string_view title);
 
+// A note's tags, to and from the one line a person types them on.
+//
+// Here rather than with the text helpers because a tag list is front matter:
+// these two are the boundary between what the writer typed and what the `tags:`
+// key holds, and the index parses the same shape when it reads a note back.
+//
+// `splitTags` splits on whitespace, drops a leading `#`, and drops duplicates
+// -- so typing a tag twice is not an error to report but a thing to ignore.
+std::vector<std::string> splitTags(std::string_view value);
+std::string joinTags(const std::vector<std::string>& tags);
+
 }

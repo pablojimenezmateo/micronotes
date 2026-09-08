@@ -45,4 +45,9 @@ private:
 std::filesystem::path normalizeInsideRoot(const std::filesystem::path& root, const std::filesystem::path& candidate);
 std::string sanitizeFileStem(std::string title);
 
+// A path as a person reads it: `~` for the home directory, as every other tool
+// that prints one does. For status lines, prompts and the settings list -- never
+// for anything that then opens the file.
+std::string displayPath(const std::filesystem::path& path);
+
 }

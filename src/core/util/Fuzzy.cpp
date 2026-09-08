@@ -1,11 +1,11 @@
-#include "ui/Fuzzy.h"
+#include "core/util/Fuzzy.h"
 
 #include "CoreAliases.h"
 
 #include "core/util/StringUtil.h"
 
 
-namespace micronotes::ui {
+namespace microcore::util {
 namespace {
 
 bool isBoundary(std::string_view text, std::size_t index) {

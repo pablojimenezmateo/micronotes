@@ -73,15 +73,15 @@ void switchLibrary(UiRuntime& ui, const std::string& typed) {
   persistLibraryState(ui);
   try {
     if(!openLibraryRoot(ui, root)) {
-      ui.status = "Could not open " + ui::displayPath(root);
+      ui.status = "Could not open " + platform::displayPath(root);
       return;
     }
   } catch(const std::exception& error) {
-    ui.status = "Could not open " + ui::displayPath(root) + ": " + error.what();
+    ui.status = "Could not open " + platform::displayPath(root) + ": " + error.what();
     return;
   }
   writeConfiguredLibraryRoot(root);
-  ui.status = "Opened " + ui::displayPath(root);
+  ui.status = "Opened " + platform::displayPath(root);
 }
 
 void performCommand(UiRuntime& ui, const std::string& id) {

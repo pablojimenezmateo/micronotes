@@ -21,4 +21,26 @@ bool equalsIgnoringAsciiCase(std::string_view a, std::string_view b) {
                     [](char x, char y) { return toLowerAscii(x) == toLowerAscii(y); });
 }
 
+
+std::vector<std::string> splitLines(std::string_view text) {
+  std::vector<std::string> lines;
+  std::string current;
+  for(const char c : text) {
+    if(c == '\n') {
+      lines.push_back(current);
+      current.clear();
+    } else {
+      current.push_back(c);
+    }
+  }
+  lines.push_back(current);
+  return lines;
+}
+
+std::string ellipsize(std::string text, std::size_t limit) {
+  if(text.size() <= limit) return text;
+  if(limit <= 3) return text.substr(0, limit);
+  return text.substr(0, limit - 3) + "...";
+}
+
 }

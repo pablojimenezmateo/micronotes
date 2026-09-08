@@ -2,9 +2,9 @@
 #include "ui/Draw.h"
 
 #include "core/editor/SoftWrap.h"
-#include "ui/ColorMath.h"
+#include "core/render/ColorMath.h"
 #include "ui/Metrics.h"
-#include "ui/TextUtil.h"
+#include "ui/TextFit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -507,7 +507,7 @@ void drawScrollbar(SDL_Renderer* renderer, const ScrollbarGeometry& geometry, bo
   // ink pulled most of the way toward the track rather than a shade of it; a
   // live drag takes the accent, so the grab gives a strong, distinct response.
   fill(renderer, geometry.thumb,
-       active ? theme().accent : blend(theme().textMuted, theme().surfaceRaised, 0.6f));
+       active ? theme().accent : render::blend(theme().textMuted, theme().surfaceRaised, 0.6f));
 }
 
 void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll,
@@ -687,7 +687,7 @@ void drawButton(SDL_Renderer* renderer, TextRenderer& text, Rect box, std::strin
     // Toward the ink rather than toward a second fill: one blend serves all
     // three tones, where a hover colour per tone is three more constants that
     // have to be kept in step with the three they hover over.
-    fillColor = blend(fillColor, ink, 0.14f);
+    fillColor = render::blend(fillColor, ink, 0.14f);
   }
   fill(renderer, box, fillColor);
   stroke(renderer, box, borderColor);

@@ -3,7 +3,8 @@
 
 #include "core/util/StringUtil.h"
 
-#include "ui/WikiLink.h"
+#include "doc/WikiLink.h"
+#include "library/WikiResolve.h"
 
 #include "library/Library.h"
 #include "library/Metadata.h"
@@ -70,7 +71,7 @@ static std::string_view columnView(sqlite3_stmt* stmt, int index) {
 }
 
 // Tags round-trip through one column as a space-separated list. A tag cannot
-// hold whitespace -- `ui::splitTags` is what parses one, and it splits on it --
+// hold whitespace -- `library::splitTags` is what parses one, and it splits on it --
 // so this is lossless, and it keeps the row a row rather than a second table
 // joined on every note list.
 static std::string joinTagList(const std::vector<std::string>& tags) {
@@ -230,8 +231,8 @@ static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out,
 
 void recordLinks(sqlite3_stmt* stmt, const std::string& noteId, std::string_view body) {
   if(!stmt) return;
-  for(const auto& reference : ui::wikiReferences(body)) {
-    const auto target = ui::splitWikiTarget(reference.target).note;
+  for(const auto& reference : doc::wikiReferences(body)) {
+    const auto target = doc::splitWikiTarget(reference.target).note;
     if(target.empty()) continue;
     sqlite3_reset(stmt);
     bindText(stmt, 1, noteId);

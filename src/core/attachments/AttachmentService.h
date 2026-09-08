@@ -22,4 +22,8 @@ public:
   bool isSupportedImage(const std::filesystem::path& path) const;
 };
 
+// What to call a file that arrived as bytes on the clipboard rather than as a
+// path. The MIME type is all there is to go on, so it is what names it.
+std::string fileNameForMime(std::string_view mime);
+
 }

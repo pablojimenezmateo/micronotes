@@ -6,7 +6,8 @@
 #include "core/platform/PathUtils.h"
 #include "ui/Actions.h"
 #include "ui/Overlay.h"
-#include "ui/TextUtil.h"
+#include "library/Metadata.h"
+#include "core/platform/PathUtils.h"
 
 #include <string>
 #include <utility>
@@ -15,8 +16,8 @@
 namespace micronotes::app {
 namespace {
 
-using micronotes::ui::joinTags;
-using micronotes::ui::splitTags;
+using micronotes::library::joinTags;
+using micronotes::library::splitTags;
 
 // Whether there is a notebook to act on, which for the root there is not: it
 // is the library, and renaming or deleting it is not a notebook operation.
@@ -220,7 +221,7 @@ void openLibraryPrompt(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "settings-library";
   overlay.title = "Library folder";
-  overlay.value.beginWith(ui.state.hasLibrary() ? ui::displayPath(ui.state.libraryRoot()) : std::string {});
+  overlay.value.beginWith(ui.state.hasLibrary() ? platform::displayPath(ui.state.libraryRoot()) : std::string {});
   overlay.placeholder = "~/Notes";
   overlay.hint = "Enter open   Esc cancel   a folder that is not there is created";
   overlay.width = 520.0f;

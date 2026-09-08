@@ -1,135 +1,9 @@
-#include "ui/TextUtil.h"
-
-#include "CoreAliases.h"
-
-#include "core/util/StringUtil.h"
+#include "ui/TextFit.h"
 
 #include <algorithm>
-#include <cctype>
-#include <cstdlib>
-#include <set>
-#include <sstream>
+#include <cstddef>
 
 namespace micronotes::ui {
-
-std::string headingAnchor(std::string_view value) {
-  std::string out;
-  bool pendingDash = false;
-  for(const unsigned char c : value) {
-    if(std::isalnum(c)) {
-      if(pendingDash && !out.empty()) out.push_back('-');
-      out.push_back(util::toLowerAscii(static_cast<char>(c)));
-      pendingDash = false;
-    } else if(!out.empty()) {
-      pendingDash = true;
-    }
-  }
-  return out;
-}
-
-std::string displayPath(const std::filesystem::path& path) {
-  const auto text = path.generic_string();
-  const char* home = std::getenv("HOME");
-  if(!home || !*home) return text;
-  const std::string prefix(home);
-  if(text.rfind(prefix, 0) != 0) return text;
-  if(text.size() == prefix.size()) return "~";
-  if(text[prefix.size()] != '/') return text;
-  return "~" + text.substr(prefix.size());
-}
-
-std::vector<std::string> splitLines(std::string_view text) {
-  std::vector<std::string> lines;
-  std::string current;
-  for(const char c : text) {
-    if(c == '\n') {
-      lines.push_back(current);
-      current.clear();
-    } else {
-      current.push_back(c);
-    }
-  }
-  lines.push_back(current);
-  return lines;
-}
-
-std::string ellipsize(std::string text, std::size_t limit) {
-  if(text.size() <= limit) return text;
-  if(limit <= 3) return text.substr(0, limit);
-  return text.substr(0, limit - 3) + "...";
-}
-
-bool isRemoteTarget(std::string_view target) {
-  return target.starts_with("http://") || target.starts_with("https://");
-}
-
-std::string decodeLinkTarget(std::string_view target) {
-  const auto hexDigit = [](char c) -> int {
-    if(c >= '0' && c <= '9') return c - '0';
-    if(c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if(c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-  };
-  std::string out;
-  out.reserve(target.size());
-  for(std::size_t i = 0; i < target.size(); ++i) {
-    if(target[i] == '%' && i + 2 < target.size()) {
-      const int high = hexDigit(target[i + 1]);
-      const int low = hexDigit(target[i + 2]);
-      // Both digits or neither. A lone `%` is a legal character in a file name,
-      // so a malformed escape is kept rather than dropped -- decoding it into
-      // something else would turn a link that works into one that does not.
-      if(high >= 0 && low >= 0) {
-        out.push_back(static_cast<char>(high * 16 + low));
-        i += 2;
-        continue;
-      }
-    }
-    // CommonMark's other escape. A backslash only escapes ASCII punctuation;
-    // before anything else it is itself a character, and on this platform a
-    // legal one in a file name.
-    if(target[i] == '\\' && i + 1 < target.size() &&
-       std::ispunct(static_cast<unsigned char>(target[i + 1])) != 0) {
-      out.push_back(target[i + 1]);
-      ++i;
-      continue;
-    }
-    out.push_back(target[i]);
-  }
-  return out;
-}
-
-std::string fileNameForMime(std::string_view mime) {
-  if(mime == "image/png") return "clipboard.png";
-  if(mime == "image/jpeg" || mime == "image/jpg") return "clipboard.jpg";
-  if(mime == "image/bmp") return "clipboard.bmp";
-  if(mime == "image/webp") return "clipboard.webp";
-  return "clipboard-image";
-}
-
-std::vector<std::string> splitTags(std::string_view value) {
-  std::vector<std::string> tags;
-  std::set<std::string> seen;
-  std::istringstream in {std::string(value)};
-  std::string tag;
-  while(in >> tag) {
-    if(!tag.empty() && tag.front() == '#') tag.erase(tag.begin());
-    if(tag.empty() || seen.contains(tag)) continue;
-    seen.insert(tag);
-    tags.push_back(tag);
-  }
-  return tags;
-}
-
-std::string joinTags(const std::vector<std::string>& tags) {
-  std::string out;
-  for(const auto& tag : tags) {
-    if(!out.empty()) out += " ";
-    out += tag;
-  }
-  return out;
-}
-
 
 namespace {
 
@@ -221,7 +95,7 @@ std::size_t smallestFitting(std::size_t low, std::size_t high, std::size_t guess
 }
 
 std::string ellipsizeToFit(std::string value, int maxWidth,
-                           const std::function<int(std::string_view)>& measure) {
+                           const MeasureText& measure) {
   if(maxWidth <= 0) return "";
   const int full = measure(value);
   if(full <= maxWidth) return value;
@@ -249,7 +123,7 @@ std::string ellipsizeToFit(std::string value, int maxWidth,
 }
 
 SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, std::size_t matchLength,
-                                 int maxWidth, const std::function<int(std::string_view)>& measure) {
+                                 int maxWidth, const MeasureText& measure) {
   static constexpr std::string_view kEllipsis = "...";
 
   SnippetWindow out;
@@ -325,7 +199,7 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
 }
 
 std::size_t breakToFit(std::string_view value, int maxWidth,
-                       const std::function<int(std::string_view)>& measure) {
+                       const MeasureText& measure) {
   if(value.empty()) return 0;
   if(maxWidth <= 0) return value.size();
   const int full = measure(value);

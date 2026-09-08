@@ -466,3 +466,48 @@ MICRONOTES_TEST(architecture_the_tab_strip_is_laid_out_once) {
       "handed, so a second caller is a second strip -- and the click lands on whichever one it "
       "built rather than on the one that was painted. Read ui.tabStrip instead.");
 }
+
+// The tree is layered, and the layers only point one way.
+//
+// `core` knows about nothing; `doc` is the Markdown document; `library` is the
+// folder of notes; `ui` draws and models; `app` is the shell and the loop. Each
+// may include itself and anything below it, and nothing above.
+//
+// This is checked rather than described because it had already broken, in the
+// way layering always does -- by one include, for one function.
+// `library/LibraryIndex.cpp` needs to know what a note's `[[wikilinks]]` are so
+// it can build the backlink table, and the answer lived in `ui/WikiLink.h`. So
+// the library included the UI, the UI includes the library, and the two
+// directories were a cycle: a change to a paint could not be reasoned about
+// without the index, and the index could not be built without the paint.
+//
+// Nothing failed. It compiled, because the include graph over *files* was still
+// acyclic -- which is exactly why a rule about directories needs a test about
+// directories. The fix was to notice that "what links does this text contain"
+// is a question about a document (`doc/WikiLink.h`) and "which note does this
+// target name" is a question about a library (`library/WikiResolve.h`), and
+// that they had been one header only because they were both about links.
+MICRONOTES_TEST(architecture_the_layers_only_point_one_way) {
+  // Lowest first. A layer may include itself and anything before it.
+  const std::vector<std::string> layers {"core", "doc", "library", "ui", "app"};
+
+  std::string offenders;
+  for(std::size_t i = 0; i < layers.size(); ++i) {
+    const auto dir = repoRoot() / "src" / layers[i];
+    for(const auto& path : sourceFiles(dir)) {
+      const std::string text = readText(path);
+      for(std::size_t j = i + 1; j < layers.size(); ++j) {
+        const std::string include = "#include \"" + layers[j] + "/";
+        if(text.find(include) == std::string::npos) continue;
+        if(!offenders.empty()) offenders += "; ";
+        offenders += "src/" + layers[i] + "/" + path.filename().string() + " includes " + layers[j] + "/";
+      }
+    }
+  }
+  micronotes::tests::require(
+    offenders.empty(),
+    "a layer includes one above it: " + offenders +
+    " -- the order is core < doc < library < ui < app. Whatever is wanted from the upper layer is "
+    "either in the wrong place or is two things: move the half the lower layer needs down, and "
+    "leave the half that needs the upper layer where it is");
+}

@@ -1,16 +1,16 @@
 #include "TestSupport.h"
 
-#include "ui/ColorMath.h"
+#include "core/render/ColorMath.h"
 #include "ui/Theme.h"
 
 #include <string>
 
-using micronotes::ui::blend;
-using micronotes::ui::compositeOver;
-using micronotes::ui::contrast;
-using micronotes::ui::ensureContrast;
-using micronotes::ui::isLight;
-using micronotes::ui::relativeLuminance;
+using microcore::render::blend;
+using microcore::render::compositeOver;
+using microcore::render::contrast;
+using microcore::render::ensureContrast;
+using microcore::render::isLight;
+using microcore::render::relativeLuminance;
 
 namespace {
 
@@ -42,29 +42,29 @@ MICRONOTES_TEST(color_contrast_matches_the_wcag_extremes) {
   MICRONOTES_REQUIRE(near(contrast(kBlack, kWhite), 21.0f));
   MICRONOTES_REQUIRE(near(contrast(kWhite, kBlack), 21.0f));
   MICRONOTES_REQUIRE(near(contrast(kWhite, kWhite), 1.0f));
-  MICRONOTES_REQUIRE(near(relativeLuminance(kWhite), 1.0f));
-  MICRONOTES_REQUIRE(near(relativeLuminance(kBlack), 0.0f));
+  MICRONOTES_REQUIRE(near(microcore::render::relativeLuminance(kWhite), 1.0f));
+  MICRONOTES_REQUIRE(near(microcore::render::relativeLuminance(kBlack), 0.0f));
 }
 
 MICRONOTES_TEST(color_blend_reaches_both_ends_and_keeps_alpha) {
   const SDL_Color base {10, 20, 30, 128};
-  MICRONOTES_REQUIRE(blend(base, kWhite, 0.0f).r == 10);
-  MICRONOTES_REQUIRE(blend(base, kWhite, 1.0f).r == 255);
+  MICRONOTES_REQUIRE(microcore::render::blend(base, kWhite, 0.0f).r == 10);
+  MICRONOTES_REQUIRE(microcore::render::blend(base, kWhite, 1.0f).r == 255);
   // Out-of-range amounts clamp rather than overshoot into nonsense.
-  MICRONOTES_REQUIRE(blend(base, kWhite, -5.0f).r == 10);
-  MICRONOTES_REQUIRE(blend(base, kWhite, 5.0f).g == 255);
-  MICRONOTES_REQUIRE(blend(base, kWhite, 0.5f).a == 128);
+  MICRONOTES_REQUIRE(microcore::render::blend(base, kWhite, -5.0f).r == 10);
+  MICRONOTES_REQUIRE(microcore::render::blend(base, kWhite, 5.0f).g == 255);
+  MICRONOTES_REQUIRE(microcore::render::blend(base, kWhite, 0.5f).a == 128);
 }
 
 // What a translucent fill will actually look like once it is drawn.
 MICRONOTES_TEST(color_composite_over_resolves_translucency) {
   const SDL_Color half {255, 255, 255, 128};
-  const SDL_Color result = compositeOver(half, kBlack);
+  const SDL_Color result = microcore::render::compositeOver(half, kBlack);
   MICRONOTES_REQUIRE(result.a == 255);
   MICRONOTES_REQUIRE(result.r > 120 && result.r < 136);
   // Fully opaque and fully transparent are the two ends.
-  MICRONOTES_REQUIRE(compositeOver({1, 2, 3, 255}, kWhite).r == 1);
-  MICRONOTES_REQUIRE(compositeOver({1, 2, 3, 0}, kWhite).r == 255);
+  MICRONOTES_REQUIRE(microcore::render::compositeOver({1, 2, 3, 255}, kWhite).r == 1);
+  MICRONOTES_REQUIRE(microcore::render::compositeOver({1, 2, 3, 0}, kWhite).r == 255);
 }
 
 MICRONOTES_TEST(color_is_light_splits_where_black_and_white_agree) {
@@ -76,7 +76,7 @@ MICRONOTES_TEST(color_is_light_splits_where_black_and_white_agree) {
 }
 
 MICRONOTES_TEST(color_ensure_contrast_leaves_a_passing_pair_alone) {
-  const SDL_Color result = ensureContrast(kBlack, kWhite, 4.5f);
+  const SDL_Color result = microcore::render::ensureContrast(kBlack, kWhite, 4.5f);
   MICRONOTES_REQUIRE(result.r == kBlack.r && result.g == kBlack.g && result.b == kBlack.b);
 }
 
@@ -88,7 +88,7 @@ MICRONOTES_TEST(color_ensure_contrast_never_makes_a_pair_worse) {
   for(int i = 0; i < 400; ++i) {
     const SDL_Color foreground {nextByte(state), nextByte(state), nextByte(state), nextByte(state)};
     const SDL_Color background {nextByte(state), nextByte(state), nextByte(state), 255};
-    const SDL_Color fixed = ensureContrast(foreground, background, 4.5f);
+    const SDL_Color fixed = microcore::render::ensureContrast(foreground, background, 4.5f);
     const float before = contrast(foreground, background);
     const float after = contrast(fixed, background);
     micronotes::tests::require(after == after, "ensureContrast produced a NaN ratio");
@@ -165,12 +165,12 @@ MICRONOTES_TEST(theme_palettes_stay_legible_in_both_modes) {
     for(const auto& separation : kSeparations) {
       const float ratio = contrast(palette.*(separation.surface), palette.*(separation.reference));
       micronotes::tests::require(
-        ratio >= micronotes::ui::kSurfaceSeparation - 0.005f,
+        ratio >= microcore::render::kSurfaceSeparation - 0.005f,
         which + " theme: " + separation.what + " differs by " + std::to_string(ratio) +
-          ":1, under the " + std::to_string(micronotes::ui::kSurfaceSeparation) +
+          ":1, under the " + std::to_string(microcore::render::kSurfaceSeparation) +
           ":1 two grounds need to read as two");
       micronotes::tests::require(
-        micronotes::ui::samePolarity(palette.*(separation.surface), palette.*(separation.reference)),
+        microcore::render::samePolarity(palette.*(separation.surface), palette.*(separation.reference)),
         std::string(which) + " theme: " + separation.what +
           " crosses the light/dark threshold -- a panel that is a raised card in one theme and a "
           "hole in the other is a palette nobody looked at");

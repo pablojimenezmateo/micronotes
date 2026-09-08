@@ -81,4 +81,13 @@ bool AttachmentService::isSupportedImage(const std::filesystem::path& path) cons
   return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif" || ext == ".webp";
 }
 
+
+std::string fileNameForMime(std::string_view mime) {
+  if(mime == "image/png") return "clipboard.png";
+  if(mime == "image/jpeg" || mime == "image/jpg") return "clipboard.jpg";
+  if(mime == "image/bmp") return "clipboard.bmp";
+  if(mime == "image/webp") return "clipboard.webp";
+  return "clipboard-image";
+}
+
 }

@@ -149,6 +149,7 @@ set(MICROCORE_SOURCES
   src/core/perf/Perf.cpp
   src/core/perf/PerformanceCounters.cpp
   src/core/perf/TraceChannel.cpp
+  src/core/render/ColorMath.cpp
   src/core/render/FontResolver.cpp
   src/core/render/TextTextureCache.cpp
   src/core/persistence/SqliteDb.cpp
@@ -157,6 +158,7 @@ set(MICROCORE_SOURCES
   src/core/platform/DurableFile.cpp
   src/core/platform/PathUtils.cpp
   src/core/ui/ShellModel.cpp
+  src/core/util/Fuzzy.cpp
   src/core/util/StringUtil.cpp
   src/core/util/Utf8.cpp
   src/core/viewer/MarkdownViewer.cpp
@@ -173,30 +175,29 @@ set(MICRONOTES_APP_SOURCES
   src/doc/Edits.cpp
   src/doc/Fold.cpp
   src/doc/InlineScan.cpp
+  src/doc/LinkTarget.cpp
+  src/doc/WikiLink.cpp
   src/doc/Layout.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp
   src/library/Organization.cpp
   src/library/RecoveryStore.cpp
+  src/library/SearchScope.cpp
+  src/library/WikiResolve.cpp
   src/ui/Actions.cpp
   src/ui/AppState.cpp
   src/ui/FoldState.cpp
-  src/ui/Fuzzy.cpp
   src/ui/CaretBlink.cpp
-  src/ui/ColorMath.cpp
   src/ui/NoteProperties.cpp
   src/ui/Menus.cpp
-  src/ui/SearchScope.cpp
   src/ui/Outline.cpp
   src/ui/Settings.cpp
   src/ui/ShellLayout.cpp
   src/ui/TagColors.cpp
   src/ui/Tabs.cpp
   src/ui/UiStateFile.cpp
-  src/ui/TextUtil.cpp
   src/ui/Tooltip.cpp
-  src/ui/WikiLink.cpp
   src/ui/Theme.cpp
   src/ui/WorkspaceModel.cpp
   src/ui/TreeModel.cpp
@@ -268,6 +269,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/ui/Draw.cpp
   src/ui/Fonts.cpp
   src/ui/Overlay.cpp
+  src/ui/TextFit.cpp
   src/ui/TextMeasureCache.cpp
 )
 
@@ -325,7 +327,7 @@ add_executable(micronotes_tests
   tests/SidebarRowsTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp
-  tests/TextUtilTests.cpp
+  tests/TextFitTests.cpp
   tests/TagColorTests.cpp
   tests/ThemeTests.cpp
   tests/TextFieldTests.cpp

@@ -50,7 +50,7 @@ using WikiResolver = std::function<bool(std::string_view)>;
 
 // md4c has no notion of `[[Some Note]]`: it hands the brackets back as literal
 // text. So the runs are split on them here, by the same rule
-// `doc::InlineScan` applies on the live surface (`ui::findWikiLink`). Without
+// `doc::InlineScan` applies on the live surface (`doc::findWikiLink`). Without
 // this the pane that exists for *reading* a note showed the raw markup of every
 // link between notes and offered nothing to click.
 std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines,

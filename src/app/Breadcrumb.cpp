@@ -5,7 +5,7 @@
 #include "app/Shell.h"
 
 #include "ui/Metrics.h"
-#include "ui/TextUtil.h"
+
 #include "ui/Theme.h"
 
 #include <cmath>

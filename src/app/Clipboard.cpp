@@ -4,7 +4,7 @@
 #include "app/Notes.h"
 #include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
-#include "ui/TextUtil.h"
+#include "core/attachments/AttachmentService.h"
 
 #include <SDL3/SDL.h>
 
@@ -17,7 +17,7 @@
 namespace micronotes::app {
 namespace {
 
-using micronotes::ui::fileNameForMime;
+using micronotes::attachments::fileNameForMime;
 
 static bool ensureSelectedNote(UiRuntime& ui) {
   if(!ui.state.hasLibrary()) {

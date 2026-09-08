@@ -1,9 +1,9 @@
-#include "ui/ColorMath.h"
+#include "core/render/ColorMath.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace micronotes::ui {
+namespace microcore::render {
 namespace {
 
 float toLinear(Uint8 value) {

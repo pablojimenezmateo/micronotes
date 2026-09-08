@@ -4,8 +4,9 @@
 #include "app/Shell.h"
 
 #include "ui/Outline.h"
-#include "ui/TextUtil.h"
-#include "ui/WikiLink.h"
+#include "doc/LinkTarget.h"
+#include "doc/WikiLink.h"
+#include "library/WikiResolve.h"
 
 #include <filesystem>
 #include <string>
@@ -22,7 +23,7 @@ const std::vector<library::NoteListItem>& wikiCandidates(UiRuntime& ui) {
 }
 
 bool wikiLinkResolves(UiRuntime& ui, std::string_view target) {
-  return ui::resolveWikiLink(target, wikiCandidates(ui)) != std::string::npos;
+  return library::resolveWikiLink(target, wikiCandidates(ui)) != std::string::npos;
 }
 
 void invalidateWikiNotes(UiRuntime& ui) {
@@ -33,10 +34,10 @@ void invalidateWikiNotes(UiRuntime& ui) {
 // link is very often written before the note is -- so it offers to create it
 // rather than reporting a failure.
 void openWikiLink(UiRuntime& ui, std::string_view target) {
-  const auto split = ui::splitWikiTarget(target);
+  const auto split = doc::splitWikiTarget(target);
   if(split.note.empty()) return;
   const auto& notes = wikiCandidates(ui);
-  const auto found = ui::resolveWikiLink(target, notes);
+  const auto found = library::resolveWikiLink(target, notes);
   if(found != std::string::npos) {
     selectNoteById(ui, notes[found].id);
     if(!split.heading.empty()) {
@@ -113,7 +114,7 @@ void commitWikiMenu(UiRuntime& ui, const std::string& title, const std::string& 
 
 
 bool jumpToAnchor(UiRuntime& ui, std::string_view anchor) {
-  const auto slug = ui::headingAnchor(anchor);
+  const auto slug = doc::headingAnchor(anchor);
   const bool live = ui.state.workspace().paneMode() == ui::PaneMode::Live;
   PageView& page = live ? ui.livePage : ui.readingPage;
   auto found = page.anchorScroll(slug);

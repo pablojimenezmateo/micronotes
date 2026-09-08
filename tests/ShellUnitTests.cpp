@@ -8,7 +8,7 @@
 #include "app/Shell.h"
 #include "core/perf/PerformanceCounters.h"
 #include "doc/BlockScan.h"
-#include "ui/TextUtil.h"
+#include "doc/LinkTarget.h"
 #include "app/SidebarModel.h"
 #include "app/Dismiss.h"
 #include "app/Notes.h"
@@ -31,7 +31,7 @@
 // is a library now and the test binary links it, so these are ordinary unit
 // tests over code that had none.
 
-using micronotes::ui::headingAnchor;
+using micronotes::doc::headingAnchor;
 using micronotes::app::InlineRun;
 using micronotes::app::inlineRuns;
 using micronotes::app::searchResultRowHeight;

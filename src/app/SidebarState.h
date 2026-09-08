@@ -6,8 +6,8 @@
 #include "library/Library.h"
 #include "ui/Memo.h"
 #include "ui/Rect.h"
-#include "ui/SearchScope.h"
-#include "ui/TextUtil.h"
+#include "library/SearchScope.h"
+#include "ui/TextFit.h"
 #include "ui/TreeModel.h"
 #include "ui/WorkspaceModel.h"
 

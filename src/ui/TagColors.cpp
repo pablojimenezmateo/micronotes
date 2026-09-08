@@ -1,6 +1,7 @@
+#include "CoreAliases.h"
 #include "ui/TagColors.h"
 
-#include "ui/ColorMath.h"
+#include "core/render/ColorMath.h"
 #include "ui/Theme.h"
 
 #include <algorithm>
@@ -71,7 +72,7 @@ SDL_Color tagSwatch(int index) {
   // the same reason the theme holds its own inks there: a swatch that arrives
   // from a palette nobody re-checked must not be able to draw an invisible dot.
   // A no-op on both built-in sets.
-  return ensureContrast(picked, theme().surfaceBackground, kIncidentalContrast);
+  return render::ensureContrast(picked, theme().surfaceBackground, render::kIncidentalContrast);
 }
 
 int defaultTagSwatch(std::string_view tag) {

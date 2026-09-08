@@ -1,9 +1,10 @@
+#include "CoreAliases.h"
 #include "core/editor/SingleLineView.h"
 #include "ui/Overlay.h"
 
 #include "core/perf/PerformanceCounters.h"
 
-#include "ui/Fuzzy.h"
+#include "core/util/Fuzzy.h"
 #include "ui/Metrics.h"
 #include "ui/TagColors.h"
 
@@ -111,8 +112,8 @@ const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) con
   for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) {
     const auto& item = overlay.items[static_cast<std::size_t>(i)];
     perf::addCounter(perf::CounterId::OverlayFilterItemsScored);
-    auto score = fuzzyScore(item.label, query);
-    if(!score && !item.detail.empty()) score = fuzzyScore(item.detail, query);
+    auto score = util::fuzzyScore(item.label, query);
+    if(!score && !item.detail.empty()) score = util::fuzzyScore(item.detail, query);
     if(score) scored.emplace_back(*score, i);
   }
   std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first > b.first; });

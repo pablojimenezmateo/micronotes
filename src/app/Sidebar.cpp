@@ -4,8 +4,8 @@
 #include "app/SidebarModel.h"
 #include "core/editor/SingleLineView.h"
 #include "ui/Metrics.h"
-#include "ui/SearchScope.h"
-#include "ui/TextUtil.h"
+#include "library/SearchScope.h"
+
 #include "ui/TagColors.h"
 #include "ui/Theme.h"
 #include "ui/TreeModel.h"
@@ -55,12 +55,12 @@ static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRunt
   ui::drawTextFieldFrame(renderer, search, focused);
   ui.sidebar.scopeToggle = parts.scope;
   ui.pointer.offerTooltip(ui.sidebar.scopeToggle,
-                  "Searching " + std::string(ui::searchScopeName(ui.fields.searchScope)) + " - click to change");
+                  "Searching " + std::string(library::searchScopeName(ui.fields.searchScope)) + " - click to change");
   ui::drawSearchGlyph(renderer, parts.label, focused ? theme().accent : theme().textMuted);
   drawTextField(renderer, text, ui, ui.fields.search, parts.field, focused, "Search all notes");
   ui::drawSurface(renderer, parts.scope, theme().surfaceRaised,
                   focused ? theme().accent : theme().border);
-  const auto scopeLabel = ui::searchScopeLabel(ui.fields.searchScope);
+  const auto scopeLabel = library::searchScopeLabel(ui.fields.searchScope);
   text.draw(scopeLabel,
             std::round(parts.scope.x + (parts.scope.w - static_cast<float>(text.width(scopeLabel, style))) / 2.0f),
             ui::textTop(parts.scope, text, style), focused ? theme().accent : theme().textSecondary, style);

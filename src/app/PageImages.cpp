@@ -3,7 +3,7 @@
 #include "app/Shell.h"
 #include "core/attachments/AttachmentService.h"
 #include "core/perf/PerformanceCounters.h"
-#include "ui/TextUtil.h"
+#include "doc/LinkTarget.h"
 
 #include <algorithm>
 #include <cmath>
@@ -30,7 +30,7 @@ const std::filesystem::path& resolvedImagePath(UiRuntime& ui, std::string_view t
   ui.imagePaths.retarget(root);
   if(const auto* found = ui.imagePaths.find(target)) return *found;
   std::filesystem::path path;
-  if(!ui::isRemoteTarget(target)) {
+  if(!doc::isRemoteTarget(target)) {
     try {
       attachments::AttachmentService service;
       auto managed = service.resolveManaged(root, std::string(target));

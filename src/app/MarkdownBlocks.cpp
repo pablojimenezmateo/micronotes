@@ -2,7 +2,7 @@
 
 #include "core/perf/PerformanceCounters.h"
 #include "ui/Theme.h"
-#include "ui/TextUtil.h"
+#include "core/util/StringUtil.h"
 
 #include <algorithm>
 #include <cmath>
@@ -211,7 +211,7 @@ bool complexRendersNothing(const markdown::Document& document) {
 }
 
 std::vector<std::string> complexSourceLines(UiRuntime& ui, const doc::SourceBlock& block) {
-  return ui::splitLines(complexSource(ui, block));
+  return util::splitLines(complexSource(ui, block));
 }
 
 }

@@ -5,7 +5,7 @@
 // Colour-space maths. Pure functions over colours, with no theme and no state,
 // so a palette can be checked for legibility in a test rather than by squinting
 // at a screenshot.
-namespace micronotes::ui {
+namespace microcore::render {
 
 // WCAG relative luminance of an sRGB colour. Alpha is ignored: a translucent
 // colour's luminance depends on what is behind it, which is what compositeOver

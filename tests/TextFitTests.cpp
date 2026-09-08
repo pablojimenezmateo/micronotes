@@ -1,6 +1,7 @@
 #include "TestSupport.h"
 
-#include "ui/TextUtil.h"
+#include "ui/TextFit.h"
+#include "doc/LinkTarget.h"
 
 #include <functional>
 #include <string>
@@ -420,7 +421,7 @@ MICRONOTES_TEST(snippet_measures_a_handful_of_times_not_eighteen) {
 // two notes -- not an edge case. A resolver comparing the raw target against a
 // path on disk would miss exactly that.
 MICRONOTES_TEST(text_link_targets_decode_the_escapes_writers_put_in_them) {
-  using micronotes::ui::decodeLinkTarget;
+  using micronotes::doc::decodeLinkTarget;
   MICRONOTES_REQUIRE(decodeLinkTarget("Meeting%20notes.md") == "Meeting notes.md");
   MICRONOTES_REQUIRE(decodeLinkTarget("work/a%2Db.md") == "work/a-b.md");
   // Case-insensitive hex, as every other decoder accepts it.

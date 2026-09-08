@@ -1,6 +1,6 @@
-#include "ui/SearchScope.h"
+#include "library/SearchScope.h"
 
-namespace micronotes::ui {
+namespace micronotes::library {
 
 using library::SearchScope;
 

@@ -4,7 +4,7 @@
 
 #include "core/util/StringUtil.h"
 
-#include "ui/ColorMath.h"
+#include "core/render/ColorMath.h"
 
 #include <cctype>
 #include <string>
@@ -117,16 +117,16 @@ Theme derive(Theme t) {
   // dark one, and on a light one the page is already near white, so back means
   // grey. The gutter is the same step, which is why code borrows it.
   t.codeBackground = t.gutterBackground;
-  t.tableHeaderBackground = light ? darken(t.editorBackground, 0.05f)
-                                  : lighten(t.editorBackground, 0.05f);
+  t.tableHeaderBackground = light ? render::darken(t.editorBackground, 0.05f)
+                                  : render::lighten(t.editorBackground, 0.05f);
   // A link to a note that is not written yet: the accent, stepped back toward
   // the page it is drawn on, so "not there yet" reads as quieter rather than as
   // a second kind of link.
-  t.linkPending = blend(t.accent, t.editorBackground, 0.45f);
+  t.linkPending = render::blend(t.accent, t.editorBackground, 0.45f);
   // Opaque, for the panels a translucent fill cannot be laid over: the sidebar
   // draws a selected snippet's match on top of a row fill that is itself on top
   // of the panel, and stacking two alphas there produced a third colour.
-  t.selectionStrong = compositeOver(t.selectionFill, t.surfaceBackground);
+  t.selectionStrong = render::compositeOver(t.selectionFill, t.surfaceBackground);
   return t;
 }
 
@@ -165,7 +165,7 @@ Theme correct(Theme t) {
   };
   const auto worst = [&](SDL_Color foreground, float minimum) {
     SDL_Color result = foreground;
-    for(const SDL_Color ground : grounds) result = ensureContrast(result, ground, minimum);
+    for(const SDL_Color ground : grounds) result = render::ensureContrast(result, ground, minimum);
     return result;
   };
 
@@ -177,9 +177,9 @@ Theme correct(Theme t) {
   // palette's *intent* rather than about a ratio: it fires only when a role has
   // ended up on the wrong side of the light/dark threshold, which no amount of
   // careful picking makes correct. It does not fire on either built-in.
-  if(!samePolarity(t.surfaceRaised, t.surfaceBackground)) {
-    t.surfaceRaised = t.mode == ThemeMode::Light ? darken(t.surfaceBackground, 0.06f)
-                                                 : lighten(t.surfaceBackground, 0.06f);
+  if(!render::samePolarity(t.surfaceRaised, t.surfaceBackground)) {
+    t.surfaceRaised = t.mode == ThemeMode::Light ? render::darken(t.surfaceBackground, 0.06f)
+                                                 : render::lighten(t.surfaceBackground, 0.06f);
   }
   // The border is not corrected either, for the reason the grounds are not: a
   // 1px rule is a boundary between two surfaces, not something anybody reads,
@@ -187,24 +187,24 @@ Theme correct(Theme t) {
   // against the panel took the picked 0x2A3548 to 0x333D50, which is a rule
   // dark enough to turn a list of rows into a list of boxes -- the failure the
   // rule's own comment said it was avoiding.
-  t.textPrimary = worst(t.textPrimary, kTextContrast);
-  t.textSecondary = worst(t.textSecondary, kTextContrast);
-  t.surfaceText = worst(t.surfaceText, kTextContrast);
-  t.chromeText = ensureContrast(t.chromeText, t.chromeBackground, kTextContrast);
-  t.chromeActiveText = ensureContrast(t.chromeActiveText, t.chromeActive, kTextContrast);
+  t.textPrimary = worst(t.textPrimary, render::kTextContrast);
+  t.textSecondary = worst(t.textSecondary, render::kTextContrast);
+  t.surfaceText = worst(t.surfaceText, render::kTextContrast);
+  t.chromeText = render::ensureContrast(t.chromeText, t.chromeBackground, render::kTextContrast);
+  t.chromeActiveText = render::ensureContrast(t.chromeActiveText, t.chromeActive, render::kTextContrast);
   // Section labels, counts, markers and the strip's inactive glyphs are
   // incidental: holding them to the body ratio would flatten the whole
   // hierarchy into one weight.
-  t.textMuted = worst(t.textMuted, kIncidentalContrast);
-  t.chromeTextSecondary = ensureContrast(t.chromeTextSecondary, t.chromeBackground,
-                                         kIncidentalContrast);
+  t.textMuted = worst(t.textMuted, render::kIncidentalContrast);
+  t.chromeTextSecondary = render::ensureContrast(t.chromeTextSecondary, t.chromeBackground,
+                                         render::kIncidentalContrast);
   // Not corrected: `textDisabled` is meant to be hard to read. A control that
   // will not answer should look like one.
-  t.onAccent = ensureContrast(t.onAccent, t.accent, kTextContrast);
-  t.accent = worst(t.accent, kIncidentalContrast);
-  t.linkPending = worst(t.linkPending, kIncidentalContrast);
-  t.warn = worst(t.warn, kIncidentalContrast);
-  t.cursor = worst(t.cursor, kIncidentalContrast);
+  t.onAccent = render::ensureContrast(t.onAccent, t.accent, render::kTextContrast);
+  t.accent = worst(t.accent, render::kIncidentalContrast);
+  t.linkPending = worst(t.linkPending, render::kIncidentalContrast);
+  t.warn = worst(t.warn, render::kIncidentalContrast);
+  t.cursor = worst(t.cursor, render::kIncidentalContrast);
   return t;
 }
 
@@ -247,10 +247,10 @@ CalloutStyle calloutStyle(std::string_view rawKind) {
   // The tint is the accent laid over the page rather than a second constant,
   // so a palette change carries it along.
   const SDL_Color page = light ? lightTheme().editorBackground : darkTheme().editorBackground;
-  style.surface = blend(page, style.accent, light ? 0.09f : 0.14f);
+  style.surface = render::blend(page, style.accent, light ? 0.09f : 0.14f);
   // The kind's name is drawn in the accent on that tint, so the accent has to
   // stay legible against the surface it just tinted.
-  style.accent = ensureContrast(style.accent, style.surface, kIncidentalContrast);
+  style.accent = render::ensureContrast(style.accent, style.surface, render::kIncidentalContrast);
   return style;
 }
 

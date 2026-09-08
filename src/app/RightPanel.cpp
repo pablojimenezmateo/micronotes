@@ -11,7 +11,7 @@
 #include "ui/Outline.h"
 #include "ui/TagColors.h"
 #include "ui/Theme.h"
-#include "ui/WikiLink.h"
+#include "doc/WikiLink.h"
 
 #include <algorithm>
 #include <string>
@@ -289,7 +289,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
         // The line as it reads, not as it is written: the source line is what
         // the index stores, and it carries the `[[brackets]]` of the very link
         // that put this row here.
-        text.draw(ui::ellipsizeToWidth(text, ui::plainWikiText(link.line), room, lineStyle),
+        text.draw(ui::ellipsizeToWidth(text, doc::plainWikiText(link.line), room, lineStyle),
                   row.x + kPadX, titleY + static_cast<float>(text.lineHeight(rowStyle)),
                   theme().textMuted, lineStyle);
         ui.rightPanel.backlinkRows.push_back({row, link.id});

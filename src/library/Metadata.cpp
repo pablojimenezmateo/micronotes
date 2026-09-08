@@ -2,6 +2,7 @@
 
 #include "core/util/StringUtil.h"
 
+#include <set>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -227,6 +228,30 @@ std::size_t metadataHeaderLength(std::string_view markdown) {
   if(bodyStart < markdown.size() && markdown[bodyStart] == '\n') ++bodyStart;
   if(bodyStart < markdown.size() && markdown[bodyStart] == '\n') ++bodyStart;
   return bodyStart;
+}
+
+
+std::vector<std::string> splitTags(std::string_view value) {
+  std::vector<std::string> tags;
+  std::set<std::string> seen;
+  std::istringstream in {std::string(value)};
+  std::string tag;
+  while(in >> tag) {
+    if(!tag.empty() && tag.front() == '#') tag.erase(tag.begin());
+    if(tag.empty() || seen.contains(tag)) continue;
+    seen.insert(tag);
+    tags.push_back(tag);
+  }
+  return tags;
+}
+
+std::string joinTags(const std::vector<std::string>& tags) {
+  std::string out;
+  for(const auto& tag : tags) {
+    if(!out.empty()) out += " ";
+    out += tag;
+  }
+  return out;
 }
 
 }

@@ -1,9 +1,9 @@
 #include "TestSupport.h"
 
 #include "library/Metadata.h"
-#include "ui/Fuzzy.h"
+#include "core/util/Fuzzy.h"
 
-using micronotes::ui::fuzzyScore;
+using micronotes::util::fuzzyScore;
 
 MICRONOTES_TEST(fuzzy_matches_subsequences_and_rejects_missing_characters) {
   MICRONOTES_REQUIRE(fuzzyScore("Product roadmap", "prod").has_value());

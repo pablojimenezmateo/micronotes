@@ -63,4 +63,16 @@ std::string sanitizeFileStem(std::string title) {
   return out.empty() ? "untitled" : out;
 }
 
+
+std::string displayPath(const std::filesystem::path& path) {
+  const auto text = path.generic_string();
+  const char* home = std::getenv("HOME");
+  if(!home || !*home) return text;
+  const std::string prefix(home);
+  if(text.rfind(prefix, 0) != 0) return text;
+  if(text.size() == prefix.size()) return "~";
+  if(text[prefix.size()] != '/') return text;
+  return "~" + text.substr(prefix.size());
+}
+
 }

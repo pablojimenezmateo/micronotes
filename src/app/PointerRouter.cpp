@@ -28,7 +28,7 @@
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
 #include "ui/Metrics.h"
-#include "ui/SearchScope.h"
+#include "library/SearchScope.h"
 #include "ui/ShellLayout.h"
 
 #include <algorithm>
@@ -213,9 +213,9 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
     // it takes the click before any row arithmetic happens.
     if(contains(searchBoxRect(layout.sidebar), x, y)) {
       if(contains(ui.sidebar.scopeToggle, x, y)) {
-        ui.fields.searchScope = ui::nextSearchScope(ui.fields.searchScope);
+        ui.fields.searchScope = library::nextSearchScope(ui.fields.searchScope);
         ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
-        ui.status = "Searching " + std::string(ui::searchScopeName(ui.fields.searchScope));
+        ui.status = "Searching " + std::string(library::searchScopeName(ui.fields.searchScope));
         return;
       }
       // Clicking a text field puts the caret where you clicked. Before, it only

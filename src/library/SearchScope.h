@@ -4,7 +4,7 @@
 
 #include <string_view>
 
-namespace micronotes::ui {
+namespace micronotes::library {
 
 // What the search field's scope badge says, and what clicking it does.
 //
