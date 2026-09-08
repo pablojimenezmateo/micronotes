@@ -14,6 +14,12 @@ std::size_t previousBoundary(std::string_view text, std::size_t offset) {
   return offset;
 }
 
+std::size_t boundaryAtOrBefore(std::string_view text, std::size_t offset) {
+  if(offset >= text.size()) return text.size();
+  while(offset > 0 && isContinuationByte(text[offset])) --offset;
+  return offset;
+}
+
 std::size_t nextBoundary(std::string_view text, std::size_t offset) {
   if(offset >= text.size()) return text.size();
   ++offset;
@@ -27,15 +33,6 @@ std::size_t countCodePoints(std::string_view text) {
     if(!isContinuationByte(c)) ++count;
   }
   return count;
-}
-
-std::size_t offsetForCodePoint(std::string_view text, std::size_t index) {
-  std::size_t offset = 0;
-  while(index > 0 && offset < text.size()) {
-    offset = nextBoundary(text, offset);
-    --index;
-  }
-  return offset;
 }
 
 }

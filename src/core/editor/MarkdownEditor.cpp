@@ -36,33 +36,13 @@ constexpr std::size_t kMinUndoSteps = 8;
 // one Ctrl+Z but a considered edit minutes later is its own.
 constexpr std::chrono::milliseconds kCoalesceWindow {600};
 
-bool isUtf8Continuation(unsigned char c) {
-  return (c & 0xC0) == 0x80;
-}
-
-// Start offset of the UTF-8 codepoint immediately before `pos`.
-std::size_t previousCodepoint(const std::string& text, std::size_t pos) {
-  if(pos == 0) return 0;
-  std::size_t i = pos - 1;
-  while(i > 0 && isUtf8Continuation(static_cast<unsigned char>(text[i]))) --i;
-  return i;
-}
-
-// Start offset of the UTF-8 codepoint immediately after `pos`.
-std::size_t nextCodepoint(const std::string& text, std::size_t pos) {
-  if(pos >= text.size()) return text.size();
-  std::size_t i = pos + 1;
-  while(i < text.size() && isUtf8Continuation(static_cast<unsigned char>(text[i]))) ++i;
-  return i;
-}
-
 // Vertical motion keeps the column in code points, not bytes. On a line holding
 // multi-byte characters a byte column lands at a different character on the
 // line below -- or mid-character, which is worse.
 std::size_t codepointColumn(const std::string& text, std::size_t lineStart, std::size_t pos) {
   std::size_t column = 0;
   for(std::size_t i = lineStart; i < pos && i < text.size(); ++i) {
-    if(!isUtf8Continuation(static_cast<unsigned char>(text[i]))) ++column;
+    if(!util::isContinuationByte(text[i])) ++column;
   }
   return column;
 }
@@ -70,7 +50,7 @@ std::size_t codepointColumn(const std::string& text, std::size_t lineStart, std:
 std::size_t offsetForColumn(const std::string& text, std::size_t lineStart, std::size_t lineEnd, std::size_t column) {
   std::size_t i = lineStart;
   while(column > 0 && i < lineEnd) {
-    i = nextCodepoint(text, i);
+    i = util::nextBoundary(text, i);
     --column;
   }
   return i < lineEnd ? i : lineEnd;
@@ -200,7 +180,7 @@ void MarkdownEditor::erasePrevious() {
     return;
   }
   if(cursor_ == 0) return;
-  applyEdit(EditKind::Erase, previousCodepoint(text_, cursor_), cursor_, {});
+  applyEdit(EditKind::Erase, util::previousBoundary(text_, cursor_), cursor_, {});
 }
 
 void MarkdownEditor::eraseNext() {
@@ -209,7 +189,7 @@ void MarkdownEditor::eraseNext() {
     return;
   }
   if(cursor_ >= text_.size()) return;
-  applyEdit(EditKind::Erase, cursor_, nextCodepoint(text_, cursor_), {});
+  applyEdit(EditKind::Erase, cursor_, util::nextBoundary(text_, cursor_), {});
 }
 
 void MarkdownEditor::erasePreviousWord() {
@@ -271,10 +251,6 @@ bool MarkdownEditor::hasSelection() const {
   return selecting_ && selectionAnchor_ != cursor_;
 }
 
-std::size_t MarkdownEditor::selectionAnchor() const {
-  return selectionAnchor_;
-}
-
 std::size_t MarkdownEditor::selectionStart() const {
   return std::min(selectionAnchor_, cursor_);
 }
@@ -300,7 +276,7 @@ void MarkdownEditor::moveLeft(bool keepSelection) {
     clearSelection();
     return;
   }
-  moveTo(previousCodepoint(text_, cursor_), keepSelection);
+  moveTo(util::previousBoundary(text_, cursor_), keepSelection);
 }
 
 void MarkdownEditor::moveRight(bool keepSelection) {
@@ -309,7 +285,7 @@ void MarkdownEditor::moveRight(bool keepSelection) {
     clearSelection();
     return;
   }
-  moveTo(nextCodepoint(text_, cursor_), keepSelection);
+  moveTo(util::nextBoundary(text_, cursor_), keepSelection);
 }
 
 std::size_t MarkdownEditor::wordStartBefore(std::size_t offset) const {

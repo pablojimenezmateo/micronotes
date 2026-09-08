@@ -1,5 +1,7 @@
 #include "core/editor/SoftWrap.h"
 
+#include "core/util/Utf8.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -14,21 +16,14 @@ bool isWrapSpace(char c) {
   return c != '\n' && std::isspace(static_cast<unsigned char>(c));
 }
 
-bool isUtf8Continuation(unsigned char c) {
-  return (c & 0xC0) == 0x80;
-}
-
 // Ensure `index` sits on a UTF-8 codepoint boundary inside (start, end], never
 // splitting a multibyte character. Guarantees forward progress past `start`.
 std::size_t snapToCodepoint(std::string_view text, std::size_t index, std::size_t start, std::size_t end) {
   if(index >= end) return end;
-  std::size_t snapped = index;
-  while(snapped > start && isUtf8Continuation(static_cast<unsigned char>(text[snapped]))) --snapped;
+  const std::size_t snapped = util::boundaryAtOrBefore(text, index);
   if(snapped > start) return snapped;
   // A single codepoint wider than the row: advance past the whole codepoint.
-  snapped = start + 1;
-  while(snapped < end && isUtf8Continuation(static_cast<unsigned char>(text[snapped]))) ++snapped;
-  return snapped;
+  return std::min(util::nextBoundary(text, start), end);
 }
 
 int measuredWidth(std::string_view value, const MeasureText& measure) {
@@ -133,11 +128,7 @@ std::size_t offsetForRowX(const SoftWrapRow& row, float x, const MeasureText& me
   const std::size_t before = after == 0 ? 0 : after - 1;
   const float beforeW = static_cast<float>(measuredWidth(std::string_view(row.text.data(), before), measure));
   const float afterW = static_cast<float>(measuredWidth(std::string_view(row.text.data(), after), measure));
-  std::size_t best = std::abs(afterW - x) <= std::abs(beforeW - x) ? after : before;
-  while(best > 0 && best < row.text.size() &&
-        (static_cast<unsigned char>(row.text[best]) & 0xC0) == 0x80) {
-    --best;
-  }
+  const std::size_t best = util::boundaryAtOrBefore(row.text, std::abs(afterW - x) <= std::abs(beforeW - x) ? after : before);
   return std::min(row.start + best, row.end);
 }
 

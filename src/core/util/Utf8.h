@@ -21,8 +21,16 @@ constexpr bool isContinuationByte(char c) {
   return (static_cast<unsigned char>(c) & 0xc0) == 0x80;
 }
 
-// Byte offset of the code point boundary at or before `offset`.
+// Byte offset of the code point boundary strictly before `offset` -- one step
+// left. This is what Backspace and a left arrow move by.
 std::size_t previousBoundary(std::string_view text, std::size_t offset);
+
+// Byte offset of the code point boundary at or before `offset` -- a snap, not a
+// step, so an offset already on a boundary is returned unchanged. This is what
+// a truncation or a hit test does with a byte index it computed by arithmetic:
+// the index is where the cut should go, and the only question is whether it is
+// in the middle of a sequence.
+std::size_t boundaryAtOrBefore(std::string_view text, std::size_t offset);
 
 // Byte offset of the next code point boundary after `offset`.
 std::size_t nextBoundary(std::string_view text, std::size_t offset);
@@ -31,8 +39,5 @@ std::size_t nextBoundary(std::string_view text, std::size_t offset);
 // bytes would put the caret in the wrong place on any line containing
 // non-ASCII.
 std::size_t countCodePoints(std::string_view text);
-
-// Byte offset of the `index`-th code point, clamped to the end of `text`.
-std::size_t offsetForCodePoint(std::string_view text, std::size_t index);
 
 }

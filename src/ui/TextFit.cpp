@@ -1,5 +1,8 @@
 #include "ui/TextFit.h"
 
+#include "CoreAliases.h"
+#include "core/util/Utf8.h"
+
 #include <algorithm>
 #include <cstddef>
 
@@ -7,27 +10,15 @@ namespace micronotes::ui {
 
 namespace {
 
-// The code point boundary at or before `i`. A cut only ever lands on one of
-// these, which is what keeps a truncation from handing the renderer half of a
-// UTF-8 sequence. Continuation bytes are `10xxxxxx` and a sequence is at most
-// four bytes long, so this steps back three times at most -- which is why the
-// three searches below index *bytes* and snap, rather than first building a
-// vector of every boundary in the string. That vector was eight bytes per byte
-// of the line, allocated and filled to be probed a handful of times.
-std::size_t snapBack(std::string_view value, std::size_t i) {
-  if(i >= value.size()) return value.size();
-  while(i > 0 && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) --i;
-  return i;
-}
-
-// The boundary after `i`, which is where a cut goes when one code point has to
-// be kept whether it fits or not.
-std::size_t nextStop(std::string_view value, std::size_t i) {
-  if(i >= value.size()) return value.size();
-  ++i;
-  while(i < value.size() && (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) ++i;
-  return i;
-}
+// A cut only ever lands on a code point boundary, which is what keeps a
+// truncation from handing the renderer half of a UTF-8 sequence. Continuation
+// bytes are `10xxxxxx` and a sequence is at most four bytes long, so a snap
+// steps back three times at most -- which is why the three searches below index
+// *bytes* and snap, rather than first building a vector of every boundary in
+// the string. That vector was eight bytes per byte of the line, allocated and
+// filled to be probed a handful of times.
+using util::boundaryAtOrBefore;
+using util::nextBoundary;
 
 // The largest offset in [low, high) that `fits`, where `fits` is monotone --
 // true up to a crossover and false from there on -- `low` is taken to fit
@@ -103,7 +94,7 @@ std::string ellipsizeToFit(std::string value, int maxWidth,
   static constexpr std::string_view kEllipsis = "...";
   std::string candidate;
   const auto fitsAt = [&](std::size_t cut) {
-    candidate.assign(value, 0, snapBack(value, cut));
+    candidate.assign(value, 0, boundaryAtOrBefore(value, cut));
     candidate.append(kEllipsis);
     return measure(candidate) <= maxWidth;
   };
@@ -118,7 +109,7 @@ std::string ellipsizeToFit(std::string value, int maxWidth,
           : static_cast<std::size_t>(static_cast<double>(value.size()) * room / full);
   // A cut of zero means not even one character and the ellipsis fit, and the
   // answer is the ellipsis alone -- which is what an empty prefix produces.
-  const std::size_t cut = snapBack(value, largestFitting(0, value.size(), guess, fitsAt));
+  const std::size_t cut = boundaryAtOrBefore(value, largestFitting(0, value.size(), guess, fitsAt));
   return value.substr(0, cut) + std::string(kEllipsis);
 }
 
@@ -150,7 +141,7 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
   const std::size_t matchEnd = matchStart + matchLength;
   std::string probe;
   const auto survives = [&](std::size_t from) {
-    from = snapBack(line, from);
+    from = boundaryAtOrBefore(line, from);
     probe.clear();
     if(from > 0) probe += kEllipsis;
     probe.append(line.substr(from, matchEnd - from));
@@ -165,7 +156,7 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
     // The least head that can go is none of it; the most is all of it up to the
     // match, which keeps no run-up at all. Monotone in between: a later cut is
     // a shorter string, so once one fits every later one does.
-    const std::size_t atMatch = snapBack(line, matchStart);
+    const std::size_t atMatch = boundaryAtOrBefore(line, matchStart);
     if(!survives(atMatch)) {
       // The match is wider than the column by itself. Nothing can show all of
       // it, so show its start and let the trim clip the rest.
@@ -180,7 +171,7 @@ SnippetWindow snippetAroundMatch(std::string_view line, std::size_t matchStart, 
               ? 0
               : static_cast<std::size_t>(static_cast<double>(line.size()) * room / full);
       const std::size_t guess = matchEnd > affordable ? matchEnd - affordable : 0;
-      from = snapBack(line, smallestFitting(0, atMatch, guess, survives));
+      from = boundaryAtOrBefore(line, smallestFitting(0, atMatch, guess, survives));
     }
   }
 
@@ -206,14 +197,14 @@ std::size_t breakToFit(std::string_view value, int maxWidth,
   if(full <= maxWidth) return value.size();
 
   const auto fitsAt = [&](std::size_t cut) {
-    return measure(value.substr(0, snapBack(value, cut))) <= maxWidth;
+    return measure(value.substr(0, boundaryAtOrBefore(value, cut))) <= maxWidth;
   };
   // One code point is taken whether it fits or not, because it has nowhere else
   // to go, so that boundary is the floor of the search rather than a case in it.
-  const std::size_t first = nextStop(value, 0);
+  const std::size_t first = nextBoundary(value, 0);
   const std::size_t guess =
       static_cast<std::size_t>(static_cast<double>(value.size()) * maxWidth / full);
-  return snapBack(value, largestFitting(first, value.size(), guess, fitsAt));
+  return boundaryAtOrBefore(value, largestFitting(first, value.size(), guess, fitsAt));
 }
 
 }
