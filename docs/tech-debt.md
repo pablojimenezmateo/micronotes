@@ -102,6 +102,7 @@ block to raw source when you click into it. If it is not, the file deletes; if
 it is, it is meant to be a different engine, and the debt is only the geometry
 it duplicates -- which `ui::pageRectIn` and `ui::pageColumnIn` already hold.
 
+
 ## TD-17 — the index stores a second copy of every note body
 
 `src/library/LibraryIndex.cpp`, schema 4: `notes.body` and `notes_fts.body` both
@@ -129,51 +130,6 @@ record rather than an accident of the first schema.
 
 
 
-## TD-23 — `DocumentLayout::update` is one algorithm in one function
-
-`src/doc/Layout.cpp`. `update` is 353 lines and `layoutBlock` is 310.
-
-Down from 409 and 1,867 respectively: the three pieces that were self-contained
-have been taken (`geometryKey`, `mergeDirtyRanges`, `sweepLayoutCache`), the
-read-only half of the class is `LayoutQueries.cpp`, and the file is 1,541 lines
-rather than 1,867. What is left in `update` is the incremental algorithm itself.
-
-**What it costs today.** The five phases inside it -- decide whether the
-standing partition still describes the source, absorb the edit, align the
-placement to the new indexing, walk the dirty ranges, carry the outstanding
-shift down -- read and write locals the next one depends on. `head`, `tail`,
-`patchable`, `geometry`, `caretBlock`, `rawBlock`, `count`, `previousCount`,
-`shift`, `pendingTop`, `pendingRows`, `settled`. Extracting a phase means
-passing eight or nine of those, which is the shape that says a function is one
-algorithm rather than several.
-
-**Why it has not been paid.** Because the honest fix is a carrier -- an
-`UpdatePass` holding the per-call state, with the phases as its methods -- and
-that is a bigger change than it looks: the state is exactly what makes the
-phases *phases*, so the carrier has to get the ownership right or the split is
-worse than the function.
-
-This entry was once grouped with two others as "the carrier problem in four
-places, worth doing once with one shape". Those two were a column of bands with
-a running `y`, and they are paid: the cursor that produces them is
-`ui::RowCursor`. This is not the same problem and never was — an incremental
-algorithm whose locals *are* its phases — and one shape covering both would
-have fitted neither.
-
-The verification is no longer the problem, and that is worth recording because
-it was the reason given last time. The layout's counters are deterministic and
-they cover the reuse paths densely: `blocks_relaid`, `blocks_walked`,
-`blocks_shifted`, `blocks_key_reused`, `cache_hits`, `cache_sweeps`,
-`cache_evictions`, `placement_patches` against `placement_rebuilds`,
-`fold_resolutions_skipped`. A `tools/session-compare.sh` run across the three
-panes reports every one of them byte-identical or it does not, and that is
-exactly what caught nothing and confirmed everything in the three splits above.
-So the instrument is there; what is missing is the design decision about the
-carrier.
-
-`layoutBlock` is a separate entry waiting to be written: it is 310 lines of
-typesetting -- one arm per block kind -- and unlike `update` it has no shared
-mutable state, so it splits by kind whenever anybody wants to.
 
 ## TD-34 — nothing scrolls sideways
 

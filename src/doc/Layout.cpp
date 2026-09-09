@@ -1326,32 +1326,21 @@ void DocumentLayout::update(std::string_view source, const LayoutOptions& option
   UpdatePass(*this, source, options).run();
 }
 
-BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) const {
-  const perf::ScopeTimer blockTimer("layout.block");
-  const bool revealed = flags.revealed;
-  const bool raw = flags.raw;
-  const bool trailingLine = flags.trailingLine;
-  const SourceBlock& block = blocks_[index];
-  const std::string_view source = source_;
+DocumentLayout::BlockStyle DocumentLayout::styleForBlock(const SourceBlock& block,
+                                                        const Flags& flags,
+                                                        BlockLayout& out) const {
   const TypeMetrics& type = options_.type;
-
-  BlockLayout out;
-  out.kind = block.kind;
-  out.revealed = revealed;
-  out.raw = raw;
-
-  RunStyle base;
-  base.size = type.body;
-  float padTop = 0.0f;
-  float padBottom = options_.blockSpacing;
+  BlockStyle style;
+  style.base.size = type.body;
+  style.padBottom = options_.blockSpacing;
   out.indent = static_cast<float>(block.listDepth) * options_.indentStep;
   out.textLeft = out.indent;
 
   switch(block.kind) {
     case BlockKind::Heading:
-      base.size = type.heading[std::clamp<int>(block.level, 1, 6) - 1];
-      base.strong = true;
-      if(!flags.first) padTop = options_.headingSpaceAbove;
+      style.base.size = type.heading[std::clamp<int>(block.level, 1, 6) - 1];
+      style.base.strong = true;
+      if(!flags.first) style.padTop = options_.headingSpaceAbove;
       break;
     case BlockKind::Bullet:
     case BlockKind::Ordered:
@@ -1362,49 +1351,246 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
       // A ticked task is struck through. Only while its marker is hidden: with
       // the caret in the block the `- [x] ` is text the user is editing, and a
       // line through what you are typing is a line through your own cursor.
-      if(block.checked && !revealed && !raw) base.strike = true;
+      if(block.checked && !flags.revealed && !flags.raw) style.base.strike = true;
       break;
     case BlockKind::Quote:
     case BlockKind::Callout:
       out.textLeft = out.indent + options_.quoteGutter;
       // Padding belongs to the run, not to every line in it, or a three-line
       // callout would be drawn with three lots of air inside its own box.
-      padTop = flags.groupFirst ? 8.0f : 0.0f;
-      padBottom = flags.groupLast ? 8.0f : 0.0f;
+      style.padTop = flags.groupFirst ? 8.0f : 0.0f;
+      style.padBottom = flags.groupLast ? 8.0f : 0.0f;
       // The head of a callout run is its title. It gets no extra height: the
       // `> [!KIND]` line already occupies one, and reserving a band above it
       // as well would leave the box with a blank row over its own name.
-      if(block.kind == BlockKind::Callout && flags.groupFirst && block.hasInfo() && !revealed && !raw) {
+      if(block.kind == BlockKind::Callout && flags.groupFirst && block.hasInfo() &&
+         !flags.revealed && !flags.raw) {
         out.calloutTitle = true;
-        base.strong = true;
+        style.base.strong = true;
       }
       break;
     case BlockKind::Code:
-      base.mono = true;
-      base.size = type.mono;
-      padTop = 8.0f;
-      padBottom = 12.0f;
+      style.base.mono = true;
+      style.base.size = type.mono;
+      style.padTop = 8.0f;
+      style.padBottom = 12.0f;
       break;
     case BlockKind::Divider:
       // A rule needs air on both sides or it reads as an underline.
-      padTop = 10.0f;
-      padBottom = 14.0f;
+      style.padTop = 10.0f;
+      style.padBottom = 14.0f;
       break;
     case BlockKind::Blank:
-      padBottom = 0.0f;
+      style.padBottom = 0.0f;
       break;
     default:
       break;
   }
-  if(raw) {
-    base = RunStyle {};
-    base.mono = true;
-    base.size = type.mono;
+  if(flags.raw) {
+    // Raw source is source: none of the above applies to it but the air.
+    style.base = RunStyle {};
+    style.base.mono = true;
+    style.base.size = type.mono;
     out.textLeft = out.indent;
   }
+  return style;
+}
 
+std::vector<Token>& DocumentLayout::nextGroup(std::size_t* count) const {
+  if(*count == flowGroups_.size()) flowGroups_.emplace_back();
+  std::vector<Token>& group = flowGroups_[(*count)++];
+  group.clear();
+  return group;
+}
+
+std::size_t DocumentLayout::stageSourceLines(const SourceBlock& block, const Flags& flags,
+                                             const RunStyle& base) const {
+  const std::string_view source = source_;
+  const RunStyle markerStyle = base;
+  std::size_t groupCount = 0;
+
+  const bool fenced = block.kind == BlockKind::Code && !flags.raw;
+  const std::size_t from = fenced ? block.contentStart() : block.start;
+  const std::size_t to = fenced ? block.contentEnd() : block.end();
+  // Revealed, the opening fence is a line of its own; hidden, it rides in front
+  // of the first line of code. Deciding that before the loop rather than
+  // splicing it in afterwards is what lets the groups be filled in order.
+  if(fenced && flags.revealed) {
+    nextGroup(&groupCount)
+      .push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
+                           TextRole::Marker, true, false, -1));
+  }
+  bool firstLine = true;
+  sourceLinesInto(source, from, to, &sourceLines_);
+  for(const auto& [lineStart, lineEnd] : sourceLines_) {
+    std::vector<Token>& group = nextGroup(&groupCount);
+    if(fenced && !flags.revealed && firstLine) {
+      group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
+                                TextRole::Marker, true, true, -1));
+    }
+    firstLine = false;
+    if(lineEnd > lineStart) {
+      group.push_back(makeToken(source, lineStart, lineEnd, base, TextRole::Code, false, false, -1));
+    }
+    // The newline itself takes no space but must stay addressable.
+    const std::size_t tail = std::min(lineEnd + 1, to);
+    if(tail > lineEnd) {
+      group.push_back(makeToken(source, lineEnd, tail, base, TextRole::Code, false, true, -1));
+    }
+  }
+  if(fenced && !flags.revealed && firstLine) {
+    // `sourceLinesInto` always yields at least one line, so this is unreachable
+    // today; it is here so that the opening fence cannot be dropped if it ever
+    // yields none.
+    nextGroup(&groupCount)
+      .push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
+                           TextRole::Marker, true, true, -1));
+  }
+  if(fenced && block.end() > block.contentEnd()) {
+    Token closing = makeToken(source, block.contentEnd(), block.end(), markerStyle,
+                              TextRole::Marker, true, !flags.revealed, -1);
+    if(flags.revealed) nextGroup(&groupCount).push_back(std::move(closing));
+    else flowGroups_[groupCount - 1].push_back(std::move(closing));
+  }
+  return groupCount;
+}
+
+// The per-byte attribute table for one block's inline spans.
+//
+// Its own step because it is the one place the *inline* grammar reaches the
+// layout: everything the scanner found becomes an attribute on the bytes it
+// covers, and everything downstream reads only the table. Fills `out.links` and
+// `out.images` on the way, because a span that names a target is the only thing
+// that knows the target.
+void DocumentLayout::applyInlineSpans(const SourceBlock& block,
+                                      const std::vector<SourceSpan>& inlines,
+                                      std::vector<Attr>& attrs, BlockLayout& out) const {
+  for(const auto& inlineSpan : inlines) {
+    // A template rather than a `std::function`: this is called per byte of the
+    // span, and through a type-erased call it could not be inlined.
+    const auto apply = [&](std::size_t from, std::size_t to, auto&& fn) {
+      for(std::size_t i = std::max(from, block.contentStart());
+          i < std::min(to, block.contentEnd()); ++i) {
+        fn(attrs[i - block.contentStart()]);
+      }
+    };
+    apply(inlineSpan.openStart, inlineSpan.openEnd, [](Attr& a) { a.marker = true; });
+    apply(inlineSpan.closeStart, inlineSpan.closeEnd, [](Attr& a) { a.marker = true; });
+    switch(inlineSpan.kind) {
+      case SpanKind::Strong:
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strong = true; });
+        break;
+      case SpanKind::Emphasis:
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.italic = true; });
+        break;
+      case SpanKind::Strike:
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strike = true; });
+        break;
+      case SpanKind::Code:
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) {
+          a.mono = true;
+          a.role = TextRole::Code;
+        });
+        break;
+      case SpanKind::Image: {
+        // The alt text becomes the picture's caption -- it is also all a reader
+        // gets when the file cannot be drawn -- and the picture itself is
+        // reserved under the block, below.
+        out.images.push_back({inlineSpan.target, Rect {}});
+        out.links.push_back(inlineSpan.target);
+        const int link = static_cast<int>(out.links.size()) - 1;
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
+          a.link = link;
+          a.role = TextRole::ImageAlt;
+        });
+        break;
+      }
+      case SpanKind::Link:
+      case SpanKind::FootnoteRef:
+      case SpanKind::Autolink: {
+        out.links.push_back(inlineSpan.target);
+        const int link = static_cast<int>(out.links.size()) - 1;
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
+          a.link = link;
+          a.role = TextRole::Link;
+        });
+        break;
+      }
+      case SpanKind::WikiLink: {
+        out.links.push_back(inlineSpan.target);
+        const int link = static_cast<int>(out.links.size()) - 1;
+        const bool resolves =
+          !options_.wikiLinkResolves || options_.wikiLinkResolves(inlineSpan.target);
+        const auto role = resolves ? TextRole::WikiLink : TextRole::WikiLinkUnresolved;
+        apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link, role](Attr& a) {
+          a.link = link;
+          a.role = role;
+        });
+        break;
+      }
+      case SpanKind::Escape:
+        break;
+    }
+  }
+}
+
+std::size_t DocumentLayout::stageInlineContent(const SourceBlock& block, const Flags& flags,
+                                               const RunStyle& base, BlockLayout& out) const {
+  const std::string_view source = source_;
+  const RunStyle markerStyle = base;
+  std::size_t groupCount = 0;
+  std::vector<Token>& group = nextGroup(&groupCount);
+
+  if(block.contentStart() > block.start) {
+    group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
+                              TextRole::Marker, true, !flags.revealed, -1));
+  }
+  if(block.contentEnd() > block.contentStart()) {
+    const perf::ScopeTimer inlineTimer("layout.block.inline_attrs");
+    const std::size_t span = block.contentEnd() - block.contentStart();
+    const auto& inlines = scanInlinesInto(source.substr(block.contentStart(), span),
+                                          block.contentStart(), &inlineScratch_);
+    perf::addCounter(perf::CounterId::LayoutInlineSpans, inlines.size());
+    if(inlines.empty()) {
+      // Nothing marked up, so there is nothing an attribute table could say.
+      perf::addCounter(perf::CounterId::LayoutPlainBlocks);
+      appendPlainTokens(source, block.contentStart(), block.contentEnd(), base, group);
+    } else {
+      perf::addCounter(perf::CounterId::LayoutAttrBytes, span);
+      // Reassigned rather than reallocated, same as the scan's own buffers: one
+      // allocation for a document instead of one per marked-up block.
+      std::vector<Attr>& attrs = attrs_;
+      attrs.assign(span, Attr {});
+      applyInlineSpans(block, inlines, attrs, out);
+      {
+        const perf::ScopeTimer tokenTimer("layout.block.content_tokens");
+        appendContentTokens(source, block.contentStart(), block.contentEnd(), attrs, base,
+                            options_.type.mono, flags.revealed, group);
+      }
+    }
+  }
+  if(block.end() > block.contentEnd()) {
+    // The trailing newline is always zero width: it must never push the line.
+    group.push_back(makeToken(source, block.contentEnd(), block.end(), markerStyle,
+                              TextRole::Marker, true, true, -1));
+  }
+  return groupCount;
+}
+
+BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) const {
+  const perf::ScopeTimer blockTimer("layout.block");
+  const SourceBlock& block = blocks_[index];
+
+  BlockLayout out;
+  out.kind = block.kind;
+  out.revealed = flags.revealed;
+  out.raw = flags.raw;
+
+  const BlockStyle style = styleForBlock(block, flags, out);
+  const RunStyle& base = style.base;
   const float available = std::max(40.0f, options_.width - out.textLeft);
-  const float lineHeight = metrics_.lineHeight ? metrics_.lineHeight(base) : base.size * type.lineHeightRatio;
+  const float lineHeight = metrics_.lineHeight ? metrics_.lineHeight(base)
+                                               : base.size * options_.type.lineHeightRatio;
   const auto appendTrailingLine = [&](float y) {
     VisualLine line;
     line.y = y;
@@ -1425,17 +1611,18 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
   // the end of the buffer, and losing it would strand the caret.
   if(flags.hidden) {
     out.hidden = true;
-    out.height = trailingLine ? appendTrailingLine(0.0f) : 0.0f;
+    out.height = flags.trailingLine ? appendTrailingLine(0.0f) : 0.0f;
     return out;
   }
 
   // A block the scanner does not model reserves the height md4c will need, and
   // exposes one caret position at its start until the user drops it to raw.
-  if(block.kind == BlockKind::Complex && !raw) {
+  if(block.kind == BlockKind::Complex && !flags.raw) {
     out.complex = true;
-    const float height = metrics_.measureComplex ? metrics_.measureComplex(block, options_.width) : lineHeight;
+    const float height =
+      metrics_.measureComplex ? metrics_.measureComplex(block, options_.width) : lineHeight;
     VisualLine line;
-    line.y = padTop;
+    line.y = style.padTop;
     line.height = std::max(lineHeight, height);
     line.runBegin = static_cast<std::uint32_t>(out.runs.size());
     TextRun& run = out.runs.emplace_back();
@@ -1446,195 +1633,59 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     run.role = TextRole::Body;
     line.runEnd = static_cast<std::uint32_t>(out.runs.size());
     out.lines.push_back(line);
-    float bottom = padTop + std::max(lineHeight, height);
-    if(trailingLine) bottom = appendTrailingLine(bottom);
-    out.height = bottom + padBottom;
+    float bottom = style.padTop + std::max(lineHeight, height);
+    if(flags.trailingLine) bottom = appendTrailingLine(bottom);
+    out.height = bottom + style.padBottom;
     return out;
   }
 
-  // Staged into the layout's own buffer, and the groups within it keep the token
-  // storage they had last block. `groupCount` is the live prefix -- the vector
-  // itself is never shrunk, so its tail is last block's tokens, which is exactly
-  // the capacity this one wants to reuse.
-  std::vector<LineGroup>& groups = flowGroups_;
-  std::size_t groupCount = 0;
-  const auto addGroup = [&]() -> LineGroup& {
-    if(groupCount == groups.size()) groups.emplace_back();
-    LineGroup& group = groups[groupCount++];
-    group.clear();
-    return group;
-  };
-  const RunStyle markerStyle = base;
+  // The block's content, staged into `flowGroups_` as one group per line's
+  // worth of source. Two shapes and no third: a fenced code block or a block
+  // dropped to raw is the file's own lines, and everything else is one group
+  // with the inline grammar applied to it.
+  const bool asSourceLines = flags.raw || block.kind == BlockKind::Code;
+  const std::size_t groupCount = asSourceLines ? stageSourceLines(block, flags, base)
+                                               : stageInlineContent(block, flags, base, out);
 
-  if(raw || block.kind == BlockKind::Code) {
-    const bool fenced = block.kind == BlockKind::Code && !raw;
-    const std::size_t from = fenced ? block.contentStart() : block.start;
-    const std::size_t to = fenced ? block.contentEnd() : block.end();
-    // Revealed, the opening fence is a line of its own; hidden, it rides in
-    // front of the first line of code. Deciding that before the loop rather than
-    // splicing it in afterwards is what lets the groups be filled in order.
-    if(fenced && revealed) {
-      addGroup().push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, false, -1));
-    }
-    bool firstLine = true;
-    sourceLinesInto(source, from, to, &sourceLines_);
-    for(const auto& [lineStart, lineEnd] : sourceLines_) {
-      LineGroup& group = addGroup();
-      if(fenced && !revealed && firstLine) {
-        group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, true, -1));
-      }
-      firstLine = false;
-      if(lineEnd > lineStart) {
-        group.push_back(makeToken(source, lineStart, lineEnd, base, TextRole::Code, false, false, -1));
-      }
-      // The newline itself takes no space but must stay addressable.
-      const std::size_t tail = std::min(lineEnd + 1, to);
-      if(tail > lineEnd) group.push_back(makeToken(source, lineEnd, tail, base, TextRole::Code, false, true, -1));
-    }
-    if(fenced && !revealed && firstLine) {
-      // `sourceLinesInto` always yields at least one line, so this is unreachable
-      // today; it is here so that the opening fence cannot be dropped if it ever
-      // yields none.
-      addGroup().push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, true, -1));
-    }
-    if(fenced && block.end() > block.contentEnd()) {
-      Token closing = makeToken(source, block.contentEnd(), block.end(), markerStyle, TextRole::Marker, true, !revealed, -1);
-      if(revealed) addGroup().push_back(std::move(closing));
-      else groups[groupCount - 1].push_back(std::move(closing));
-    }
-  } else {
-    LineGroup& group = addGroup();
-    if(block.contentStart() > block.start) {
-      group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle, TextRole::Marker, true, !revealed, -1));
-    }
-    if(block.contentEnd() > block.contentStart()) {
-      const perf::ScopeTimer inlineTimer("layout.block.inline_attrs");
-      const std::size_t span = block.contentEnd() - block.contentStart();
-      const auto& inlines =
-        scanInlinesInto(source.substr(block.contentStart(), span), block.contentStart(),
-                        &inlineScratch_);
-      perf::addCounter(perf::CounterId::LayoutInlineSpans, inlines.size());
-      if(inlines.empty()) {
-        // Nothing marked up, so there is nothing an attribute table could say.
-        perf::addCounter(perf::CounterId::LayoutPlainBlocks);
-        appendPlainTokens(source, block.contentStart(), block.contentEnd(), base, group);
-      } else {
-        perf::addCounter(perf::CounterId::LayoutAttrBytes, span);
-        // Reassigned rather than reallocated, same as the scan's own buffers:
-        // one allocation for a document instead of one per marked-up block.
-        std::vector<Attr>& attrs = attrs_;
-        attrs.assign(span, Attr {});
-        for(const auto& inlineSpan : inlines) {
-          // A template rather than a `std::function`: this is called per byte of
-          // the span, and through a type-erased call it could not be inlined.
-          const auto apply = [&](std::size_t from, std::size_t to, auto&& fn) {
-            for(std::size_t i = std::max(from, block.contentStart()); i < std::min(to, block.contentEnd()); ++i) {
-              fn(attrs[i - block.contentStart()]);
-            }
-          };
-          apply(inlineSpan.openStart, inlineSpan.openEnd, [](Attr& a) { a.marker = true; });
-          apply(inlineSpan.closeStart, inlineSpan.closeEnd, [](Attr& a) { a.marker = true; });
-          switch(inlineSpan.kind) {
-            case SpanKind::Strong:
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strong = true; });
-              break;
-            case SpanKind::Emphasis:
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.italic = true; });
-              break;
-            case SpanKind::Strike:
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) { a.strike = true; });
-              break;
-            case SpanKind::Code:
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [](Attr& a) {
-                a.mono = true;
-                a.role = TextRole::Code;
-              });
-              break;
-            case SpanKind::Image: {
-              // The alt text becomes the picture's caption -- it is also all a
-              // reader gets when the file cannot be drawn -- and the picture
-              // itself is reserved under the block, below.
-              out.images.push_back({inlineSpan.target, Rect {}});
-              out.links.push_back(inlineSpan.target);
-              const int link = static_cast<int>(out.links.size()) - 1;
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
-                a.link = link;
-                a.role = TextRole::ImageAlt;
-              });
-              break;
-            }
-            case SpanKind::Link:
-            case SpanKind::FootnoteRef:
-            case SpanKind::Autolink: {
-              out.links.push_back(inlineSpan.target);
-              const int link = static_cast<int>(out.links.size()) - 1;
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link](Attr& a) {
-                a.link = link;
-                a.role = TextRole::Link;
-              });
-              break;
-            }
-            case SpanKind::WikiLink: {
-              out.links.push_back(inlineSpan.target);
-              const int link = static_cast<int>(out.links.size()) - 1;
-              const bool resolves = !options_.wikiLinkResolves || options_.wikiLinkResolves(inlineSpan.target);
-              const auto role = resolves ? TextRole::WikiLink : TextRole::WikiLinkUnresolved;
-              apply(inlineSpan.contentStart, inlineSpan.contentEnd, [link, role](Attr& a) {
-                a.link = link;
-                a.role = role;
-              });
-              break;
-            }
-            case SpanKind::Escape:
-              break;
-          }
-        }
-        {
-          const perf::ScopeTimer tokenTimer("layout.block.content_tokens");
-          appendContentTokens(source, block.contentStart(), block.contentEnd(), attrs, base, type.mono, revealed, group);
-        }
-      }
-    }
-    if(block.end() > block.contentEnd()) {
-      // The trailing newline is always zero width: it must never push the line.
-      group.push_back(makeToken(source, block.contentEnd(), block.end(), markerStyle, TextRole::Marker, true, true, -1));
-    }
-  }
-
-  // Roughly how many lines this is about to wrap into, so the line vector grows
-  // once rather than doubling its way there. Half the type size is a crude mean
-  // glyph advance, and being wrong only costs the doubling this avoids.
-  {
-    const std::size_t contentBytes =
-      block.contentEnd() > block.contentStart() ? block.contentEnd() - block.contentStart() : 0;
-    const float inkWidth = static_cast<float>(contentBytes) * base.size * 0.5f;
-    out.lines.reserve(static_cast<std::size_t>(inkWidth / std::max(1.0f, available)) + 1);
-    // And exactly how many runs, which is not an estimate: the flow emits one
-    // run per staged token, plus one more for a trailing line. A word split
-    // across a wrap emits more, which is the one case this under-counts and the
-    // one case the doubling is right for.
-    std::size_t tokens = trailingLine ? 1 : 0;
-    for(std::size_t g = 0; g < groupCount; ++g) tokens += groups[g].size();
-    perf::addCounter(perf::CounterId::LayoutTokensStaged, tokens);
-    out.runs.reserve(tokens);
-  }
+  reserveFlowOutput(block, flags, base, available, groupCount, out);
 
   float bottom = 0.0f;
   {
     const perf::ScopeTimer flowTimer("layout.block.flow");
     Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
-              !raw && block.kind != BlockKind::Code, padTop, out, flowPending_, flowCluster_);
-    flow.run(groups, groupCount);
+              !flags.raw && block.kind != BlockKind::Code, style.padTop, out, flowPending_,
+              flowCluster_);
+    flow.run(flowGroups_, groupCount);
     bottom = flow.bottom();
   }
-  if(trailingLine) bottom = appendTrailingLine(bottom);
+  if(flags.trailingLine) bottom = appendTrailingLine(bottom);
   // The pictures the block named, under its text and in source order. Reserved
   // here rather than drawn over the following blocks, so the note scrolls past
   // an image the same way it scrolls past a paragraph and every position query
   // below this block is already right.
   if(!out.images.empty()) bottom = placeImages(out, bottom);
-  out.height = bottom + padBottom;
+  out.height = bottom + style.padBottom;
   return out;
+}
+
+// Roughly how many lines this is about to wrap into, so the line vector grows
+// once rather than doubling its way there. Half the type size is a crude mean
+// glyph advance, and being wrong only costs the doubling this avoids.
+void DocumentLayout::reserveFlowOutput(const SourceBlock& block, const Flags& flags,
+                                       const RunStyle& base, float available,
+                                       std::size_t groupCount, BlockLayout& out) const {
+  const std::size_t contentBytes =
+    block.contentEnd() > block.contentStart() ? block.contentEnd() - block.contentStart() : 0;
+  const float inkWidth = static_cast<float>(contentBytes) * base.size * 0.5f;
+  out.lines.reserve(static_cast<std::size_t>(inkWidth / std::max(1.0f, available)) + 1);
+  // And exactly how many runs, which is not an estimate: the flow emits one run
+  // per staged token, plus one more for a trailing line. A word split across a
+  // wrap emits more, which is the one case this under-counts and the one case
+  // the doubling is right for.
+  std::size_t tokens = flags.trailingLine ? 1 : 0;
+  for(std::size_t g = 0; g < groupCount; ++g) tokens += flowGroups_[g].size();
+  perf::addCounter(perf::CounterId::LayoutTokensStaged, tokens);
+  out.runs.reserve(tokens);
 }
 
 // The images of a block that has some, laid out down the column from `top`.

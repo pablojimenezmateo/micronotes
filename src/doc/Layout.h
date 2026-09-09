@@ -541,6 +541,40 @@ private:
   const BlockLayout* resolveEntry(std::size_t index, const Flags& flags, std::uint64_t geometry,
                                   std::uint64_t* key, Tally* tally);
 
+  // The type, the air above and below, and where the text starts. One switch
+  // over the block's kind, and the only part of laying a block out that is
+  // purely about what kind of block it is.
+  struct BlockStyle {
+    RunStyle base;
+    float padTop = 0.0f;
+    float padBottom = 0.0f;
+  };
+  BlockStyle styleForBlock(const SourceBlock& block, const Flags& flags, BlockLayout& out) const;
+
+  // The next staging group in `flowGroups_`, cleared and ready. `count` is the
+  // live prefix: the vector itself is never shrunk, so its tail is last block's
+  // tokens, which is exactly the capacity this block wants to reuse.
+  std::vector<Token>& nextGroup(std::size_t* count) const;
+
+  // A block's content, staged as one token group per line's worth of source.
+  // Two shapes and no third, which is why they are two functions: a fenced code
+  // block or a block dropped to raw is the *file's* own lines, and everything
+  // else is one group with the inline grammar applied to it. Both return how
+  // many groups came out live.
+  std::size_t stageSourceLines(const SourceBlock& block, const Flags& flags,
+                               const RunStyle& base) const;
+  std::size_t stageInlineContent(const SourceBlock& block, const Flags& flags,
+                                 const RunStyle& base, BlockLayout& out) const;
+  // Everything the inline scanner found, as a per-byte attribute table. The one
+  // place the inline grammar reaches the layout: downstream reads only the
+  // table. Fills `out.links` and `out.images`, because a span that names a
+  // target is the only thing that knows the target.
+  void applyInlineSpans(const SourceBlock& block, const std::vector<SourceSpan>& inlines,
+                        std::vector<Attr>& attrs, BlockLayout& out) const;
+  // What the flow is about to produce, so neither vector doubles its way there.
+  void reserveFlowOutput(const SourceBlock& block, const Flags& flags, const RunStyle& base,
+                         float available, std::size_t groupCount, BlockLayout& out) const;
+
   BlockLayout layoutBlock(std::size_t index, const Flags& flags) const;
   const BlockLayout* layoutForOffset(std::size_t offset, std::size_t* blockIndex) const;
   std::size_t flatLineForOffset(std::size_t offset, float* caretX) const;
