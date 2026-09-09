@@ -183,31 +183,6 @@ worth doing and is an afternoon; it was not done in the same pass that found the
 bugs, because a lane written to catch the bug you already know about is the one
 that catches nothing else.
 
-## TD-21 — a capture waits half a second no matter what it is capturing
-
-`src/app/Screenshot.cpp`.
-
-`captureWindowToFile` draws sixty frames with an `SDL_Delay(8)` between them
-before reading pixels back, on a comment about giving the compositor time to map
-and size the window. That is a fixed ~500 ms floor on every `--screenshot` run.
-
-**What it costs today.** `tools/session-compare.sh` is built on interleaved
-captures — the instrument that the harness's own lanes cannot replace, per
-`docs/performance.md` — and every one of them pays the floor whether the window
-mapped in one frame or thirty. It also makes the capture path the slowest thing
-in the test tooling by an order of magnitude, which is the sort of cost that
-quietly discourages taking the before-and-after pixels the guide asks for.
-
-**Why it has not been paid.** It needs a real readiness signal rather than a
-sleep: `SDL_EVENT_WINDOW_EXPOSED` plus a size that matches what was asked for
-would let the loop stop as soon as the window is actually up, falling back to
-the sixty-frame bound only when neither arrives. The window is now mapped
-explicitly by `app::revealWindow` rather than at creation, so the moment to
-watch for is finally a moment the code chooses — before that the map raced
-everything and the sleep was standing in for a signal nobody had. Not done here
-because the capture path is used by tooling rather than by the app, and this
-change was about the app's first frame.
-
 ## TD-22 — the menu bar has no keyboard mnemonics
 
 `src/app/MenuBar.cpp`, `src/ui/Menus.h`.
@@ -258,11 +233,12 @@ that is a bigger change than it looks: the state is exactly what makes the
 phases *phases*, so the carrier has to get the ownership right or the split is
 worse than the function.
 
-This entry used to be grouped with `TD-32` and `TD-35` as "the carrier problem
-in four places, worth doing once with one shape". It is not the same problem
-and is no longer waiting on them: those two are a column of bands with a
-running `y`, and this is an incremental algorithm whose locals are its phases.
-One shape covering both would fit neither.
+This entry was once grouped with two others as "the carrier problem in four
+places, worth doing once with one shape". Those two were a column of bands with
+a running `y`, and they are paid: the cursor that produces them is
+`ui::RowCursor`. This is not the same problem and never was — an incremental
+algorithm whose locals *are* its phases — and one shape covering both would
+have fitted neither.
 
 The verification is no longer the problem, and that is worth recording because
 it was the reason given last time. The layout's counters are deterministic and
@@ -278,31 +254,3 @@ carrier.
 `layoutBlock` is a separate entry waiting to be written: it is 310 lines of
 typesetting -- one arm per block kind -- and unlike `update` it has no shared
 mutable state, so it splits by kind whenever anybody wants to.
-
-## TD-24 — two perf counters are not deterministic
-
-`layout.caret_queries` and `layout.caret_probes`.
-
-AGENTS.md says of the counters: "**Deterministic**: the same workload gives
-byte-identical values every run and in every build type, which is what makes
-them proof rather than evidence." That is true of every counter but these two.
-
-**What it costs today.** They appear in the diff of about half of all
-`session-compare.sh` runs, in both directions -- 114 against 99 one run, 96
-against 114 the next -- on changes that cannot possibly have touched them. Which
-is worse than useless: it trains whoever is reading the diff to skim past
-counter changes, on the instrument whose whole value is that a changed number
-means something happened.
-
-The cause is that `PageView` asks `caretRect` only when the caret is *painted*,
-and whether it is painted is `ui::CaretBlink`'s answer to `SDL_GetTicks()`. A
-capture draws sixty frames as fast as it can, so how many of them land in the
-caret's on-phase is a function of how fast the machine was that second.
-
-**Why it has not been paid.** The fix is to make the capture's clock
-deterministic rather than to move the counter, because the counter is measuring
-the right thing -- and a blink that does not advance during a capture is also
-what would make a *screenshot* of a caret reproducible, which is the same
-problem one step further on. That is a seam through `CaretBlink` and the
-capture path, and it is worth doing with `TD-21`'s readiness signal, which is
-in the same file for the same reason.

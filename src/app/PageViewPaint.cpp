@@ -27,9 +27,8 @@
 // nothing below it changes the layout.
 //
 // It is also what the 1,000-line ceiling `architecture_no_shell_source_is_a_
-// catch_all` enforces was for. `PageView.cpp` reached 1,003 lines, the ceiling
-// failed the build, and this is the split `docs/tech-debt.md` TD-30 had already
-// written down as the answer.
+// catch_all` enforces was for: `PageView.cpp` reached 1,003 lines and the
+// ceiling failed the build.
 namespace micronotes::app {
 namespace {
 

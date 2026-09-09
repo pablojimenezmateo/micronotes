@@ -2767,3 +2767,50 @@ The pattern is worth naming, because it is the same one each time:
 The harness now has a search lane. It still has no lane for **a keystroke
 through the shell** -- see `TD-19` -- which is what both of the first two
 findings would have needed, and is the largest hole left in it.
+
+## The instrument itself: a capture cost more than the frames it measured
+
+Not an app finding. `session-compare.sh` is built out of `--screenshot` runs,
+and `docs/performance.md` calls the pixel `cmp` "the cheapest proof there is"
+that a paint change is unobservable — so what a capture costs decides how often
+anybody takes one.
+
+A capture drew sixty frames with an `SDL_Delay(8)` between them, and took
+**1.10 s**. `TD-21` read that as a fixed ~500 ms floor of sleeping and proposed
+a readiness signal — `SDL_EVENT_WINDOW_EXPOSED` plus a settled size — to end the
+wait as soon as the window was really up.
+
+Two things were wrong with that, and both only showed up when measured.
+
+**The sixty frames are the sample, not the wait.** Every table in this file is
+"Release, headless, 60 frames" with the per-frame figures divided by it. A
+capture that stopped as soon as the window was up drew three frames — quick, and
+measuring nothing. An idle-frame regression is exactly what this instrument
+exists to catch; the sidebar rebuilding per frame and the fold predicate asked
+per block per frame are both in the list above, and over three frames neither
+shows.
+
+**Removing the sleep buys exactly zero.** Vsync is on, so `SDL_RenderPresent`
+blocks until the next refresh either way: a frame that slept 8 ms first simply
+waits 8 ms less in the present. 1.10 s with the sleep, 1.09 s without it, with
+`frame.present_micros` moving from 503,390 to 982,278 to absorb the difference
+exactly.
+
+| | wall clock | `frame.present_micros` | frames sampled |
+| --- | ---: | ---: | ---: |
+| sixty frames, `SDL_Delay(8)` | 1.10 s | 503,390 | 60 |
+| sixty frames, no delay | 1.09 s | 982,278 | 60 |
+| stop when the window is up | 0.16 s | 3 frames' worth | **3** |
+| **sixty frames, vsync off** | **0.36 s** | **241,688** | 60 |
+
+The fix is the one neither the entry nor the sleep pointed at: **a capture has
+no viewer, so it should not be paced to a display.** The app keeps vsync on,
+because a present that beats the display is a frame thrown away; the capture
+turns it off for the frames nobody will see. 1.10 s to 0.36 s, the sixty-frame
+sample intact, and the pixels byte-identical in all three pane modes.
+
+The reading worth keeping is the second one. The sleep was the obvious
+suspect — it is a literal `SDL_Delay` in the hot loop, and it is what the debt
+entry named — and it cost nothing at all, because something further down was
+already absorbing it. **A wait inside a paced loop is free until you unpace the
+loop.**

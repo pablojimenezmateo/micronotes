@@ -209,6 +209,27 @@ when the counters went in it turned out to be 70% of every frame.
   one of those exists because the same thing had been written two or three
   times, and in most cases the copies had drifted -- three different `trim`s,
   two spellings of FNV, four `nextBoundary`s, three `uniquePath`s.
+- **A list of rows is two halves of one type, and both already exist.**
+  `ui::RowCursor` (`ui/RowCursor.h`) *places* them: it advances by exactly the
+  height it just used, so the list tiles, and it answers "does this one clear
+  the foot" and "what is the mean row" for a pane that stops. `ui::rowBand`
+  (`ui/RowBand.h`) *queries* them, and is only correct because the cursor tiled
+  them -- which is why they are a pair. How far a list is scrolled is
+  `ui::ScrollList` in pixels or `ui::RowStrip` in whole rows (`ui/ScrollList.h`);
+  a `RowStrip` carries the row count the paint recorded alongside the offset,
+  because for a variable-height list nothing else can know it. Four surfaces had
+  written the placement out for themselves, and the copies had grown separate
+  fields for the same two concepts.
+- A popup menu's row is `ui::MenuRow`, painted by `ui::drawMenuRow`, and a
+  popup's rows are stacked with `ui::menuPopupRows`. The menu bar's popups, the
+  context menus and the palette are one object reached through two item tables;
+  when they were two paints and two stackings, the tick sat a pixel apart and
+  the accelerator a whole size apart between them.
+- What a `PageView` needs before it lays out is `app::PageFrame`, handed over in
+  one `beginFrame`. Do not add a per-frame setter: the reason that struct exists
+  is that a page which is not told about a new revision does not fail, it keeps
+  a stale layout, and the two surfaces assembling the inputs by hand is how the
+  reading pane came to render `[[wikilinks]]` as literal brackets.
 - A press or a keystroke is routed by one chain whose *order is the design*, and
   each band or surface owns what it means: `app/PointerRouter.h` into
   `app/PagePress.h` / `Sidebar::pressSidebar` / the panels, and
