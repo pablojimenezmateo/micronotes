@@ -1,6 +1,7 @@
 #include "core/editor/MarkdownEditor.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/StringUtil.h"
 #include "core/util/Utf8.h"
 
 #include <algorithm>
@@ -56,10 +57,9 @@ std::size_t offsetForColumn(const std::string& text, std::size_t lineStart, std:
   return i < lineEnd ? i : lineEnd;
 }
 
-bool isSpaceByte(char c) {
-  const auto value = static_cast<unsigned char>(c);
-  return value == ' ' || value == '\t' || value == '\n' || value == '\r';
-}
+// The one whitespace predicate, from `core/util/StringUtil.h`; see the note
+// there. The copy this replaces named four bytes rather than six.
+using util::isAsciiSpace;
 
 // Everything non-ASCII counts as a word byte: it keeps accented and CJK text in
 // one word instead of breaking at every multi-byte codepoint.
@@ -78,8 +78,8 @@ bool isWordByte(char c) {
 std::size_t MarkdownEditor::wordStartsIn(std::size_t from, std::size_t to) const {
   std::size_t words = 0;
   for(std::size_t i = from; i < to; ++i) {
-    if(isSpaceByte(text_[i])) continue;
-    if(i == 0 || isSpaceByte(text_[i - 1])) ++words;
+    if(isAsciiSpace(text_[i])) continue;
+    if(i == 0 || isAsciiSpace(text_[i - 1])) ++words;
   }
   return words;
 }
@@ -290,24 +290,24 @@ void MarkdownEditor::moveRight(bool keepSelection) {
 
 std::size_t MarkdownEditor::wordStartBefore(std::size_t offset) const {
   std::size_t pos = std::min(offset, text_.size());
-  while(pos > 0 && isSpaceByte(text_[pos - 1])) --pos;
+  while(pos > 0 && isAsciiSpace(text_[pos - 1])) --pos;
   if(pos == 0) return 0;
   if(isWordByte(text_[pos - 1])) {
     while(pos > 0 && isWordByte(text_[pos - 1])) --pos;
   } else {
-    while(pos > 0 && !isWordByte(text_[pos - 1]) && !isSpaceByte(text_[pos - 1])) --pos;
+    while(pos > 0 && !isWordByte(text_[pos - 1]) && !isAsciiSpace(text_[pos - 1])) --pos;
   }
   return pos;
 }
 
 std::size_t MarkdownEditor::wordEndAfter(std::size_t offset) const {
   std::size_t pos = std::min(offset, text_.size());
-  while(pos < text_.size() && isSpaceByte(text_[pos])) ++pos;
+  while(pos < text_.size() && isAsciiSpace(text_[pos])) ++pos;
   if(pos >= text_.size()) return text_.size();
   if(isWordByte(text_[pos])) {
     while(pos < text_.size() && isWordByte(text_[pos])) ++pos;
   } else {
-    while(pos < text_.size() && !isWordByte(text_[pos]) && !isSpaceByte(text_[pos])) ++pos;
+    while(pos < text_.size() && !isWordByte(text_[pos]) && !isAsciiSpace(text_[pos])) ++pos;
   }
   return pos;
 }

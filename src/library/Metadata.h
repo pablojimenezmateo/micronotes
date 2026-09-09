@@ -47,6 +47,27 @@ struct NoteMetadata {
   std::vector<std::string> extra;
 };
 
+// The shape of a front-matter block, as two rules rather than as prose.
+//
+// Public because they are not the parser's private business: the header is
+// carried through verbatim in `NoteMetadata::extra` -- one string per source
+// line -- so anything that wants to read those lines back has to apply the
+// same two rules the parser split them on. `ui::notePropertiesOf` does, and
+// carried its own copy of both until this pair was named.
+
+// Whether a front-matter line continues the key above it rather than opening
+// one of its own: anything indented, and the `- item` lines of a block
+// sequence. Splitting on that boundary is what lets an unrecognized key be
+// carried through with its whole value, however many lines it spans.
+bool continuesFrontMatterValue(std::string_view line);
+
+// The text of a `- item` line, trimmed, or empty when the line is not one.
+//
+// Trimmed before the dash is looked for, not after: the dash of a block item is
+// indented under its key, so testing the raw line for "- " finds it only on the
+// one item that happens to sit at column zero.
+std::string frontMatterSequenceItem(std::string_view line);
+
 std::string generateNoteId();
 
 // Identity for a note file whose front matter carries no `id`. Derived from the

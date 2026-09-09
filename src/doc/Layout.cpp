@@ -6,6 +6,7 @@
 #include "doc/Fold.h"
 
 #include "core/util/Hash.h"
+#include "core/util/StringUtil.h"
 #include "core/util/Utf8.h"
 
 #include <algorithm>
@@ -25,9 +26,10 @@ using microcore::util::hashBytes;
 using microcore::util::hashValue;
 using microcore::util::kFnvOffset;
 
-bool isSpaceByte(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
+// The one whitespace predicate, from `core/util/StringUtil.h`. This file and
+// the editor's word walk each carried a copy naming four bytes; the shared one
+// names six, and a form feed is whitespace in both of the places they are used.
+using microcore::util::isAsciiSpace;
 
 // Newlines and tabs become one space each, so a run's text stays byte-aligned
 // with the source it came from and prefix measurement maps offsets to pixels.
@@ -283,9 +285,9 @@ void appendPlainTokens(std::string_view source, std::size_t from, std::size_t to
   out.reserve(out.size() + tokenEstimate(to - from));
   std::size_t i = from;
   while(i < to) {
-    const bool space = isSpaceByte(source[i]);
+    const bool space = isAsciiSpace(source[i]);
     std::size_t j = i + 1;
-    while(j < to && isSpaceByte(source[j]) == space) ++j;
+    while(j < to && isAsciiSpace(source[j]) == space) ++j;
     const bool foldsLineEnding = space && j - i > 1 &&
                                  source.substr(i, j - i).find('\n') != std::string_view::npos;
     if(foldsLineEnding) {
@@ -307,9 +309,9 @@ void appendContentTokens(std::string_view source, std::size_t from, std::size_t 
   std::size_t i = from;
   while(i < to) {
     const Attr& attr = attrs[i - from];
-    const bool space = isSpaceByte(source[i]);
+    const bool space = isAsciiSpace(source[i]);
     std::size_t j = i + 1;
-    while(j < to && attrs[j - from] == attr && isSpaceByte(source[j]) == space) ++j;
+    while(j < to && attrs[j - from] == attr && isAsciiSpace(source[j]) == space) ++j;
     const bool hidden = attr.marker && !revealed;
     const RunStyle style = styleFrom(base, attr, monoSize);
     const TextRole role = attr.marker ? TextRole::Marker : attr.role;

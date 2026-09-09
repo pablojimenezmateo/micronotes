@@ -37,6 +37,20 @@ std::string fallbackNoteId(std::string_view relativePath) {
   return out.str();
 }
 
+// The two front-matter shape rules. Declared in the header rather than kept in
+// the anonymous namespace below, because whatever reads `NoteMetadata::extra`
+// back has to split those lines on the same boundary the parser split them on
+// -- see the note there.
+bool continuesFrontMatterValue(std::string_view line) {
+  return !line.empty() && (line.front() == ' ' || line.front() == '\t' || line.starts_with("- "));
+}
+
+std::string frontMatterSequenceItem(std::string_view line) {
+  const auto text = util::trim(line);
+  if(!text.starts_with("- ")) return {};
+  return std::string(util::trim(text.substr(2)));
+}
+
 namespace {
 
 // Find the closing front-matter fence: a line that is exactly "---". Avoids
@@ -60,20 +74,6 @@ std::size_t findClosingFence(std::string_view markdown) {
 // here and removes a copy that read as though it meant something.
 static std::string trim(std::string_view value) {
   return std::string(util::trim(value));
-}
-
-// A front-matter entry is a `key:` line plus the lines that continue its value:
-// anything indented, and the `- item` lines of a block sequence. Splitting on
-// that boundary is what lets an unrecognized key be carried through with its
-// whole value, however many lines it spans.
-static bool continuesValue(std::string_view line) {
-  return !line.empty() && (line.front() == ' ' || line.front() == '\t' || line.starts_with("- "));
-}
-
-static std::string sequenceItem(std::string_view line) {
-  const auto text = trim(line);
-  if(!text.starts_with("- ")) return {};
-  return trim(std::string_view(text).substr(2));
 }
 
 static void readTags(NoteMetadata& metadata, std::string_view inlineValue,
@@ -112,7 +112,7 @@ static void readTags(NoteMetadata& metadata, std::string_view inlineValue,
   // An empty inline value with `- item` lines under it is YAML's block form,
   // which is what most other editors write and what micronotes used to drop.
   for(std::size_t i = from; i < to; ++i) {
-    auto tag = sequenceItem(lines[i]);
+    auto tag = frontMatterSequenceItem(lines[i]);
     if(!tag.empty()) {
       metadata.tagForm = NoteMetadata::TagForm::Block;
       metadata.tags.push_back(std::move(tag));
@@ -193,7 +193,7 @@ NoteMetadata parseMetadata(std::string_view markdown) {
   for(std::size_t i = 0; i < lines.size();) {
     const std::string_view line = lines[i];
     std::size_t next = i + 1;
-    while(next < lines.size() && continuesValue(lines[next])) ++next;
+    while(next < lines.size() && continuesFrontMatterValue(lines[next])) ++next;
     if(line.starts_with("id: ")) metadata.id = line.substr(4);
     else if(line.starts_with("title: ")) metadata.title = line.substr(7);
     else if(line.starts_with("icon: ")) metadata.icon = trim(line.substr(6));

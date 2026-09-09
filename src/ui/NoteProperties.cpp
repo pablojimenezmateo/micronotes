@@ -7,16 +7,14 @@
 #include <string_view>
 
 namespace micronotes::ui {
-namespace {
 
-// Whether a front-matter line continues the key above it rather than opening
-// one of its own. The same rule the parser used to gather these lines, applied
-// again here to put them back together.
-bool continuesValue(std::string_view line) {
-  return !line.empty() && (line.front() == ' ' || line.front() == '\t' || line.starts_with("- "));
-}
-
-}
+// The two rules the parser split these lines on, applied again here to put them
+// back together. Borrowed from `library/Metadata.h` rather than restated: this
+// file used to carry its own copy of both, and a copy of a *shape* rule is the
+// kind that goes wrong quietly -- the header would still parse and still save,
+// and only the rows drawn above the note would be assembled wrongly.
+using library::continuesFrontMatterValue;
+using library::frontMatterSequenceItem;
 
 std::vector<NoteProperty> notePropertiesOf(const library::NoteMetadata& metadata) {
   std::vector<NoteProperty> rows;
@@ -27,15 +25,13 @@ std::vector<NoteProperty> notePropertiesOf(const library::NoteMetadata& metadata
     rows.push_back(std::move(tags));
   }
   for(const auto& line : metadata.extra) {
-    if(continuesValue(line)) {
+    if(continuesFrontMatterValue(line)) {
       // A continuation before any key at all is a malformed header, not a row.
       if(rows.empty()) continue;
-      // Trimmed before the sequence dash is looked for, not after: the dash of
-      // a block item is indented under its key, so testing the raw line for
-      // "- " finds it only on the one item that happens to sit at column zero.
-      std::string_view piece = util::trim(line);
-      if(piece.starts_with("- ")) piece.remove_prefix(2);
-      const std::string item = std::string(util::trim(piece));
+      // A `- item` line contributes its item; an indented scalar contributes
+      // the whole trimmed line.
+      std::string item = frontMatterSequenceItem(line);
+      if(item.empty()) item = std::string(util::trim(line));
       if(item.empty()) continue;
       // Flattened onto one line on purpose. The header is a summary of what the
       // note carries; a page that reserves eleven rows for an eleven-item list
