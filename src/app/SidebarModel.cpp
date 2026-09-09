@@ -258,7 +258,7 @@ public:
   void finish() {
     perf::addCounter(perf::CounterId::SidebarRowsBuilt, ui_.sidebar.rows.size());
     const float contentHeight = cursor_.height();
-    ui_.sidebar.rowsKey.contentHeight = contentHeight;
+    ui_.sidebar.rowsKey.placement.contentHeight = contentHeight;
     ui_.sidebar.list.setContent(rect_.h - kSidebarListPadding * 2.0f, contentHeight);
   }
 
@@ -396,36 +396,46 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
 // do, and both are an offset over a list already built. Rebuilding regardless
 // was ~0.7 ms of a ~1.0 ms frame on a 400-note library, which is most of the
 // frame spent re-deriving three dozen visible rows from four hundred notes.
+// The inputs the row list is a pure function of, gathered in one place.
+//
+// Both the reuse test and the store go through this, which is what makes them
+// one list rather than two that have to be kept in step by hand.
+SidebarRowsShape sidebarRowsShape(const UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
+  const auto& workspace = ui.state.workspace();
+  SidebarRowsShape shape;
+  shape.stateRevision = ui.state.catalog().revision();
+  shape.treeRevision = ui.sidebar.tree.revision();
+  shape.search = ui.fields.search.text();
+  shape.searchScope = ui.fields.searchScope;
+  shape.tag = ui.state.selection().tag;
+  shape.favorites = workspace.favorites;
+  shape.recents = workspace.recents;
+  shape.collapsedSections = workspace.collapsedSections;
+  shape.width = rect.w;
+  shape.height = rect.h;
+  // Every row's height derives from these, so a change of text size has to
+  // rebuild the list rather than shift one laid out at the old rhythm.
+  shape.rowHeight = metrics.row;
+  shape.snippetHeight = metrics.snippet;
+  return shape;
+}
+
 void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   // The rows and the rectangle they were placed in are one fact, so the build
   // records it. The draw used to, one line before calling this, which made it
   // possible -- and for a while true -- for a reader of `ui.sidebar.rect` to be
   // looking at a rect no row had been placed against.
   ui.sidebar.rect = rect;
-  const auto& workspace = ui.state.workspace();
   const auto& previous = ui.sidebar.rowsKey;
-  const bool reusable = previous.valid &&
-    previous.stateRevision == ui.state.catalog().revision() &&
-    previous.treeRevision == ui.sidebar.tree.revision() &&
-    previous.search == ui.fields.search.text() &&
-    previous.searchScope == ui.fields.searchScope &&
-    previous.tag == ui.state.selection().tag &&
-    previous.favorites == workspace.favorites &&
-    previous.recents == workspace.recents &&
-    previous.collapsedSections == workspace.collapsedSections &&
-    previous.width == rect.w &&
-    previous.height == rect.h &&
-    // Every row's height is derived from these, so a change of text size has to
-    // rebuild the list rather than shift a list laid out at the old rhythm.
-    previous.rowHeight == metrics.row &&
-    previous.snippetHeight == metrics.snippet;
+  const SidebarRowsShape shape = sidebarRowsShape(ui, rect, metrics);
+  const bool reusable = previous.valid && previous.shape == shape;
 
   if(reusable) {
     // Clamp first: the scroll the rows are shifted by has to be the one they
     // will be drawn at, or a clamp after the shift leaves them a scroll behind.
-    ui.sidebar.list.setContent(rect.h - kSidebarListPadding * 2.0f, previous.contentHeight);
-    const float dx = rect.x - previous.originX;
-    const float dy = (rect.y - previous.originY) - static_cast<float>(ui.sidebar.list.scroll() - previous.scroll);
+    ui.sidebar.list.setContent(rect.h - kSidebarListPadding * 2.0f, previous.placement.contentHeight);
+    const float dx = rect.x - previous.placement.originX;
+    const float dy = (rect.y - previous.placement.originY) - static_cast<float>(ui.sidebar.list.scroll() - previous.placement.scroll);
     if(dx != 0.0f || dy != 0.0f) {
       for(auto& row : ui.sidebar.rows) {
         row.rect.x += dx;
@@ -434,9 +444,9 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
         row.disclosure.y += dy;
       }
     }
-    ui.sidebar.rowsKey.originX = rect.x;
-    ui.sidebar.rowsKey.originY = rect.y;
-    ui.sidebar.rowsKey.scroll = ui.sidebar.list.scroll();
+    ui.sidebar.rowsKey.placement.originX = rect.x;
+    ui.sidebar.rowsKey.placement.originY = rect.y;
+    ui.sidebar.rowsKey.placement.scroll = ui.sidebar.list.scroll();
     perf::addCounter(perf::CounterId::SidebarRowsReused, ui.sidebar.rows.size());
     return;
   }
@@ -445,22 +455,12 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
 
   auto& key = ui.sidebar.rowsKey;
   key.valid = true;
-  key.stateRevision = ui.state.catalog().revision();
-  key.treeRevision = ui.sidebar.tree.revision();
-  key.search = ui.fields.search.text();
-  key.searchScope = ui.fields.searchScope;
-  key.tag = ui.state.selection().tag;
-  key.favorites = workspace.favorites;
-  key.recents = workspace.recents;
-  key.collapsedSections = workspace.collapsedSections;
-  key.width = rect.w;
-  key.height = rect.h;
-  key.rowHeight = metrics.row;
-  key.snippetHeight = metrics.snippet;
-  key.originX = rect.x;
-  key.originY = rect.y;
+  // The same value the reuse test above compared against, stored whole.
+  key.shape = shape;
+  key.placement.originX = rect.x;
+  key.placement.originY = rect.y;
   // Read back rather than remembered: finish() clamps it.
-  key.scroll = ui.sidebar.list.scroll();
+  key.placement.scroll = ui.sidebar.list.scroll();
 }
 
 // Scrolls the cursor row into view using last frame's geometry, which is all

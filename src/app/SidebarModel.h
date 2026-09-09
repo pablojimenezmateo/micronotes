@@ -126,6 +126,15 @@ struct SidebarMetrics {
 
 SidebarMetrics sidebarMetrics(int uiLineHeight, int snippetLineHeight);
 
+// The inputs the row list is a pure function of, gathered from the shell.
+//
+// Exported so the reuse test, the store and `sidebar_rows_*` can all read the
+// same list. The invariant worth stating is that after `buildSidebarRows` the
+// key's stored shape equals this -- if it does not, the memo reused a list
+// built for a different world, which is the failure two hand-written field
+// lists used to make possible.
+SidebarRowsShape sidebarRowsShape(const UiRuntime& ui, ui::Rect rect, const SidebarMetrics& metrics);
+
 float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metrics);
 
 // The width of a snippet line, in the font the rows draw it in.

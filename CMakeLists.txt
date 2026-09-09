@@ -362,6 +362,7 @@ add_executable(micronotes_tests
   tests/SettingsSurfaceTests.cpp
   tests/ShellLayoutTests.cpp
   tests/ShellUnitTests.cpp
+  tests/SidebarRowsMemoTests.cpp
   tests/SidebarRowsTests.cpp
   tests/SingleLineEditorTests.cpp
   tests/TabsTests.cpp

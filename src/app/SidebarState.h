@@ -100,20 +100,30 @@ struct SidebarRow {
 };
 
 
-// What the row list was built from. The list is a pure function of these, and
-// it used to be rebuilt on every frame -- a relativised path, a map key and a
-// row object per note in the library, to draw the three dozen rows the panel is
-// tall enough to show. Only the scroll and the panel origin move on a typical
-// frame, and both are an offset applied to a list already built.
+// What the row list was built from.
+//
+// The list is a pure function of these, and it used to be rebuilt on every
+// frame -- a relativised path, a map key and a row object per note in the
+// library, to draw the three dozen rows the panel is tall enough to show. Only
+// the scroll and the panel origin move on a typical frame, and both are an
+// offset applied to a list already built.
 //
 // Not a `ui::Memo`, and this is the one memo in the shell that should not be:
-// its reuse is *partial*. The fields above the line decide whether the rows
-// exist at all; the ones below only decide where they sit, and a change to
-// those shifts every rect by a delta instead of rebuilding anything. A memo
-// with one key cannot express that, and pretending it could would turn a scroll
-// into an O(library) rebuild.
-struct SidebarRowsKey {
-  bool valid = false;
+// its reuse is *partial*. `shape` decides whether the rows exist at all;
+// `placement` only decides where they sit, and a change to it shifts every rect
+// by a delta instead of rebuilding anything. A memo with one key cannot express
+// that, and pretending it could would turn a scroll into an O(library) rebuild.
+//
+// The two halves are two structs rather than one struct with a comment across
+// the middle, and that is the point. The rebuild half was compared field by
+// field at the top of `buildSidebarRows` and assigned field by field at the
+// bottom of `rebuildSidebarRows` -- two hand-written lists of thirteen, forty
+// lines apart, which is the shape AGENTS.md names as this codebase's quietest
+// bug: the lists drift, and the memo then answers for inputs it was not built
+// from. Silently, because it is only wrong when the field nobody stored is the
+// field that changed. As one comparable value there is one list, `operator==`
+// is the compiler's, and adding a field to it cannot be half done.
+struct SidebarRowsShape {
   std::uint64_t stateRevision = 0;
   std::uint64_t treeRevision = 0;
   std::string search;
@@ -133,11 +143,22 @@ struct SidebarRowsKey {
   float rowHeight = 0.0f;
   float snippetHeight = 0.0f;
 
-  // ---- placement only, from here down: a change shifts the rows ----
+  bool operator==(const SidebarRowsShape&) const = default;
+};
+
+// Where the rows the shape produced were put. A change here is a delta applied
+// to rects that already exist.
+struct SidebarRowsPlacement {
   float originX = 0.0f;
   float originY = 0.0f;
   int scroll = 0;
   float contentHeight = 0.0f;
+};
+
+struct SidebarRowsKey {
+  bool valid = false;
+  SidebarRowsShape shape;
+  SidebarRowsPlacement placement;
 };
 
 // The question the result list answers, and the library it answered it against.
