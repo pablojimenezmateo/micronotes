@@ -145,6 +145,11 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   frame.markWorkDone();
   {
     const perf::ScopeTimer timer("shell.present");
+    // Whether this present waits for the display. It does, unless the window is
+    // in the middle of being dragged by its edge -- see `app/ResizePacing.h`.
+    if(ui.pacing.settle(renderer, SDL_GetTicks())) {
+      perf::addCounter(perf::CounterId::FramePacingChanges);
+    }
     SDL_RenderPresent(renderer);
   }
 }
@@ -153,6 +158,10 @@ int captureFrame(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images,
   // A capture is one image, not a session: the caret is held solid so two runs
   // of the same build produce the same bytes. See `CaretState::frozen`.
   ui.caret.frozen = true;
+  // And the vsync `captureWindowToFile` is about to turn off stays off. Every
+  // frame settles the pacing before it presents, so a capture that only set the
+  // mode once would have its own first frame put the display back under it.
+  ui.pacing.noteUnpacedByCaller();
   return captureWindowToFile(renderer, options.screenshotPath, options.windowWidth, options.windowHeight,
                              [&](int width, int height) { drawApp(renderer, text, images, ui, width, height); });
 }

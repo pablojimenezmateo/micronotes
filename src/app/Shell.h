@@ -17,6 +17,7 @@
 #include "app/Focus.h"
 #include "app/LinkRegion.h"
 #include "app/RawPaneState.h"
+#include "app/ResizePacing.h"
 #include "app/TextFields.h"
 #include "app/SidebarState.h"
 #include "app/TabStrip.h"
@@ -91,6 +92,10 @@ struct UiRuntime {
   // cost is nothing: one inotify descriptor and a thread asleep in `poll`. See
   // `platform::DirectoryWatcher`.
   platform::DirectoryWatcher watcher;
+
+  // Whether the frame waits for the display. It does, except while the window
+  // is being dragged by its edge; see `app/ResizePacing.h`.
+  ResizePacing pacing;
 
   // ---- the open note -----------------------------------------------------
   editor::MarkdownEditor editor;

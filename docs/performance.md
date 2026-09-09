@@ -2948,3 +2948,51 @@ The rewrap is still the whole note on every keystroke -- `editor::softWrap` has
 no incremental form -- and at 720 us against a 2 ms keystroke budget that is now
 a thing to know rather than a thing to fix. `shell.raw_pane_rewrap` is the
 budget that keeps it that way.
+
+
+### Resolved: a resize step waited for the display it was already behind
+
+Every frame is drawn from scratch and presented with vsync on. The window is
+`SDL_WINDOW_BORDERLESS` with a custom hit test, so a drag on its edge is an
+*opaque* resize the window manager performs: the X window grows, and the region
+it grew into holds undefined content until micronotes presents. That is what
+reads as a flicker to black for the whole drag.
+
+The entry proposed a retained scene texture -- keep the last frame, blit it when
+the window is exposed, draw the real one after. **That would not have helped,
+and working out why is what found the actual answer.** With vsync on, the blit
+takes the next refresh and the real frame takes the one after: the window shows
+a *stretched, stale* frame one refresh sooner than it would have shown the
+correct one. The wait is the problem, not the absence of something to show.
+
+So the drag is unpaced and everything else is paced. `app/ResizePacing.h` notes
+the time of the last resize event and turns vsync off until the drag settles;
+`drawApp` settles it once a frame, just before the present, and the SDL call is
+made only on the two edges. `frame.pacing_changes` is the instrument that keeps
+it honest: two per drag. A number that grows with the frame count would mean
+something is calling a resize a frame, and on a typing session with no resize in
+it the counter reads 2 -- the startup expose, off and on again -- over 66
+presents.
+
+Ten scripted `xdotool windowsize` steps on a 1000x700 window, interleaved:
+
+| `frame.present_micros`, 20 presents | paced | unpaced during the drag |
+|---|---:|---:|
+| round 1 | 140,212 | **130,785** |
+| round 2 | 141,837 | **126,464** |
+| round 3 | 145,839 | **130,372** |
+| round 4 | 139,414 | **130,412** |
+
+**Read that with its limit attached.** These are on Xvfb, which has no display
+to pace to, so what is being measured is whatever pacing SDL's software path
+does anyway -- 7.08 ms a present against 6.47 ms, seven per cent, consistent
+across four interleaved rounds and with no overlap between the two sets. The
+entry's own numbers were taken on a real window and put the present at 10.8 ms
+against 2.3 ms of drawing, so on a display that genuinely blocks there is far
+more of it to remove; that part is reasoned rather than measured, and it is the
+one measurement this machine cannot take.
+
+Tearing during a drag is not a cost worth naming next to a window that has not
+been painted at all, and a present that beats the display is a frame thrown
+away -- which is why vsync is on the rest of the time, and why the pacing comes
+straight back the moment the drag settles.

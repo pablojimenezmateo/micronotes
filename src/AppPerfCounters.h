@@ -80,6 +80,10 @@
   X(RenderTextMeasureCacheHits, "render.text_measure_cache_hits")                      \
   /* --- frame loop / input ------------------------------------------------ */       \
   X(FrameEventWakes, "frame.event_wakes")                                              \
+  /* How often the frame stopped or started waiting for the display. Two per */  \
+  /* resize drag: off when it begins, on when it settles. A number that grows */  \
+  /* with the frame count means something is calling a resize a frame.        */  \
+  X(FramePacingChanges, "frame.pacing_changes")                                          \
   X(FramePresents, "frame.presents")                                                   \
   X(FrameRepaintsSkipped, "frame.repaints_skipped")                                    \
   /* What the frames actually cost. presents alone says a frame happened, which */     \

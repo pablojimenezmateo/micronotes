@@ -99,8 +99,19 @@ EventOutcome routeEvent(const SDL_Event& event, ui::TextRenderer& text, UiRuntim
 
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
     case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+      outcome.displayScaleChanged = true;
+      return outcome;
+
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
       outcome.displayScaleChanged = true;
+      ui.pacing.noteResize(SDL_GetTicks());
+      return outcome;
+
+    case SDL_EVENT_WINDOW_EXPOSED:
+      // A region of the window has become undefined and is ours to fill. Same
+      // urgency as a resize step, and on some window managers the only event a
+      // resize produces at all.
+      ui.pacing.noteResize(SDL_GetTicks());
       return outcome;
 
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
@@ -110,6 +121,8 @@ EventOutcome routeEvent(const SDL_Event& event, ui::TextRenderer& text, UiRuntim
     case SDL_EVENT_WINDOW_RESIZED:
     case SDL_EVENT_WINDOW_RESTORED:
     case SDL_EVENT_WINDOW_MAXIMIZED:
+      ui.pacing.noteResize(SDL_GetTicks());
+      [[fallthrough]];
     case SDL_EVENT_WINDOW_MOVED:
       // A compositor-driven resize or move paints its own grab cursor and does
       // not tell SDL, so the shape on screen and SDL's idea of it disagree --
