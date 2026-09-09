@@ -78,6 +78,11 @@ struct WorkspaceModel {
   float sidebarWidth = kDefaultSidebarWidth;
   float rightPanelWidth = kDefaultRightPanelWidth;
 
+  // How many recently-opened notes are remembered. A cap rather than a growing
+  // list: the point of RECENT is that it is short enough to read at a glance,
+  // and the library itself is the long list.
+  static constexpr std::size_t kMaxRecents = 12;
+
   // Notes pinned to the top of the sidebar, and the ones opened most recently,
   // newest first. Both name notes by id and never touch a file: which notes
   // someone keeps to hand is a view preference, not part of the note.
@@ -120,12 +125,33 @@ struct WorkspaceModel {
   // At `kMaxTabs` the leftmost tab that is neither pinned nor active gives way.
   void openNote(const std::string& noteId, TabPolicy policy = TabPolicy::NewTab);
 
-  // Re-points every tab showing `from` at `to`. A note's id changes exactly
-  // once in its life: the first time micronotes saves a file that arrived
-  // without front matter, it stops being filed under an id derived from its
-  // path and gets a permanent one. Without this the tab still names the old id
-  // and the note vanishes out from under the person editing it.
+  // Re-points everything naming `from` at `to`: its tabs, its place in the
+  // favorites and its place in the recents.
+  //
+  // A note's id changes exactly once in its life: the first time micronotes
+  // saves a file that arrived without front matter, it stops being filed under
+  // an id derived from its path and gets a permanent one. Without this the tab
+  // still names the old id and the note vanishes out from under the person
+  // editing it.
+  //
+  // All three lists, not just the tabs, because there is no id here that is
+  // half-renamed and no caller that wants one. The two lists used to be
+  // re-pointed by the caller -- twice, in the two places `AppState` learns an
+  // id has moved -- so "which lists name a note" was a fact spelled out at the
+  // call sites rather than known by the thing that holds them, and a third
+  // list would have had to be added to both.
   void renameNote(std::string_view from, const std::string& to);
+
+  // The notes kept to hand. All three are about `favorites` and `recents` and
+  // nothing else, which is why they are methods here rather than on `AppState`:
+  // they were three functions over this struct's fields, reached through it.
+  bool isFavorite(std::string_view noteId) const;
+  // Returns whether the note is a favorite *after* the toggle, which is what
+  // the two callers say in the status line.
+  bool toggleFavorite(const std::string& noteId);
+  // Records a note as just opened. Newest first, and capped, so the list stays
+  // a shortcut rather than a second library.
+  void noteOpened(const std::string& noteId);
 
   // Closes a tab and picks the next one to show: the tab to the right, or the
   // one to the left when the closed tab was last, which is what every editor

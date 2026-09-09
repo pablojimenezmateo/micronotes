@@ -75,15 +75,11 @@ const UiSelection& AppState::selection() const {
 }
 
 void AppState::selectFolder(std::filesystem::path folder) {
-  selection_.folder = std::move(folder);
-  selection_.tag.clear();
-  selection_.search.clear();
+  selection_.showFolder(std::move(folder));
 }
 
 void AppState::selectTag(std::string tag) {
-  selection_.tag = std::move(tag);
-  selection_.folder.clear();
-  selection_.search.clear();
+  selection_.showTag(std::move(tag));
 }
 
 void AppState::selectNote(std::string noteId, ui::TabPolicy policy) {
@@ -105,8 +101,7 @@ void AppState::stepTab(int delta) {
 }
 
 void AppState::setSearch(std::string query, library::SearchScope scope) {
-  selection_.search = std::move(query);
-  selection_.searchScope = scope;
+  selection_.showSearch(std::move(query), scope);
 }
 
 // The empties are statics rather than temporaries: these return references, and
@@ -234,9 +229,7 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
   if(!folder.empty()) path = library_->moveNote(path, folder);
   openNote_.reset();
   refreshLibrary();
-  selection_.folder = folder;
-  selection_.tag.clear();
-  selection_.search.clear();
+  selection_.showFolder(folder);
   selection_.noteId = metadata.id;
   workspace_.openNote(metadata.id, policy);
   return library::NoteListItem {metadata.id,   path,          metadata.title,
@@ -311,8 +304,6 @@ SaveResult AppState::saveSelectedNote(std::string_view body) {
     // `clearSelectedNoteRecovery` above, which ran while the selection still
     // named it -- so nothing is left behind under a name nothing answers to.
     workspace_.renameNote(previous, adopted);
-    std::replace(workspace_.favorites.begin(), workspace_.favorites.end(), previous, adopted);
-    std::replace(workspace_.recents.begin(), workspace_.recents.end(), previous, adopted);
     selection_.noteId = adopted;
     openNote_->noteId = adopted;
   }
@@ -405,9 +396,7 @@ bool AppState::appendToNote(std::string_view noteId, std::string_view text) {
 bool AppState::createFolder(const std::filesystem::path& folder) {
   if(!library_ || folder.empty()) return false;
   const auto target = library_->createFolder(folder);
-  selection_.folder = std::filesystem::relative(target, library_->root());
-  selection_.tag.clear();
-  selection_.search.clear();
+  selection_.showFolder(std::filesystem::relative(target, library_->root()));
   selection_.noteId.clear();
   return refreshLibrary();
 }
@@ -415,7 +404,7 @@ bool AppState::createFolder(const std::filesystem::path& folder) {
 bool AppState::renameSelectedFolder(const std::filesystem::path& folder) {
   if(!library_ || selection_.folder.empty() || folder.empty()) return false;
   const auto target = library_->renameFolder(selection_.folder, folder);
-  selection_.folder = std::filesystem::relative(target, library_->root());
+  selection_.showFolder(std::filesystem::relative(target, library_->root()));
   selection_.noteId.clear();
   return refreshLibrary();
 }
@@ -431,14 +420,14 @@ bool AppState::moveFolderInto(const std::filesystem::path& folder, const std::fi
   const auto target = newParent / folder.filename();
   if(std::filesystem::exists(library_->root() / target)) return false;
   library_->renameFolder(folder, target);
-  if(selection_.folder == folder) selection_.folder = target;
+  if(selection_.folder == folder) selection_.showFolder(target);
   return refreshLibrary();
 }
 
 bool AppState::deleteSelectedFolder() {
   if(!library_ || selection_.folder.empty()) return false;
   library_->deleteFolder(selection_.folder);
-  selection_.folder.clear();
+  selection_.showFolder({});
   selection_.noteId.clear();
   return refreshLibrary();
 }
@@ -474,9 +463,7 @@ bool AppState::moveSelectedNoteToFolder(const std::filesystem::path& folder) {
   if(open.noteId.empty()) return false;
   const auto noteId = open.metadata.id;
   library_->moveNote(open.path, folder);
-  selection_.folder = folder;
-  selection_.tag.clear();
-  selection_.search.clear();
+  selection_.showFolder(folder);
   if(!noteId.empty()) selection_.noteId = noteId;
   // The full walk, not `refreshNoteFile`: the move may have created the folder,
   // and the sidebar tree is drawn from the directories the walk reports --
@@ -491,29 +478,6 @@ bool AppState::updateSelectedTags(const std::vector<std::string>& tags) {
   if(openNote().noteId.empty()) return false;
   metadata.tags = tags;
   return saveSelectedNoteHeader(metadata);
-}
-
-bool AppState::favorite(std::string_view noteId) const {
-  return std::find(workspace_.favorites.begin(), workspace_.favorites.end(), noteId) != workspace_.favorites.end();
-}
-
-bool AppState::toggleFavorite(const std::string& noteId) {
-  if(noteId.empty()) return false;
-  const auto found = std::find(workspace_.favorites.begin(), workspace_.favorites.end(), noteId);
-  if(found != workspace_.favorites.end()) {
-    workspace_.favorites.erase(found);
-    return false;
-  }
-  workspace_.favorites.push_back(noteId);
-  return true;
-}
-
-void AppState::noteOpened(const std::string& noteId) {
-  if(noteId.empty()) return;
-  auto& recents = workspace_.recents;
-  recents.erase(std::remove(recents.begin(), recents.end(), noteId), recents.end());
-  recents.insert(recents.begin(), noteId);
-  if(recents.size() > 12) recents.resize(12);
 }
 
 std::vector<library::TrashEntry> AppState::trashEntries() const {
@@ -577,8 +541,6 @@ bool AppState::reloadSelectedNote() {
   for(const auto& note : allNotes()) {
     if(note.path != path) continue;
     workspace_.renameNote(previous, note.id);
-    std::replace(workspace_.favorites.begin(), workspace_.favorites.end(), previous, note.id);
-    std::replace(workspace_.recents.begin(), workspace_.recents.end(), previous, note.id);
     selection_.noteId = note.id;
     return true;
   }

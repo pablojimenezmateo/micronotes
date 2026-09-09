@@ -96,7 +96,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "favorite") {
     const auto noteId = ui.state.selection().noteId;
     if(noteId.empty()) ui.status = "No note selected";
-    else ui.status = ui.state.toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
+    else ui.status = ui.state.editWorkspace().toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
   }
   // Show on disk / copy relative / copy absolute, about the note on the page.
   else if(handleNotePathCommand(ui, id, {})) {}

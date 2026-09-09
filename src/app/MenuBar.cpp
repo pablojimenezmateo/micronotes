@@ -104,7 +104,7 @@ bool menuItemChecked(const UiRuntime& ui, ui::ActionId action) {
     case ui::ActionId::ToggleTheme: return ui::themeMode() == ui::ThemeMode::Light;
     case ui::ActionId::ToggleFavorite: {
       const auto& noteId = ui.state.selection().noteId;
-      return !noteId.empty() && ui.state.favorite(noteId);
+      return !noteId.empty() && ui.state.workspace().isFavorite(noteId);
     }
     case ui::ActionId::PinTab: {
       const auto& tabs = workspace.tabs;

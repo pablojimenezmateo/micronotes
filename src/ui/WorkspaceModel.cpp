@@ -97,6 +97,30 @@ void WorkspaceModel::renameNote(std::string_view from, const std::string& to) {
   for(auto& tab : tabs) {
     if(tab.noteId == from) tab.noteId = to;
   }
+  std::replace(favorites.begin(), favorites.end(), std::string(from), to);
+  std::replace(recents.begin(), recents.end(), std::string(from), to);
+}
+
+bool WorkspaceModel::isFavorite(std::string_view noteId) const {
+  return std::find(favorites.begin(), favorites.end(), noteId) != favorites.end();
+}
+
+bool WorkspaceModel::toggleFavorite(const std::string& noteId) {
+  if(noteId.empty()) return false;
+  const auto found = std::find(favorites.begin(), favorites.end(), noteId);
+  if(found != favorites.end()) {
+    favorites.erase(found);
+    return false;
+  }
+  favorites.push_back(noteId);
+  return true;
+}
+
+void WorkspaceModel::noteOpened(const std::string& noteId) {
+  if(noteId.empty()) return;
+  recents.erase(std::remove(recents.begin(), recents.end(), noteId), recents.end());
+  recents.insert(recents.begin(), noteId);
+  if(recents.size() > kMaxRecents) recents.resize(kMaxRecents);
 }
 
 void WorkspaceModel::closeTab(std::size_t index) {

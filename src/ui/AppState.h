@@ -19,12 +19,45 @@
 
 namespace micronotes::ui {
 
+// What the sidebar's list is showing, and which note is open.
+//
+// The three filters are mutually exclusive -- a list is a folder's notes, or a
+// tag's, or a search's, never two -- and that rule is the whole reason this is
+// a type with methods rather than five fields. It used to be arithmetic
+// repeated at each site that moved the selection: `folder = x; tag.clear();
+// search.clear();`, five times. Four of the five spelled it out and
+// `renameSelectedFolder` did not, so renaming a folder while a tag was
+// selected left the sidebar filtered by a tag and titled after a folder, with
+// nothing to say which of the two the list was.
 struct UiSelection {
   std::filesystem::path folder;
   std::string tag;
   std::string noteId;
   std::string search;
   library::SearchScope searchScope = library::SearchScope::All;
+
+  // Show a folder's notes. Clears the other two filters.
+  void showFolder(std::filesystem::path chosen) {
+    folder = std::move(chosen);
+    tag.clear();
+    clearSearch();
+  }
+  // Show a tag's notes. Clears the other two filters.
+  void showTag(std::string chosen) {
+    tag = std::move(chosen);
+    folder.clear();
+    clearSearch();
+  }
+  // Show what a query matches. The scope travels with the query because an
+  // empty query means "not searching" and a scope without one means nothing.
+  void showSearch(std::string query, library::SearchScope scope) {
+    search = std::move(query);
+    searchScope = scope;
+  }
+  void clearSearch() {
+    search.clear();
+    searchScope = library::SearchScope::All;
+  }
 };
 
 struct LoadedNote {
@@ -109,11 +142,6 @@ public:
   // Moves to the next or previous tab, wrapping.
   void stepTab(int delta);
   void setSearch(std::string query, library::SearchScope scope = library::SearchScope::All);
-  // Records a note as just opened. Newest first, and capped, so the list stays
-  // a shortcut rather than a second library.
-  void noteOpened(const std::string& noteId);
-  bool favorite(std::string_view noteId) const;
-  bool toggleFavorite(const std::string& noteId);
 
   // --- reading the library -------------------------------------------------
 

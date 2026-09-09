@@ -35,7 +35,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     {"rename", "Rename", "", ui::keysFor(ui::ActionId::RenameNote), hasNote, false, false, false},
     {"icon", "Set icon", "", "", hasNote, false, false, false},
     {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false, false, false},
-    {"favorite", "Favorite", "", "", hasNote, false, hasNote && ui.state.favorite(noteId), false},
+    {"favorite", "Favorite", "", "", hasNote, false, hasNote && ui.state.workspace().isFavorite(noteId), false},
     {"move", "Move to notebook", "", "", hasNote, false, false, false},
     {"", "", "", "", false, false, false, true},
     // A note is a file, and these are the questions a reader asks about one.

@@ -263,14 +263,14 @@ MICRONOTES_TEST(app_state_carries_the_selection_when_a_foreign_note_adopts_an_id
   MICRONOTES_REQUIRE(state.allNotes().size() == 1);
   const auto pathId = state.allNotes().front().id;
   state.selectNote(pathId);
-  MICRONOTES_REQUIRE(state.toggleFavorite(pathId));
+  MICRONOTES_REQUIRE(state.editWorkspace().toggleFavorite(pathId));
 
   MICRONOTES_REQUIRE(state.saveSelectedNote("edited by micronotes\n").ok);
   MICRONOTES_REQUIRE(state.selection().noteId != pathId);
   MICRONOTES_REQUIRE(!state.selection().noteId.empty());
   // Still open, still selected, still favorite, and still one note.
   MICRONOTES_REQUIRE(state.readSelectedNote().has_value());
-  MICRONOTES_REQUIRE(state.favorite(state.selection().noteId));
+  MICRONOTES_REQUIRE(state.workspace().isFavorite(state.selection().noteId));
   MICRONOTES_REQUIRE(state.workspace().tabs.front().noteId == state.selection().noteId);
   MICRONOTES_REQUIRE(state.allNotes().size() == 1);
 

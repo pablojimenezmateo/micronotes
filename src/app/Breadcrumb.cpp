@@ -105,7 +105,7 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
   // A filled star reads as "kept"; the outline is an offer.
   ui.chrome.favoriteButton = {rect.x + rect.w - kFavoriteWidth - ui::kSpace2, rect.y + 1.0f,
                        kFavoriteWidth, rect.h - 2.0f};
-  const bool pinned = ui.state.favorite(note->id);
+  const bool pinned = ui.state.workspace().isFavorite(note->id);
   ui.pointer.offerTooltip(ui.chrome.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
   if(ui.pointer.over(ui.chrome.favoriteButton)) fill(renderer, ui.chrome.favoriteButton, theme().rowHighlight);
   // The mark centred in the target rather than filling it. See
@@ -121,7 +121,7 @@ bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
   if(ui::contains(ui.chrome.favoriteButton, x, y)) {
     const auto noteId = ui.state.selection().noteId;
-    ui.status = ui.state.toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
+    ui.status = ui.state.editWorkspace().toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
     return true;
   }
   for(const auto& [crumb, folder] : ui.chrome.crumbs) {

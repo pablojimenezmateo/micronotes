@@ -57,7 +57,7 @@ void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
   }
   const std::string title(ui.state.selectedTitle());
   ui.status = unsaved ? "Recovered unsaved " + title : "Loaded " + title;
-  ui.state.noteOpened(noteId);
+  ui.state.editWorkspace().noteOpened(noteId);
 }
 
 }
