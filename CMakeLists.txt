@@ -249,6 +249,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Dismiss.cpp
   src/app/Fields.cpp
   src/app/FindBar.cpp
+  src/app/FocusedEdits.cpp
   src/app/Folds.cpp
   src/app/EventRouter.cpp
   src/app/Frame.cpp
@@ -336,6 +337,7 @@ add_executable(micronotes_tests
   tests/EditorTests.cpp
   tests/EditsTests.cpp
   tests/FlowTests.cpp
+  tests/FocusedEditsTests.cpp
   tests/FoldTests.cpp
   tests/TokenizeTests.cpp
   tests/FramePolicyTests.cpp

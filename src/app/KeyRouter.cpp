@@ -12,6 +12,7 @@
 #include "app/EditorBlocks.h"
 #include "app/Fields.h"
 #include "app/FindBar.h"
+#include "app/FocusedEdits.h"
 #include "app/Folds.h"
 #include "app/MenuBar.h"
 #include "app/Notes.h"
@@ -133,75 +134,15 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     return;
   }
 
-  if(shortcut(SDLK_A, SDL_SCANCODE_A)) {
-    if(ui.focus == FocusArea::Editor) {
-      ui.editor.selectAll();
-      publishEditorPrimarySelection(ui);
-      ui.revealEditorCursor = ui.focus == FocusArea::Editor;
-    }
-    else if(auto* field = focusedField(ui)) {
-      field->editor.selectAll();
-      if(field->editor.hasSelection()) SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
-    }
-  } else if(shortcut(SDLK_C, SDL_SCANCODE_C)) {
-    if(ui.focus == FocusArea::Editor && ui.blockSelection.active) {
-      const auto [from, to] = blockSelectionCarets(ui);
-      const EditorBlocks blocks(ui);
-      const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
-      const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end();
-      ui.status = setClipboardText(std::string_view(ui.editor.text()).substr(start, end - start))
-                    ? "Copied block" : "Copy failed: " + std::string(SDL_GetError());
-    } else if(readsTheNote(ui.focus) && ui.editor.hasSelection()) {
-      // `Viewer` as well as `Editor`: the reading pane makes a selection in the
-      // same buffer, and a selection you can see and cannot copy is worse than
-      // one you cannot make.
-      ui.status = setClipboardText(ui.editor.selectedText()) ? "Copied selection" : "Copy failed: " + std::string(SDL_GetError());
-    } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
-      // Copies the actual selected range. It used to copy the whole field,
-      // because the whole field was the only range that could be selected.
-      ui.status = setClipboardText(field->editor.selectedText()) ? "Copied selection" : "Copy failed: " + std::string(SDL_GetError());
-    }
-  } else if(shortcut(SDLK_X, SDL_SCANCODE_X)) {
-    if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
-      const bool copied = setClipboardText(ui.editor.selectedText());
-      ui.editor.eraseSelection();
-      ui.markEdited();
-      ui.revealEditorCursor = true;
-      ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
-    } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
-      const bool copied = setClipboardText(field->editor.selectedText());
-      field->editor.eraseSelection();
-      syncFocusedInput(ui);
-      ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
-    }
-  } else if(shortcut(SDLK_Z, SDL_SCANCODE_Z)) {
-    // Resolved through `shortcut`, which also accepts the scancode, so Ctrl+Z
-    // still works on a layout where the Z key does not produce 'z'.
-    if(auto* field = focusedField(ui)) {
-      if(field->editor.undo()) syncFocusedInput(ui);
-    } else if(ui.focus == FocusArea::Editor) {
-      (void)undoEditorEdit(ui);
-    }
-  } else if(shortcut(SDLK_Y, SDL_SCANCODE_Y)) {
-    if(auto* field = focusedField(ui)) {
-      if(field->editor.redo()) syncFocusedInput(ui);
-    } else if(ui.focus == FocusArea::Editor) {
-      (void)redoEditorEdit(ui);
-    }
-  } else if(shortcut(SDLK_V, SDL_SCANCODE_V)) {
-    if(focusedField(ui)) pasteClipboardIntoInput(ui);
-    else if(ui.focus == FocusArea::Editor) {
-      // Decide by what is actually on the clipboard: image data wins (image
-      // copies often also expose an incidental text/plain target), otherwise
-      // paste text. Shift forces plain text even when an image is present.
-      if(shift) {
-        if(!pasteClipboardText(ui)) pasteClipboardImage(ui);
-      } else {
-        if(!pasteClipboardImage(ui)) pasteClipboardText(ui);
-      }
-      ui.revealEditorCursor = true;
-    }
-  } else if(shortcut(SDLK_K, SDL_SCANCODE_K)) {
+  if(shortcut(SDLK_A, SDL_SCANCODE_A)) selectAllInFocus(ui);
+  else if(shortcut(SDLK_C, SDL_SCANCODE_C)) copySelectionInFocus(ui);
+  else if(shortcut(SDLK_X, SDL_SCANCODE_X)) cutSelectionInFocus(ui);
+  // Resolved through `shortcut`, which also accepts the scancode, so Ctrl+Z
+  // still works on a layout where the Z key does not produce 'z'.
+  else if(shortcut(SDLK_Z, SDL_SCANCODE_Z)) undoInFocus(ui);
+  else if(shortcut(SDLK_Y, SDL_SCANCODE_Y)) redoInFocus(ui);
+  else if(shortcut(SDLK_V, SDL_SCANCODE_V)) pasteInFocus(ui, /*plainTextOnly=*/shift);
+  else if(shortcut(SDLK_K, SDL_SCANCODE_K)) {
     // In the editor Ctrl+K makes a link out of the selection, as it does
     // everywhere else; outside it there is no selection to link, so it is the
     // jump the plan asked for.

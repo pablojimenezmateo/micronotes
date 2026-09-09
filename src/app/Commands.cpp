@@ -4,6 +4,7 @@
 #include "app/Chrome.h"
 #include "app/ContextMenus.h"
 #include "app/EditCommands.h"
+#include "app/FocusedEdits.h"
 #include "app/Fields.h"
 #include "app/FindBar.h"
 #include "app/Folds.h"
@@ -134,12 +135,12 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "italic") wrapEditorSelection(ui, "*", "*", "Italic");
   else if(id == "code") wrapEditorSelection(ui, "`", "`", "Code");
   else if(id == "link") linkEditorSelection(ui);
-  else if(id == "undo") {
-    if(ui.focus == FocusArea::Editor) (void)undoEditorEdit(ui);
-  }
-  else if(id == "redo") {
-    if(ui.focus == FocusArea::Editor) (void)redoEditorEdit(ui);
-  }
+  // Through the same function the key runs, because these two are the case
+  // where having a second implementation was already wrong: this one handled
+  // the note buffer and not a focused field, so choosing Undo from the Edit
+  // menu with the caret in a rename box did nothing while Ctrl+Z worked.
+  else if(id == "undo") undoInFocus(ui);
+  else if(id == "redo") redoInFocus(ui);
   else if(id == "toggle-task") {
     if(ui.focus != FocusArea::Editor) ui.status = "Put the caret in a task first";
     else if(!applyTransform(ui, doc::toggleTodo)) ui.status = "No task to toggle here";
