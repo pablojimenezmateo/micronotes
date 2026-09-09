@@ -249,7 +249,6 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
       fill(renderer, toRect(rect, ox, oy), theme().selectionFill);
     }
   }
-  const auto& blocks = document_.blocks();
   // Only the blocks that reach the viewport. This used to walk the whole note
   // and test each block against the page, which made a draw cost the document
   // rather than the window: 10,801 blocks visited to draw 18 of them, every
