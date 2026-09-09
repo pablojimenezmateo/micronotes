@@ -248,13 +248,22 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
     std::size_t payloadStart = bodyStart;
     std::size_t payloadEnd = line.end;
 
+    // Every arm below ends the same way, and did so in nine copies: pack the
+    // three absolutes into the block and hand it back. One place to do it means
+    // an arm cannot set the extent and forget the payload -- which would leave
+    // the block claiming the whole line as content -- and it is why the three
+    // are tracked as absolutes at all (see above).
+    const auto finish = [&] {
+      block.setEnd(blockEnd);
+      block.setContent(payloadStart, payloadEnd);
+      return block;
+    };
+
     if(isBlank(text)) {
       block.kind = BlockKind::Blank;
       payloadStart = line.start;
       payloadEnd = line.start;
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     // Four columns of indentation open a Markdown code block. A list marker at
@@ -274,9 +283,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       blockEnd = lastContentEnd;
       payloadStart = line.start;
       payloadEnd = lastContentEnd > line.start && source[lastContentEnd - 1] == '\n' ? lastContentEnd - 1 : lastContentEnd;
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     // Fenced code owns everything up to its closing fence, so a `#` inside a
@@ -310,9 +317,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
         blockEnd = scan;
       }
       payloadEnd = std::max(payloadStart, contentEnd);
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     // Tables, raw HTML and footnote definitions are handed to md4c whole.
@@ -339,9 +344,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       blockEnd = scan;
       payloadStart = line.start;
       payloadEnd = scan > line.start && source[scan - 1] == '\n' ? scan - 1 : scan;
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     if(columns < 4 && isDivider(body)) {
@@ -349,9 +352,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       // The whole line is marker; there is nothing to type into.
       payloadStart = line.end;
       payloadEnd = line.end;
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     if(columns < 4 && !body.empty() && body[0] == '#') {
@@ -363,9 +364,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
         std::size_t after = hashes;
         while(after < body.size() && body[after] == ' ') ++after;
         payloadStart = bodyStart + after;
-        block.setEnd(blockEnd);
-        block.setContent(payloadStart, payloadEnd);
-        return block;
+        return finish();
       }
     }
 
@@ -385,9 +384,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
           payloadStart = bodyStart + contentAfter;
         }
       }
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     if(const Marker& marker = leadingMarker; marker.matched) {
@@ -404,9 +401,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       const auto run = absorbContinuation(source, line);
       payloadEnd = run.contentEnd;
       blockEnd = run.blockEnd;
-      block.setEnd(blockEnd);
-      block.setContent(payloadStart, payloadEnd);
-      return block;
+      return finish();
     }
 
     // A paragraph absorbs following lines until something else starts.
@@ -415,9 +410,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
     const auto run = absorbContinuation(source, line);
     payloadEnd = run.contentEnd;
     blockEnd = run.blockEnd;
-    block.setEnd(blockEnd);
-    block.setContent(payloadStart, payloadEnd);
-    return block;
+    return finish();
   }
 }
 

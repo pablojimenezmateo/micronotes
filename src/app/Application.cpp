@@ -185,11 +185,11 @@ int run(ApplicationOptions options) {
         // changed", the cursor has to ask for a present of its own on a real
         // shape change. Hovering a link changes no pixels at all.
         needsDraw = true;
-      const EventOutcome outcome = routeEvent(event, text, ui, cursors, width, height);
-      if(outcome.quit) running = false;
-      // The loop's own business, because it owns the renderer's scale and the
-      // face cache that has to be dropped with it.
-      if(outcome.displayScaleChanged) applyDisplayScale();
+        const EventOutcome outcome = routeEvent(event, text, ui, cursors, width, height);
+        if(outcome.quit) running = false;
+        // The loop's own business, because it owns the renderer's scale and the
+        // face cache that has to be dropped with it.
+        if(outcome.displayScaleChanged) applyDisplayScale();
         // A held key or a fast trackpad refills the queue as fast as it
         // empties, and draining it whole starves the paint: the window stops
         // updating while input is still arriving. Stop at the budget and let
