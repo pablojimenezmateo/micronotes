@@ -53,6 +53,153 @@ using pageview::toTextStyle;
 
 }
 
+// One block of the note: its list chrome, its lines and runs, and the pictures
+// it named. Returns whether it was drawn at all -- a block above or below the
+// viewport is skipped -- and adds the runs it emitted to `runs`.
+//
+// Extracted from `draw`, which was 233 lines and the longest function in
+// `src/app/`. It stays in this translation unit deliberately: this is called
+// once per visible block per frame, and Release carries no LTO.
+bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t index,
+                         const BlockPaint& paint, std::size_t& runs) {
+  const auto& blocks = document_.blocks();
+  const doc::SourceBlock& block = blocks[index];
+  const doc::BlockLayout& layout = document_.layout(index);
+  const float top = paint.oy + document_.blockTop(index);
+  if(top + layout.height < paint.viewTop || top > paint.viewBottom) return false;
+
+  const float left = paint.ox + layout.indent;
+  const float bodyLine = layout.lines.empty() ? 0.0f : layout.lines.front().height;
+
+  // List chrome stands in for the marker text while the marker is hidden.
+  if(!layout.revealed && !layout.raw && bodyLine > 0.0f) {
+    const float markerY = top + (layout.lines.empty() ? 0.0f : layout.lines.front().y);
+    if(block.kind == doc::BlockKind::Bullet) {
+      ui::TextStyle style;
+      style.size = ui::type().body;
+      text.draw("•", left + 6.0f, markerY, theme().textSecondary, style);
+    } else if(block.kind == doc::BlockKind::Ordered) {
+      ui::TextStyle style;
+      style.size = ui::type().body;
+      const auto label = std::to_string(block.ordinal > 0 ? block.ordinal : 1) + ".";
+      text.draw(label, left + 2.0f, markerY, theme().textSecondary, style);
+    } else if(block.kind == doc::BlockKind::Todo) {
+      Rect box {left + 3.0f, markerY + 4.0f, 14.0f, 14.0f};
+      // A generous hit area: the drawn box is deliberately small.
+      const Rect hit {box.x - 4.0f, box.y - 4.0f, box.w + 8.0f, box.h + 8.0f};
+      checkboxes_.push_back({hit, block.start});
+      // Including on a read-only page: a task is a control there too, and it
+      // ticks. It used not to, and the hover was suppressed for exactly that
+      // reason -- a box that lights up and then does nothing is worse than
+      // one that never invited the click.
+      const bool hot = ui::contains(hit, pointerX_, pointerY_);
+      if(block.checked) {
+        fill(renderer, box, theme().accent);
+        const SDL_Color tick = theme().onAccent;
+        SDL_SetRenderDrawColor(renderer, tick.r, tick.g, tick.b, tick.a);
+        SDL_RenderLine(renderer, box.x + 3.5f, box.y + 7.0f, box.x + 6.0f, box.y + 9.5f);
+        SDL_RenderLine(renderer, box.x + 6.0f, box.y + 9.5f, box.x + 10.5f, box.y + 4.5f);
+      } else {
+        // The box lights up under the pointer, because a control that never
+        // reacts is one people do not learn is clickable.
+        ui::stroke(renderer, box, hot ? theme().accent : theme().textMuted);
+      }
+    }
+  }
+
+  if(layout.complex) {
+    Rect complexRect {paint.ox, top, columnWidth_, layout.height};
+    if(hooks_.drawComplex) hooks_.drawComplex(block, complexRect);
+    // Drawn, by md4c rather than by the run loop below.
+    return true;
+  }
+
+  // A code block and a block dropped to raw text are both kept inside the
+  // column: a long line scrolls off its own right edge rather than out over
+  // the gutter. `std::optional` because the guard is the scope, and this one
+  // has to end with the block rather than with the loop body it lives in.
+  std::optional<ui::ClipGuard> columnClip;
+  if(block.kind == doc::BlockKind::Code || layout.raw) {
+    columnClip.emplace(renderer, Rect {paint.ox, std::max(page_.y + 1.0f, top), columnWidth_,
+                                       std::min(layout.height, page_.y + page_.h - top)});
+  }
+  for(std::size_t lineIndex = 0; lineIndex < layout.lines.size(); ++lineIndex) {
+    const doc::VisualLine& line = layout.lines[lineIndex];
+    const float lineY = top + line.y;
+    if(lineY + line.height < paint.viewTop || lineY > paint.viewBottom) continue;
+    // A line the *column* broke wears a mark at the point it broke, so a
+    // reader can tell it from a line the file itself ended. Drawn on the line
+    // that wrapped rather than on the one that continues it, at the trailing
+    // edge, which is where the eye is when it runs out of room.
+    if(lineIndex + 1 < layout.lines.size() && layout.lines[lineIndex + 1].continuation) {
+      const float size = std::max(6.0f, line.height * 0.45f);
+      const float markX = paint.ox + columnWidth_ - size - 2.0f;
+      // Only where it has somewhere to go. A code line keeps
+      // `doc::kWrapMarkReserve` clear for it; a paragraph does not, because it
+      // breaks at a space and almost always leaves the room itself -- and on
+      // the rare line that ends flush with the column, a mark drawn over the
+      // last word would say less than the flush edge already does.
+      float lineRight = paint.ox + layout.textLeft;
+      for(const auto& run : layout.runsOf(line)) {
+        lineRight = std::max(lineRight, paint.ox + run.rect.x + run.rect.w);
+      }
+      if(lineRight <= markX - 2.0f) {
+        ui::drawWrapGlyph(renderer,
+                          {markX, std::round(lineY + (line.height - size) / 2.0f), size, size},
+                          theme().textDisabled);
+      }
+    }
+    for(const auto& run : layout.runsOf(line)) {
+      if(run.text.empty()) continue;
+      ++runs;
+      const ui::TextStyle style = toTextStyle(run.style);
+      const float x = paint.ox + run.rect.x;
+      if(run.role == doc::TextRole::Code && !run.isMarker) {
+        fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f}, theme().codeBackground);
+      }
+      SDL_Color ink = colorFor(run.role, block.kind);
+      // A ticked task is done being read. The layout already struck it
+      // through; muting the ink is the other half of saying so.
+      if(block.kind == doc::BlockKind::Todo && block.checked && !layout.revealed &&
+         run.role == doc::TextRole::Body) {
+        ink = theme().textMuted;
+      }
+      // A callout's head line is its name, so it is drawn in the kind's own
+      // colour rather than in the muted ink the rest of a quote takes.
+      if(layout.calloutTitle && run.role == doc::TextRole::Body) {
+        ink = ui::calloutStyle(block.info(document_.source())).accent;
+      }
+      text.draw(run.text, x, lineY, ink, style);
+      if(run.style.strike) {
+        hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);
+      }
+      if(run.linkIndex >= 0 && run.linkIndex < static_cast<int>(layout.links.size())) {
+        // No rule under an image's caption: the picture below it is the
+        // affordance, and an underline there reads as a stray link.
+        if(run.role != doc::TextRole::ImageAlt) {
+          hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accent);
+        }
+        const bool wiki = run.role == doc::TextRole::WikiLink ||
+                          run.role == doc::TextRole::WikiLinkUnresolved;
+        links_.push_back({{x, lineY, run.rect.w, line.height},
+                          layout.links[static_cast<std::size_t>(run.linkIndex)], wiki});
+      }
+    }
+  }
+
+  // The pictures under the block. Their boxes were reserved by the layout, so
+  // this is a blit at a rect that is already right rather than a second
+  // measure of the same file.
+  for(const auto& image : layout.images) {
+    if(image.rect.w <= 0.0f || image.rect.h <= 0.0f) continue;
+    const Rect box {paint.ox + image.rect.x, top + image.rect.y, image.rect.w, image.rect.h};
+    if(box.y + box.h < paint.viewTop || box.y > paint.viewBottom) continue;
+    if(hooks_.drawImage) hooks_.drawImage(image.target, box);
+    links_.push_back({box, image.target, false});
+  }
+  return true;
+}
+
 void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t caret, const PageSelection& selection,
                     bool focused, std::span<const util::TextMatch> findMatches,
                     std::size_t activeMatch) {
@@ -120,141 +267,13 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   perf::addCounter(perf::CounterId::PageBlocksVisited, lastBlock - firstBlock);
   std::size_t blocksDrawn = 0;
   std::size_t runsDrawn = 0;
+  BlockPaint paint;
+  paint.ox = ox;
+  paint.oy = oy;
+  paint.viewTop = viewTop;
+  paint.viewBottom = viewBottom;
   for(std::size_t i = firstBlock; i < lastBlock; ++i) {
-    const doc::SourceBlock& block = blocks[i];
-    const doc::BlockLayout& layout = document_.layout(i);
-    const float top = oy + document_.blockTop(i);
-    if(top + layout.height < viewTop || top > viewBottom) continue;
-    ++blocksDrawn;
-
-    const float left = ox + layout.indent;
-    const float bodyLine = layout.lines.empty() ? 0.0f : layout.lines.front().height;
-
-    // List chrome stands in for the marker text while the marker is hidden.
-    if(!layout.revealed && !layout.raw && bodyLine > 0.0f) {
-      const float markerY = top + (layout.lines.empty() ? 0.0f : layout.lines.front().y);
-      if(block.kind == doc::BlockKind::Bullet) {
-        ui::TextStyle style;
-        style.size = ui::type().body;
-        text.draw("•", left + 6.0f, markerY, theme().textSecondary, style);
-      } else if(block.kind == doc::BlockKind::Ordered) {
-        ui::TextStyle style;
-        style.size = ui::type().body;
-        const auto label = std::to_string(block.ordinal > 0 ? block.ordinal : 1) + ".";
-        text.draw(label, left + 2.0f, markerY, theme().textSecondary, style);
-      } else if(block.kind == doc::BlockKind::Todo) {
-        Rect box {left + 3.0f, markerY + 4.0f, 14.0f, 14.0f};
-        // A generous hit area: the drawn box is deliberately small.
-        const Rect hit {box.x - 4.0f, box.y - 4.0f, box.w + 8.0f, box.h + 8.0f};
-        checkboxes_.push_back({hit, block.start});
-        // Including on a read-only page: a task is a control there too, and it
-        // ticks. It used not to, and the hover was suppressed for exactly that
-        // reason -- a box that lights up and then does nothing is worse than
-        // one that never invited the click.
-        const bool hot = ui::contains(hit, pointerX_, pointerY_);
-        if(block.checked) {
-          fill(renderer, box, theme().accent);
-          const SDL_Color tick = theme().onAccent;
-          SDL_SetRenderDrawColor(renderer, tick.r, tick.g, tick.b, tick.a);
-          SDL_RenderLine(renderer, box.x + 3.5f, box.y + 7.0f, box.x + 6.0f, box.y + 9.5f);
-          SDL_RenderLine(renderer, box.x + 6.0f, box.y + 9.5f, box.x + 10.5f, box.y + 4.5f);
-        } else {
-          // The box lights up under the pointer, because a control that never
-          // reacts is one people do not learn is clickable.
-          ui::stroke(renderer, box, hot ? theme().accent : theme().textMuted);
-        }
-      }
-    }
-
-    if(layout.complex) {
-      Rect complexRect {ox, top, columnWidth_, layout.height};
-      if(hooks_.drawComplex) hooks_.drawComplex(block, complexRect);
-      continue;
-    }
-
-    // A code block and a block dropped to raw text are both kept inside the
-    // column: a long line scrolls off its own right edge rather than out over
-    // the gutter. `std::optional` because the guard is the scope, and this one
-    // has to end with the block rather than with the loop body it lives in.
-    std::optional<ui::ClipGuard> columnClip;
-    if(block.kind == doc::BlockKind::Code || layout.raw) {
-      columnClip.emplace(renderer, Rect {ox, std::max(page_.y + 1.0f, top), columnWidth_,
-                                         std::min(layout.height, page_.y + page_.h - top)});
-    }
-    for(std::size_t lineIndex = 0; lineIndex < layout.lines.size(); ++lineIndex) {
-      const doc::VisualLine& line = layout.lines[lineIndex];
-      const float lineY = top + line.y;
-      if(lineY + line.height < viewTop || lineY > viewBottom) continue;
-      // A line the *column* broke wears a mark at the point it broke, so a
-      // reader can tell it from a line the file itself ended. Drawn on the line
-      // that wrapped rather than on the one that continues it, at the trailing
-      // edge, which is where the eye is when it runs out of room.
-      if(lineIndex + 1 < layout.lines.size() && layout.lines[lineIndex + 1].continuation) {
-        const float size = std::max(6.0f, line.height * 0.45f);
-        const float markX = ox + columnWidth_ - size - 2.0f;
-        // Only where it has somewhere to go. A code line keeps
-        // `doc::kWrapMarkReserve` clear for it; a paragraph does not, because it
-        // breaks at a space and almost always leaves the room itself -- and on
-        // the rare line that ends flush with the column, a mark drawn over the
-        // last word would say less than the flush edge already does.
-        float lineRight = ox + layout.textLeft;
-        for(const auto& run : layout.runsOf(line)) {
-          lineRight = std::max(lineRight, ox + run.rect.x + run.rect.w);
-        }
-        if(lineRight <= markX - 2.0f) {
-          ui::drawWrapGlyph(renderer,
-                            {markX, std::round(lineY + (line.height - size) / 2.0f), size, size},
-                            theme().textDisabled);
-        }
-      }
-      for(const auto& run : layout.runsOf(line)) {
-        if(run.text.empty()) continue;
-        ++runsDrawn;
-        const ui::TextStyle style = toTextStyle(run.style);
-        const float x = ox + run.rect.x;
-        if(run.role == doc::TextRole::Code && !run.isMarker) {
-          fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f}, theme().codeBackground);
-        }
-        SDL_Color ink = colorFor(run.role, block.kind);
-        // A ticked task is done being read. The layout already struck it
-        // through; muting the ink is the other half of saying so.
-        if(block.kind == doc::BlockKind::Todo && block.checked && !layout.revealed &&
-           run.role == doc::TextRole::Body) {
-          ink = theme().textMuted;
-        }
-        // A callout's head line is its name, so it is drawn in the kind's own
-        // colour rather than in the muted ink the rest of a quote takes.
-        if(layout.calloutTitle && run.role == doc::TextRole::Body) {
-          ink = ui::calloutStyle(block.info(document_.source())).accent;
-        }
-        text.draw(run.text, x, lineY, ink, style);
-        if(run.style.strike) {
-          hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);
-        }
-        if(run.linkIndex >= 0 && run.linkIndex < static_cast<int>(layout.links.size())) {
-          // No rule under an image's caption: the picture below it is the
-          // affordance, and an underline there reads as a stray link.
-          if(run.role != doc::TextRole::ImageAlt) {
-            hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accent);
-          }
-          const bool wiki = run.role == doc::TextRole::WikiLink ||
-                            run.role == doc::TextRole::WikiLinkUnresolved;
-          links_.push_back({{x, lineY, run.rect.w, line.height},
-                            layout.links[static_cast<std::size_t>(run.linkIndex)], wiki});
-        }
-      }
-    }
-
-    // The pictures under the block. Their boxes were reserved by the layout, so
-    // this is a blit at a rect that is already right rather than a second
-    // measure of the same file.
-    for(const auto& image : layout.images) {
-      if(image.rect.w <= 0.0f || image.rect.h <= 0.0f) continue;
-      const Rect box {ox + image.rect.x, top + image.rect.y, image.rect.w, image.rect.h};
-      if(box.y + box.h < viewTop || box.y > viewBottom) continue;
-      if(hooks_.drawImage) hooks_.drawImage(image.target, box);
-      links_.push_back({box, image.target, false});
-    }
+    if(drawBlock(renderer, text, i, paint, runsDrawn)) ++blocksDrawn;
   }
   perf::addCounter(perf::CounterId::PageBlocksDrawn, blocksDrawn);
   perf::addCounter(perf::CounterId::PageRunsDrawn, runsDrawn);

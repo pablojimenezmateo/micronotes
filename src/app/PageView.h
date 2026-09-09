@@ -314,6 +314,15 @@ private:
   // viewport's worth rather than the document's.
   std::pair<std::size_t, std::size_t> visibleBlocks() const;
   // Backgrounds and rules, drawn under the text of every visible block.
+  // What a block's paint needs that does not change from one block to the next.
+  struct BlockPaint {
+    float ox = 0.0f;
+    float oy = 0.0f;
+    float viewTop = 0.0f;
+    float viewBottom = 0.0f;
+  };
+  bool drawBlock(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t index,
+                 const BlockPaint& paint, std::size_t& runs);
   void drawBlockDecorations(SDL_Renderer* renderer, ui::TextRenderer& text);
   // The find matches, banded to the blocks on screen. Kept out of `draw`
   // because the interesting part is what it does *not* do: it builds a rect
