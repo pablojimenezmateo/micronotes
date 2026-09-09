@@ -4,6 +4,7 @@
 #include "app/EditCommands.h"
 #include "app/Fields.h"
 #include "app/FocusedEdits.h"
+#include "app/EditCommands.h"
 #include "app/Shell.h"
 #include "app/SettingsPane.h"
 #include "ui/Actions.h"
@@ -172,4 +173,71 @@ MICRONOTES_TEST(block_kind_shortcut_rows_name_the_shape_they_make) {
     micronotes::tests::require(found, std::string("no shortcut row names the shape \"") +
                                         entry.label + "\" that a digit is bound to");
   }
+}
+
+// Copy and cut over a block selection.
+//
+// These two are a pair, and they had drifted apart: copy took whole blocks and
+// cut fell through every branch and did nothing. Silently -- there is no editor
+// selection while blocks are selected, because `selectBlockAtCursor` clears it,
+// so cut's first arm was false and its second looked for a one-line field that
+// is not focused either. The clipboard cannot be read in a test, so these
+// assert on the buffer and the status line, which is what the reader sees.
+namespace {
+
+// A shell with a note whose blocks can be selected.
+void openTwoBlocks(UiRuntime& ui) {
+  ui.editor.setText("First block.\n\nSecond block.\n");
+  ui.focus = FocusArea::Editor;
+  ui.editor.moveCursor(0);
+  micronotes::app::selectBlockAtCursor(ui);
+}
+
+}
+
+MICRONOTES_TEST(focused_edits_copying_a_block_selection_leaves_the_note_alone) {
+  UiRuntime ui;
+  openTwoBlocks(ui);
+  const std::string before = ui.editor.text();
+  copySelectionInFocus(ui);
+  MICRONOTES_REQUIRE(ui.editor.text() == before);
+  // Either it reached the clipboard or it said why; what it must not do is
+  // nothing at all.
+  MICRONOTES_REQUIRE(!ui.status.text.empty());
+}
+
+MICRONOTES_TEST(focused_edits_cutting_a_block_selection_removes_it_from_the_note) {
+  UiRuntime ui;
+  openTwoBlocks(ui);
+  MICRONOTES_REQUIRE(ui.blockSelection.active);
+  const std::string before = ui.editor.text();
+
+  cutSelectionInFocus(ui);
+
+  // The block is gone from the buffer. Before this arm existed the text was
+  // untouched and the status line said nothing.
+  micronotes::tests::require(ui.editor.text() != before,
+                             "cut left the note unchanged with blocks selected");
+  MICRONOTES_REQUIRE(ui.editor.text().find("First block.") == std::string::npos);
+  MICRONOTES_REQUIRE(ui.editor.text().find("Second block.") != std::string::npos);
+  MICRONOTES_REQUIRE(!ui.status.text.empty());
+}
+
+// The pair agrees about *what* is selected: whatever copy would take is what
+// cut removes. That is the invariant the two branches now share a helper for.
+MICRONOTES_TEST(focused_edits_cut_removes_exactly_what_copy_would_take) {
+  UiRuntime copied;
+  openTwoBlocks(copied);
+  const std::string whole = copied.editor.text();
+
+  UiRuntime cut;
+  openTwoBlocks(cut);
+  cutSelectionInFocus(cut);
+  const std::string remaining = cut.editor.text();
+
+  // What cut removed is a prefix of the note, and it is the whole first block
+  // rather than the fragment between two carets.
+  MICRONOTES_REQUIRE(remaining.size() < whole.size());
+  MICRONOTES_REQUIRE(whole.find(remaining) != std::string::npos ||
+                     whole.rfind(remaining) != std::string::npos);
 }

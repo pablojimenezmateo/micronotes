@@ -28,13 +28,29 @@ void selectAllInFocus(UiRuntime& ui) {
   }
 }
 
+namespace {
+
+// The source the selected blocks cover, whole. `blockSelectionCarets` gives two
+// offsets inside the first and last block; the text is from the start of one to
+// the end of the other, so a copy takes whole blocks rather than the fragment
+// between two carets.
+std::string_view selectedBlockText(const UiRuntime& ui) {
+  const auto [from, to] = blockSelectionCarets(ui);
+  const EditorBlocks blocks(ui);
+  const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
+  const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end();
+  return std::string_view(ui.editor.text()).substr(start, end - start);
+}
+
+bool blocksAreSelected(const UiRuntime& ui) {
+  return ui.focus == FocusArea::Editor && ui.blockSelection.active;
+}
+
+}
+
 void copySelectionInFocus(UiRuntime& ui) {
-  if(ui.focus == FocusArea::Editor && ui.blockSelection.active) {
-    const auto [from, to] = blockSelectionCarets(ui);
-    const EditorBlocks blocks(ui);
-    const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
-    const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end();
-    ui.status = setClipboardText(std::string_view(ui.editor.text()).substr(start, end - start))
+  if(blocksAreSelected(ui)) {
+    ui.status = setClipboardText(selectedBlockText(ui))
                   ? "Copied block" : "Copy failed: " + std::string(SDL_GetError());
   } else if(readsTheNote(ui.focus) && ui.editor.hasSelection()) {
     // `Viewer` as well as `Editor`: the reading pane makes a selection in the
@@ -49,7 +65,18 @@ void copySelectionInFocus(UiRuntime& ui) {
 }
 
 void cutSelectionInFocus(UiRuntime& ui) {
-  if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
+  // Blocks first, and for the same reason copy takes them first: with a block
+  // selection up there is no editor selection at all -- `selectBlockAtCursor`
+  // clears it -- so without this arm Ctrl+X fell through every branch and did
+  // nothing, silently, while Ctrl+C copied the blocks.
+  if(blocksAreSelected(ui)) {
+    const bool copied = setClipboardText(selectedBlockText(ui));
+    // The same deletion `performBlockCommand("delete")` runs, so cut is copy
+    // and delete rather than a third opinion about what a block selection is.
+    performBlockCommand(ui, "delete");
+    if(!copied) ui.status = "Cut copied text failed: " + std::string(SDL_GetError());
+    else ui.status = "Cut block";
+  } else if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
     const bool copied = setClipboardText(ui.editor.selectedText());
     ui.editor.eraseSelection();
     ui.markEdited();
