@@ -306,30 +306,3 @@ what would make a *screenshot* of a caret reproducible, which is the same
 problem one step further on. That is a seam through `CaretBlink` and the
 capture path, and it is worth doing with `TD-21`'s readiness signal, which is
 in the same file for the same reason.
-
-## TD-33 — `AppState` is 55 methods, and one of them is the note-writing path
-
-`src/ui/AppState.h`.
-
-The reach-through half is paid. `workspace()` is const-only now and the sites
-that write say `editWorkspace()`, so `AppState`'s encapsulation is no longer
-"whatever `WorkspaceModel` chooses to make public at 62 call sites"; there are
-fourteen writers and the compiler names them. The pane mode -- the question the
-shell asks most, and asked three objects deep at 21 sites -- is
-`UiRuntime::paneMode()`.
-
-**What is left, and what it costs today.** The 55 methods themselves are mostly
-fine: `AppState` is an aggregate root and most of them are one-line delegations
-to `library_`, `index_` or `organization_`. What is not fine is that a reader
-cannot tell which is which, and that the note-writing path --
-`saveSelectedNote`, which stats a file before overwriting it so that an edit
-made in another program is filed beside the note rather than destroyed, and
-which `AGENTS.md` singles out as the rule never to bypass -- sits in the same
-list as `toggleFavorite`.
-
-**Why it has not been paid.** Splitting the class is the wrong move: the
-selection, the library, the index and the workspace really are one thing with
-one revision counter, and pulling them apart would put the revision in two
-places. What the remaining cost wants is an ordering and a boundary inside the
-header -- the writes that go to disk, named as such and grouped -- rather than
-a new type.
