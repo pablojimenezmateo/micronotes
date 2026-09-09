@@ -107,126 +107,171 @@ Prescan prescan(std::string_view text) {
   return found;
 }
 
-}
 
-const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_t base,
-                                               InlineScratch* scratch) {
-  std::vector<SourceSpan>& spans = scratch->spans;
-  spans.clear();
-  if(text.empty()) return spans;
-  const Prescan found = prescan(text);
-  if(!found.markup && !found.scheme) {
-    perf::addCounter(perf::CounterId::LayoutInlineScanRejects);
-    return spans;
+// One call of `scanInlinesInto`, with the six passes as its methods.
+//
+// It was a 369-line function, the largest in the tree, and one algorithm rather
+// than six independent ones: every pass reads and writes the same `masked`
+// array, and **the order between them is the design**. Each pass comment below
+// says what it must come after and why -- wikilinks before links because
+// `[[a](b)]` is otherwise a link either way round; bare URLs after links so a
+// link's own target does not become a second link, and before emphasis so a
+// query string's underscores are not offered to it.
+//
+// So the shape is `DocumentLayout::UpdatePass`'s, for the same reason and with
+// the same rule: **the pass owns nothing.** `spans`, `masked`, `delimiters` and
+// `ends` are the caller's scratch buffers, patched in place through `scratch_`
+// so that a document's worth of blocks allocates them once rather than once
+// each. What lives here is only the bookkeeping that was on the stack before,
+// and it lives for one call.
+class InlineScanPass {
+public:
+  InlineScanPass(std::string_view text, std::size_t base, InlineScratch* scratch)
+      : text_(text), base_(base), scratch_(scratch), spans_(scratch->spans),
+        masked_(scratch->masked) {}
+
+  // Whether anything was found. False leaves `spans` empty, which is the
+  // answer for the four blocks in five with no markup in them.
+  bool run() {
+    spans_.clear();
+    if(text_.empty()) return false;
+    found_ = prescan(text_);
+    if(!found_.markup && !found_.scheme) {
+      perf::addCounter(perf::CounterId::LayoutInlineScanRejects);
+      return false;
+    }
+
+
+    // Bytes that structural scanning has claimed. Emphasis delimiters are only
+    // recognised outside them. Reassigned rather than reallocated: `assign` keeps
+    // the capacity a previous block grew, so a document's worth of scanning takes
+    // one allocation instead of one per block.
+    //
+    // Left empty on the URL-only route, where no pass claims anything: `mask`
+    // and `claimed` both read its size, so an empty one is simply a block in
+    // which nothing has been spoken for.
+    std::vector<char>& masked_ = scratch_->masked;
+    if(found_.markup) masked_.assign(text_.size(), 0);
+    else masked_.clear();
+
+    // The order is the design; see the class comment.
+    if(found_.markup) {
+      scanCodeAndAutolinks();
+      scanWikiLinks();
+      scanFootnoteRefs();
+      scanLinksAndImages();
+    }
+    if(found_.scheme) scanBareUrls();
+    if(found_.markup) scanEmphasis();
+    assignDepths();
+    return true;
   }
 
-  // Bytes that structural scanning has claimed. Emphasis delimiters are only
-  // recognised outside them. Reassigned rather than reallocated: `assign` keeps
-  // the capacity a previous block grew, so a document's worth of scanning takes
-  // one allocation instead of one per block.
-  //
-  // Left empty on the URL-only route, where no pass claims anything: `mask`
-  // and `claimed` both read its size, so an empty one is simply a block in
-  // which nothing has been spoken for.
-  std::vector<char>& masked = scratch->masked;
-  if(found.markup) masked.assign(text.size(), 0);
-  else masked.clear();
-  const auto mask = [&](std::size_t from, std::size_t to) {
-    for(std::size_t i = from; i < to && i < masked.size(); ++i) masked[i] = 1;
-  };
-  const auto claimed = [&](std::size_t i) { return i < masked.size() && masked[i] != 0; };
-  const auto add = [&](SourceSpan span) {
-    span.start += base;
-    span.end += base;
-    span.contentStart += base;
-    span.contentEnd += base;
-    span.openStart += base;
-    span.openEnd += base;
-    span.closeStart += base;
-    span.closeEnd += base;
-    spans.push_back(std::move(span));
-  };
+private:
+  void mask(std::size_t from, std::size_t to) {
+    for(std::size_t i = from; i < to && i < masked_.size(); ++i) masked_[i] = 1;
+  }
+
+  bool claimed(std::size_t i) const {
+    return i < masked_.size() && masked_[i] != 0;
+  }
+
+  // Every span is recorded in block-relative offsets and shifted to the
+  // document's once, here, so no pass has to remember to do it.
+  void add(SourceSpan span) {
+    span.start += base_;
+    span.end += base_;
+    span.contentStart += base_;
+    span.contentEnd += base_;
+    span.openStart += base_;
+    span.openEnd += base_;
+    span.closeStart += base_;
+    span.closeEnd += base_;
+    spans_.push_back(std::move(span));
+  }
 
   // Pass 1: escapes, code spans and autolinks. These win over everything.
   //
   // Every pass from here to pass 4 looks for a markup byte, so a block whose
   // only find was a `://` skips all of them and runs the URL pass alone.
-  for(std::size_t i = 0; found.markup && i < text.size();) {
-    const char c = text[i];
-    if(c == '\\' && i + 1 < text.size() && isAsciiPunct(text[i + 1])) {
-      SourceSpan span;
-      span.kind = SpanKind::Escape;
-      span.start = i;
-      span.end = i + 2;
-      span.openStart = i;
-      span.openEnd = i + 1;
-      span.contentStart = i + 1;
-      span.contentEnd = i + 2;
-      span.closeStart = i + 2;
-      span.closeEnd = i + 2;
-      add(std::move(span));
-      mask(i, i + 2);
-      i += 2;
-      continue;
-    }
-    if(c == '`') {
-      std::size_t run = 0;
-      while(i + run < text.size() && text[i + run] == '`') ++run;
-      std::size_t scan = i + run;
-      std::size_t close = std::string_view::npos;
-      while(scan < text.size()) {
-        if(text[scan] != '`') {
-          ++scan;
-          continue;
-        }
-        std::size_t closeRun = 0;
-        while(scan + closeRun < text.size() && text[scan + closeRun] == '`') ++closeRun;
-        if(closeRun == run) {
-          close = scan;
-          break;
-        }
-        scan += closeRun;
-      }
-      if(close == std::string_view::npos) {
-        i += run;
-        continue;
-      }
-      SourceSpan span;
-      span.kind = SpanKind::Code;
-      span.start = i;
-      span.end = close + run;
-      span.openStart = i;
-      span.openEnd = i + run;
-      span.contentStart = i + run;
-      span.contentEnd = close;
-      span.closeStart = close;
-      span.closeEnd = close + run;
-      add(std::move(span));
-      mask(i, close + run);
-      i = close + run;
-      continue;
-    }
-    if(c == '<') {
-      const auto close = text.find('>', i + 1);
-      if(close != std::string_view::npos && looksLikeAutolink(text.substr(i + 1, close - i - 1))) {
+  void scanCodeAndAutolinks() {
+    for(std::size_t i = 0; i < text_.size();) {
+      const char c = text_[i];
+      if(c == '\\' && i + 1 < text_.size() && isAsciiPunct(text_[i + 1])) {
         SourceSpan span;
-        span.kind = SpanKind::Autolink;
+        span.kind = SpanKind::Escape;
         span.start = i;
-        span.end = close + 1;
+        span.end = i + 2;
         span.openStart = i;
         span.openEnd = i + 1;
         span.contentStart = i + 1;
-        span.contentEnd = close;
-        span.closeStart = close;
-        span.closeEnd = close + 1;
-        span.target = std::string(text.substr(i + 1, close - i - 1));
+        span.contentEnd = i + 2;
+        span.closeStart = i + 2;
+        span.closeEnd = i + 2;
         add(std::move(span));
-        mask(i, close + 1);
-        i = close + 1;
+        mask(i, i + 2);
+        i += 2;
         continue;
       }
+      if(c == '`') {
+        std::size_t run = 0;
+        while(i + run < text_.size() && text_[i + run] == '`') ++run;
+        std::size_t scan = i + run;
+        std::size_t close = std::string_view::npos;
+        while(scan < text_.size()) {
+          if(text_[scan] != '`') {
+            ++scan;
+            continue;
+          }
+          std::size_t closeRun = 0;
+          while(scan + closeRun < text_.size() && text_[scan + closeRun] == '`') ++closeRun;
+          if(closeRun == run) {
+            close = scan;
+            break;
+          }
+          scan += closeRun;
+        }
+        if(close == std::string_view::npos) {
+          i += run;
+          continue;
+        }
+        SourceSpan span;
+        span.kind = SpanKind::Code;
+        span.start = i;
+        span.end = close + run;
+        span.openStart = i;
+        span.openEnd = i + run;
+        span.contentStart = i + run;
+        span.contentEnd = close;
+        span.closeStart = close;
+        span.closeEnd = close + run;
+        add(std::move(span));
+        mask(i, close + run);
+        i = close + run;
+        continue;
+      }
+      if(c == '<') {
+        const auto close = text_.find('>', i + 1);
+        if(close != std::string_view::npos && looksLikeAutolink(text_.substr(i + 1, close - i - 1))) {
+          SourceSpan span;
+          span.kind = SpanKind::Autolink;
+          span.start = i;
+          span.end = close + 1;
+          span.openStart = i;
+          span.openEnd = i + 1;
+          span.contentStart = i + 1;
+          span.contentEnd = close;
+          span.closeStart = close;
+          span.closeEnd = close + 1;
+          span.target = std::string(text_.substr(i + 1, close - i - 1));
+          add(std::move(span));
+          mask(i, close + 1);
+          i = close + 1;
+          continue;
+        }
+      }
+      ++i;
     }
-    ++i;
   }
 
   // Pass 2: wikilinks, before ordinary links, because `[[a]]` would otherwise
@@ -235,56 +280,58 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   //
   // The whole span is masked, unlike a link: what is between the brackets is a
   // note's title, so a `*` in it is part of the name rather than emphasis.
-  for(std::size_t i = 0; found.markup && i + 3 < text.size();) {
-    if(masked[i] || text[i] != '[' || text[i + 1] != '[' || masked[i + 1]) {
-      ++i;
-      continue;
-    }
-    std::size_t close = std::string_view::npos;
-    for(std::size_t scan = i + 2; scan + 1 < text.size(); ++scan) {
-      if(masked[scan]) continue;
-      // A `[` inside would be someone typing, not a nested link: there is no
-      // such thing, so the first `]]` closes.
-      if(text[scan] == ']' && text[scan + 1] == ']') {
-        close = scan;
-        break;
+  void scanWikiLinks() {
+    for(std::size_t i = 0; i + 3 < text_.size();) {
+      if(masked_[i] || text_[i] != '[' || text_[i + 1] != '[' || masked_[i + 1]) {
+        ++i;
+        continue;
       }
-    }
-    if(close == std::string_view::npos || close == i + 2) {
-      // Unterminated, or empty. Leave the brackets as the literal text they are.
-      ++i;
-      continue;
-    }
-    const std::size_t innerStart = i + 2;
-    // The first bar splits the target from what to show instead of it.
-    std::size_t bar = std::string_view::npos;
-    for(std::size_t scan = innerStart; scan < close; ++scan) {
-      if(text[scan] == '|') {
-        bar = scan;
-        break;
+      std::size_t close = std::string_view::npos;
+      for(std::size_t scan = i + 2; scan + 1 < text_.size(); ++scan) {
+        if(masked_[scan]) continue;
+        // A `[` inside would be someone typing, not a nested link: there is no
+        // such thing, so the first `]]` closes.
+        if(text_[scan] == ']' && text_[scan + 1] == ']') {
+          close = scan;
+          break;
+        }
       }
+      if(close == std::string_view::npos || close == i + 2) {
+        // Unterminated, or empty. Leave the brackets as the literal text they are.
+        ++i;
+        continue;
+      }
+      const std::size_t innerStart = i + 2;
+      // The first bar splits the target from what to show instead of it.
+      std::size_t bar = std::string_view::npos;
+      for(std::size_t scan = innerStart; scan < close; ++scan) {
+        if(text_[scan] == '|') {
+          bar = scan;
+          break;
+        }
+      }
+      SourceSpan span;
+      span.kind = SpanKind::WikiLink;
+      span.start = i;
+      span.end = close + 2;
+      span.openStart = i;
+      // With an alias, the target and the bar are part of the marker, so hiding
+      // the markers leaves exactly the words the writer chose to show.
+      span.openEnd = bar == std::string_view::npos ? innerStart : bar + 1;
+      span.contentStart = span.openEnd;
+      span.contentEnd = close;
+      span.closeStart = close;
+      span.closeEnd = close + 2;
+      span.target = std::string(text_.substr(innerStart, (bar == std::string_view::npos ? close : bar) - innerStart));
+      // An alias with nothing before the bar has no target to go to.
+      if(span.target.empty()) {
+        ++i;
+        continue;
+      }
+      add(std::move(span));
+      mask(i, close + 2);
+      i = close + 2;
     }
-    SourceSpan span;
-    span.kind = SpanKind::WikiLink;
-    span.start = i;
-    span.end = close + 2;
-    span.openStart = i;
-    // With an alias, the target and the bar are part of the marker, so hiding
-    // the markers leaves exactly the words the writer chose to show.
-    span.openEnd = bar == std::string_view::npos ? innerStart : bar + 1;
-    span.contentStart = span.openEnd;
-    span.contentEnd = close;
-    span.closeStart = close;
-    span.closeEnd = close + 2;
-    span.target = std::string(text.substr(innerStart, (bar == std::string_view::npos ? close : bar) - innerStart));
-    // An alias with nothing before the bar has no target to go to.
-    if(span.target.empty()) {
-      ++i;
-      continue;
-    }
-    add(std::move(span));
-    mask(i, close + 2);
-    i = close + 2;
   }
 
   // Pass 2b: footnote references. Before links, because `[^a]` is a bracket
@@ -294,73 +341,77 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   // The definition it points at is a block of its own, handed to md4c; this is
   // the `[^a]` in the middle of a sentence, and what it needs from the layout
   // is to be a link to the anchor the page records for that definition.
-  for(std::size_t i = 0; found.markup && i + 3 < text.size();) {
-    if(masked[i] || text[i] != '[' || text[i + 1] != '^' || masked[i + 1]) {
-      ++i;
-      continue;
+  void scanFootnoteRefs() {
+    for(std::size_t i = 0; i + 3 < text_.size();) {
+      if(masked_[i] || text_[i] != '[' || text_[i + 1] != '^' || masked_[i + 1]) {
+        ++i;
+        continue;
+      }
+      std::size_t close = i + 2;
+      while(close < text_.size() && text_[close] != ']' && text_[close] != '[' && text_[close] != '\n' &&
+            !masked_[close]) {
+        ++close;
+      }
+      // Empty, unterminated, or `[^a](b)` -- which is a link whose label happens
+      // to start with a caret, and pass 3's business.
+      if(close >= text_.size() || text_[close] != ']' || close == i + 2 ||
+         (close + 1 < text_.size() && (text_[close + 1] == '(' || text_[close + 1] == ':'))) {
+        ++i;
+        continue;
+      }
+      SourceSpan span;
+      span.kind = SpanKind::FootnoteRef;
+      span.start = i;
+      span.end = close + 1;
+      span.openStart = i;
+      span.openEnd = i + 2;
+      span.contentStart = i + 2;
+      span.contentEnd = close;
+      span.closeStart = close;
+      span.closeEnd = close + 1;
+      span.target = "#fn-" + std::string(text_.substr(i + 2, close - i - 2));
+      add(std::move(span));
+      mask(span.openStart, span.openEnd);
+      mask(span.closeStart, span.closeEnd);
+      i = close + 1;
     }
-    std::size_t close = i + 2;
-    while(close < text.size() && text[close] != ']' && text[close] != '[' && text[close] != '\n' &&
-          !masked[close]) {
-      ++close;
-    }
-    // Empty, unterminated, or `[^a](b)` -- which is a link whose label happens
-    // to start with a caret, and pass 3's business.
-    if(close >= text.size() || text[close] != ']' || close == i + 2 ||
-       (close + 1 < text.size() && (text[close + 1] == '(' || text[close + 1] == ':'))) {
-      ++i;
-      continue;
-    }
-    SourceSpan span;
-    span.kind = SpanKind::FootnoteRef;
-    span.start = i;
-    span.end = close + 1;
-    span.openStart = i;
-    span.openEnd = i + 2;
-    span.contentStart = i + 2;
-    span.contentEnd = close;
-    span.closeStart = close;
-    span.closeEnd = close + 1;
-    span.target = "#fn-" + std::string(text.substr(i + 2, close - i - 2));
-    add(std::move(span));
-    mask(span.openStart, span.openEnd);
-    mask(span.closeStart, span.closeEnd);
-    i = close + 1;
   }
 
   // Pass 3: links and images. Only their markers are masked, so emphasis inside
   // a link label still matches.
-  for(std::size_t i = 0; found.markup && i < text.size();) {
-    if(masked[i] || text[i] != '[') {
-      ++i;
-      continue;
+  void scanLinksAndImages() {
+    for(std::size_t i = 0; i < text_.size();) {
+      if(masked_[i] || text_[i] != '[') {
+        ++i;
+        continue;
+      }
+      const bool image = i > 0 && text_[i - 1] == '!' && !masked_[i - 1];
+      const auto labelEnd = matchBracket(text_, masked_, i, '[', ']');
+      if(labelEnd == std::string_view::npos || labelEnd + 1 >= text_.size() || text_[labelEnd + 1] != '(' || masked_[labelEnd + 1]) {
+        ++i;
+        continue;
+      }
+      const auto targetEnd = matchBracket(text_, masked_, labelEnd + 1, '(', ')');
+      if(targetEnd == std::string_view::npos) {
+        ++i;
+        continue;
+      }
+      SourceSpan span;
+      span.kind = image ? SpanKind::Image : SpanKind::Link;
+      span.start = image ? i - 1 : i;
+      span.end = targetEnd + 1;
+      span.openStart = span.start;
+      span.openEnd = i + 1;
+      span.contentStart = i + 1;
+      span.contentEnd = labelEnd;
+      span.closeStart = labelEnd;
+      span.closeEnd = targetEnd + 1;
+      span.target = linkTarget(text_.substr(labelEnd + 2, targetEnd - labelEnd - 2));
+      add(std::move(span));
+      mask(span.openStart, span.openEnd);
+      mask(span.closeStart, span.closeEnd);
+      i = span.contentStart;
     }
-    const bool image = i > 0 && text[i - 1] == '!' && !masked[i - 1];
-    const auto labelEnd = matchBracket(text, masked, i, '[', ']');
-    if(labelEnd == std::string_view::npos || labelEnd + 1 >= text.size() || text[labelEnd + 1] != '(' || masked[labelEnd + 1]) {
-      ++i;
-      continue;
-    }
-    const auto targetEnd = matchBracket(text, masked, labelEnd + 1, '(', ')');
-    if(targetEnd == std::string_view::npos) {
-      ++i;
-      continue;
-    }
-    SourceSpan span;
-    span.kind = image ? SpanKind::Image : SpanKind::Link;
-    span.start = image ? i - 1 : i;
-    span.end = targetEnd + 1;
-    span.openStart = span.start;
-    span.openEnd = i + 1;
-    span.contentStart = i + 1;
-    span.contentEnd = labelEnd;
-    span.closeStart = labelEnd;
-    span.closeEnd = targetEnd + 1;
-    span.target = linkTarget(text.substr(labelEnd + 2, targetEnd - labelEnd - 2));
-    add(std::move(span));
-    mask(span.openStart, span.openEnd);
-    mask(span.closeStart, span.closeEnd);
-    i = span.contentStart;
   }
 
   // Pass 3b: bare URLs, pasted into prose without brackets around them.
@@ -369,114 +420,135 @@ const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_
   // inside one must stay that link's target rather than becoming a second link
   // of its own. Before pass 4, because a query string is full of underscores
   // and every one of them would otherwise be offered to emphasis.
-  for(std::size_t i = 0; found.scheme && i < text.size();) {
-    if(claimed(i) || text[i] != 'h') {
-      ++i;
-      continue;
+  void scanBareUrls() {
+    for(std::size_t i = 0; i < text_.size();) {
+      if(claimed(i) || text_[i] != 'h') {
+        ++i;
+        continue;
+      }
+      const auto url = markdown::bareUrlAt(text_, i);
+      if(url.span == 0) {
+        ++i;
+        continue;
+      }
+      if(url.length > 0) {
+        SourceSpan span;
+        span.kind = SpanKind::Autolink;
+        span.start = i;
+        span.end = i + url.length;
+        // No brackets to hide: the whole span is its own content, which is what
+        // makes this the one link in the shell that reads the same revealed as
+        // it does laid out.
+        span.openStart = i;
+        span.openEnd = i;
+        span.contentStart = i;
+        span.contentEnd = span.end;
+        span.closeStart = span.end;
+        span.closeEnd = span.end;
+        span.target = std::string(text_.substr(i, url.length));
+        add(std::move(span));
+        mask(i, i + url.length);
+      }
+      i += url.span;
     }
-    const auto url = markdown::bareUrlAt(text, i);
-    if(url.span == 0) {
-      ++i;
-      continue;
-    }
-    if(url.length > 0) {
-      SourceSpan span;
-      span.kind = SpanKind::Autolink;
-      span.start = i;
-      span.end = i + url.length;
-      // No brackets to hide: the whole span is its own content, which is what
-      // makes this the one link in the shell that reads the same revealed as
-      // it does laid out.
-      span.openStart = i;
-      span.openEnd = i;
-      span.contentStart = i;
-      span.contentEnd = span.end;
-      span.closeStart = span.end;
-      span.closeEnd = span.end;
-      span.target = std::string(text.substr(i, url.length));
-      add(std::move(span));
-      mask(i, i + url.length);
-    }
-    i += url.span;
   }
 
   // Pass 4: emphasis, strong and strikethrough delimiter runs.
-  std::vector<Delimiter>& open = scratch->delimiters;
-  open.clear();
-  for(std::size_t i = 0; found.markup && i < text.size();) {
-    const char c = text[i];
-    if(masked[i] || (c != '*' && c != '_' && c != '~')) {
-      ++i;
-      continue;
-    }
-    std::size_t length = 0;
-    while(i + length < text.size() && text[i + length] == c && !masked[i + length]) ++length;
-    const char before = i > 0 ? text[i - 1] : ' ';
-    const char after = i + length < text.size() ? text[i + length] : ' ';
-    bool canOpen = !isSpace(after);
-    bool canClose = !isSpace(before);
-    if(c == '_') {
-      // Intraword underscores are literal, so snake_case survives.
-      canOpen = canOpen && !isWordChar(before);
-      canClose = canClose && !isWordChar(after);
-    }
-    if(c == '~') {
-      canOpen = canOpen && length >= 2;
-      canClose = canClose && length >= 2;
-    }
-
-    std::size_t remaining = length;
-    if(canClose) {
-      while(remaining > 0 && !open.empty()) {
-        auto found = open.rend();
-        for(auto it = open.rbegin(); it != open.rend(); ++it) {
-          if(it->marker == c) {
-            found = it;
-            break;
-          }
-        }
-        if(found == open.rend()) break;
-        auto& opener = *found;
-        const std::size_t use = (remaining >= 2 && opener.length >= 2) ? 2 : 1;
-        if(c == '~' && use < 2) break;
-        SourceSpan span;
-        span.kind = use == 2 ? (c == '~' ? SpanKind::Strike : SpanKind::Strong) : SpanKind::Emphasis;
-        span.openStart = opener.pos + opener.length - use;
-        span.openEnd = opener.pos + opener.length;
-        span.closeStart = i + (length - remaining);
-        span.closeEnd = span.closeStart + use;
-        span.contentStart = span.openEnd;
-        span.contentEnd = span.closeStart;
-        span.start = span.openStart;
-        span.end = span.closeEnd;
-        if(span.contentStart > span.contentEnd) break;
-        add(std::move(span));
-        opener.length -= use;
-        remaining -= use;
-        // Delimiters opened inside the span can no longer match anything.
-        const auto keep = static_cast<std::size_t>(std::distance(found, open.rend()));
-        open.resize(keep);
-        if(open.back().length == 0) open.pop_back();
+  void scanEmphasis() {
+    std::vector<Delimiter>& open = scratch_->delimiters;
+    open.clear();
+    for(std::size_t i = 0; i < text_.size();) {
+      const char c = text_[i];
+      if(masked_[i] || (c != '*' && c != '_' && c != '~')) {
+        ++i;
+        continue;
       }
+      std::size_t length = 0;
+      while(i + length < text_.size() && text_[i + length] == c && !masked_[i + length]) ++length;
+      const char before = i > 0 ? text_[i - 1] : ' ';
+      const char after = i + length < text_.size() ? text_[i + length] : ' ';
+      bool canOpen = !isSpace(after);
+      bool canClose = !isSpace(before);
+      if(c == '_') {
+        // Intraword underscores are literal, so snake_case survives.
+        canOpen = canOpen && !isWordChar(before);
+        canClose = canClose && !isWordChar(after);
+      }
+      if(c == '~') {
+        canOpen = canOpen && length >= 2;
+        canClose = canClose && length >= 2;
+      }
+
+      std::size_t remaining = length;
+      if(canClose) {
+        while(remaining > 0 && !open.empty()) {
+          auto found_ = open.rend();
+          for(auto it = open.rbegin(); it != open.rend(); ++it) {
+            if(it->marker == c) {
+              found_ = it;
+              break;
+            }
+          }
+          if(found_ == open.rend()) break;
+          auto& opener = *found_;
+          const std::size_t use = (remaining >= 2 && opener.length >= 2) ? 2 : 1;
+          if(c == '~' && use < 2) break;
+          SourceSpan span;
+          span.kind = use == 2 ? (c == '~' ? SpanKind::Strike : SpanKind::Strong) : SpanKind::Emphasis;
+          span.openStart = opener.pos + opener.length - use;
+          span.openEnd = opener.pos + opener.length;
+          span.closeStart = i + (length - remaining);
+          span.closeEnd = span.closeStart + use;
+          span.contentStart = span.openEnd;
+          span.contentEnd = span.closeStart;
+          span.start = span.openStart;
+          span.end = span.closeEnd;
+          if(span.contentStart > span.contentEnd) break;
+          add(std::move(span));
+          opener.length -= use;
+          remaining -= use;
+          // Delimiters opened inside the span can no longer match anything.
+          const auto keep = static_cast<std::size_t>(std::distance(found_, open.rend()));
+          open.resize(keep);
+          if(open.back().length == 0) open.pop_back();
+        }
+      }
+      if(remaining > 0 && canOpen) {
+        open.push_back({i + (length - remaining), remaining, c});
+      }
+      i += length;
     }
-    if(remaining > 0 && canOpen) {
-      open.push_back({i + (length - remaining), remaining, c});
-    }
-    i += length;
   }
 
-  std::sort(spans.begin(), spans.end(), [](const SourceSpan& a, const SourceSpan& b) {
-    if(a.start != b.start) return a.start < b.start;
-    return a.end > b.end;
-  });
-  std::vector<std::size_t>& ends = scratch->ends;
-  ends.clear();
-  for(auto& span : spans) {
-    while(!ends.empty() && ends.back() <= span.start) ends.pop_back();
-    span.depth = static_cast<int>(ends.size());
-    ends.push_back(span.end);
+  // Nesting depth, from the sorted spans: outermost first, and a span's depth
+  // is how many still-open spans enclose it.
+  void assignDepths() {
+    std::sort(spans_.begin(), spans_.end(), [](const SourceSpan& a, const SourceSpan& b) {
+      if(a.start != b.start) return a.start < b.start;
+      return a.end > b.end;
+    });
+    std::vector<std::size_t>& ends = scratch_->ends;
+    ends.clear();
+    for(auto& span : spans_) {
+      while(!ends.empty() && ends.back() <= span.start) ends.pop_back();
+      span.depth = static_cast<int>(ends.size());
+      ends.push_back(span.end);
+    }
   }
-  return spans;
+
+  std::string_view text_;
+  std::size_t base_ = 0;
+  InlineScratch* scratch_ = nullptr;
+  std::vector<SourceSpan>& spans_;
+  std::vector<char>& masked_;
+  Prescan found_;
+};
+}
+
+const std::vector<SourceSpan>& scanInlinesInto(std::string_view text, std::size_t base,
+                                               InlineScratch* scratch) {
+  InlineScanPass(text, base, scratch).run();
+  return scratch->spans;
 }
 
 std::vector<SourceSpan> scanInlines(std::string_view text, std::size_t base) {
