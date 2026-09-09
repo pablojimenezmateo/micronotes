@@ -132,8 +132,9 @@ float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metric
 using SnippetMeasure = std::function<int(std::string_view)>;
 
 // The results the sidebar is listing, recomputed only when the question or the
-// library has changed. Each query is a hit on SQLite.
-const std::vector<library::SearchResult>& searchResults(UiRuntime& ui);
+// library has changed. Each query is a hit on SQLite, plus a scan of the
+// companion names.
+const SidebarSearch& searchResults(UiRuntime& ui);
 
 // Fills `ui.sidebar.rows` for a list occupying `rect`, and records that rect as
 // the one the rows were placed against, reusing the standing list
@@ -206,11 +207,19 @@ std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, float x, float y);
 // One function because the motion path highlights the target and the release
 // path acts on it, and the two disagreeing is a note filed somewhere the reader
 // was not shown.
+//
+// A row in a files area answers with `filesDir` instead: the directory a
+// `FilesFolder` row is, or the one a `File` row sits in. What may land there is
+// the release handler's decision -- a companion may, a note or a notebook may
+// not -- because the target is the same either way and the refusal is about
+// what is being carried.
 struct SidebarDropTarget {
   bool valid = false;
   std::size_t row = 0;
   // Where the dragged thing goes. Empty is the library root.
   std::filesystem::path folder;
+  // Set instead of `folder` when the row is inside a files area.
+  std::filesystem::path filesDir;
 };
 
 SidebarDropTarget sidebarDropTargetAt(const UiRuntime& ui, float x, float y);

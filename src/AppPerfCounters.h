@@ -26,6 +26,15 @@
   X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
   X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \
+  /* Entries seen under a `files/` directory -- the companion files beside a   */   \
+  /* notebook's notes. They ride the same walk as the notes, so this against  */   \
+  /* directory_entries_visited says how much of the tree is files rather than */   \
+  /* notes; and files_dir_refreshes counts the watcher re-walking one such     */   \
+  /* directory on its own, which is what a PDF dropped into a folder should   */   \
+  /* cost -- not an index_refresh_call. The two climbing together means the   */   \
+  /* narrow path has fallen back to the wide one.                              */   \
+  X(LibraryCompanionEntriesVisited, "library.companion_entries_visited")               \
+  X(LibraryFilesDirRefreshes, "library.files_dir_refreshes")                           \
   /* Note-list rows read back out of the index instead of off the disk. The    */   \
   /* sidebar's list needs an id, a path, a title, tags and an icon per note,   */   \
   /* and the refresh has just read every changed file and written all five to  */   \

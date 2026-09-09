@@ -1,6 +1,7 @@
 #include "app/ContextMenus.h"
 
 #include "app/Shell.h"
+#include "library/Library.h"
 
 #include "ui/Actions.h"
 #include "ui/Overlay.h"
@@ -53,6 +54,62 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
   // note menu ran to thirteen rows, which put Delete below the fold behind a
   // scrollbar nobody expects on a menu. The window-height clamp still applies,
   // so this cannot run a menu off the screen.
+  overlay.maxRows = static_cast<int>(overlay.items.size());
+  ui.overlays.open(std::move(overlay));
+}
+
+void openFileMenu(UiRuntime& ui, float x, float y) {
+  if(ui.sidebar.companionTarget.empty()) return;
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::List;
+  overlay.id = "file-menu";
+  overlay.anchored = true;
+  overlay.anchorX = x;
+  overlay.anchorY = y;
+  overlay.width = 220.0f;
+  // The same four groups the note menu has, minus what only a note can do:
+  // there is no icon, no tags and no favourite for a file, because micronotes
+  // holds nothing about a file but where it is.
+  overlay.items = {
+    {"open", "Open", "", "", true, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"rename", "Rename", "", "", true, false, false, false},
+    {"move", "Move to notebook", "", "", true, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"show-on-disk", "Show on disk", "", "", true, false, false, false},
+    {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
+    {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"delete", "Delete", "", "", true, true, false, false},
+  };
+  overlay.maxRows = static_cast<int>(overlay.items.size());
+  ui.overlays.open(std::move(overlay));
+}
+
+void openFilesFolderMenu(UiRuntime& ui, float x, float y) {
+  if(ui.sidebar.companionTarget.empty()) return;
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::List;
+  overlay.id = "files-folder-menu";
+  overlay.anchored = true;
+  overlay.anchorX = x;
+  overlay.anchorY = y;
+  overlay.width = 220.0f;
+  // The `files` directory itself keeps its name -- it is the name that makes
+  // the convention -- so its menu offers no rename. Deleting it is allowed: that
+  // is a decision about the files, not about the rule.
+  const bool anchor = library::isFilesDir(ui.sidebar.companionTarget);
+  overlay.items = {
+    {"new-folder", "New folder", "", "", true, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"rename", "Rename", "", "", !anchor, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"show-on-disk", "Show on disk", "", "", true, false, false, false},
+    {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
+    {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    {"delete", "Delete", "", "", true, true, false, false},
+  };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
 }

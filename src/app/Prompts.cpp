@@ -6,10 +6,12 @@
 #include "core/platform/PathUtils.h"
 #include "ui/Actions.h"
 #include "ui/Overlay.h"
+#include "library/Library.h"
 #include "library/Metadata.h"
 #include "core/platform/PathUtils.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
@@ -214,10 +216,10 @@ void openNotePalette(UiRuntime& ui, std::string overlayId, std::string title) {
   ui.overlays.open(std::move(overlay));
 }
 
-void openFolderPalette(UiRuntime& ui) {
+void openFolderPalette(UiRuntime& ui, std::string overlayId, std::string title) {
   ui::Overlay overlay;
-  overlay.id = "move-note-folder";
-  overlay.title = "Move note to";
+  overlay.id = std::move(overlayId);
+  overlay.title = std::move(title);
   overlay.filterable = true;
   overlay.placeholder = "Type a notebook name";
   overlay.hint = "Enter move   Esc cancel";
@@ -329,6 +331,137 @@ void deleteTag(UiRuntime& ui, const std::string& tag) {
   invalidateWikiNotes(ui);
   ui.status = "Removed " + tag + " from " + std::to_string(changed) +
               (changed == 1 ? " note" : " notes");
+}
+
+namespace {
+
+// Whether there is a companion to act on, and what it is called. The target is
+// set by the right click that opened the menu; empty means the menu's answer
+// arrived after something else cleared it, which is a refusal rather than a
+// crash.
+bool hasCompanionTarget(UiRuntime& ui) {
+  if(!ui.sidebar.companionTarget.empty()) return true;
+  ui.status = "No file to act on";
+  return false;
+}
+
+std::string companionName(const UiRuntime& ui) {
+  return ui.sidebar.companionTarget.filename().generic_string();
+}
+
+}
+
+void beginCompanionRename(UiRuntime& ui) {
+  if(!hasCompanionTarget(ui)) return;
+  if(library::isFilesDir(ui.sidebar.companionTarget)) {
+    ui.status = "The files folder keeps its name";
+    return;
+  }
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::TextPrompt;
+  overlay.id = "companion-name";
+  overlay.title = "Rename \"" + companionName(ui) + "\"";
+  // The whole name, extension included, so the reader sees what the desktop
+  // will use to choose an opener and can change it on purpose.
+  overlay.value.beginWith(companionName(ui));
+  overlay.placeholder = "File name";
+  overlay.hint = "Enter to save, Esc to cancel";
+  ui.overlays.open(std::move(overlay));
+}
+
+void saveCompanionRename(UiRuntime& ui, const std::string& name) {
+  if(!hasCompanionTarget(ui)) return;
+  if(name.empty()) {
+    ui.status = "A name is required";
+    return;
+  }
+  const auto landed = ui.state.renameCompanion(ui.sidebar.companionTarget, name);
+  if(landed.empty()) {
+    ui.status = "Could not rename " + companionName(ui);
+    return;
+  }
+  ui.sidebar.companionTarget = landed.lexically_relative(ui.state.catalog().root());
+  ui.focus = FocusArea::Folders;
+  ui.status = "Renamed to " + landed.filename().generic_string();
+}
+
+void beginCompanionFolderCreate(UiRuntime& ui) {
+  if(!hasCompanionTarget(ui)) return;
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::TextPrompt;
+  overlay.id = "companion-folder-name";
+  overlay.title = "New folder in " + companionName(ui);
+  overlay.value.beginWith("Folder");
+  overlay.placeholder = "Folder name";
+  overlay.hint = "Enter to create, Esc to cancel";
+  ui.overlays.open(std::move(overlay));
+}
+
+void saveCompanionFolderCreate(UiRuntime& ui, const std::string& name) {
+  if(!hasCompanionTarget(ui)) return;
+  if(name.empty() || name.find('/') != std::string::npos || name == "." || name == "..") {
+    ui.status = "Folder name is required";
+    return;
+  }
+  const auto& parent = ui.sidebar.companionTarget;
+  if(ui.state.createCompanionFolder(parent / name).empty()) {
+    ui.status = "Could not create the folder";
+    return;
+  }
+  ui.sidebar.tree.reveal(parent);
+  ui.focus = FocusArea::Folders;
+  ui.status = "Created folder " + name;
+}
+
+void openCompanionMovePalette(UiRuntime& ui) {
+  if(!hasCompanionTarget(ui)) return;
+  if(library::isFilesDir(ui.sidebar.companionTarget)) {
+    ui.status = "The files folder stays with its notebook";
+    return;
+  }
+  openFolderPalette(ui, "move-companion-folder", "Move " + companionName(ui) + " to");
+}
+
+void moveCompanionToNotebook(UiRuntime& ui, const std::filesystem::path& notebook) {
+  if(!hasCompanionTarget(ui)) return;
+  // The notebook's own files directory, made on demand: the reader named a
+  // notebook, and "with that notebook" is what its `files/` means.
+  const auto destination = notebook / std::filesystem::path(library::kFilesDirName);
+  const auto landed = ui.state.moveCompanion(ui.sidebar.companionTarget, destination);
+  if(landed.empty()) {
+    ui.status = ui.sidebar.companionTarget.parent_path() == destination
+                  ? companionName(ui) + " is already there"
+                  : "Could not move " + companionName(ui);
+    return;
+  }
+  ui.sidebar.companionTarget = landed.lexically_relative(ui.state.catalog().root());
+  ui.sidebar.tree.reveal(destination);
+  ui.status = "Moved " + landed.filename().generic_string() + " to " + destination.generic_string();
+}
+
+void openDeleteCompanionConfirm(UiRuntime& ui) {
+  if(!hasCompanionTarget(ui)) return;
+  const bool directory = std::filesystem::is_directory(ui.state.catalog().root() / ui.sidebar.companionTarget);
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::Confirm;
+  overlay.id = "delete-companion";
+  overlay.title = "Delete \"" + companionName(ui) + "\"?";
+  overlay.hint = directory ? "Everything inside it goes to the library trash."
+                           : "It goes to the library trash.";
+  overlay.confirmLabel = "Delete";
+  overlay.width = 400.0f;
+  ui.overlays.open(std::move(overlay));
+}
+
+void deleteCompanionTarget(UiRuntime& ui) {
+  if(!hasCompanionTarget(ui)) return;
+  const auto name = companionName(ui);
+  if(ui.state.deleteCompanion(ui.sidebar.companionTarget)) {
+    ui.sidebar.companionTarget.clear();
+    ui.status = "Deleted " + name;
+  } else {
+    ui.status = "Could not delete " + name;
+  }
 }
 
 void openDeleteFolderConfirm(UiRuntime& ui) {

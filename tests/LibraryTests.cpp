@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <iterator>
 #include <string>
 
@@ -568,5 +569,162 @@ MICRONOTES_TEST(library_reserves_distinct_trash_names_within_one_folder_delete) 
     MICRONOTES_REQUIRE(std::filesystem::exists(root / ".micronotes" / "attachments" / id / "file.png"));
   }
 
+  std::filesystem::remove_all(root);
+}
+
+// A directory named `files` inside a notebook holds companion files, and the
+// walk reports everything under it as such -- never as a note, whatever its
+// extension, and never as a notebook. See `library::kFilesDirName`.
+MICRONOTES_TEST(library_walk_files_directory_contents_are_companions_not_notes) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-companions-walk-test";
+  std::filesystem::remove_all(root);
+  const auto touch = [&](const std::filesystem::path& relative) {
+    std::filesystem::create_directories((root / relative).parent_path());
+    std::ofstream out(root / relative);
+    out << "x";
+  };
+  touch("Inbox.md");
+  touch("files/report.pdf");
+  touch("work/Alpha.md");
+  touch("work/files/diagram.png");
+  touch("work/files/sub/clip.mp4");
+  // A note-shaped file in a files area is a file: micronotes does not read it.
+  touch("work/files/notes.md");
+  // A nested `files` is an ordinary folder inside the area, not a second rule.
+  touch("work/files/files/nested.txt");
+  // The match is exact and case-sensitive, so this is a notebook.
+  touch("Files/Beta.md");
+  // A durable write's staging file is debris wherever it is found.
+  touch("work/files/.diagram.png.microcore-write.123.1");
+
+  micronotes::library::Library library(root);
+  std::vector<std::filesystem::directory_entry> notes;
+  std::vector<std::filesystem::path> directories;
+  std::vector<micronotes::library::CompanionEntry> companions;
+  library.walk(&notes, &directories, &companions);
+
+  std::vector<std::string> noteNames;
+  for(const auto& entry : notes) noteNames.push_back(entry.path().lexically_relative(root).generic_string());
+  std::sort(noteNames.begin(), noteNames.end());
+  MICRONOTES_REQUIRE((noteNames == std::vector<std::string> {"Files/Beta.md", "Inbox.md", "work/Alpha.md"}));
+
+  std::vector<std::string> directoryNames;
+  for(const auto& dir : directories) directoryNames.push_back(dir.generic_string());
+  std::sort(directoryNames.begin(), directoryNames.end());
+  MICRONOTES_REQUIRE((directoryNames == std::vector<std::string> {"Files", "work"}));
+
+  std::vector<std::string> companionNames;
+  for(const auto& entry : companions) {
+    companionNames.push_back(entry.path.generic_string() + (entry.directory ? "/" : ""));
+    MICRONOTES_REQUIRE(entry.folder == entry.path.parent_path());
+  }
+  std::sort(companionNames.begin(), companionNames.end());
+  MICRONOTES_REQUIRE((companionNames == std::vector<std::string> {
+    "files/", "files/report.pdf", "work/files/", "work/files/diagram.png", "work/files/files/",
+    "work/files/files/nested.txt", "work/files/notes.md", "work/files/sub/", "work/files/sub/clip.mp4"}));
+
+  // The rule, asked directly.
+  using micronotes::library::filesRootOf;
+  using micronotes::library::insideFilesDir;
+  using micronotes::library::isFilesDir;
+  MICRONOTES_REQUIRE(isFilesDir("files"));
+  MICRONOTES_REQUIRE(isFilesDir("work/files"));
+  MICRONOTES_REQUIRE(isFilesDir("work/files/"));
+  MICRONOTES_REQUIRE(!isFilesDir("work/files/sub"));
+  MICRONOTES_REQUIRE(!isFilesDir("work/files/files"));
+  MICRONOTES_REQUIRE(!isFilesDir("Files"));
+  MICRONOTES_REQUIRE(!isFilesDir("work"));
+  MICRONOTES_REQUIRE(!isFilesDir(""));
+  MICRONOTES_REQUIRE(insideFilesDir("work/files"));
+  MICRONOTES_REQUIRE(insideFilesDir("work/files/sub/clip.mp4"));
+  MICRONOTES_REQUIRE(!insideFilesDir("work/Alpha.md"));
+  MICRONOTES_REQUIRE(!insideFilesDir("Files/Beta.md"));
+  MICRONOTES_REQUIRE(filesRootOf("work/files/sub/clip.mp4") == std::filesystem::path("work/files"));
+  MICRONOTES_REQUIRE(filesRootOf("files/report.pdf") == std::filesystem::path("files"));
+  MICRONOTES_REQUIRE(filesRootOf("work/Alpha.md").empty());
+
+  // One files directory on its own, for the watcher: the same entries the whole
+  // walk reported for it, and nothing from any other.
+  const auto one = library.walkFilesDir("work/files");
+  std::vector<std::string> oneNames;
+  for(const auto& entry : one) oneNames.push_back(entry.path.generic_string() + (entry.directory ? "/" : ""));
+  std::sort(oneNames.begin(), oneNames.end());
+  MICRONOTES_REQUIRE((oneNames == std::vector<std::string> {
+    "work/files/", "work/files/diagram.png", "work/files/files/", "work/files/files/nested.txt",
+    "work/files/notes.md", "work/files/sub/", "work/files/sub/clip.mp4"}));
+  MICRONOTES_REQUIRE(library.walkFilesDir("work").empty());
+  MICRONOTES_REQUIRE(library.walkFilesDir("ideas/files").empty());
+  std::filesystem::remove_all(root);
+}
+
+MICRONOTES_TEST(library_companion_goes_to_the_trash_and_comes_back_with_its_extension) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-companions-trash-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "files");
+  { std::ofstream out(root / "work" / "files" / "diagram.png"); out << "png"; }
+  micronotes::library::Library library(root);
+
+  // Not a companion: refused, and nothing moves.
+  MICRONOTES_REQUIRE(!library.deleteCompanion("work"));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "work"));
+
+  MICRONOTES_REQUIRE(library.deleteCompanion("work/files/diagram.png"));
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "work" / "files" / "diagram.png"));
+  const auto entries = library.trashEntries();
+  MICRONOTES_REQUIRE(entries.size() == 1);
+  MICRONOTES_REQUIRE(entries[0].title == "diagram.png");
+  MICRONOTES_REQUIRE(entries[0].originalRelative == std::filesystem::path("work/files/diagram.png"));
+  MICRONOTES_REQUIRE(library.restoreFromTrash(entries[0].name));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "work" / "files" / "diagram.png"));
+
+  // The whole files directory can go, as one entry, and come back.
+  MICRONOTES_REQUIRE(library.deleteCompanion("work/files"));
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "work" / "files"));
+  const auto after = library.trashEntries();
+  MICRONOTES_REQUIRE(after.size() == 1);
+  MICRONOTES_REQUIRE(library.restoreFromTrash(after[0].name));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "work" / "files" / "diagram.png"));
+  std::filesystem::remove_all(root);
+}
+
+MICRONOTES_TEST(library_companion_move_refuses_the_anchor_and_a_move_into_itself) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-companions-move-test";
+  std::filesystem::remove_all(root);
+  const auto touch = [&](const std::filesystem::path& relative) {
+    std::filesystem::create_directories((root / relative).parent_path());
+    std::ofstream out(root / relative);
+    out << "x";
+  };
+  touch("work/files/sub/clip.mp4");
+  touch("files/a.pdf");
+  touch("files/b.pdf");
+  micronotes::library::Library library(root);
+
+  // The `files` directory is the convention; renaming it would take every file
+  // in it out of the tree at once.
+  MICRONOTES_REQUIRE(library.moveCompanion("work/files", "work/stuff").empty());
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "work" / "files"));
+  // A folder cannot become its own child.
+  MICRONOTES_REQUIRE(library.moveCompanion("work/files/sub", "work/files/sub/inner").empty());
+  // Neither end may leave a files area: out there it would be a note or a notebook.
+  MICRONOTES_REQUIRE(library.moveCompanion("files/a.pdf", "work/a.pdf").empty());
+  MICRONOTES_REQUIRE(library.moveCompanion("work/Alpha.md", "files/Alpha.md").empty());
+
+  // Across notebooks is fine, and the target's parent is made on the way.
+  const auto moved = library.moveCompanion("work/files/sub", "ideas/files/sub");
+  MICRONOTES_REQUIRE(moved == root / "ideas" / "files" / "sub");
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "ideas" / "files" / "sub" / "clip.mp4"));
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "work" / "files" / "sub"));
+
+  // A rename onto a taken name numbers itself rather than overwriting, and the
+  // extension survives the numbering.
+  const auto renamed = library.moveCompanion("files/a.pdf", "files/b.pdf");
+  MICRONOTES_REQUIRE(!renamed.empty());
+  MICRONOTES_REQUIRE(renamed != root / "files" / "b.pdf");
+  MICRONOTES_REQUIRE(renamed.extension() == ".pdf");
+  MICRONOTES_REQUIRE(std::filesystem::exists(renamed));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "files" / "b.pdf"));
+  // And a rename to the name it already has is a no-op, not a `-2`.
+  MICRONOTES_REQUIRE(library.moveCompanion("files/b.pdf", "files/b.pdf") == root / "files" / "b.pdf");
   std::filesystem::remove_all(root);
 }

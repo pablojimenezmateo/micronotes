@@ -11,6 +11,13 @@ struct UiRuntime;
 void openNoteMenu(UiRuntime& ui, float x, float y);
 void openFolderMenu(UiRuntime& ui, float x, float y);
 
+// A companion file's menu, and a files directory's. Both are about
+// `ui.sidebar.companionTarget`, which the press that opened them set: a
+// companion is never the selection, so the row has to be remembered some other
+// way. See `library::kFilesDirName`.
+void openFileMenu(UiRuntime& ui, float x, float y);
+void openFilesFolderMenu(UiRuntime& ui, float x, float y);
+
 // A tab's menu. `noteId` is the tab under the pointer, not the note on the
 // page: a right click on a tab is about that tab, and switching to it first
 // would be the menu acting before it was asked to.

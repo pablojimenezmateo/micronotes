@@ -58,11 +58,16 @@ void TreeModel::reveal(const std::filesystem::path& folder) {
 }
 
 std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& folders,
-                                     const std::vector<library::NoteListItem>& notes) const {
+                                     const std::vector<library::NoteListItem>& notes,
+                                     const std::vector<library::CompanionEntry>& companions) const {
   // Children by parent, so the walk below is a lookup rather than a scan of
   // every folder at every level.
   std::map<std::string, std::vector<const library::FolderNode*>> children;
   std::map<std::string, std::vector<const library::NoteListItem*>> owned;
+  // The `files/` directory a notebook holds, by the notebook; and what sits
+  // directly inside each companion directory, by that directory.
+  std::map<std::string, const library::CompanionEntry*> filesDirOf;
+  std::map<std::string, std::vector<const library::CompanionEntry*>> companionChildren;
   for(const auto& folder : folders) {
     // The root's own entry is not a child of anything, and has no row.
     if(folder.path.empty()) continue;
@@ -71,8 +76,46 @@ std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& fol
   for(const auto& note : notes) {
     owned[key(note.folder)].push_back(&note);
   }
+  for(const auto& entry : companions) {
+    if(entry.directory && library::isFilesDir(entry.path)) filesDirOf[key(entry.folder)] = &entry;
+    else companionChildren[key(entry.folder)].push_back(&entry);
+  }
 
   std::vector<TreeRow> rows;
+  // A companion directory and everything under it. Folders first, then files,
+  // each by name -- the same rule the notebooks follow, for the same reason.
+  const auto emitCompanionDir = [&](auto&& self, const library::CompanionEntry& dir, int depth) -> void {
+    auto& inside = companionChildren[key(dir.path)];
+    TreeRow row;
+    row.kind = TreeRowKind::FilesFolder;
+    row.depth = depth;
+    row.folder = dir.folder;
+    row.file = dir.path;
+    row.label = dir.path.filename().generic_string();
+    row.noteCount = static_cast<int>(inside.size());
+    row.expandable = !inside.empty();
+    row.expanded = expanded(dir.path);
+    rows.push_back(std::move(row));
+    if(!expanded(dir.path)) return;
+    std::sort(inside.begin(), inside.end(), [](const auto* lhs, const auto* rhs) {
+      if(lhs->directory != rhs->directory) return lhs->directory;
+      return lhs->path.filename() < rhs->path.filename();
+    });
+    for(const auto* child : inside) {
+      if(child->directory) {
+        self(self, *child, depth + 1);
+        continue;
+      }
+      TreeRow fileRow;
+      fileRow.kind = TreeRowKind::File;
+      fileRow.depth = depth + 1;
+      fileRow.folder = child->folder;
+      fileRow.file = child->path;
+      fileRow.label = child->path.filename().generic_string();
+      rows.push_back(std::move(fileRow));
+    }
+  };
+
   // What is *inside* `folder`, at `depth`. Recursion by hand: the depth and the
   // "is this open" question both belong to the walk, and an explicit stack
   // would say the same thing less clearly.
@@ -97,10 +140,17 @@ std::vector<TreeRow> TreeModel::rows(const std::vector<library::FolderNode>& fol
       row.folder = child->path;
       row.label = child->path.filename().generic_string();
       row.noteCount = child->noteCount;
-      row.expandable = !children[key(child->path)].empty() || !owned[key(child->path)].empty();
+      row.expandable = !children[key(child->path)].empty() || !owned[key(child->path)].empty() ||
+                       filesDirOf.contains(key(child->path));
       row.expanded = expanded(child->path);
       rows.push_back(std::move(row));
       if(expanded(child->path)) self(self, child->path, depth + 1);
+    }
+    // The notebook's files between its notebooks and its notes: a container,
+    // so above the leaves, and always in the same place whatever it is called
+    // relative to the notebooks beside it.
+    if(const auto found = filesDirOf.find(key(folder)); found != filesDirOf.end()) {
+      emitCompanionDir(emitCompanionDir, *found->second, depth);
     }
     std::sort(subnotes.begin(), subnotes.end(),
               [](const auto* lhs, const auto* rhs) { return lhs->title < rhs->title; });

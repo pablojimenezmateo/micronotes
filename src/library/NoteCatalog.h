@@ -56,6 +56,11 @@ public:
   // caller already holds a reference to.
   const NoteListItem* noteById(std::string_view noteId) const;
   std::vector<SearchResult> search(std::string_view query, SearchScope scope) const;
+  // Every companion entry -- see `kFilesDirName` -- in path order.
+  const std::vector<CompanionEntry>& companions() const;
+  // The companions whose *name* matches the query. Never their contents, which
+  // is why `SearchScope::Content` finds none: a companion is not read.
+  std::vector<CompanionEntry> searchCompanions(std::string_view query, SearchScope scope) const;
   // Notes whose text links to one named `title` or filed under `stem`.
   std::vector<Backlink> backlinks(std::string_view title, std::string_view stem) const;
   std::vector<TrashEntry> trashEntries() const;
@@ -103,6 +108,24 @@ public:
   void deleteFolder(const std::filesystem::path& folder);
   bool restoreFromTrash(const std::string& name);
 
+  // Companion files. Each of these moves something inside a files directory
+  // and then re-walks only the files directories it touched -- a rename is a
+  // rename, not a reason to stat every note in the library.
+  //
+  // `renameCompanion` keeps the entry where it is and changes its last
+  // component; `moveCompanion` keeps its name and changes the directory it sits
+  // in, which may be another notebook's `files/`, created on demand. Both
+  // return where the entry landed, empty when refused: the `files` directory
+  // itself, a move to the folder it is already in, or a directory into itself.
+  std::filesystem::path renameCompanion(const std::filesystem::path& relative,
+                                        const std::string& newName);
+  std::filesystem::path moveCompanion(const std::filesystem::path& relative,
+                                      const std::filesystem::path& destinationDir);
+  bool deleteCompanion(const std::filesystem::path& relative);
+  // A folder inside a files directory. `relative` names the folder to create,
+  // and it has to sit under a `files/`: a folder anywhere else is a notebook.
+  std::filesystem::path createCompanionFolder(const std::filesystem::path& relative);
+
   // --- keeping up with what changed underneath -----------------------------
 
   // Re-reads the library from disk: a recursive walk, a stat per note, a read
@@ -114,6 +137,11 @@ public:
   // of the five fields the note list is built from. The memos are already
   // dropped when it did; the answer is for a caller holding caches of its own.
   bool refreshFile(const std::filesystem::path& path);
+  // Re-walks one `<notebook>/files` directory and swaps its entries into the
+  // list. For a change the watcher reported under one: the narrow answer to the
+  // question `refresh()` answers by re-reading everything. Bumps the revision,
+  // so every view keyed on it sees the new list.
+  void refreshFilesDir(const std::filesystem::path& filesDir);
 
 private:
   // Records a single-file re-index: moves the revision when a row actually

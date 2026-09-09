@@ -3,6 +3,7 @@
 #include "CoreAliases.h"
 
 #include "core/persistence/SqliteDb.h"
+#include "library/Library.h"
 #include "library/Metadata.h"
 
 #include <cstddef>
@@ -156,6 +157,10 @@ public:
   // walk's directories out is what leaves the startup at one walk rather than
   // two.
   const std::vector<std::filesystem::path>& directories() const;
+  // Every companion entry the last refresh's walk passed, for the same reason
+  // the directories are here: the walk is already paid for. None of it is in
+  // SQLite -- a companion is listed and named, never indexed.
+  const std::vector<CompanionEntry>& companions() const;
 
 private:
   // The body both refreshes share. `written` is the front matter and body the
@@ -170,6 +175,7 @@ private:
   std::filesystem::path dbPath_;
   // Filled by every walk this class makes, so `directories()` never causes one.
   std::vector<std::filesystem::path> directories_;
+  std::vector<CompanionEntry> companions_;
   // One connection for the index's lifetime. Every method used to open its own,
   // which recompiled its SQL each call and left sqlite.connection_opens reading
   // zero -- the counter looked like "no connections" rather than "not measured".

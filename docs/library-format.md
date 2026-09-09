@@ -8,6 +8,7 @@ A micronotes library is a local folder. Markdown files are the source of truth f
 library/
   note.md
   folder/another-note.md
+  folder/files/<anything>
   .micronotes/
     index.sqlite
     attachments/<note-id>/<file>
@@ -64,6 +65,43 @@ into front matter would make a preference a library-wide edit, and would put it
 in everyone's history.
 
 The SQLite database is a rebuildable index/cache. If it is deleted, micronotes rebuilds it from Markdown files and metadata.
+
+## Companion Files
+
+A directory named `files`, directly inside a notebook or the library root,
+holds the PDFs, pictures, recordings and anything else that belongs beside that
+notebook's notes. micronotes lists what is in it and leaves the rest to the
+desktop:
+
+- Everything under `files/`, recursively, is a **file**, whatever its extension.
+  A `.md` inside one is a file too, and is neither indexed nor opened here. A
+  nested `files/` inside one is an ordinary folder.
+- The tree shows a notebook's `files/` between its sub-notebooks and its notes,
+  and inside it folders before files, each by name. A files directory is never
+  the current notebook and a file is never the open note: clicking one, or
+  pressing Enter on it, hands it to the desktop's default handler through
+  `xdg-open`, and the page keeps showing whatever it was showing. Arrowing over
+  one does nothing.
+- Search finds a file by its **name** only. A query scoped to content finds no
+  files, because their contents are not read. Matches are listed under a
+  caption of their own so a `plan.pdf` is not mistaken for a note called
+  `plan`.
+- A file or a folder inside a files area can be renamed, moved and deleted from
+  the sidebar. Deleting moves it to `.micronotes/trash/` like a note, under its
+  own name, and it is offered back by Restore from trash. Dragging a file onto
+  a notebook puts it in that notebook's `files/`, created if it had none;
+  dragging it onto a row inside a files area puts it in that directory.
+- The `files` directory itself is the anchor of the rule: it can be deleted but
+  not renamed or moved, because under another name it would be a notebook and
+  every file in it would leave the tree at once.
+
+The name is exact and case-sensitive, so `Files` is a notebook. Because the name
+*is* the rule, micronotes refuses to create or rename a notebook to `files`, to
+create a note inside a files area, or to move a note or a notebook into one --
+each of those would make something silently stop being what the reader filed it
+as. A change made under `files/` from outside -- a file copied in from a file
+manager -- appears in the tree within a frame, through a walk of that one
+directory rather than a refresh of the index.
 
 ## Changes Made Outside micronotes
 

@@ -223,6 +223,26 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
   if(count > 0) SDL_RenderFillRects(renderer, spans, count);
 }
 
+void drawFileGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  // The same 12x12 field the note marks use, so a file beside a note sits on
+  // the same baseline.
+  const float side = 12.0f;
+  const float left = std::round(box.x + (box.w - side) / 2.0f);
+  const float top = std::round(box.y + (box.h - side) / 2.0f);
+  // The sheet, with the top-right corner cut off, and the fold drawn as the
+  // two edges of the triangle that was turned over.
+  const SDL_FPoint sheet[] = {
+    {left + 2.0f, top},              {left + side - 4.0f, top},
+    {left + side - 1.0f, top + 3.0f}, {left + side - 1.0f, top + side},
+    {left + 2.0f, top + side},        {left + 2.0f, top},
+  };
+  strokePath(renderer, sheet, 6, color);
+  const SDL_FPoint fold[] = {
+    {left + side - 4.0f, top}, {left + side - 4.0f, top + 3.0f}, {left + side - 1.0f, top + 3.0f},
+  };
+  strokePath(renderer, fold, 3, color);
+}
+
 std::span<const NoteGlyph> noteGlyphs() {
   return std::span<const NoteGlyph>(kNoteGlyphs, std::size(kNoteGlyphs));
 }

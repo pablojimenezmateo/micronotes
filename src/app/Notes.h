@@ -119,6 +119,18 @@ LibraryPaths folderPathsFor(const UiRuntime& ui, const std::filesystem::path& fo
 bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId);
 bool handleFolderPathCommand(UiRuntime& ui, std::string_view command,
                              const std::filesystem::path& folder);
+// A companion's, by its library-relative path -- see `library::kFilesDirName`.
+LibraryPaths companionPathsFor(const UiRuntime& ui, const std::filesystem::path& relative);
+bool handleCompanionPathCommand(UiRuntime& ui, std::string_view command,
+                                const std::filesystem::path& relative);
+
+// Opens a companion file with whatever the desktop opens it with, and says so
+// on the status line. micronotes never renders one: a PDF, a picture or a
+// recording beside a notebook is filed here to be *found* here, and what reads
+// it is the reader's own choice of program. Through `ui.launcher` when a test
+// has set one, so the rule that only a deliberate activation launches anything
+// can be checked without spawning a process.
+bool openCompanion(UiRuntime& ui, const std::filesystem::path& relative);
 
 // The note a Markdown link's path names, or null when it names something that
 // is not a note in this library.

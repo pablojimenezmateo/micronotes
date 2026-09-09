@@ -7,6 +7,7 @@
 #include "library/LibraryIndex.h"
 #include "library/Library.h"
 #include "library/Metadata.h"
+#include "library/NoteCatalog.h"
 #include "library/Organization.h"
 #include "core/perf/PerformanceCounters.h"
 
@@ -838,5 +839,44 @@ MICRONOTES_TEST(library_index_stores_the_terms_rather_than_the_text) {
   MICRONOTES_REQUIRE(index.rebuild());
   MICRONOTES_REQUIRE(index.search("blorple").size() == 1);
   MICRONOTES_REQUIRE(index.search("zarquon").empty());
+  std::filesystem::remove_all(root);
+}
+
+// A companion file is found by its name and by nothing else: its contents are
+// not micronotes' to read, so a search scoped to content finds none.
+MICRONOTES_TEST(library_finds_companion_files_by_name_only) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-companion-search-test";
+  std::filesystem::remove_all(root);
+  const auto touch = [&](const std::filesystem::path& relative, const char* text) {
+    std::filesystem::create_directories((root / relative).parent_path());
+    std::ofstream out(root / relative);
+    out << text;
+  };
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "plan-note";
+  metadata.title = "Plan";
+  library.createNote(metadata, "the report body");
+  touch("files/Report.PDF", "pdf bytes");
+  touch("files/report-notes/other.txt", "report inside, name outside");
+  touch("work/files/plan.pdf", "pdf bytes");
+
+  micronotes::library::NoteCatalog catalog;
+  MICRONOTES_REQUIRE(catalog.open(root));
+  MICRONOTES_REQUIRE(catalog.companions().size() == 6);
+
+  // Case-insensitive on the name, and a directory whose name matches is not a
+  // hit -- there is nothing to open.
+  const auto report = catalog.searchCompanions("report", micronotes::library::SearchScope::All);
+  MICRONOTES_REQUIRE(report.size() == 1);
+  MICRONOTES_REQUIRE(report[0].path == std::filesystem::path("files/Report.PDF"));
+  const auto pdf = catalog.searchCompanions("PDF", micronotes::library::SearchScope::Title);
+  MICRONOTES_REQUIRE(pdf.size() == 2);
+  // The word is inside `other.txt` and in the body of the note, and the
+  // companion search sees neither.
+  MICRONOTES_REQUIRE(catalog.searchCompanions("inside", micronotes::library::SearchScope::All).empty());
+  MICRONOTES_REQUIRE(catalog.searchCompanions("pdf", micronotes::library::SearchScope::Content).empty());
+  // The note search is untouched by the files beside it.
+  MICRONOTES_REQUIRE(catalog.search("report", micronotes::library::SearchScope::All).size() == 1);
   std::filesystem::remove_all(root);
 }

@@ -97,6 +97,12 @@ struct UiRuntime {
   // is being dragged by its edge; see `app/ResizePacing.h`.
   ResizePacing pacing;
 
+  // How a companion file is opened: handed to the desktop's default handler,
+  // unless a test has put something else here. Empty means the desktop. A seam
+  // rather than a direct call so the rule -- a click launches, a cursor passing
+  // over never does -- can be checked without spawning `xdg-open` from a test.
+  std::function<bool(const std::filesystem::path&)> launcher;
+
   // ---- the open note -----------------------------------------------------
   editor::MarkdownEditor editor;
   markdown::MarkdownParser parser;

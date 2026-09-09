@@ -1,5 +1,7 @@
 #include "library/Organization.h"
 
+#include "core/util/StringUtil.h"
+
 #include <algorithm>
 #include <set>
 #include <unordered_map>
@@ -35,14 +37,17 @@ const std::vector<NoteListItem>& OrganizationService::notes() const {
       });
     }
     // The directories come from the refresh's own walk, so the startup is one
-    // walk of the tree rather than two.
+    // walk of the tree rather than two. The companions ride the same walk.
     directories_ = index_.directories();
+    if(!companions_) setCompanions(index_.companions());
   } else {
     // No index -- it would not open, or it is genuinely empty. Either way the
     // notes have to come from the tree, and the walk that finds them reports
     // the directories alongside them.
     std::vector<std::filesystem::directory_entry> files;
-    library_.walk(&files, &directories_);
+    std::vector<CompanionEntry> companions;
+    library_.walk(&files, &directories_, &companions);
+    if(!companions_) setCompanions(std::move(companions));
     notes.reserve(files.size());
     for(const auto& entry : files) {
       const auto& path = entry.path();
@@ -113,6 +118,52 @@ const std::vector<std::string>& OrganizationService::tags() const {
   }
   tags_ = std::vector<std::string> {unique.begin(), unique.end()};
   return *tags_;
+}
+
+void OrganizationService::setCompanions(std::vector<CompanionEntry> entries) const {
+  // Sorted once, on the way in, so the tree and the search read a list in path
+  // order rather than each sorting a copy.
+  std::sort(entries.begin(), entries.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.path < rhs.path; });
+  companions_ = std::move(entries);
+}
+
+const std::vector<CompanionEntry>& OrganizationService::companions() const {
+  // Established by the same scan that fills the directories; see `notes()`.
+  if(!companions_) notes();
+  if(!companions_) companions_.emplace();
+  return *companions_;
+}
+
+void OrganizationService::replaceCompanionsUnder(const std::filesystem::path& filesDir,
+                                                 std::vector<CompanionEntry> entries) {
+  auto list = companions();
+  const auto under = [&](const CompanionEntry& entry) {
+    return filesRootOf(entry.path) == filesDir;
+  };
+  list.erase(std::remove_if(list.begin(), list.end(), under), list.end());
+  for(auto& entry : entries) list.push_back(std::move(entry));
+  setCompanions(std::move(list));
+}
+
+std::vector<CompanionEntry> OrganizationService::companionsMatching(std::string_view query) const {
+  std::vector<CompanionEntry> out;
+  if(query.empty()) return out;
+  std::string needle(query);
+  util::toLowerAsciiInPlace(needle);
+  // The same cap the index search applies, and for the same reason: nothing
+  // downstream will draw more, and a one-letter query matches most of a
+  // library.
+  constexpr std::size_t kMaxResults = 200;
+  for(const auto& entry : companions()) {
+    if(entry.directory) continue;
+    std::string name = entry.path.filename().string();
+    util::toLowerAsciiInPlace(name);
+    if(name.find(needle) == std::string::npos) continue;
+    out.push_back(entry);
+    if(out.size() >= kMaxResults) break;
+  }
+  return out;
 }
 
 // Both filters copy only what they return. Taking the note by value to test it

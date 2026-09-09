@@ -10,6 +10,7 @@
 #include "app/WikiLinks.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <charconv>
 #include <string>
 #include <vector>
@@ -206,6 +207,31 @@ bool handleFolderPathCommand(UiRuntime& ui, std::string_view command,
                              "That notebook is not inside the library");
 }
 
+LibraryPaths companionPathsFor(const UiRuntime& ui, const std::filesystem::path& relative) {
+  if(!ui.state.catalog().isOpen() || relative.empty()) return {};
+  return libraryPathsFor(ui, ui.state.catalog().root() / relative);
+}
+
+bool handleCompanionPathCommand(UiRuntime& ui, std::string_view command,
+                                const std::filesystem::path& relative) {
+  return carryOutPathCommand(ui, command, companionPathsFor(ui, relative), "No file to locate",
+                             "That file is not inside the library");
+}
+
+bool openCompanion(UiRuntime& ui, const std::filesystem::path& relative) {
+  if(!ui.state.catalog().isOpen() || relative.empty()) return false;
+  const auto path = ui.state.catalog().root() / relative;
+  const auto name = relative.filename().generic_string();
+  std::error_code ec;
+  if(!std::filesystem::exists(path, ec)) {
+    ui.status = name + " is no longer on disk";
+    return false;
+  }
+  const bool opened = ui.launcher ? ui.launcher(path) : openWithDesktop(path.string());
+  ui.status = opened ? "Opened " + name : "Could not open " + name;
+  return opened;
+}
+
 const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative) {
   if(relative.empty() || !ui.state.catalog().isOpen()) return nullptr;
   // A URL is somebody else's business, and so is an absolute path: a link out
@@ -343,15 +369,28 @@ bool applyWatchedChanges(UiRuntime& ui) {
 
   bool listChanged = false;
   bool touchedAnything = false;
+  // The `<notebook>/files` directories something changed under, each once. A
+  // change there is a change to what the tree lists, but not to any note, so it
+  // costs one small walk of that directory rather than a refresh of the index.
+  std::vector<std::filesystem::path> filesDirs;
+  const auto& root = ui.state.catalog().root();
   for(const auto& path : paths) {
-    // Only notes. A library holds whatever the user puts in it, and an image
-    // dropped next to a note is not a change to the library's contents.
+    if(const auto filesDir = library::filesRootOf(path.lexically_relative(root)); !filesDir.empty()) {
+      if(std::find(filesDirs.begin(), filesDirs.end(), filesDir) == filesDirs.end()) {
+        filesDirs.push_back(filesDir);
+      }
+      continue;
+    }
+    // Otherwise only notes. A library holds whatever the user puts in it, and
+    // an image dropped next to a note is not a change to the library's
+    // contents -- it is one filed *under* `files/` that is.
     if(path.extension() != ".md") continue;
     perf::addCounter(perf::CounterId::WatcherPathsApplied);
     listChanged = ui.state.refreshNoteFile(path) || listChanged;
     touchedAnything = true;
   }
-  if(!touchedAnything) return false;
+  for(const auto& filesDir : filesDirs) ui.state.refreshFilesDir(filesDir);
+  if(!touchedAnything) return !filesDirs.empty();
   // The catalog has already dropped its own memos for every file whose note-
   // list fields moved; what it cannot know about is the wiki-link cache the
   // shell keeps over the same list.

@@ -7,6 +7,7 @@
 
 namespace {
 
+using micronotes::library::CompanionEntry;
 using micronotes::library::FolderNode;
 using micronotes::library::NoteListItem;
 using micronotes::ui::TreeModel;
@@ -31,11 +32,18 @@ std::vector<NoteListItem> fixtureNotes() {
   };
 }
 
+// A files directory as `<files>` and a companion as `name (file)`, so a shape
+// says which kind every row is.
 std::string shape(const std::vector<TreeRow>& rows) {
   std::string out;
   for(const auto& row : rows) {
     out += std::string(static_cast<std::size_t>(row.depth) * 2, ' ');
-    out += row.kind == TreeRowKind::Folder ? "[" + row.label + "]" : row.label;
+    switch(row.kind) {
+      case TreeRowKind::Folder: out += "[" + row.label + "]"; break;
+      case TreeRowKind::FilesFolder: out += "<" + row.label + ">"; break;
+      case TreeRowKind::File: out += row.label + " (file)"; break;
+      case TreeRowKind::Note: out += row.label; break;
+    }
     out += "\n";
   }
   return out;
@@ -140,5 +148,73 @@ MICRONOTES_TEST(tree_carries_the_note_icon_and_folder_counts) {
     if(row.label == "Alpha") MICRONOTES_REQUIRE(row.icon == "\xF0\x9F\x93\x93");
     if(row.label == "Beta") MICRONOTES_REQUIRE(row.icon.empty());
     if(row.kind == TreeRowKind::Folder && row.label == "work") MICRONOTES_REQUIRE(row.noteCount == 2);
+  }
+}
+
+namespace {
+
+// Every companion the walk would report for the fixture, deliberately out of
+// order: the tree sorts, the list does not have to.
+std::vector<CompanionEntry> fixtureCompanions() {
+  return {
+    {"work/files/diagram.png", "work/files", false},
+    {"work/files", "work", true},
+    {"work/files/sub", "work/files", true},
+    {"work/files/sub/clip.mp4", "work/files/sub", false},
+    {"work/files/archive.zip", "work/files", false},
+    {"files", "", true},
+    {"files/report.pdf", "files", false},
+    // A notebook with nothing but a files directory in it.
+    {"ideas/files", "ideas", true},
+  };
+}
+
+}
+
+// A notebook's `files/` sits between its notebooks and its notes; inside it,
+// folders come before files and both sort by name. A companion row carries its
+// own path in `file` and its parent in `folder`, the way a note row carries its
+// notebook.
+MICRONOTES_TEST(tree_lists_a_notebooks_files_between_its_notebooks_and_its_notes) {
+  TreeModel tree;
+  MICRONOTES_REQUIRE(shape(tree.rows(fixtureFolders(), fixtureNotes(), fixtureCompanions())) ==
+                     "[ideas]\n"
+                     "[work]\n"
+                     "<files>\n"
+                     "Inbox\n");
+
+  tree.reveal("work/files/sub");
+  const auto rows = tree.rows(fixtureFolders(), fixtureNotes(), fixtureCompanions());
+  MICRONOTES_REQUIRE(shape(rows) ==
+                     "[ideas]\n"
+                     "[work]\n"
+                     "  [2026]\n"
+                     "  <files>\n"
+                     "    <sub>\n"
+                     "      clip.mp4 (file)\n"
+                     "    archive.zip (file)\n"
+                     "    diagram.png (file)\n"
+                     "  Alpha\n"
+                     "  Beta\n"
+                     "<files>\n"
+                     "Inbox\n");
+  for(const auto& row : rows) {
+    if(row.kind == TreeRowKind::FilesFolder && row.file == std::filesystem::path("work/files")) {
+      MICRONOTES_REQUIRE(row.folder == std::filesystem::path("work"));
+      MICRONOTES_REQUIRE(row.noteCount == 3);  // sub, archive.zip, diagram.png
+      MICRONOTES_REQUIRE(row.expandable && row.expanded);
+    }
+    if(row.kind == TreeRowKind::File && row.label == "clip.mp4") {
+      MICRONOTES_REQUIRE(row.file == std::filesystem::path("work/files/sub/clip.mp4"));
+      MICRONOTES_REQUIRE(row.folder == std::filesystem::path("work/files/sub"));
+    }
+    // A notebook holding only a files directory still has something to unfold.
+    if(row.kind == TreeRowKind::Folder && row.label == "ideas") MICRONOTES_REQUIRE(row.expandable);
+    // And the root's own files directory is a top-level row with an empty parent.
+    if(row.kind == TreeRowKind::FilesFolder && row.file == std::filesystem::path("files")) {
+      MICRONOTES_REQUIRE(row.folder.empty());
+      MICRONOTES_REQUIRE(row.depth == 0);
+      MICRONOTES_REQUIRE(!row.expanded);
+    }
   }
 }

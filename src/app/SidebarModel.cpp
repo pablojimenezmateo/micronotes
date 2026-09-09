@@ -33,6 +33,22 @@ std::size_t countMatchLines(const library::SearchResult& result) {
   return lines;
 }
 
+namespace {
+
+bool isCompanionRow(const ui::TreeRow& tree) {
+  return tree.kind == ui::TreeRowKind::File || tree.kind == ui::TreeRowKind::FilesFolder;
+}
+
+// The path a tree row's disclosure is keyed by: a notebook's own folder, or a
+// files directory's own path. The two live in different fields because for a
+// notebook row `folder` *is* the row, while for a companion row it is the
+// parent -- see `ui::TreeRow::file`.
+const std::filesystem::path& treeRowPath(const ui::TreeRow& tree) {
+  return isCompanionRow(tree) ? tree.file : tree.folder;
+}
+
+}
+
 SidebarMetrics sidebarMetrics(int uiLineHeight, int snippetLineHeight) {
   const float line = static_cast<float>(uiLineHeight);
   const float small = static_cast<float>(snippetLineHeight);
@@ -57,11 +73,14 @@ float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metric
 // The results the sidebar is listing, recomputed only when the question or the
 // library has changed. buildSidebarRows() runs on every frame, and each query
 // is a hit on SQLite.
-const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
+const SidebarSearch& searchResults(UiRuntime& ui) {
   const auto& selection = ui.state.selection();
   const SearchKey key {selection.search, selection.searchScope, ui.state.catalog().revision()};
   if(const auto* results = ui.sidebar.searchResults.get(key)) return *results;
-  return ui.sidebar.searchResults.store(key, ui.state.currentSearchResults());
+  SidebarSearch results;
+  results.notes = ui.state.currentSearchResults();
+  results.files = ui.state.catalog().searchCompanions(selection.search, selection.searchScope);
+  return ui.sidebar.searchResults.store(key, std::move(results));
 }
 
 namespace {
@@ -157,6 +176,19 @@ public:
     treeRow(std::move(tree));
   }
 
+  // A companion file listed outside the tree, under a query. The tree's own
+  // `File` row, at depth 0, so a hit opens, drags and answers a right click the
+  // way the same file does in the tree.
+  void fileRow(const library::CompanionEntry& entry) {
+    ui::TreeRow tree;
+    tree.kind = ui::TreeRowKind::File;
+    tree.depth = 0;
+    tree.folder = entry.folder;
+    tree.file = entry.path;
+    tree.label = entry.path.filename().generic_string();
+    treeRow(std::move(tree));
+  }
+
   void noteShortcuts(const std::vector<std::string>& ids, std::size_t limit) {
     std::size_t drawn = 0;
     for(const auto& id : ids) {
@@ -241,8 +273,20 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
       build.finish();
       return;
     }
-    build.caption(std::to_string(results.size()) + (results.size() == 1 ? " result" : " results"));
-    for(std::size_t i = 0; i < results.size(); ++i) build.searchResult(results[i], i);
+    const auto& hits = results.notes;
+    const auto& files = results.files;
+    if(!hits.empty()) {
+      build.caption(std::to_string(hits.size()) + (hits.size() == 1 ? " result" : " results"));
+      for(std::size_t i = 0; i < hits.size(); ++i) build.searchResult(hits[i], i);
+    }
+    // The files whose name matched, under their own caption so a PDF called
+    // `plan.pdf` is not mistaken for a note called `plan`. Only when there are
+    // any: a heading over nothing is the thing the empty-result rule above is
+    // there to prevent.
+    if(!files.empty()) {
+      build.caption(std::to_string(files.size()) + (files.size() == 1 ? " file" : " files"));
+      for(const auto& entry : files) build.fileRow(entry);
+    }
     build.finish();
     return;
   }
@@ -271,7 +315,8 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // The tree is a band like the other three. It had no heading at all, which is
   // most of what made the divisions unclear: an unlabelled group between two
   // labelled ones reads as the tail of the one above it.
-  auto treeRows = ui.sidebar.tree.rows(ui.state.catalog().folders(), notes);
+  auto treeRows = ui.sidebar.tree.rows(ui.state.catalog().folders(), notes,
+                                       ui.state.catalog().companions());
   if(!treeRows.empty()) {
     if(build.section(ui::SidebarSection::Notebooks, "Notebooks", notes.size())) {
       for(auto& row : treeRows) build.treeRow(std::move(row));
@@ -451,7 +496,8 @@ void expandTreeCursor(UiRuntime& ui, bool open) {
     ui.state.editWorkspace().setSectionCollapsed(*row.section, !open);
     return;
   }
-  if(row.kind != SidebarRow::Kind::Tree || row.tree.kind == ui::TreeRowKind::Note) {
+  const bool leaf = row.tree.kind == ui::TreeRowKind::Note || row.tree.kind == ui::TreeRowKind::File;
+  if(row.kind != SidebarRow::Kind::Tree || leaf) {
     if(!open) moveTreeCursor(ui, -1);
     return;
   }
@@ -460,7 +506,9 @@ void expandTreeCursor(UiRuntime& ui, bool open) {
     return;
   }
   if(!row.tree.expandable) return;
-  ui.sidebar.tree.setExpanded(row.tree.folder, open);
+  // A files directory is keyed by its own path, a notebook by its folder --
+  // which for a notebook row *is* its own path. See `ui::TreeRow::file`.
+  ui.sidebar.tree.setExpanded(treeRowPath(row.tree), open);
 }
 
 FocusArea chooseSidebarCursorRow(UiRuntime& ui) {
@@ -471,8 +519,14 @@ FocusArea chooseSidebarCursorRow(UiRuntime& ui) {
   activateSidebarRow(ui, row, RowActivation::Click);
   // A tag and a band both change what the list is showing rather than opening
   // anything, so the reader stays in the list to see what happened.
+  //
+  // So does a companion row: a file opened elsewhere leaves nothing on the
+  // page to focus, and a files directory only unfolds.
   const bool changedTheList = row.kind == SidebarRow::Kind::Tag ||
-                              (row.kind == SidebarRow::Kind::SectionLabel && row.section);
+                              (row.kind == SidebarRow::Kind::SectionLabel && row.section) ||
+                              (row.kind == SidebarRow::Kind::Tree &&
+                               (row.tree.kind == ui::TreeRowKind::File ||
+                                row.tree.kind == ui::TreeRowKind::FilesFolder));
   return changedTheList ? FocusArea::Folders : FocusArea::Editor;
 }
 
@@ -495,7 +549,23 @@ void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uin
   // `activateSidebarRow` handles below.
   if(row.kind == SidebarRow::Kind::Tree && row.disclosure.w > 0.0f &&
      contains(row.disclosure, x, y) && button == SDL_BUTTON_LEFT) {
-    ui.sidebar.tree.toggle(row.tree.folder);
+    ui.sidebar.tree.toggle(treeRowPath(row.tree));
+    return;
+  }
+  // A companion row's menu is about that row, so the row is remembered before
+  // anything is opened -- there is no selection for a file to become.
+  if(row.kind == SidebarRow::Kind::Tree && isCompanionRow(row.tree)) {
+    if(button == SDL_BUTTON_RIGHT) {
+      ui.sidebar.companionTarget = row.tree.file;
+      if(row.tree.kind == ui::TreeRowKind::File) openFileMenu(ui, x, y);
+      else openFilesFolderMenu(ui, x, y);
+      return;
+    }
+    activateSidebarRow(ui, row, RowActivation::Click);
+    if(button == SDL_BUTTON_LEFT) {
+      ui.sidebar.drag.file = true;
+      ui.sidebar.drag.filePath = row.tree.file;
+    }
     return;
   }
   // On a tag's own row the whole row already means that tag, so the dot on it
@@ -556,6 +626,20 @@ void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how)
     return;
   }
   if(row.kind != SidebarRow::Kind::Tree) return;
+  // A companion file opens in whatever the desktop opens it with, and only when
+  // asked for: a cursor passing over it must not launch a program per row. It
+  // is never the selection -- there is no page for it -- so the note on screen
+  // and the notebook in the breadcrumb stay exactly where they were.
+  if(row.tree.kind == ui::TreeRowKind::File) {
+    if(how == RowActivation::Click) openCompanion(ui, row.tree.file);
+    return;
+  }
+  // A files directory unfolds on a click and nothing else: it is not a notebook,
+  // has no first note to open, and cannot be the current folder.
+  if(row.tree.kind == ui::TreeRowKind::FilesFolder) {
+    if(how == RowActivation::Click) ui.sidebar.tree.toggle(row.tree.file);
+    return;
+  }
   if(row.tree.kind == ui::TreeRowKind::Note) {
     selectNoteById(ui, row.tree.noteId, policy);
     // Opening a note moves the context to its folder *and* opens the tree onto
@@ -580,7 +664,7 @@ void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
   SidebarRow& row = ui.sidebar.rows[index];
   if(row.kind != SidebarRow::Kind::SearchResult || row.matchLinesBuilt) return;
   row.matchLinesBuilt = true;
-  const auto& results = searchResults(ui);
+  const auto& results = searchResults(ui).notes;
   // The row list and the result list share a key, so an index into one holds in
   // the other -- but the row list survives a scroll without being rebuilt, so
   // the note id is checked rather than assumed. A row that has come adrift draws
@@ -688,6 +772,14 @@ SidebarDropTarget sidebarDropTargetAt(const UiRuntime& ui, float x, float y) {
   const auto index = sidebarRowAt(ui, x, y);
   if(!index) return {};
   const SidebarRow& row = ui.sidebar.rows[*index];
+  // A row in a files area stands for a directory in it: the one a folder row
+  // is, or the one a file sits in.
+  if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::FilesFolder) {
+    return {true, *index, {}, row.tree.file};
+  }
+  if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::File) {
+    return {true, *index, {}, row.tree.folder};
+  }
   // A note row stands for the folder holding it, so dropping between two notes
   // does the obvious thing rather than nothing.
   if(row.kind == SidebarRow::Kind::Tree) return {true, *index, row.tree.folder};

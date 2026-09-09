@@ -197,6 +197,20 @@ public:
   bool moveFolderInto(const std::filesystem::path& folder, const std::filesystem::path& newParent);
   bool deleteSelectedFolder();
 
+  // Companion files -- see `library::kFilesDirName`. None of these touch the
+  // selection: a companion is never the open note or the current notebook, so
+  // there is nothing here to re-point. The catalog does the moving and the
+  // refusing; these exist so every disk command the shell runs still goes
+  // through one door.
+  std::filesystem::path renameCompanion(const std::filesystem::path& relative,
+                                        const std::string& newName);
+  std::filesystem::path moveCompanion(const std::filesystem::path& relative,
+                                      const std::filesystem::path& destinationDir);
+  bool deleteCompanion(const std::filesystem::path& relative);
+  std::filesystem::path createCompanionFolder(const std::filesystem::path& relative);
+  // A change the watcher reported under one `<notebook>/files` directory.
+  void refreshFilesDir(const std::filesystem::path& filesDir);
+
   // The view-state file beside the library: which notes are in tabs, how wide
   // the panels are, which bands are shut.
   //

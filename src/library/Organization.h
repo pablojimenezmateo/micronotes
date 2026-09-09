@@ -61,7 +61,25 @@ public:
   // note it found. `findNote` deep-copies a path and three strings.
   const NoteListItem* noteById(std::string_view noteId) const;
 
+  // Every companion entry -- see `Library::kFilesDirName` -- sorted by path.
+  // Memoised like the folders, and off the same walk: the refresh reports them
+  // beside the directories, so listing them costs no second pass of the tree.
+  const std::vector<CompanionEntry>& companions() const;
+  // Swaps the entries under one `<notebook>/files` directory for `entries`,
+  // leaving every other subtree as it was. What the watcher applies when a
+  // change lands under a files directory, so a PDF copied in is one small walk
+  // and a memo patch rather than a re-read of the library.
+  void replaceCompanionsUnder(const std::filesystem::path& filesDir,
+                              std::vector<CompanionEntry> entries);
+  // The companions whose file name contains `query`, case-insensitively for
+  // ASCII, directories excluded. Capped like the index search is. Name only,
+  // and deliberately: a companion's contents are not micronotes' to read.
+  std::vector<CompanionEntry> companionsMatching(std::string_view query) const;
+
 private:
+  // Stores the list in path order, which both readers rely on.
+  void setCompanions(std::vector<CompanionEntry> entries) const;
+
   const Library& library_;
   const LibraryIndex& index_;
   mutable std::optional<std::vector<NoteListItem>> notes_;
@@ -73,6 +91,7 @@ private:
   // the fallback path. The tree needs the empty ones, which no list of notes
   // can name.
   mutable std::vector<std::filesystem::path> directories_;
+  mutable std::optional<std::vector<CompanionEntry>> companions_;
   mutable std::optional<std::vector<FolderNode>> folders_;
   mutable std::optional<std::vector<std::string>> tags_;
 };

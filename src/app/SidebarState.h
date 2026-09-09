@@ -159,11 +159,25 @@ struct SidebarDrag {
   std::string noteId;
   bool folder = false;
   std::filesystem::path folderPath;
+  // A companion file or a folder inside a files directory, by its
+  // library-relative path. The third thing the tree can drag, and the only one
+  // that can land in a files area. See `library::kFilesDirName`.
+  bool file = false;
+  std::filesystem::path filePath;
   // The row under the pointer, highlighted rather than merely guessed at.
   std::optional<std::size_t> dropRow;
 
-  bool active() const { return note || folder; }
+  bool active() const { return note || folder || file; }
   void clear() { *this = {}; }
+};
+
+// What the sidebar is listing for a query: the notes whose text or title
+// matched, and the companion files whose *name* did. One memo under one key,
+// because the two are asked together and go stale together.
+struct SidebarSearch {
+  std::vector<library::SearchResult> notes;
+  std::vector<library::CompanionEntry> files;
+  bool empty() const { return notes.empty() && files.empty(); }
 };
 
 struct SidebarState {
@@ -178,7 +192,7 @@ struct SidebarState {
   // The results being listed. Held rather than re-queried because the row list
   // is rebuilt on every frame -- including the ones a hover causes -- and each
   // query is a hit on SQLite.
-  ui::Memo<std::vector<library::SearchResult>, SearchKey> searchResults;
+  ui::Memo<SidebarSearch, SearchKey> searchResults;
 
   // Last frame's rect, so keyboard navigation can scroll a row into view
   // without recomputing the whole window layout.
@@ -199,6 +213,12 @@ struct SidebarState {
   int cursor = 0;
 
   SidebarDrag drag;
+  // The companion entry a right-click menu, and the prompt or confirm it
+  // opened, is about -- library-relative. Notes and notebooks carry this in the
+  // selection, but a companion is never the selection: it has no page to open
+  // and is not a filter over the list. So the row that was clicked is
+  // remembered here for as long as the menu it opened is answering.
+  std::filesystem::path companionTarget;
   // Whether the notebook prompt that is open is creating one or renaming one.
   bool creatingFolder = false;
   // Whether the pointer is dragging the panel's trailing edge.

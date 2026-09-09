@@ -13,7 +13,13 @@ namespace micronotes::ui {
 
 enum class TreeRowKind {
   Folder,
-  Note
+  Note,
+  // A `files/` directory, or a folder inside one -- see `library::kFilesDirName`.
+  // Drawn with a chevron like a notebook, but it is not one: it holds files
+  // rather than notes, cannot be selected, and opens nothing.
+  FilesFolder,
+  // A companion file. Opens with the desktop's default handler, never here.
+  File
 };
 
 // One line of the sidebar tree, already flattened for drawing. A row knows its
@@ -27,6 +33,10 @@ struct TreeRow {
   // it, but which has no folder row of its own: the tree starts at the root's
   // contents. See `rows`.
   std::filesystem::path folder;
+  // The entry's own library-relative path, `FilesFolder` and `File` rows only.
+  // `folder` is still its parent for those, so a drop on either kind can name
+  // the directory it stands for the way a note row names its notebook.
+  std::filesystem::path file;
   std::string noteId;   // note rows only
   std::string label;
   std::string icon;     // the note's `icon:`, empty when it has none
@@ -65,8 +75,14 @@ public:
   // This is O(library), not O(viewport): it relativises a path and builds a map
   // key for every note before it can place the first row. The caller is
   // expected to hold the result and ask again only when `revision()` moves.
+  //
+  // Inside a notebook the order is its sub-notebooks, then its `files/`
+  // directory if it has one, then its notes; inside a files directory it is
+  // folders then files, each by name. The companions are the walk's list of
+  // everything under every files directory, in any order.
   std::vector<TreeRow> rows(const std::vector<library::FolderNode>& folders,
-                            const std::vector<library::NoteListItem>& notes) const;
+                            const std::vector<library::NoteListItem>& notes,
+                            const std::vector<library::CompanionEntry>& companions = {}) const;
 
   // One expanded folder path per line, so the file stays readable and a path
   // containing any character but a newline round-trips unescaped.

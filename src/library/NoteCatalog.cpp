@@ -3,6 +3,7 @@
 
 #include "library/Metadata.h"
 #include "core/perf/Perf.h"
+#include "core/perf/PerformanceCounters.h"
 #include "core/platform/PathUtils.h"
 
 #include <utility>
@@ -74,6 +75,17 @@ std::vector<SearchResult> NoteCatalog::search(std::string_view query, SearchScop
   return index_.search(query, scope);
 }
 
+const std::vector<CompanionEntry>& NoteCatalog::companions() const {
+  static const std::vector<CompanionEntry> kNone;
+  return organization_ ? organization_->companions() : kNone;
+}
+
+std::vector<CompanionEntry> NoteCatalog::searchCompanions(std::string_view query,
+                                                          SearchScope scope) const {
+  if(!organization_ || query.empty() || scope == SearchScope::Content) return {};
+  return organization_->companionsMatching(query);
+}
+
 std::vector<Backlink> NoteCatalog::backlinks(std::string_view title, std::string_view stem) const {
   if(!library_) return {};
   return index_.backlinks(title, stem);
@@ -132,7 +144,9 @@ std::filesystem::path NoteCatalog::writeNoteAs(const std::filesystem::path& path
 std::optional<NoteListItem> NoteCatalog::createNote(const std::string& title,
                                                     const std::filesystem::path& folder,
                                                     std::string_view body) {
-  if(!library_) return std::nullopt;
+  // A note inside a files directory is a note the walk would never report:
+  // filed, indexed by nothing, and gone from the tree the moment it was made.
+  if(!library_ || insideFilesDir(folder)) return std::nullopt;
   NoteMetadata metadata;
   metadata.id = generateNoteId();
   metadata.title = uniqueTitle(title, folder);
@@ -168,14 +182,17 @@ void NoteCatalog::deleteNote(const std::filesystem::path& path) {
 
 std::filesystem::path NoteCatalog::moveNote(const std::filesystem::path& path,
                                             const std::filesystem::path& folder) {
-  if(!library_) return {};
+  if(!library_ || insideFilesDir(folder)) return {};
   const auto target = library_->moveNote(path, folder);
   refresh();
   return target;
 }
 
 std::filesystem::path NoteCatalog::createFolder(const std::filesystem::path& folder) {
-  if(!library_) return {};
+  // A notebook cannot be called `files`, or sit under one: the name is the
+  // convention, and a notebook that took it would silently turn its notes into
+  // companions. `createCompanionFolder` is the call for a folder in a files area.
+  if(!library_ || insideFilesDir(folder)) return {};
   const auto target = library_->createFolder(folder);
   refresh();
   return target;
@@ -183,9 +200,52 @@ std::filesystem::path NoteCatalog::createFolder(const std::filesystem::path& fol
 
 std::filesystem::path NoteCatalog::renameFolder(const std::filesystem::path& folder,
                                                 const std::filesystem::path& newFolder) {
-  if(!library_) return {};
+  if(!library_ || insideFilesDir(folder) || insideFilesDir(newFolder)) return {};
   const auto target = library_->renameFolder(folder, newFolder);
   refresh();
+  return target;
+}
+
+std::filesystem::path NoteCatalog::renameCompanion(const std::filesystem::path& relative,
+                                                   const std::string& newName) {
+  if(!library_ || newName.empty()) return {};
+  // A name, not a path: a slash in it would be a move dressed as a rename, and
+  // `..` a way out of the files directory.
+  if(newName.find('/') != std::string::npos || newName == "." || newName == "..") return {};
+  const auto target = library_->moveCompanion(relative, relative.parent_path() / newName);
+  if(target.empty()) return target;
+  refreshFilesDir(filesRootOf(relative));
+  return target;
+}
+
+std::filesystem::path NoteCatalog::moveCompanion(const std::filesystem::path& relative,
+                                                 const std::filesystem::path& destinationDir) {
+  if(!library_) return {};
+  // Already there is not a move, and is reported as a refusal so a drop on the
+  // folder a file already sits in says nothing rather than "moved".
+  if(relative.parent_path() == destinationDir) return {};
+  const auto target = library_->moveCompanion(relative, destinationDir / relative.filename());
+  if(target.empty()) return target;
+  // Both ends: the file left one files directory and arrived in another, or
+  // moved within one -- either way each root it touched is re-read.
+  const auto from = filesRootOf(relative);
+  const auto to = filesRootOf(destinationDir);
+  refreshFilesDir(from);
+  if(to != from) refreshFilesDir(to);
+  return target;
+}
+
+bool NoteCatalog::deleteCompanion(const std::filesystem::path& relative) {
+  if(!library_ || !library_->deleteCompanion(relative)) return false;
+  refreshFilesDir(filesRootOf(relative));
+  return true;
+}
+
+std::filesystem::path NoteCatalog::createCompanionFolder(const std::filesystem::path& relative) {
+  if(!library_ || !insideFilesDir(relative)) return {};
+  const auto target = library_->createFolder(relative);
+  if(target.empty()) return target;
+  refreshFilesDir(filesRootOf(relative));
   return target;
 }
 
@@ -213,6 +273,13 @@ bool NoteCatalog::refresh() {
 bool NoteCatalog::refreshFile(const std::filesystem::path& path) {
   if(!library_) return false;
   return applied(index_.refreshFile(path));
+}
+
+void NoteCatalog::refreshFilesDir(const std::filesystem::path& filesDir) {
+  if(!library_ || !organization_ || filesDir.empty()) return;
+  perf::addCounter(perf::CounterId::LibraryFilesDirRefreshes);
+  ++revision_;
+  organization_->replaceCompanionsUnder(filesDir, library_->walkFilesDir(filesDir));
 }
 
 bool NoteCatalog::applied(const LibraryIndex::FileRefresh& refresh) {

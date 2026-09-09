@@ -68,6 +68,11 @@ std::span<const NoteGlyph> noteGlyphs();
 // so the caller can fall back to the mark a note with no icon wears.
 bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Color color);
 
+// A companion file's mark: a page with its corner folded. One mark for every
+// kind of file, because the tree says what a file is called and the desktop
+// says what opens it; a mark per type would be a MIME table drawn in 12 pixels.
+void drawFileGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
+
 // Minimise, maximise (or restore), close: `which` is 0, 1, 2 in that order,
 // which is the order they are laid out in.
 void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized,

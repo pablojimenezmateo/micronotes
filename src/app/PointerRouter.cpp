@@ -23,6 +23,7 @@
 #include "app/Scroll.h"
 #include "app/SettingsPane.h"
 #include "app/Shell.h"
+#include "library/Library.h"
 #include "app/Sidebar.h"
 #include "app/SidebarModel.h"
 #include "app/TabStrip.h"
@@ -192,17 +193,38 @@ void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button) {
   const auto drop = sidebarDropTargetAt(ui, x, y);
   if(drop.valid) {
     const auto target = drop.folder;
-    if(ui.sidebar.drag.note) {
+    const auto rootName = ui.state.catalog().root().filename().generic_string();
+    if(ui.sidebar.drag.file) {
+      // A companion lands in the files area it was dropped on, or in the files
+      // directory of the notebook it was dropped on -- created if the notebook
+      // has none yet, because "put this PDF with that notebook" is the gesture.
+      const auto destination = !drop.filesDir.empty()
+                                 ? drop.filesDir
+                                 : target / std::filesystem::path(library::kFilesDirName);
+      const auto& carried = ui.sidebar.drag.filePath;
+      const auto name = carried.filename().generic_string();
+      if(!ui.state.moveCompanion(carried, destination).empty()) {
+        ui.sidebar.tree.reveal(destination);
+        ui.status = "Moved " + name + " to " + destination.generic_string();
+      } else if(carried.parent_path() != destination) {
+        ui.status = "Could not move " + name;
+      }
+    } else if(!drop.filesDir.empty()) {
+      // The one thing a files area does not take. A note there would vanish
+      // from the tree, and a notebook there would stop being one.
+      ui.status = ui.sidebar.drag.note ? "Notes live in notebooks, not with files"
+                                       : "Notebooks cannot be filed with files";
+    } else if(ui.sidebar.drag.note) {
       selectNoteById(ui, ui.sidebar.drag.noteId);
       if(ui.state.moveSelectedNoteToFolder(target)) {
         ui.sidebar.tree.reveal(target);
-        ui.status = "Moved note to " + (target.empty() ? ui.state.catalog().root().filename().generic_string() : target.generic_string());
+        ui.status = "Moved note to " + (target.empty() ? rootName : target.generic_string());
       } else {
         ui.status = "Move note failed";
       }
     } else if(ui.state.moveFolderInto(ui.sidebar.drag.folderPath, target)) {
       ui.sidebar.tree.reveal(target / ui.sidebar.drag.folderPath.filename());
-      ui.status = "Moved notebook into " + (target.empty() ? ui.state.catalog().root().filename().generic_string() : target.generic_string());
+      ui.status = "Moved notebook into " + (target.empty() ? rootName : target.generic_string());
     } else if(target != ui.sidebar.drag.folderPath.parent_path() && target != ui.sidebar.drag.folderPath) {
       ui.status = "Cannot move a notebook into itself";
     }

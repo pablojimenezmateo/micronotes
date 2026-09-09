@@ -1352,3 +1352,161 @@ MICRONOTES_TEST(field_table_gives_each_focus_its_own_field) {
   ui.focus = micronotes::app::FocusArea::Editor;
   MICRONOTES_REQUIRE(micronotes::app::focusedField(ui) == nullptr);
 }
+
+namespace {
+
+// A sidebar row list built for a fixed panel, so a test can find rows by kind.
+void buildTestSidebar(micronotes::app::UiRuntime& ui) {
+  micronotes::app::buildSidebarRows(ui, {0.0f, 0.0f, 320.0f, 900.0f}, sidebarMetrics(16, 12));
+}
+
+const SidebarRow* findTreeRow(const micronotes::app::UiRuntime& ui, micronotes::ui::TreeRowKind kind,
+                              const std::filesystem::path& file) {
+  for(const auto& row : ui.sidebar.rows) {
+    if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == kind && row.tree.file == file) return &row;
+  }
+  return nullptr;
+}
+
+}
+
+// A companion file opens with the desktop when it is asked for -- a click, or
+// Enter -- and never when the keyboard cursor merely passes over it. Neither
+// touches the selection: a file has no page, so the note on screen stays.
+MICRONOTES_TEST(shell_a_companion_opens_on_a_click_and_never_on_the_cursor) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-companion-open";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "files");
+  { std::ofstream note(root / "work" / "Alpha.md"); note << "---\nid: c-alpha\ntitle: Alpha\n---\n\nBody.\n"; }
+  { std::ofstream pdf(root / "work" / "files" / "diagram.png"); pdf << "png"; }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  int launched = 0;
+  std::filesystem::path last;
+  ui.launcher = [&](const std::filesystem::path& path) {
+    ++launched;
+    last = path;
+    return true;
+  };
+  ui.sidebar.tree.reveal("work/files");
+  buildTestSidebar(ui);
+
+  const auto* file = findTreeRow(ui, micronotes::ui::TreeRowKind::File, "work/files/diagram.png");
+  MICRONOTES_REQUIRE(file != nullptr);
+  const auto* filesDir = findTreeRow(ui, micronotes::ui::TreeRowKind::FilesFolder, "work/files");
+  MICRONOTES_REQUIRE(filesDir != nullptr);
+  const SidebarRow fileRow = *file;
+  const SidebarRow dirRow = *filesDir;
+
+  micronotes::app::activateSidebarRow(ui, fileRow, micronotes::app::RowActivation::Cursor);
+  MICRONOTES_REQUIRE(launched == 0);
+  MICRONOTES_REQUIRE(ui.state.selection().noteId.empty());
+
+  micronotes::app::activateSidebarRow(ui, fileRow, micronotes::app::RowActivation::Click);
+  MICRONOTES_REQUIRE(launched == 1);
+  MICRONOTES_REQUIRE(last == root / "work" / "files" / "diagram.png");
+  MICRONOTES_REQUIRE(ui.status == "Opened diagram.png");
+  MICRONOTES_REQUIRE(ui.state.selection().noteId.empty());
+  MICRONOTES_REQUIRE(ui.state.selection().folder.empty());
+
+  // The files directory unfolds and folds, and becomes nothing.
+  MICRONOTES_REQUIRE(ui.sidebar.tree.expanded("work/files"));
+  micronotes::app::activateSidebarRow(ui, dirRow, micronotes::app::RowActivation::Click);
+  MICRONOTES_REQUIRE(!ui.sidebar.tree.expanded("work/files"));
+  MICRONOTES_REQUIRE(ui.state.selection().folder.empty());
+  MICRONOTES_REQUIRE(launched == 1);
+
+  // A drop on either kind names the directory it stands for, and a drop on a
+  // note names its notebook with no files directory at all.
+  const auto centre = [](const SidebarRow& row) {
+    return std::pair {row.rect.x + row.rect.w / 2.0f, row.rect.y + row.rect.h / 2.0f};
+  };
+  const auto [fx, fy] = centre(fileRow);
+  const auto onFile = micronotes::app::sidebarDropTargetAt(ui, fx, fy);
+  MICRONOTES_REQUIRE(onFile.valid && onFile.filesDir == std::filesystem::path("work/files"));
+  const auto [dx, dy] = centre(dirRow);
+  const auto onDir = micronotes::app::sidebarDropTargetAt(ui, dx, dy);
+  MICRONOTES_REQUIRE(onDir.valid && onDir.filesDir == std::filesystem::path("work/files"));
+  const SidebarRow* note = nullptr;
+  for(const auto& row : ui.sidebar.rows) {
+    if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == micronotes::ui::TreeRowKind::Note) note = &row;
+  }
+  MICRONOTES_REQUIRE(note != nullptr);
+  const auto [nx, ny] = centre(*note);
+  const auto onNote = micronotes::app::sidebarDropTargetAt(ui, nx, ny);
+  MICRONOTES_REQUIRE(onNote.valid && onNote.folder == std::filesystem::path("work") && onNote.filesDir.empty());
+  std::filesystem::remove_all(root);
+}
+
+// A query lists the files whose *name* matched under a caption of their own,
+// and only when there are any.
+MICRONOTES_TEST(shell_search_lists_matching_file_names_under_their_own_caption) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-companion-search";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "files");
+  { std::ofstream note(root / "work" / "Alpha.md"); note << "---\nid: s-alpha\ntitle: Alpha\n---\n\ndiagram in the body\n"; }
+  { std::ofstream pdf(root / "work" / "files" / "diagram.png"); pdf << "png"; }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  ui.fields.search.beginWith("diagram", false);
+  ui.state.setSearch("diagram");
+  buildTestSidebar(ui);
+
+  bool notesCaption = false;
+  bool filesCaption = false;
+  bool fileRow = false;
+  for(const auto& row : ui.sidebar.rows) {
+    if(row.kind == SidebarRow::Kind::SectionLabel && row.label == "1 result") notesCaption = true;
+    if(row.kind == SidebarRow::Kind::SectionLabel && row.label == "1 file") filesCaption = true;
+    if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == micronotes::ui::TreeRowKind::File &&
+       row.tree.file == std::filesystem::path("work/files/diagram.png")) {
+      fileRow = true;
+    }
+  }
+  MICRONOTES_REQUIRE(notesCaption && filesCaption && fileRow);
+
+  // A query only a note answers has no files caption at all.
+  ui.fields.search.beginWith("body", false);
+  ui.state.setSearch("body");
+  buildTestSidebar(ui);
+  for(const auto& row : ui.sidebar.rows) {
+    MICRONOTES_REQUIRE(!(row.kind == SidebarRow::Kind::SectionLabel && row.label.ends_with(" file")));
+    MICRONOTES_REQUIRE(!(row.kind == SidebarRow::Kind::Tree && row.tree.kind == micronotes::ui::TreeRowKind::File));
+  }
+  std::filesystem::remove_all(root);
+}
+
+// A file copied into a `files/` directory from outside appears in the tree
+// through one walk of that directory -- not through the library refresh a
+// folder operation costs.
+MICRONOTES_TEST(shell_a_file_dropped_into_files_refreshes_only_that_directory) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-companion-watch";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "files");
+  { std::ofstream note(root / "work" / "Alpha.md"); note << "---\nid: w-alpha\ntitle: Alpha\n---\n\nBody.\n"; }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  MICRONOTES_REQUIRE(ui.watcher.active());
+  MICRONOTES_REQUIRE(ui.state.catalog().companions().size() == 1);
+
+  microcore::perf::resetCounters();
+  { std::ofstream pdf(root / "work" / "files" / "new.pdf"); pdf << "pdf"; }
+  bool applied = false;
+  for(int attempt = 0; attempt < 400 && !applied; ++attempt) {
+    applied = micronotes::app::applyWatchedChanges(ui);
+    if(!applied) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  MICRONOTES_REQUIRE(applied);
+  bool listed = false;
+  for(const auto& entry : ui.state.catalog().companions()) {
+    if(entry.path == std::filesystem::path("work/files/new.pdf")) listed = true;
+  }
+  MICRONOTES_REQUIRE(listed);
+  using microcore::perf::CounterId;
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(CounterId::LibraryFilesDirRefreshes) >= 1);
+  MICRONOTES_REQUIRE(microcore::perf::readCounter(CounterId::LibraryIndexRefreshCalls) == 0);
+  std::filesystem::remove_all(root);
+}

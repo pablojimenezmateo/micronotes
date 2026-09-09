@@ -325,3 +325,61 @@ MICRONOTES_TEST(app_state_numbers_a_rename_onto_a_name_already_taken) {
   MICRONOTES_REQUIRE(state.selectedTitle() == "TODO-2");
   std::filesystem::remove_all(root);
 }
+
+// A files directory is not a notebook, and the app refuses to treat it as one:
+// no note lands in it, no notebook takes its name, and a notebook cannot be
+// moved into it. The companion operations, meanwhile, refuse the moves that
+// would lose a file. See `library::kFilesDirName`.
+MICRONOTES_TEST(app_state_keeps_notes_and_notebooks_out_of_a_files_area) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-app-state-companions-test";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root / "work" / "files");
+  std::filesystem::create_directories(root / "other");
+  { std::ofstream out(root / "work" / "files" / "a.pdf"); out << "pdf"; }
+
+  micronotes::ui::AppState state;
+  MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
+  MICRONOTES_REQUIRE(state.catalog().companions().size() == 2);
+
+  MICRONOTES_REQUIRE(!state.createNote("Stray", "work/files").has_value());
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "work" / "files" / "Stray.md"));
+  MICRONOTES_REQUIRE(!state.createFolder("files"));
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "files"));
+  MICRONOTES_REQUIRE(!state.createFolder("work/files/sub"));
+  MICRONOTES_REQUIRE(!state.moveFolderInto("other", "work/files"));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "other"));
+  state.selectFolder("other");
+  MICRONOTES_REQUIRE(!state.renameSelectedFolder("files"));
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "other"));
+  MICRONOTES_REQUIRE(state.selection().folder == std::filesystem::path("other"));
+
+  // The companion side of the same rule.
+  MICRONOTES_REQUIRE(state.renameCompanion("work/files", "stuff").empty());
+  MICRONOTES_REQUIRE(state.moveCompanion("work/files/a.pdf", "work/files").empty());
+  MICRONOTES_REQUIRE(state.renameCompanion("work/files/a.pdf", "../a.pdf").empty());
+  const auto before = state.catalog().revision();
+  const auto renamed = state.renameCompanion("work/files/a.pdf", "b.pdf");
+  MICRONOTES_REQUIRE(renamed == root / "work" / "files" / "b.pdf");
+  MICRONOTES_REQUIRE(state.catalog().revision() > before);
+  bool listed = false;
+  for(const auto& entry : state.catalog().companions()) {
+    if(entry.path == std::filesystem::path("work/files/b.pdf")) listed = true;
+    MICRONOTES_REQUIRE(entry.path != std::filesystem::path("work/files/a.pdf"));
+  }
+  MICRONOTES_REQUIRE(listed);
+  // Moved to another notebook, whose files directory did not exist yet.
+  const auto moved = state.moveCompanion("work/files/b.pdf", "other/files");
+  MICRONOTES_REQUIRE(moved == root / "other" / "files" / "b.pdf");
+  bool inOther = false;
+  for(const auto& entry : state.catalog().companions()) {
+    if(entry.path == std::filesystem::path("other/files/b.pdf")) inOther = true;
+  }
+  MICRONOTES_REQUIRE(inOther);
+  // A folder inside a files area is made through the companion door, and the
+  // notebook door still refuses it.
+  MICRONOTES_REQUIRE(state.createCompanionFolder("other/sub").empty());
+  MICRONOTES_REQUIRE(state.createCompanionFolder("other/files/sub") == root / "other" / "files" / "sub");
+  MICRONOTES_REQUIRE(state.deleteCompanion("other/files/b.pdf"));
+  MICRONOTES_REQUIRE(state.catalog().trashEntries().size() == 1);
+  std::filesystem::remove_all(root);
+}

@@ -185,6 +185,35 @@ static std::vector<std::string> splitFields(const std::string& line) {
 
 }
 
+std::filesystem::path filesRootOf(const std::filesystem::path& relative) {
+  std::filesystem::path walk;
+  for(const auto& part : relative) {
+    // A trailing slash leaves an empty last component and `.` names nothing;
+    // neither is a directory the rule could apply to.
+    if(part.empty() || part == ".") continue;
+    walk /= part;
+    if(part == kFilesDirName) return walk;
+  }
+  return {};
+}
+
+bool insideFilesDir(const std::filesystem::path& relative) {
+  return !filesRootOf(relative).empty();
+}
+
+bool isFilesDir(const std::filesystem::path& relative) {
+  // The last real component is `files`, and nothing before it is. Spelled as a
+  // walk rather than as `filesRootOf(relative) == relative` so a trailing slash
+  // or a `.` in the path does not make the same directory two different ones.
+  bool sawFiles = false;
+  for(const auto& part : relative) {
+    if(part.empty() || part == ".") continue;
+    if(sawFiles) return false;
+    if(part == kFilesDirName) sawFiles = true;
+  }
+  return sawFiles;
+}
+
 Library::Library(std::filesystem::path root)
   : root_(std::move(root)), safeRoot_(root_) {}
 
@@ -482,12 +511,14 @@ bool Library::restoreFromTrash(const std::string& name) const {
 }
 
 void Library::walk(std::vector<std::filesystem::directory_entry>* filesOut,
-                   std::vector<std::filesystem::path>* directoriesOut) const {
+                   std::vector<std::filesystem::path>* directoriesOut,
+                   std::vector<CompanionEntry>* companionsOut) const {
   perf::addCounter(perf::CounterId::LibraryNoteFilesCalls);
   std::vector<std::filesystem::directory_entry> discard;
   std::vector<std::filesystem::directory_entry>& files = filesOut ? *filesOut : discard;
   files.clear();
   if(directoriesOut) directoriesOut->clear();
+  if(companionsOut) companionsOut->clear();
   if(!std::filesystem::exists(root_)) return;
 
   // The state directory holds the sqlite index, its WAL, and every attachment.
@@ -502,14 +533,34 @@ void Library::walk(std::vector<std::filesystem::directory_entry>* filesOut,
     root_, std::filesystem::directory_options::skip_permission_denied, error);
   if(error) return;
   const std::filesystem::recursive_directory_iterator end;
+  // The depth at which the walk entered a files directory, or -1 outside one.
+  // Everything deeper than it is a companion; the first entry back at or above
+  // it is out again. By depth rather than by inspecting each path's components:
+  // that is O(1) per entry on a walk whose whole cost is the entries.
+  int filesDepth = -1;
   for(; it != end; it.increment(error)) {
     if(error) break;
     perf::addCounter(perf::CounterId::LibraryDirectoryEntriesVisited);
-    if(it->is_directory(error)) {
-      if(it->path() == stateDir) {
-        it.disable_recursion_pending();
-        continue;
-      }
+    if(filesDepth >= 0 && it.depth() <= filesDepth) filesDepth = -1;
+    const bool directory = it->is_directory(error);
+    if(directory && filesDepth < 0 && it->path() == stateDir) {
+      it.disable_recursion_pending();
+      continue;
+    }
+    if(filesDepth < 0 && directory && it->path().filename() == kFilesDirName) {
+      filesDepth = it.depth();
+    }
+    if(filesDepth >= 0) {
+      perf::addCounter(perf::CounterId::LibraryCompanionEntriesVisited);
+      if(!companionsOut) continue;
+      if(!directory && !it->is_regular_file(error)) continue;
+      if(!directory && platform::isTemporaryWriteName(it->path().filename().native())) continue;
+      auto relative = it->path().lexically_relative(root_);
+      auto folder = relative.parent_path();
+      companionsOut->push_back({std::move(relative), std::move(folder), directory});
+      continue;
+    }
+    if(directory) {
       if(directoriesOut) directoriesOut->push_back(it->path().lexically_relative(root_));
       continue;
     }
@@ -531,6 +582,74 @@ std::vector<std::filesystem::path> Library::noteFiles() const {
   files.reserve(entries.size());
   for(const auto& entry : entries) files.push_back(entry.path());
   return files;
+}
+
+std::vector<CompanionEntry> Library::walkFilesDir(const std::filesystem::path& relativeFilesDir) const {
+  std::vector<CompanionEntry> out;
+  if(!isFilesDir(relativeFilesDir)) return out;
+  const auto dir = safeRoot_.normalize(root_ / relativeFilesDir);
+  std::error_code error;
+  if(!std::filesystem::is_directory(dir, error)) return out;
+  out.push_back({relativeFilesDir, relativeFilesDir.parent_path(), true});
+  std::filesystem::recursive_directory_iterator it(
+    dir, std::filesystem::directory_options::skip_permission_denied, error);
+  if(error) return out;
+  const std::filesystem::recursive_directory_iterator end;
+  for(; it != end; it.increment(error)) {
+    if(error) break;
+    perf::addCounter(perf::CounterId::LibraryCompanionEntriesVisited);
+    const bool directory = it->is_directory(error);
+    if(!directory && !it->is_regular_file(error)) continue;
+    if(!directory && platform::isTemporaryWriteName(it->path().filename().native())) continue;
+    auto relative = it->path().lexically_relative(root_);
+    auto folder = relative.parent_path();
+    out.push_back({std::move(relative), std::move(folder), directory});
+  }
+  return out;
+}
+
+std::filesystem::path Library::moveCompanion(const std::filesystem::path& relative,
+                                             const std::filesystem::path& newRelative) const {
+  // Both ends inside a files directory, and neither end the directory itself.
+  // A companion moved out of a files area would become a note, a notebook or
+  // an invisible file, and the `files` directory renamed would take every file
+  // in it out of the tree at once.
+  if(!insideFilesDir(relative) || isFilesDir(relative)) return {};
+  if(!insideFilesDir(newRelative) || isFilesDir(newRelative)) return {};
+  const auto source = safeRoot_.normalize(root_ / relative);
+  std::error_code error;
+  if(!std::filesystem::exists(source, error)) return {};
+  auto target = safeRoot_.normalize(root_ / newRelative);
+  // A directory cannot be moved into itself: the rename would take it, and
+  // everything under it, out of reach. From the target's parent, so that a
+  // rename to the name it already has is a no-op rather than a refusal.
+  for(auto walk = target.parent_path(); !walk.empty() && walk != walk.root_path(); walk = walk.parent_path()) {
+    if(walk == source) return {};
+  }
+  std::filesystem::create_directories(target.parent_path(), error);
+  target = platform::uniquePath(target, source);
+  if(target == source) return target;
+  std::filesystem::rename(source, target, error);
+  return error ? std::filesystem::path {} : target;
+}
+
+bool Library::deleteCompanion(const std::filesystem::path& relative) const {
+  if(!insideFilesDir(relative)) return false;
+  const auto safePath = safeRoot_.normalize(root_ / relative);
+  if(!std::filesystem::exists(safePath)) return false;
+  const auto files = trashFiles(root_);
+  std::filesystem::create_directories(files);
+  TrashEntry entry;
+  entry.originalRelative = safePath.lexically_relative(root_);
+  // The file's own name, extension included: a companion has no title but the
+  // one the reader gave the file, and the restore list should show it as the
+  // tree did.
+  entry.title = safePath.filename().string();
+  entry.deletedAt = timestampNow();
+  entry.name = uniqueTrashName(files, safePath, {});
+  // Index line first, then the move, for the reason `deleteNote` gives.
+  if(!appendTrashEntries(root_, {entry})) return false;
+  return moveIntoTrashAs(root_, safePath, entry.name);
 }
 
 }

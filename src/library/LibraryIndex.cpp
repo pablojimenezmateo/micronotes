@@ -541,7 +541,7 @@ bool LibraryIndex::rebuild() {
 
   Library library(root_);
   std::vector<std::filesystem::directory_entry> entries;
-  library.walk(&entries, &directories_);
+  library.walk(&entries, &directories_, &companions_);
   bool ok = true;
   for(const auto& entry : entries) {
     const auto& path = entry.path();
@@ -714,7 +714,7 @@ bool LibraryIndex::refreshChangedFiles() {
   {
   perf::ScopeTimer scanTimer("library_index.refresh.scan_tree");
   std::vector<std::filesystem::directory_entry> entries;
-  library.walk(&entries, &directories_);
+  library.walk(&entries, &directories_, &companions_);
   for(const auto& entry : entries) {
     const auto& path = entry.path();
     auto relative = path.lexically_relative(root_).generic_string();
@@ -895,6 +895,10 @@ std::vector<IndexedNote> LibraryIndex::notes() const {
 
 const std::vector<std::filesystem::path>& LibraryIndex::directories() const {
   return directories_;
+}
+
+const std::vector<CompanionEntry>& LibraryIndex::companions() const {
+  return companions_;
 }
 
 }

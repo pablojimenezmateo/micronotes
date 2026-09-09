@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace micronotes::library {
@@ -15,6 +16,36 @@ namespace micronotes::library {
 struct LoadedNote {
   NoteMetadata metadata;
   std::string body;
+};
+
+// The companion-files convention: a directory named `files` directly inside a
+// notebook -- the library root included -- holds the PDFs, images and videos
+// that belong with that notebook's notes. Everything under it, recursively, is
+// a *file* rather than a note: listed in the tree, found by name, opened by the
+// desktop's default handler, and never read, rendered or indexed by micronotes.
+// A `.md` inside one is a file too, and a nested `files/` inside one is an
+// ordinary folder.
+//
+// The name is spelled here and nowhere else. Every layer that has to know
+// whether a path is a companion asks one of these three rather than comparing
+// a component to a string, which is what keeps the rule one rule.
+//
+// The match is exact and case-sensitive: `Files` is a notebook.
+inline constexpr std::string_view kFilesDirName = "files";
+
+// Whether `relative` names a files directory itself: `<notebook>/files`.
+bool isFilesDir(const std::filesystem::path& relative);
+// Whether `relative` is a files directory or sits anywhere under one.
+bool insideFilesDir(const std::filesystem::path& relative);
+// The `<notebook>/files` prefix of `relative`, or empty when it has none.
+std::filesystem::path filesRootOf(const std::filesystem::path& relative);
+
+// One entry under a files directory, as the walk reports it. The `files`
+// directory itself is the first entry of its subtree, with `directory` set.
+struct CompanionEntry {
+  std::filesystem::path path;    // library-relative
+  std::filesystem::path folder;  // its parent, library-relative -- carried, like NoteListItem::folder
+  bool directory = false;
 };
 
 // A note or folder waiting in `.micronotes/trash/`. Deletion is a move inside
@@ -101,8 +132,32 @@ public:
   // a second `recursive_directory_iterator` over the same tree a few
   // microseconds later. Paths are library-relative, and the state directory is
   // pruned rather than filtered, so neither list can mention it.
+  //
+  // `companions` receives everything under a files directory -- see
+  // `kFilesDirName` -- and nothing under one reaches the other two outputs. A
+  // note inside a files directory would otherwise be a note the index knows
+  // and the tree cannot place.
   void walk(std::vector<std::filesystem::directory_entry>* files,
-            std::vector<std::filesystem::path>* directories) const;
+            std::vector<std::filesystem::path>* directories,
+            std::vector<CompanionEntry>* companions = nullptr) const;
+
+  // The companion entries under one `<notebook>/files` directory, without a
+  // walk of anything else. For the watcher: a PDF copied into a folder must not
+  // cost the whole-library refresh a folder operation does. Empty when the
+  // directory is gone, which is the answer for a files directory just deleted.
+  std::vector<CompanionEntry> walkFilesDir(const std::filesystem::path& relativeFilesDir) const;
+
+  // Moves or renames a companion entry -- a file or a folder inside a files
+  // directory -- to `newRelative`, creating the target's parent and numbering
+  // around anything already there. Returns where it landed, or empty when the
+  // move was refused or failed. Refused: the `files` directory itself, which is
+  // the anchor of the convention and would stop being one under another name.
+  std::filesystem::path moveCompanion(const std::filesystem::path& relative,
+                                      const std::filesystem::path& newRelative) const;
+  // Moves a companion entry into the trash, restorable through
+  // `restoreFromTrash` like a note: the same index line, minus the attachment
+  // half a note carries and a file does not.
+  bool deleteCompanion(const std::filesystem::path& relative) const;
 
 private:
   // Every row of the trash index. The two readers of it differ in what they

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 
 // The overlays that ask a question: the palettes, the text prompts, and the two
@@ -41,6 +42,20 @@ void beginFolderRename(UiRuntime& ui);
 void saveFolderRename(UiRuntime& ui);
 void openLibraryPrompt(UiRuntime& ui);
 
+// Companion files -- see `library::kFilesDirName`. All of these are about
+// `ui.sidebar.companionTarget`, the row whose menu opened them. The commits
+// take the typed text directly rather than through a field: a companion has no
+// inline field of its own, and the prompt is the only way in.
+void beginCompanionRename(UiRuntime& ui);
+void saveCompanionRename(UiRuntime& ui, const std::string& name);
+void beginCompanionFolderCreate(UiRuntime& ui);
+void saveCompanionFolderCreate(UiRuntime& ui, const std::string& name);
+// "Move to notebook" for a file: the notebook chosen is where its `files/` is.
+void openCompanionMovePalette(UiRuntime& ui);
+void moveCompanionToNotebook(UiRuntime& ui, const std::filesystem::path& notebook);
+void openDeleteCompanionConfirm(UiRuntime& ui);
+void deleteCompanionTarget(UiRuntime& ui);
+
 // Confirms, and what they run when confirmed.
 
 // Deleting a tag, which is not deleting a thing: a tag exists because notes
@@ -61,7 +76,10 @@ void openCommandPalette(UiRuntime& ui);
 // that has to name a target note. `id` says which, so the result knows what it
 // is answering.
 void openNotePalette(UiRuntime& ui, std::string overlayId, std::string title);
-void openFolderPalette(UiRuntime& ui);
+// One list of every notebook. `overlayId` says what the choice is for -- moving
+// a note, or moving a file -- and `title` says so to the reader.
+void openFolderPalette(UiRuntime& ui, std::string overlayId = "move-note-folder",
+                       std::string title = "Move note to");
 void openTrashPalette(UiRuntime& ui);
 
 }

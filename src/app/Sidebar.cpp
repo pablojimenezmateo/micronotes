@@ -297,11 +297,15 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     }
 
     const bool isNote = row.tree.kind == ui::TreeRowKind::Note;
+    const bool isFile = row.tree.kind == ui::TreeRowKind::File;
+    // A companion row -- a file, or a folder in a files area -- is neither the
+    // open document nor the current notebook, so it never wears either mark.
+    const bool companion = isFile || row.tree.kind == ui::TreeRowKind::FilesFolder;
     // A folder is the current context and a note is the open document, so only
     // the note wears the accent strip: two markers at once would read as two
     // selections rather than as one place and one file.
     const bool selected = isNote && row.tree.noteId == selection.noteId;
-    const bool current = !isNote && selection.tag.empty() && selection.folder == row.tree.folder;
+    const bool current = !isNote && !companion && selection.tag.empty() && selection.folder == row.tree.folder;
     const bool dropTarget = ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == i;
     // Hover lifts the row's ground and nothing else, so the tree reads as "this
     // is what I would click" without masquerading as selected.
@@ -320,6 +324,12 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
                    {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
                     kSidebarGutterWidth, kSidebarGutterWidth},
                    selected ? theme().accent : theme().textMuted);
+    } else if(isFile) {
+      // One mark for every kind of file; see `ui::drawFileGlyph`.
+      ui::drawFileGlyph(renderer,
+                        {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
+                         kSidebarGutterWidth, kSidebarGutterWidth},
+                        theme().textMuted);
     }
     // A dot per tag at the trailing edge, which is what joins a note's row to
     // the TAGS band below: the row named a folder and said nothing at all about
@@ -344,8 +354,12 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     // A folder is a container and a note is a leaf, so the folder's name is the
     // brighter of the two -- the file tree's rule in every IDE, and the reverse
     // of what a list of documents would do.
+    //
+    // A files directory takes the leaf's ink even though it wears a chevron: it
+    // is a container of files rather than a notebook, and the dimmer name is
+    // what says so at a glance.
     const SDL_Color ink = selected || current ? theme().textPrimary
-                        : isNote              ? theme().textSecondary
+                        : isNote || companion ? theme().textSecondary
                                               : theme().textPrimary;
     text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), rowStyle),
               labelX, labelY, ink, rowStyle);

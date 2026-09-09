@@ -299,6 +299,9 @@ bool AppState::moveSelectedNoteToFolder(const std::filesystem::path& folder) {
 bool AppState::createFolder(const std::filesystem::path& folder) {
   if(!catalog_.isOpen() || folder.empty()) return false;
   const auto target = catalog_.createFolder(folder);
+  // Refused by the catalog: a notebook called `files`, or one under a files
+  // directory, would not be a notebook. See `library::kFilesDirName`.
+  if(target.empty()) return false;
   selection_.showFolder(std::filesystem::relative(target, catalog_.root()));
   selection_.noteId.clear();
   return true;
@@ -307,6 +310,7 @@ bool AppState::createFolder(const std::filesystem::path& folder) {
 bool AppState::renameSelectedFolder(const std::filesystem::path& folder) {
   if(!catalog_.isOpen() || selection_.folder.empty() || folder.empty()) return false;
   const auto target = catalog_.renameFolder(selection_.folder, folder);
+  if(target.empty()) return false;
   selection_.showFolder(std::filesystem::relative(target, catalog_.root()));
   selection_.noteId.clear();
   return true;
@@ -316,6 +320,8 @@ bool AppState::moveFolderInto(const std::filesystem::path& folder,
                               const std::filesystem::path& newParent) {
   if(!catalog_.isOpen() || folder.empty()) return false;
   if(folder == newParent || folder.parent_path() == newParent) return false;
+  // A notebook dropped into a files directory would stop being one.
+  if(library::insideFilesDir(newParent)) return false;
   // A folder cannot become its own child: renaming a directory into itself
   // takes it, and everything under it, out of the library.
   for(auto walk = newParent; !walk.empty(); walk = walk.parent_path()) {
@@ -338,6 +344,28 @@ bool AppState::deleteSelectedFolder() {
 
 bool AppState::restoreFromTrash(const std::string& name) {
   return catalog_.restoreFromTrash(name);
+}
+
+std::filesystem::path AppState::renameCompanion(const std::filesystem::path& relative,
+                                                const std::string& newName) {
+  return catalog_.renameCompanion(relative, newName);
+}
+
+std::filesystem::path AppState::moveCompanion(const std::filesystem::path& relative,
+                                              const std::filesystem::path& destinationDir) {
+  return catalog_.moveCompanion(relative, destinationDir);
+}
+
+bool AppState::deleteCompanion(const std::filesystem::path& relative) {
+  return catalog_.deleteCompanion(relative);
+}
+
+std::filesystem::path AppState::createCompanionFolder(const std::filesystem::path& relative) {
+  return catalog_.createCompanionFolder(relative);
+}
+
+void AppState::refreshFilesDir(const std::filesystem::path& filesDir) {
+  catalog_.refreshFilesDir(filesDir);
 }
 
 bool AppState::refreshLibrary() {

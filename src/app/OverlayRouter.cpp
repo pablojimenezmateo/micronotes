@@ -82,6 +82,26 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
                   : "Could not set icon";
   } else if(result.overlayId == "settings-library") {
     switchLibrary(ui, result.value);
+  } else if(result.overlayId == "companion-name") {
+    saveCompanionRename(ui, result.value);
+  } else if(result.overlayId == "companion-folder-name") {
+    saveCompanionFolderCreate(ui, result.value);
+  } else if(result.overlayId == "delete-companion") {
+    deleteCompanionTarget(ui);
+  } else if(result.overlayId == "move-companion-folder") {
+    const std::filesystem::path folder = result.itemId == "/" ? std::filesystem::path {} : std::filesystem::path {result.itemId};
+    moveCompanionToNotebook(ui, folder);
+  } else if(result.overlayId == "file-menu") {
+    if(result.itemId == "open") openCompanion(ui, ui.sidebar.companionTarget);
+    else if(result.itemId == "rename") beginCompanionRename(ui);
+    else if(result.itemId == "move") openCompanionMovePalette(ui);
+    else if(result.itemId == "delete") openDeleteCompanionConfirm(ui);
+    else if(handleCompanionPathCommand(ui, result.itemId, ui.sidebar.companionTarget)) {}
+  } else if(result.overlayId == "files-folder-menu") {
+    if(result.itemId == "new-folder") beginCompanionFolderCreate(ui);
+    else if(result.itemId == "rename") beginCompanionRename(ui);
+    else if(result.itemId == "delete") openDeleteCompanionConfirm(ui);
+    else if(handleCompanionPathCommand(ui, result.itemId, ui.sidebar.companionTarget)) {}
   } else if(result.overlayId == "folder-menu") {
     if(result.itemId == "new-folder") beginFolderCreate(ui);
     else if(result.itemId == "new-note") createNoteInFolder(ui, ui.state.selection().folder);
