@@ -4,6 +4,7 @@
 
 #include "core/editor/TextField.h"
 #include "ui/Rect.h"
+#include "ui/ScrollList.h"
 
 #include <cstddef>
 #include <string>
@@ -109,15 +110,13 @@ struct SettingsSurfaceState {
   // Index into the category list, and into the rows of that category.
   int category = 0;
   int row = 0;
-  int rowScroll = 0;
-  int aboutScroll = 0;
-  // Rows the last frame actually fitted, in each mode. The rows are not a fixed
-  // height -- a setting whose help runs to two lines is taller than one whose
-  // help fits on one -- so only the paint knows how many the pane held, and the
-  // wheel and the arrows have to clamp against what was drawn rather than
-  // against a count they guessed.
-  int rowsShown = 1;
-  int aboutRowsShown = 1;
+  // How far each of the card's two lists is scrolled, and how many rows the
+  // last paint fitted into it. One `RowStrip` per list rather than an offset
+  // and a count per list spelled out as four ints: the two travel together --
+  // every clamp reads both -- and as separate fields they were clamped by hand
+  // at nine sites, twice each.
+  RowStrip rows;
+  RowStrip about;
 
   // What the last frame drew, so a click finds what it landed on without laying
   // the surface out twice.

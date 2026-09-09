@@ -7,6 +7,7 @@
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
 #include "ui/RowBand.h"
+#include "ui/RowCursor.h"
 #include "ui/TreeModel.h"
 
 #include <algorithm>
@@ -65,14 +66,26 @@ const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
 
 namespace {
 
-// The row list, from the library. O(library) rather than O(viewport): the tree
-// relativises a path and builds a map key for every note before it can place
-// the first row, and every row is a string, a path and a rect. Called through
-// buildSidebarRows(), which is what keeps it off the frame path.
-void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
-  ui.sidebar.rows.clear();
-  const float top = rect.y + kSidebarListPadding;
-  float y = top - static_cast<float>(ui.sidebar.list.scroll());
+// The sidebar's row list, built one band at a time.
+//
+// A type rather than a function with seven lambdas in it. The lambdas shared a
+// running `y`, the row vector and the metrics, which is why the function could
+// not be split by moving pieces out of it -- it was already a builder, with its
+// state in the enclosing scope and its invariant maintained by seven closures
+// agreeing to advance by exactly the height they had just used.
+//
+// That invariant is load-bearing: `sidebarRowRange` binary-searches the list on
+// every frame and every mouse-motion event, and it is only correct because the
+// rows tile. `ui::RowCursor` owns it now, so a band added here cannot break the
+// band query over there.
+class RowBuilder {
+public:
+  RowBuilder(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
+    : ui_(ui), rect_(rect), metrics_(metrics),
+      cursor_(rect.x, rect.w, rect.y + kSidebarListPadding -
+                                static_cast<float>(ui.sidebar.list.scroll())) {
+    ui_.sidebar.rows.clear();
+  }
 
   // A caption on what the list is showing: the result count, the tag being
   // filtered by. It heads the list the same way a band does and reads the same,
@@ -82,81 +95,58 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // "Unstaged", and at 13px the reason is legible: uppercase in a mono face is
   // a row of same-width rectangles with no ascenders or descenders to tell them
   // apart, so a caps heading reads as a texture before it reads as a word.
-  const auto pushCaption = [&](std::string label) {
+  void caption(std::string label) {
     SidebarRow row;
     row.kind = SidebarRow::Kind::SectionLabel;
     row.label = std::move(label);
     // Full panel width, unlike the rows it heads. A band that stops short of
     // the panel edges reads as a card sitting in the list rather than as a
     // division of it, and a division is the whole point.
-    row.rect = {rect.x, y, rect.w, metrics.label};
-    ui.sidebar.rows.push_back(std::move(row));
-    y += metrics.label;
-  };
+    row.rect = cursor_.place(metrics_.label);
+    ui_.sidebar.rows.push_back(std::move(row));
+  }
+
   // A band that can be shut. Returns whether to go on and emit its contents,
   // so a collapsed section is one `if` at the call site rather than a branch
   // around each of the four groups.
-  const auto pushSection = [&](ui::SidebarSection section, std::string label, std::size_t count) {
+  bool section(ui::SidebarSection which, std::string label, std::size_t count) {
     SidebarRow row;
     row.kind = SidebarRow::Kind::SectionLabel;
     row.label = std::move(label);
-    row.section = section;
-    row.collapsed = ui.state.workspace().sectionCollapsed(section);
+    row.section = which;
+    row.collapsed = ui_.state.workspace().sectionCollapsed(which);
     // The count is worth most on a band that is shut, which is the one case
     // where what is under it cannot be counted by looking.
     if(count > 0) row.trailing = std::to_string(count);
-    row.rect = {rect.x, y, rect.w, metrics.label};
+    row.rect = cursor_.place(metrics_.label);
     // The same control a folder row wears, at the panel's own inset rather
     // than on the label column the rows use. That outdent is the visual
     // difference between a heading and a row -- see `ui::kSectionLabelX`.
-    row.disclosure = {rect.x + ui::kSectionChevronX,
-                      y + (metrics.label - kSidebarGutterWidth) / 2.0f,
+    row.disclosure = {rect_.x + ui::kSectionChevronX,
+                      row.rect.y + (metrics_.label - kSidebarGutterWidth) / 2.0f,
                       kSidebarGutterWidth, kSidebarGutterWidth};
     const bool collapsed = row.collapsed;
-    ui.sidebar.rows.push_back(std::move(row));
-    y += metrics.label;
+    ui_.sidebar.rows.push_back(std::move(row));
     return !collapsed;
-  };
-  const auto pushTreeRow = [&](ui::TreeRow tree) {
+  }
+
+  void treeRow(ui::TreeRow tree) {
     SidebarRow row;
     row.kind = SidebarRow::Kind::Tree;
-    row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f, metrics.row};
+    row.rect = cursor_.place(metrics_.row, ui::kSpace2);
     if(tree.expandable) {
       row.disclosure = {row.rect.x + kSidebarGutterX + static_cast<float>(tree.depth) * kSidebarIndent,
-                        y + (metrics.row - kSidebarGutterWidth) / 2.0f,
+                        row.rect.y + (metrics_.row - kSidebarGutterWidth) / 2.0f,
                         kSidebarGutterWidth, kSidebarGutterWidth};
     }
     row.tree = std::move(tree);
-    ui.sidebar.rows.push_back(std::move(row));
-    y += metrics.row;
-  };
+    ui_.sidebar.rows.push_back(std::move(row));
+  }
 
-  const auto& notes = ui.state.allNotes();
-  const auto root = ui.state.libraryRoot();
-  // A shortcut list is a flat list of notes, drawn with the same row the tree
-  // uses so a note looks and behaves the same wherever it is listed.
-  const auto pushNoteShortcuts = [&](const std::vector<std::string>& ids, std::size_t limit) {
-    std::size_t drawn = 0;
-    for(const auto& id : ids) {
-      if(drawn >= limit) break;
-      // By id index rather than by scan. Thirteen shortcuts against a thousand
-      // notes was thirteen thousand string compares to draw thirteen rows.
-      const auto* found = ui.state.noteById(id);
-      if(!found) continue;
-      ui::TreeRow tree;
-      tree.kind = ui::TreeRowKind::Note;
-      tree.depth = 0;
-      tree.folder = found->folder;
-      tree.noteId = found->id;
-      tree.label = found->title;
-      tree.icon = found->icon;
-      pushTreeRow(std::move(tree));
-      ++drawn;
-    }
-    return drawn;
-  };
-
-  const auto pushFlatNote = [&](const library::NoteListItem& note) {
+  // A note listed outside the tree -- in a shortcut band, or under a tag
+  // filter. Drawn with the row the tree uses so a note looks and behaves the
+  // same wherever it is listed.
+  void noteRow(const library::NoteListItem& note) {
     ui::TreeRow tree;
     tree.kind = ui::TreeRowKind::Note;
     tree.depth = 0;
@@ -164,15 +154,81 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
     tree.noteId = note.id;
     tree.label = note.title;
     tree.icon = note.icon;
-    pushTreeRow(std::move(tree));
-  };
+    treeRow(std::move(tree));
+  }
+
+  void noteShortcuts(const std::vector<std::string>& ids, std::size_t limit) {
+    std::size_t drawn = 0;
+    for(const auto& id : ids) {
+      if(drawn >= limit) break;
+      // By id index rather than by scan. Thirteen shortcuts against a thousand
+      // notes was thirteen thousand string compares to draw thirteen rows.
+      const auto* found = ui_.state.noteById(id);
+      if(!found) continue;
+      noteRow(*found);
+      ++drawn;
+    }
+  }
+
+  void tagRow(const std::string& tag) {
+    SidebarRow row;
+    row.kind = SidebarRow::Kind::Tag;
+    row.rect = cursor_.place(metrics_.tag, ui::kSpace2);
+    row.tag = tag;
+    ui_.sidebar.rows.push_back(std::move(row));
+  }
+
+  void searchResult(const library::SearchResult& result, std::size_t index) {
+    SidebarRow row;
+    row.kind = SidebarRow::Kind::SearchResult;
+    row.noteId = result.id;
+    row.title = result.title;
+    row.resultIndex = index;
+    // How many lines the row will show, counted rather than measured. Every
+    // line `fillSearchSnippets` will trim is a non-empty one, so the two
+    // agree without either of them doing the other's work.
+    row.matchLineCount = countMatchLines(result);
+    row.rect = cursor_.place(searchResultRowHeight(row.matchLineCount, metrics_), ui::kSpace2);
+    ui_.sidebar.rows.push_back(std::move(row));
+  }
+
+  // How many of a shortcut list still name a note. Counted before the band is
+  // pushed rather than after, because a band that can be shut has to carry its
+  // count whether or not its rows were emitted -- and because a heading over
+  // nothing at all is a lie whichever way round it is built. This is the
+  // `resize` the two shortcut lists used to do to take a heading back.
+  std::size_t resolvable(const std::vector<std::string>& ids, std::size_t limit) const {
+    std::size_t found = 0;
+    for(const auto& id : ids) {
+      if(found >= limit) break;
+      if(ui_.state.noteById(id)) ++found;
+    }
+    return found;
+  }
+
   // Whatever the list ended up holding, it scrolls the same way.
-  const auto finish = [&]() {
-    perf::addCounter(perf::CounterId::SidebarRowsBuilt, ui.sidebar.rows.size());
-    const float contentHeight = y + static_cast<float>(ui.sidebar.list.scroll()) - top;
-    ui.sidebar.rowsKey.contentHeight = contentHeight;
-    ui.sidebar.list.setContent(rect.h - kSidebarListPadding * 2.0f, contentHeight);
-  };
+  void finish() {
+    perf::addCounter(perf::CounterId::SidebarRowsBuilt, ui_.sidebar.rows.size());
+    const float contentHeight = cursor_.height();
+    ui_.sidebar.rowsKey.contentHeight = contentHeight;
+    ui_.sidebar.list.setContent(rect_.h - kSidebarListPadding * 2.0f, contentHeight);
+  }
+
+private:
+  UiRuntime& ui_;
+  Rect rect_;
+  const SidebarMetrics& metrics_;
+  ui::RowCursor cursor_;
+};
+
+// The row list, from the library. O(library) rather than O(viewport): the tree
+// relativises a path and builds a map key for every note before it can place
+// the first row, and every row is a string, a path and a rect. Called through
+// buildSidebarRows(), which is what keeps it off the frame path.
+void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
+  RowBuilder build(ui, rect, metrics);
+
+  const auto& notes = ui.state.allNotes();
 
   // A running query replaces the tree rather than appearing beside it. The
   // sidebar answers one question at a time, and Esc puts the tree back.
@@ -182,27 +238,12 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
     // a row saying the list is empty, drawn instead of the empty state that
     // says so and also says how to get out of it.
     if(results.empty()) {
-      finish();
+      build.finish();
       return;
     }
-    pushCaption(std::to_string(results.size()) + (results.size() == 1 ? " result" : " results"));
-    for(std::size_t i = 0; i < results.size(); ++i) {
-      const auto& result = results[i];
-      SidebarRow row;
-      row.kind = SidebarRow::Kind::SearchResult;
-      row.noteId = result.id;
-      row.title = result.title;
-      row.resultIndex = i;
-      // How many lines the row will show, counted rather than measured. Every
-      // line `fillSearchSnippets` will trim is a non-empty one, so the two
-      // agree without either of them doing the other's work.
-      row.matchLineCount = countMatchLines(result);
-      row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f,
-                  searchResultRowHeight(row.matchLineCount, metrics)};
-      y += row.rect.h;
-      ui.sidebar.rows.push_back(std::move(row));
-    }
-    finish();
+    build.caption(std::to_string(results.size()) + (results.size() == 1 ? " result" : " results"));
+    for(std::size_t i = 0; i < results.size(); ++i) build.searchResult(results[i], i);
+    build.finish();
     return;
   }
 
@@ -211,33 +252,19 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // colour beside its name everywhere else, and a sigil as well is the same
   // thing said twice in two registers.
   if(!ui.state.selection().tag.empty()) {
-    pushCaption(ui.state.selection().tag);
+    build.caption(ui.state.selection().tag);
     for(const auto& note : notes) {
       if(std::find(note.tags.begin(), note.tags.end(), ui.state.selection().tag) == note.tags.end()) continue;
-      pushFlatNote(note);
+      build.noteRow(note);
     }
-    finish();
+    build.finish();
     return;
   }
 
-  // How many of a shortcut list still name a note. Counted before the band is
-  // pushed rather than after, because a band that can be shut has to carry its
-  // count whether or not its rows were emitted -- and because a heading over
-  // nothing at all is a lie whichever way round it is built. This is the
-  // `resize` the two shortcut lists used to do to take a heading back.
-  const auto resolvable = [&](const std::vector<std::string>& ids, std::size_t limit) {
-    std::size_t found = 0;
-    for(const auto& id : ids) {
-      if(found >= limit) break;
-      if(ui.state.noteById(id)) ++found;
-    }
-    return found;
-  };
-
   const auto& favorites = ui.state.workspace().favorites;
-  if(const std::size_t count = resolvable(favorites, kMaxFavoriteRows); count > 0) {
-    if(pushSection(ui::SidebarSection::Favorites, "Favorites", count)) {
-      pushNoteShortcuts(favorites, kMaxFavoriteRows);
+  if(const std::size_t count = build.resolvable(favorites, kMaxFavoriteRows); count > 0) {
+    if(build.section(ui::SidebarSection::Favorites, "Favorites", count)) {
+      build.noteShortcuts(favorites, kMaxFavoriteRows);
     }
   }
 
@@ -246,8 +273,8 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // labelled ones reads as the tail of the one above it.
   auto treeRows = ui.sidebar.tree.rows(ui.state.folders(), notes);
   if(!treeRows.empty()) {
-    if(pushSection(ui::SidebarSection::Notebooks, "Notebooks", notes.size())) {
-      for(auto& row : treeRows) pushTreeRow(std::move(row));
+    if(build.section(ui::SidebarSection::Notebooks, "Notebooks", notes.size())) {
+      for(auto& row : treeRows) build.treeRow(std::move(row));
     }
   }
 
@@ -255,26 +282,19 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   if(!tags.empty()) {
     // Tags are a filter over the tree, not a second way to organise it, so they
     // sit below it.
-    if(pushSection(ui::SidebarSection::Tags, "Tags", tags.size())) {
-      for(const auto& tag : tags) {
-        SidebarRow row;
-        row.kind = SidebarRow::Kind::Tag;
-        row.rect = {rect.x + ui::kSpace2, y, rect.w - ui::kSpace2 * 2.0f, metrics.tag};
-        row.tag = tag;
-        ui.sidebar.rows.push_back(std::move(row));
-        y += metrics.tag;
-      }
+    if(build.section(ui::SidebarSection::Tags, "Tags", tags.size())) {
+      for(const auto& tag : tags) build.tagRow(tag);
     }
   }
 
   const auto& recents = ui.state.workspace().recents;
-  if(const std::size_t count = resolvable(recents, kMaxRecentRows); count > 0) {
-    if(pushSection(ui::SidebarSection::Recent, "Recent", count)) {
-      pushNoteShortcuts(recents, kMaxRecentRows);
+  if(const std::size_t count = build.resolvable(recents, kMaxRecentRows); count > 0) {
+    if(build.section(ui::SidebarSection::Recent, "Recent", count)) {
+      build.noteShortcuts(recents, kMaxRecentRows);
     }
   }
 
-  finish();
+  build.finish();
   // A list of nothing but headings used to be a heading over a hole, and was
   // cleared so the empty message could say what had happened instead. It is not
   // any more: a band is a control, and four shut bands is what a reader who

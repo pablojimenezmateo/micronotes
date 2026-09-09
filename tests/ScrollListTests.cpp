@@ -2,6 +2,7 @@
 
 #include "ui/ScrollList.h"
 
+using micronotes::ui::RowStrip;
 using micronotes::ui::ScrollList;
 using micronotes::ui::WheelAccumulator;
 
@@ -122,4 +123,57 @@ MICRONOTES_TEST(scroll_list_rebase_drops_the_wheel_remainder) {
   MICRONOTES_REQUIRE(list.scroll() == 0);
   list.wheel(-0.5f, 42.0f);
   MICRONOTES_REQUIRE(list.scroll() == 21);
+}
+
+// --- RowStrip: a list scrolled by whole rows ------------------------------
+
+// The ceiling is what the paint recorded, not a count the caller guessed. This
+// is the coupling the type exists to hold: `shown` is written by the only code
+// that can know it, and every clamp reads it back.
+MICRONOTES_TEST(row_strip_clamps_against_what_the_paint_fitted) {
+  RowStrip strip;
+  strip.fitted(7);
+  MICRONOTES_REQUIRE(strip.last(20) == 13);
+  strip.scroll = 99;
+  strip.clamp(20);
+  MICRONOTES_REQUIRE(strip.scroll == 13);
+}
+
+// A list that fits entirely cannot be scrolled at all, and a list shorter than
+// the pane must not report a negative ceiling -- which is what the longhand
+// `count - shown` did at every one of the nine sites before a `std::max`.
+MICRONOTES_TEST(row_strip_that_fits_does_not_scroll) {
+  RowStrip strip;
+  strip.fitted(20);
+  MICRONOTES_REQUIRE(strip.last(5) == 0);
+  strip.scrollBy(3, 5);
+  MICRONOTES_REQUIRE(strip.scroll == 0);
+}
+
+// The paint always places its first row, however little room there is, so a
+// pane that fitted nothing still reports one. A zero here would make `last()`
+// the whole list and send the offset off the end.
+MICRONOTES_TEST(row_strip_never_records_a_pane_of_no_rows) {
+  RowStrip strip;
+  strip.fitted(0);
+  MICRONOTES_REQUIRE(strip.shown == 1);
+  MICRONOTES_REQUIRE(strip.last(4) == 3);
+}
+
+// Following the keyboard: move as little as possible, at either edge, and never
+// past the top.
+MICRONOTES_TEST(row_strip_reveal_moves_the_minimum) {
+  RowStrip strip;
+  strip.fitted(5);
+  strip.scroll = 10;
+  strip.reveal(12);            // already on screen
+  MICRONOTES_REQUIRE(strip.scroll == 10);
+  strip.reveal(14);            // one past the last visible row
+  MICRONOTES_REQUIRE(strip.scroll == 10);
+  strip.reveal(15);
+  MICRONOTES_REQUIRE(strip.scroll == 11);
+  strip.reveal(3);
+  MICRONOTES_REQUIRE(strip.scroll == 3);
+  strip.reveal(0);
+  MICRONOTES_REQUIRE(strip.scroll == 0);
 }

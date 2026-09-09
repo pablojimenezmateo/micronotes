@@ -2,6 +2,7 @@
 
 #include "core/editor/TextField.h"
 #include "ui/Draw.h"
+#include "ui/ScrollList.h"
 
 #include <SDL3/SDL.h>
 
@@ -78,10 +79,16 @@ struct Overlay {
   std::vector<OverlayItem> items;
   bool filterable = false;
   int highlighted = 0;
-  // First visible row, as a position in the filtered list rather than an item
-  // index: the filter reorders items, and a scroll offset that meant an item
-  // would jump every time the text changed.
-  int scroll = 0;
+  // How far the list is scrolled and how many rows the last layout fitted, as
+  // positions in the *filtered* list rather than item indices: the filter
+  // reorders items, and an offset that meant an item would jump every time the
+  // text changed.
+  //
+  // On the overlay rather than on the stack. The row count used to live on
+  // `OverlayStack`, which made it the count for whichever overlay was laid out
+  // last -- so pushing a confirmation over an open palette left the palette
+  // clamping its scroll against the confirmation's one row.
+  RowStrip rows;
   // Most rows this overlay wants on screen at once: enough for the whole
   // block-type list before anyone filters it. A menu is better short; a
   // reference list asks for more. Capped by what the window can fit.
@@ -216,7 +223,9 @@ private:
     std::vector<int> itemIndices;  // into Overlay::items
   };
 
-  Layout layoutFor(const Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const;
+  // Not const: the layout is the only thing that knows how many rows the panel
+  // held, and that count belongs to the overlay whose list it counted.
+  Layout layoutFor(Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const;
   const std::vector<int>& visibleIndices(const Overlay& overlay) const;
   std::optional<OverlayResult> commit();
   void moveHighlight(int delta);
@@ -227,9 +236,6 @@ private:
 
   std::vector<Overlay> stack_;
   Layout lastLayout_;
-  // Rows the last layout actually fitted. Scrolling has to agree with what was
-  // drawn, and only the layout knows how tall the window was.
-  mutable int lastRows_ = 12;
   float mouseX_ = -1.0f;
   float mouseY_ = -1.0f;
   bool caretVisible_ = true;

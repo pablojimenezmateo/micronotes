@@ -11,6 +11,7 @@
 #include "ui/Metrics.h"
 #include "ui/Settings.h"
 #include "core/platform/PathUtils.h"
+#include "ui/RowCursor.h"
 #include "ui/Theme.h"
 
 #include <algorithm>
@@ -116,6 +117,59 @@ std::string_view categoryHelp(std::string_view category) {
   if(category == "Workspace") return "Which panels are showing around the page.";
   if(category == "Library") return "Where the notes are, and what the keys do.";
   return {};
+}
+
+// What measuring a settings row produced, handed to the paint so the help text
+// is wrapped once rather than once per pass.
+struct MeasuredSettingRow {
+  // The room the controls left the label and the help, which both the wrap and
+  // the label's ellipsis are cut to.
+  float helpWidth = 0.0f;
+  std::vector<std::string> help;
+};
+
+// Painting one of the card's two scrolling lists.
+//
+// The About entries and the settings rows are the same eleven statements --
+// clamp the offset, walk from it, stop before the foot cuts a row, record how
+// many fitted, scale the offset to pixels for the scrollbar -- around a
+// different row body, and they were written out twice, over two sets of fields
+// for the same two concepts.
+//
+// The count is load-bearing rather than cosmetic. A row is as tall as its own
+// content, so only the paint can know how many the pane held, and the wheel and
+// the arrow keys clamp against what it recorded: two copies that disagree are a
+// list you cannot scroll to the end of, not a wrong pixel.
+//
+// Measured and painted in two steps because a row's height *is* its wrapped
+// text, and wrapping it twice would measure the whole list twice: `measure`
+// returns the height and whatever it had to build to know it, and `paint` is
+// handed both back with the box they landed in.
+template <typename Measure, typename Paint>
+void drawScrollingRows(SDL_Renderer* renderer, ui::RowStrip& strip, Rect values, float inset,
+                       std::size_t count, const Measure& measure, const Paint& paint) {
+  strip.clamp(count);
+  ui::RowCursor cursor(values.x, values.w, values.y + ui::kSpace2);
+  cursor.stopAt(values.y + values.h);
+  {
+    ui::ClipGuard clip(renderer, values);
+    for(std::size_t i = static_cast<std::size_t>(strip.scroll); i < count; ++i) {
+      auto [height, row] = measure(i);
+      if(!cursor.fits(height)) break;
+      paint(i, row, cursor.place(height, inset));
+    }
+  }
+  strip.fitted(cursor.placed());
+  // The shell's scrollbar, in rows scaled to pixels: at `cursor.pitch()` pixels
+  // a row the visible fraction and the thumb's travel come out the same as if
+  // the list had been measured, and there is no second scrollbar to keep in
+  // step with this one.
+  const int hidden = strip.last(count);
+  if(hidden <= 0) return;
+  const float pitch = cursor.pitch();
+  ui::drawVerticalScrollbar(renderer, values,
+                            static_cast<int>(std::lround(static_cast<float>(strip.scroll) * pitch)),
+                            static_cast<int>(std::lround(static_cast<float>(hidden) * pitch)));
 }
 
 void clampSelection(UiRuntime& ui, const std::vector<ui::SettingsRow>& rows) {
@@ -243,16 +297,229 @@ std::vector<ui::AboutRow> aboutRows() {
   return rows;
 }
 
+namespace {
+
+// The filter, in both modes. The one thing on the card that takes typing, so it
+// is also the one part that lays a caret out.
+void drawFilterField(SDL_Renderer* renderer, ui::TextRenderer& text,
+                     ui::SettingsSurfaceState& surface, Rect field) {
+  const bool focused = surface.focus == SettingsPaneFocus::Filter;
+  ui::drawTextFieldFrame(renderer, field, focused);
+  const float textY = ui::textTop(field, text, labelStyle());
+  if(surface.query.empty()) {
+    text.draw(surface.mode == SettingsMode::About ? "Search commands and keys" : "Type to filter",
+              field.x + ui::kSpace2, textY, ui::theme().textMuted, labelStyle());
+    return;
+  }
+  const auto measure = [&](std::string_view value) { return text.width(value, labelStyle()); };
+  const auto view = editor::layoutSingleLine(surface.query.editor, field.w - ui::kSpace2 * 2.0f,
+                                             surface.query.scrollX, measure);
+  surface.query.scrollX = view.scrollX;
+  const float left = field.x + ui::kSpace2 - view.scrollX;
+  ui::ClipGuard clip(renderer, field);
+  text.draw(surface.query.text(), left, textY, ui::theme().textPrimary, labelStyle());
+  if(focused) {
+    ui::fill(renderer, {left + view.caretX, field.y + 6.0f, 2.0f, field.h - 12.0f},
+             ui::theme().accent);
+  }
+}
+
+// The foot: what the filter left, and the way out.
+void drawFoot(SDL_Renderer* renderer, ui::TextRenderer& text, SettingsMode mode, Rect footer,
+              std::size_t shown) {
+  ui::fill(renderer, footer, ui::theme().chromeBackground);
+  ui::hLine(renderer, footer.x, footer.x + footer.w, footer.y, ui::theme().border);
+  const auto style = helpStyle();
+  const std::string count = std::to_string(shown) +
+                            (mode == SettingsMode::About ? (shown == 1 ? " entry" : " entries")
+                                                         : (shown == 1 ? " setting" : " settings"));
+  text.draw(count, footer.x + ui::kSpace3, ui::textTop(footer, text, style), ui::theme().textMuted,
+            style);
+  const std::string hint = mode == SettingsMode::About
+                             ? "Esc close"
+                             : "Tab pane   Up/Down move   Left/Right change   Esc close";
+  const int width = text.width(hint, style);
+  text.draw(hint, footer.x + footer.w - ui::kSpace3 - static_cast<float>(width),
+            ui::textTop(footer, text, style), ui::theme().textMuted, style);
+}
+
+// About: one column of label and wrapped detail.
+void drawAboutList(SDL_Renderer* renderer, ui::TextRenderer& text, ui::RowStrip& strip, Rect values,
+                   const std::vector<ui::AboutRow>& about, const std::vector<int>& visible) {
+  if(visible.empty()) {
+    text.draw("No matches", values.x + ui::kSpace4, values.y + ui::kSpace2, ui::theme().textMuted,
+              labelStyle());
+    return;
+  }
+  const float labelColumn = std::round(values.w * 0.42f);
+  const float detailX = values.x + ui::kSpace4 + labelColumn + ui::kSpace3;
+  const float detailWidth = std::max(80.0f, values.x + values.w - ui::kSpace4 - detailX);
+  const float step = static_cast<float>(text.lineHeight(helpStyle()));
+  drawScrollingRows(
+    renderer, strip, values, 0.0f, visible.size(),
+    [&](std::size_t i) {
+      auto detail = wrapHelp(text, about[static_cast<std::size_t>(visible[i])].detail, detailWidth);
+      const float height = std::max(static_cast<float>(text.lineHeight(labelStyle())),
+                                    static_cast<float>(detail.size()) * step) + ui::kSpace1;
+      return std::pair {height, std::move(detail)};
+    },
+    [&](std::size_t i, const std::vector<std::string>& detail, Rect rect) {
+      const auto& row = about[static_cast<std::size_t>(visible[i])];
+      // A row with no detail is a section heading -- there is no key to print
+      // beside "Writing" -- so it is set in the accent and the strong face.
+      // Drawn in the entry ink it read as one more command that happened to
+      // have no shortcut, which is the opposite of what a heading is for.
+      const bool heading = row.detail.empty();
+      text.draw(ui::ellipsizeToWidth(text, row.label, static_cast<int>(labelColumn),
+                                     heading ? titleStyle() : labelStyle()),
+                values.x + ui::kSpace4, rect.y,
+                heading ? ui::theme().accent : ui::theme().textPrimary,
+                heading ? titleStyle() : labelStyle());
+      float detailY = rect.y;
+      for(const auto& line : detail) {
+        text.draw(line, detailX, detailY, ui::theme().textSecondary, helpStyle());
+        detailY += step;
+      }
+    });
+}
+
+// The rail of categories, and the rects a click on one lands in.
+void drawCategoryRail(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rail,
+                      const std::vector<ui::SettingsRow>& rows,
+                      const std::vector<std::string>& categories, std::string_view query) {
+  auto& surface = ui.settings;
+  const bool focused = surface.focus == SettingsPaneFocus::Categories;
+  ui::RowCursor cursor(rail.x, rail.w, rail.y + ui::kSpace2);
+  for(std::size_t i = 0; i < categories.size(); ++i) {
+    const Rect rect = cursor.place(ui::kSettingsCategoryRowHeight, ui::kSpace1);
+    surface.categoryRects.push_back(rect);
+    const bool selected = static_cast<int>(i) == surface.category;
+    // A category the filter has emptied is listed and dimmed rather than
+    // removed: a rail that reorders itself as you type is a rail you lose your
+    // place in.
+    const bool empty = !ui::settingsCategoryMatches(rows, categories[i], query);
+    ui::drawRow(renderer, rect, selected, !selected && ui.pointer.over(rect));
+    if(selected && focused) ui::drawFocusRing(renderer, rect, true);
+    text.draw(ui::ellipsizeToWidth(text, categories[i],
+                                   static_cast<int>(rect.w - ui::kSpace3 * 2.0f), labelStyle()),
+              rect.x + ui::kSpace3, ui::textTop(rect, text, labelStyle()),
+              empty ? ui::theme().textMuted
+                    : selected ? ui::theme().textPrimary : ui::theme().textSecondary,
+              labelStyle());
+  }
+}
+
+// The selected category's own heading, and the line under it.
+void drawCategoryHeading(SDL_Renderer* renderer, ui::TextRenderer& text, Rect header,
+                         std::string_view category) {
+  text.draw(category, header.x + ui::kSpace4, header.y + ui::kSpace2, ui::theme().accent,
+            titleStyle());
+  text.draw(categoryHelp(category), header.x + ui::kSpace4,
+            header.y + ui::kSpace2 + static_cast<float>(text.lineHeight(titleStyle())),
+            ui::theme().textMuted, helpStyle());
+  ui::hLine(renderer, header.x, header.x + header.w, header.y + header.h - 1.0f,
+            ui::theme().border);
+}
+
+// The settings themselves: a label, its help wrapped to what the controls left,
+// and the controls.
+void drawValueRows(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect values,
+                   const std::vector<ui::SettingsRow>& rows, const std::vector<int>& visible) {
+  auto& surface = ui.settings;
+  if(visible.empty()) {
+    surface.rows.rebase();
+    text.draw("Nothing here matches the filter", values.x + ui::kSpace4, values.y + ui::kSpace3,
+              ui::theme().textMuted, labelStyle());
+    return;
+  }
+  const bool focused = surface.focus == SettingsPaneFocus::Values;
+  drawScrollingRows(
+    renderer, surface.rows, values, ui::kSpace1, visible.size(),
+    [&](std::size_t i) {
+      const auto& row = rows[static_cast<std::size_t>(visible[i])];
+      // The row's height is its content's height, so a setting whose
+      // explanation runs to two lines gets two lines rather than a clipped one.
+      // The controls are placed against a one-line probe first, because how
+      // much room the help has to wrap into is what the controls left it.
+      const Rect column {values.x + ui::kSpace1, values.y, values.w - ui::kSpace1 * 2.0f,
+                         rowHeight(text, 1)};
+      MeasuredSettingRow measured;
+      measured.helpWidth = std::max(60.0f, controlsLeft(boxesFor(row, column), column) -
+                                             ui::kSpace2 - (column.x + kRowPadX));
+      measured.help = wrapHelp(text, row.description, measured.helpWidth);
+      return std::pair {rowHeight(text, measured.help.size()), std::move(measured)};
+    },
+    [&](std::size_t i, const MeasuredSettingRow& measured, Rect rect) {
+      const auto& row = rows[static_cast<std::size_t>(visible[i])];
+      const auto boxes = boxesFor(row, rect);
+      surface.rowBoxes.push_back(boxes);
+
+      const bool selected = static_cast<int>(i) == surface.row;
+      ui::drawRow(renderer, rect, selected, !selected && ui.pointer.over(rect));
+      if(selected && focused) ui::drawFocusRing(renderer, rect, true);
+
+      const float labelX = rect.x + kRowPadX;
+      text.draw(ui::ellipsizeToWidth(text, row.label, static_cast<int>(measured.helpWidth), labelStyle()),
+                labelX, rect.y + kRowPadY, ui::theme().textPrimary, labelStyle());
+      float helpY = rect.y + kRowPadY + static_cast<float>(text.lineHeight(labelStyle()));
+      for(const auto& line : measured.help) {
+        text.draw(line, labelX, helpY, ui::theme().textMuted, helpStyle());
+        helpY += static_cast<float>(text.lineHeight(helpStyle()));
+      }
+
+      if(row.resettable) {
+        ui::drawSurface(renderer, boxes.reset, ui::theme().surfaceRaised, ui::theme().border);
+        ui::drawResetGlyph(renderer, boxes.reset,
+                           ui.pointer.over(boxes.reset) ? ui::theme().accent : ui::theme().textMuted);
+        ui.pointer.offerTooltip(boxes.reset, "Back to the default");
+      }
+
+      switch(row.control) {
+        case SettingControl::Checkbox:
+          ui::drawSurface(renderer, boxes.checkbox, ui::theme().surfaceBackground,
+                          row.checked ? ui::theme().accent : ui::theme().border);
+          if(row.checked) ui::drawCheckGlyph(renderer, boxes.checkbox, ui::theme().accent);
+          break;
+        case SettingControl::Segmented:
+        case SettingControl::Action:
+          ui::drawButton(renderer, text, boxes.value,
+                         ui::ellipsizeToWidth(text, row.value,
+                                              static_cast<int>(boxes.value.w - ui::kSpace2 * 2.0f), labelStyle()),
+                         true, ui.pointer.over(boxes.value), ui::ButtonTone::Neutral);
+          break;
+        case SettingControl::Stepper:
+          ui::drawSurface(renderer, boxes.previous,
+                          ui.pointer.over(boxes.previous) ? ui::theme().rowHighlight : ui::theme().surfaceRaised,
+                          ui::theme().border);
+          ui::drawArrowGlyph(renderer, boxes.previous, false, ui::theme().textSecondary);
+          ui::drawButton(renderer, text, boxes.value, row.value, true,
+                         ui.pointer.over(boxes.value), ui::ButtonTone::Neutral);
+          ui::drawSurface(renderer, boxes.next,
+                          ui.pointer.over(boxes.next) ? ui::theme().rowHighlight : ui::theme().surfaceRaised,
+                          ui::theme().border);
+          ui::drawArrowGlyph(renderer, boxes.next, true, ui::theme().textSecondary);
+          break;
+        case SettingControl::None:
+          break;
+      }
+    });
+}
+
+}
+
+// The card, band by band. Each band is a function above rather than a paragraph
+// here: the surface has six of them, two of which differ between the two modes,
+// and written inline that came to one 262-line function with the mode branch
+// buried two thirds of the way down it.
 void drawSettingsSurface(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
                          int windowWidth, int windowHeight) {
   auto& surface = ui.settings;
   if(!surface.visible) return;
 
   const auto rows = settingsRows(ui);
-  const auto about = aboutRows();
   clampSelection(ui, rows);
-  const auto categories = ui::settingsCategories(rows);
   const std::string query = surface.query.text();
+  const bool aboutMode = surface.mode == SettingsMode::About;
 
   ui::fill(renderer, {0, 0, static_cast<float>(windowWidth), static_cast<float>(windowHeight)},
            ui::theme().overlayBackdrop);
@@ -266,245 +533,31 @@ void drawSettingsSurface(SDL_Renderer* renderer, ui::TextRenderer& text, UiRunti
   surface.rowBoxes.clear();
 
   const Rect band = ui::drawTitledCard(renderer, layout.panel, layout.header.h);
-  text.draw(surface.mode == SettingsMode::About ? "About micronotes" : "Settings",
-            band.x + ui::kSpace3, ui::textTop(band, text, titleStyle()), ui::theme().accent,
-            titleStyle());
+  text.draw(aboutMode ? "About micronotes" : "Settings", band.x + ui::kSpace3,
+            ui::textTop(band, text, titleStyle()), ui::theme().accent, titleStyle());
+  drawFilterField(renderer, text, surface, layout.filter);
 
-  // --- the filter, in both modes ------------------------------------------
-  {
-    const bool focused = surface.focus == SettingsPaneFocus::Filter;
-    ui::drawTextFieldFrame(renderer, layout.filter, focused);
-    const float textY = ui::textTop(layout.filter, text, labelStyle());
-    const float inner = layout.filter.w - ui::kSpace2 * 2.0f;
-    if(surface.query.empty()) {
-      text.draw(surface.mode == SettingsMode::About ? "Search commands and keys" : "Type to filter",
-                layout.filter.x + ui::kSpace2, textY, ui::theme().textMuted, labelStyle());
-    } else {
-      const auto measure = [&](std::string_view value) { return text.width(value, labelStyle()); };
-      const auto view = editor::layoutSingleLine(surface.query.editor, inner, surface.query.scrollX, measure);
-      surface.query.scrollX = view.scrollX;
-      const float left = layout.filter.x + ui::kSpace2 - view.scrollX;
-      ui::ClipGuard clip(renderer, layout.filter);
-      text.draw(query, left, textY, ui::theme().textPrimary, labelStyle());
-      if(focused) {
-        ui::fill(renderer, {left + view.caretX, layout.filter.y + 6.0f, 2.0f, layout.filter.h - 12.0f},
-                 ui::theme().accent);
-      }
-    }
-  }
-
-  // --- the foot: what the filter left, and the way out --------------------
-  {
-    ui::fill(renderer, layout.footer, ui::theme().chromeBackground);
-    ui::hLine(renderer, layout.footer.x, layout.footer.x + layout.footer.w, layout.footer.y,
-              ui::theme().border);
-    const auto style = helpStyle();
-    const std::size_t shown = surface.mode == SettingsMode::About
-                                ? ui::aboutRowsMatching(about, query).size()
-                                : ui::settingsMatchCount(rows, query);
-    const std::string count = std::to_string(shown) +
-                              (surface.mode == SettingsMode::About
-                                 ? (shown == 1 ? " entry" : " entries")
-                                 : (shown == 1 ? " setting" : " settings"));
-    text.draw(count, layout.footer.x + ui::kSpace3, ui::textTop(layout.footer, text, style),
-              ui::theme().textMuted, style);
-    const std::string hint = surface.mode == SettingsMode::About
-                               ? "Esc close"
-                               : "Tab pane   Up/Down move   Left/Right change   Esc close";
-    const int width = text.width(hint, style);
-    text.draw(hint, layout.footer.x + layout.footer.w - ui::kSpace3 - static_cast<float>(width),
-              ui::textTop(layout.footer, text, style), ui::theme().textMuted, style);
-  }
-
-  // --- About: one column of label and wrapped detail ----------------------
-  if(surface.mode == SettingsMode::About) {
+  if(aboutMode) {
+    const auto about = aboutRows();
     const auto visible = ui::aboutRowsMatching(about, query);
-    const float labelColumn = std::round(layout.values.w * 0.42f);
-    const float detailX = layout.values.x + ui::kSpace4 + labelColumn + ui::kSpace3;
-    const float detailWidth = std::max(80.0f, layout.values.x + layout.values.w - ui::kSpace4 - detailX);
-    const float step = static_cast<float>(text.lineHeight(helpStyle()));
-    surface.aboutScroll = std::clamp(surface.aboutScroll, 0,
-                                     std::max(0, static_cast<int>(visible.size()) - surface.aboutRowsShown));
-    const float top = layout.values.y + ui::kSpace2;
-    const float bottom = layout.values.y + layout.values.h;
-    float y = top;
-    int drawn = 0;
-    {
-      ui::ClipGuard clip(renderer, layout.values);
-      for(std::size_t i = static_cast<std::size_t>(surface.aboutScroll); i < visible.size(); ++i) {
-        const auto& row = about[static_cast<std::size_t>(visible[i])];
-        const auto detail = wrapHelp(text, row.detail, detailWidth);
-        const float height = std::max(static_cast<float>(text.lineHeight(labelStyle())),
-                                      static_cast<float>(detail.size()) * step) + ui::kSpace1;
-        // Stopped before it is drawn rather than after. Breaking on "the last row
-        // started past the foot" leaves a row cut through the middle of its
-        // glyphs, which reads as a rendering fault rather than as a list that
-        // continues.
-        if(drawn > 0 && y + height > bottom) break;
-        // A row with no detail is a section heading -- there is no key to print
-        // beside "Writing" -- so it is set in the accent and the strong face.
-        // Drawn in the entry ink it read as one more command that happened to
-        // have no shortcut, which is the opposite of what a heading is for.
-        const bool heading = row.detail.empty();
-        text.draw(ui::ellipsizeToWidth(text, row.label, static_cast<int>(labelColumn),
-                                       heading ? titleStyle() : labelStyle()),
-                  layout.values.x + ui::kSpace4, y,
-                  heading ? ui::theme().accent : ui::theme().textPrimary,
-                  heading ? titleStyle() : labelStyle());
-        float detailY = y;
-        for(const auto& line : detail) {
-          text.draw(line, detailX, detailY, ui::theme().textSecondary, helpStyle());
-          detailY += step;
-        }
-        y += height;
-        ++drawn;
-      }
-    }
-    surface.aboutRowsShown = std::max(1, drawn);
-    if(visible.empty()) {
-      text.draw("No matches", layout.values.x + ui::kSpace4, top, ui::theme().textMuted, labelStyle());
-      return;
-    }
-    // The shell's scrollbar, in entries scaled to pixels: at `pitch` pixels an
-    // entry the visible fraction and the thumb's travel come out the same as if
-    // the list were measured, and there is no second scrollbar to keep in step.
-    if(static_cast<int>(visible.size()) > drawn && drawn > 0) {
-      const float pitch = (y - top) / static_cast<float>(drawn);
-      const int hidden = static_cast<int>(visible.size()) - drawn;
-      ui::drawVerticalScrollbar(renderer, layout.values,
-                                static_cast<int>(std::lround(static_cast<float>(surface.aboutScroll) * pitch)),
-                                static_cast<int>(std::lround(static_cast<float>(hidden) * pitch)));
-    }
+    drawFoot(renderer, text, surface.mode, layout.footer, visible.size());
+    drawAboutList(renderer, text, surface.about, layout.values, about, visible);
     return;
   }
 
-  // --- the rail of categories ---------------------------------------------
-  ui::fill(renderer, {layout.values.x - 1.0f, layout.rail.y, 1.0f, layout.rail.h}, ui::theme().border);
-  {
-    const bool focused = surface.focus == SettingsPaneFocus::Categories;
-    float y = layout.rail.y + ui::kSpace2;
-    for(std::size_t i = 0; i < categories.size(); ++i) {
-      const Rect rect {layout.rail.x + ui::kSpace1, y, layout.rail.w - ui::kSpace1 * 2.0f,
-                       ui::kSettingsCategoryRowHeight};
-      surface.categoryRects.push_back(rect);
-      y += ui::kSettingsCategoryRowHeight;
-      const bool selected = static_cast<int>(i) == surface.category;
-      // A category the filter has emptied is listed and dimmed rather than
-      // removed: a rail that reorders itself as you type is a rail you lose
-      // your place in.
-      const bool empty = !ui::settingsCategoryMatches(rows, categories[i], query);
-      ui::drawRow(renderer, rect, selected, !selected && ui.pointer.over(rect));
-      if(selected && focused) ui::drawFocusRing(renderer, rect, true);
-      text.draw(ui::ellipsizeToWidth(text, categories[i], static_cast<int>(rect.w - ui::kSpace3 * 2.0f),
-                                     labelStyle()),
-                rect.x + ui::kSpace3, ui::textTop(rect, text, labelStyle()),
-                empty ? ui::theme().textMuted : selected ? ui::theme().textPrimary : ui::theme().textSecondary, labelStyle());
-    }
-  }
+  drawFoot(renderer, text, surface.mode, layout.footer, ui::settingsMatchCount(rows, query));
 
-  // --- the selected category's own heading --------------------------------
+  const auto categories = ui::settingsCategories(rows);
+  ui::fill(renderer, {layout.values.x - 1.0f, layout.rail.y, 1.0f, layout.rail.h},
+           ui::theme().border);
+  drawCategoryRail(renderer, text, ui, layout.rail, rows, categories, query);
+
   const std::string category = categories.empty()
                                  ? std::string {}
                                  : categories[static_cast<std::size_t>(surface.category)];
-  {
-    text.draw(category, layout.sectionHeader.x + ui::kSpace4, layout.sectionHeader.y + ui::kSpace2,
-              ui::theme().accent, titleStyle());
-    text.draw(categoryHelp(category), layout.sectionHeader.x + ui::kSpace4,
-              layout.sectionHeader.y + ui::kSpace2 + static_cast<float>(text.lineHeight(titleStyle())),
-              ui::theme().textMuted, helpStyle());
-    ui::hLine(renderer, layout.sectionHeader.x, layout.sectionHeader.x + layout.sectionHeader.w,
-              layout.sectionHeader.y + layout.sectionHeader.h - 1.0f, ui::theme().border);
-  }
-
-  // --- the rows themselves ------------------------------------------------
-  const auto visible = ui::settingsRowsIn(rows, category, query);
-  surface.rowScroll = std::clamp(surface.rowScroll, 0,
-                                 std::max(0, static_cast<int>(visible.size()) - surface.rowsShown));
-  if(visible.empty()) {
-    text.draw("Nothing here matches the filter", layout.values.x + ui::kSpace4,
-              layout.values.y + ui::kSpace3, ui::theme().textMuted, labelStyle());
-    return;
-  }
-
-  const bool focused = surface.focus == SettingsPaneFocus::Values;
-  const float top = layout.values.y + ui::kSpace2;
-  const float bottom = layout.values.y + layout.values.h;
-  float y = top;
-  int drawn = 0;
-  ui::ClipGuard clip(renderer, layout.values);
-  for(std::size_t i = static_cast<std::size_t>(surface.rowScroll); i < visible.size(); ++i) {
-    const auto& row = rows[static_cast<std::size_t>(visible[i])];
-    // Two passes over the help text: once to know how tall the row is, and once
-    // to draw it. The row's height is its content's height, so a setting whose
-    // explanation runs to two lines gets two lines rather than a clipped one.
-    Rect rect {layout.values.x + ui::kSpace1, y, layout.values.w - ui::kSpace1 * 2.0f, 0.0f};
-    auto boxes = boxesFor(row, {rect.x, rect.y, rect.w, rowHeight(text, 1)});
-    const float labelX = rect.x + kRowPadX;
-    const float helpWidth = std::max(60.0f, controlsLeft(boxes, rect) - ui::kSpace2 - labelX);
-    const auto help = wrapHelp(text, row.description, helpWidth);
-    rect.h = rowHeight(text, help.size());
-    if(drawn > 0 && rect.y + rect.h > bottom) break;
-    boxes = boxesFor(row, rect);
-    surface.rowBoxes.push_back(boxes);
-    y += rect.h;
-    ++drawn;
-
-    const bool selected = static_cast<int>(i) == surface.row;
-    ui::drawRow(renderer, rect, selected, !selected && ui.pointer.over(rect));
-    if(selected && focused) ui::drawFocusRing(renderer, rect, true);
-
-    text.draw(ui::ellipsizeToWidth(text, row.label, static_cast<int>(helpWidth), labelStyle()), labelX,
-              rect.y + kRowPadY, ui::theme().textPrimary, labelStyle());
-    float helpY = rect.y + kRowPadY + static_cast<float>(text.lineHeight(labelStyle()));
-    for(const auto& line : help) {
-      text.draw(line, labelX, helpY, ui::theme().textMuted, helpStyle());
-      helpY += static_cast<float>(text.lineHeight(helpStyle()));
-    }
-
-    if(row.resettable) {
-      ui::drawSurface(renderer, boxes.reset, ui::theme().surfaceRaised, ui::theme().border);
-      ui::drawResetGlyph(renderer, boxes.reset,
-                         ui.pointer.over(boxes.reset) ? ui::theme().accent : ui::theme().textMuted);
-      ui.pointer.offerTooltip(boxes.reset, "Back to the default");
-    }
-
-    switch(row.control) {
-      case SettingControl::Checkbox:
-        ui::drawSurface(renderer, boxes.checkbox, ui::theme().surfaceBackground,
-                        row.checked ? ui::theme().accent : ui::theme().border);
-        if(row.checked) ui::drawCheckGlyph(renderer, boxes.checkbox, ui::theme().accent);
-        break;
-      case SettingControl::Segmented:
-      case SettingControl::Action:
-        ui::drawButton(renderer, text, boxes.value,
-                       ui::ellipsizeToWidth(text, row.value,
-                                            static_cast<int>(boxes.value.w - ui::kSpace2 * 2.0f), labelStyle()),
-                       true, ui.pointer.over(boxes.value), ui::ButtonTone::Neutral);
-        break;
-      case SettingControl::Stepper:
-        ui::drawSurface(renderer, boxes.previous,
-                        ui.pointer.over(boxes.previous) ? ui::theme().rowHighlight : ui::theme().surfaceRaised,
-                        ui::theme().border);
-        ui::drawArrowGlyph(renderer, boxes.previous, false, ui::theme().textSecondary);
-        ui::drawButton(renderer, text, boxes.value, row.value, true,
-                       ui.pointer.over(boxes.value), ui::ButtonTone::Neutral);
-        ui::drawSurface(renderer, boxes.next,
-                        ui.pointer.over(boxes.next) ? ui::theme().rowHighlight : ui::theme().surfaceRaised,
-                        ui::theme().border);
-        ui::drawArrowGlyph(renderer, boxes.next, true, ui::theme().textSecondary);
-        break;
-      case SettingControl::None:
-        break;
-    }
-  }
-  surface.rowsShown = std::max(1, drawn);
-  if(static_cast<int>(visible.size()) > drawn && drawn > 0) {
-    const float pitch = (y - top) / static_cast<float>(drawn);
-    const int hidden = static_cast<int>(visible.size()) - drawn;
-    ui::drawVerticalScrollbar(renderer, layout.values,
-                              static_cast<int>(std::lround(static_cast<float>(surface.rowScroll) * pitch)),
-                              static_cast<int>(std::lround(static_cast<float>(hidden) * pitch)));
-  }
+  drawCategoryHeading(renderer, text, layout.sectionHeader, category);
+  drawValueRows(renderer, text, ui, layout.values, rows,
+                ui::settingsRowsIn(rows, category, query));
 }
 
 namespace {
@@ -577,7 +630,7 @@ SettingsOutcome handleSettingsClick(UiRuntime& ui, float x, float y) {
     surface.focus = SettingsPaneFocus::Categories;
     surface.category = static_cast<int>(i);
     surface.row = 0;
-    surface.rowScroll = 0;
+    surface.rows.rebase();
     return outcome;
   }
 
@@ -588,7 +641,7 @@ SettingsOutcome handleSettingsClick(UiRuntime& ui, float x, float y) {
   for(std::size_t i = 0; i < surface.rowBoxes.size(); ++i) {
     const auto& boxes = surface.rowBoxes[i];
     if(!ui::contains(boxes.row, x, y)) continue;
-    const std::size_t index = static_cast<std::size_t>(surface.rowScroll) + i;
+    const std::size_t index = static_cast<std::size_t>(surface.rows.scroll) + i;
     if(index >= visible.size()) break;
     const auto& row = rows[static_cast<std::size_t>(visible[index])];
     surface.focus = SettingsPaneFocus::Values;
@@ -650,13 +703,12 @@ SettingsOutcome handleSettingsKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, boo
 
   if(surface.mode == SettingsMode::About) {
     const auto about = aboutRows();
-    const int count = static_cast<int>(ui::aboutRowsMatching(about, surface.query.text()).size());
-    const int last = std::max(0, count - surface.aboutRowsShown);
-    if(key == SDLK_DOWN) surface.aboutScroll = std::min(surface.aboutScroll + 1, last);
-    else if(key == SDLK_UP) surface.aboutScroll = std::max(0, surface.aboutScroll - 1);
+    const std::size_t count = ui::aboutRowsMatching(about, surface.query.text()).size();
+    if(key == SDLK_DOWN) surface.about.scrollBy(1, count);
+    else if(key == SDLK_UP) surface.about.scrollBy(-1, count);
     else {
       const auto handled = editor::applyKeyToField(surface.query, key, ctrl, shift);
-      if(handled == editor::FieldKeyResult::Changed) surface.aboutScroll = 0;
+      if(handled == editor::FieldKeyResult::Changed) surface.about.rebase();
     }
     return outcome;
   }
@@ -669,7 +721,7 @@ SettingsOutcome handleSettingsKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, boo
     const auto handled = editor::applyKeyToField(surface.query, key, ctrl, shift);
     if(handled == editor::FieldKeyResult::Changed) {
       surface.row = 0;
-      surface.rowScroll = 0;
+      surface.rows.rebase();
     }
     return outcome;
   }
@@ -679,7 +731,7 @@ SettingsOutcome handleSettingsKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, boo
       const int count = static_cast<int>(categories.size());
       surface.category = (surface.category + (key == SDLK_DOWN ? 1 : -1) + count) % count;
       surface.row = 0;
-      surface.rowScroll = 0;
+      surface.rows.rebase();
     } else if(key == SDLK_RIGHT || key == SDLK_RETURN || key == SDLK_KP_ENTER) {
       surface.focus = SettingsPaneFocus::Values;
     }
@@ -700,13 +752,10 @@ SettingsOutcome handleSettingsKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, boo
 
   if(key == SDLK_DOWN || key == SDLK_UP) {
     surface.row = (surface.row + (key == SDLK_DOWN ? 1 : -1) + count) % count;
-    // Scroll to follow, one row at a time. The rows are not a fixed height, so
-    // the draw is the only thing that knows how many fit -- and it clamps this
-    // against what it actually placed.
-    if(surface.row < surface.rowScroll) surface.rowScroll = surface.row;
-    else if(surface.row >= surface.rowScroll + surface.rowsShown) {
-      surface.rowScroll = surface.row - surface.rowsShown + 1;
-    }
+    // Scroll to follow. The rows are not a fixed height, so the draw is the
+    // only thing that knows how many fit, and `RowStrip::shown` is what it
+    // recorded.
+    surface.rows.reveal(surface.row);
     return outcome;
   }
   if(key == SDLK_LEFT || key == SDLK_RIGHT) {
@@ -745,8 +794,8 @@ bool handleSettingsText(UiRuntime& ui, const char* input) {
   surface.focus = SettingsPaneFocus::Filter;
   surface.query.editor.insert(input);
   surface.row = 0;
-  surface.rowScroll = 0;
-  surface.aboutScroll = 0;
+  surface.rows.rebase();
+  surface.about.rebase();
   return true;
 }
 
@@ -756,16 +805,13 @@ bool handleSettingsWheel(UiRuntime& ui, float dy) {
   const int notches = static_cast<int>(std::lround(dy * 2.0f));
   if(surface.mode == SettingsMode::About) {
     const auto about = aboutRows();
-    const int count = static_cast<int>(ui::aboutRowsMatching(about, surface.query.text()).size());
-    surface.aboutScroll = std::clamp(surface.aboutScroll - notches, 0,
-                                     std::max(0, count - surface.aboutRowsShown));
+    surface.about.scrollBy(-notches, ui::aboutRowsMatching(about, surface.query.text()).size());
     return true;
   }
   const auto rows = settingsRows(ui);
-  const int count = static_cast<int>(
+  surface.rows.scrollBy(
+    -notches,
     ui::settingsSelection(rows, surface.category, surface.row, surface.query.text()).visible.size());
-  surface.rowScroll = std::clamp(surface.rowScroll - notches, 0,
-                                 std::max(0, count - surface.rowsShown));
   return true;
 }
 

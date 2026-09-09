@@ -398,34 +398,6 @@ named facts
 about the overlay. That is a naming exercise, and worth doing next time this
 file is opened for another reason.
 
-## TD-32 — `rebuildSidebarRows` is a builder written as seven lambdas
-
-`src/app/SidebarModel.cpp`, 236 lines, of which about 200 are seven lambdas --
-`pushCaption`, `pushSection`, `pushNoteShortcuts`, `pushTree`,
-`pushSearchResults`, `resolvable`, `finish` -- capturing the same running
-cursor, and about 35 are the band sequence that calls them.
-
-**What it costs today.** The same shape as `TD-23` and for the same reason: the
-lambdas share mutable state (`y`, the row vector, the metrics), so the function
-cannot be split by moving pieces out of it. It reads as a 236-line function and
-is really a small builder with its state in the enclosing scope.
-
-**Why it has not been paid.** A `RowCursor` type holding the vector, the running
-`y` and the metrics, with the seven pushes as methods, is the answer, and it is
-a better one than it looks: `sidebarRowRange` already depends on the rows
-tiling -- every push advancing the cursor by exactly the row's own height -- and
-that invariant is currently maintained by seven lambdas agreeing to. A type
-would own it, at both ends: `ui/RowBand.h` is the *query* over a tiled list and
-already documents the invariant, so the cursor that produces it belongs beside
-it.
-
-This was previously deferred as one of four instances worth doing together with
-one shape. That grouping was too wide. `TD-35` is the same cursor with a bound
-on it -- refuse a row the foot would cut -- so these two are worth doing in one
-commit. `DocumentLayout::update` is a different problem and should not be
-waited on: its shared state is an incremental algorithm's, not a column of
-bands. See `TD-23`.
-
 ## TD-33 — `AppState` is 55 methods, and one of them is the note-writing path
 
 `src/ui/AppState.h`.
@@ -488,58 +460,3 @@ struct -- and it is worth making deliberately, in a commit of its own, with the
 hit test moved under `MenusTests` and `OverlayTests` together. Taken as a rider
 on a feature, the two would end up with a shared helper each.
 
-## TD-35 — `drawSettingsSurface` writes the same row walker twice
-
-`src/app/SettingsPane.cpp`, 772 lines, of which `drawSettingsSurface` is 262 in
-one function -- and the specific thing wrong with it is narrower and more
-actionable than "it is long".
-
-**What it costs today.** The function contains **two copies of the same
-variable-height row walker**, one for the About list and one for the settings
-list, identical on eleven statements and differing only in the body that draws
-a row:
-
-| | About | Settings |
-|---|---|---|
-| clamp | `aboutScroll` vs `size - aboutRowsShown` | `rowScroll` vs `size - rowsShown` |
-| bounds | `top = values.y + kSpace2`, `bottom = values.y + values.h` | the same two lines |
-| break | `if(drawn > 0 && y + height > bottom) break;` | `if(drawn > 0 && rect.y + rect.h > bottom) break;` |
-| advance | `y += height; ++drawn;` | `y += rect.h; ++drawn;` |
-| record | `aboutRowsShown = max(1, drawn)` | `rowsShown = max(1, drawn)` |
-| scrollbar | `pitch = (y - top) / drawn`, `hidden = size - drawn` | the same three lines |
-
-The two halves already keep *separate* fields for the same two concepts
-(`aboutScroll`/`rowScroll`, `aboutRowsShown`/`rowsShown`), which is what a
-duplicated walker turns into once somebody needs to change one of them. And the
-measurement is load-bearing in both: `rowsShown` is written by the paint because
-only the paint knows how many variable-height rows fitted, and the wheel and the
-arrow keys then clamp against it -- so a discrepancy between the two copies is a
-list you cannot scroll to the end of, not a wrong pixel.
-
-**Why it has not been paid.** The previous entry framed this as the fourth
-instance of a carrier problem (`DocumentLayout::update`, `rebuildSidebarRows`,
-`Overlay::draw`, this) that was only worth doing once, with one shape, for all
-four -- which made it a coordinated design exercise nobody was going to start.
-That framing was wrong about this file. The duplication above is inside *one
-function*, and extracting it does not require agreeing on a shape for the other
-three.
-
-What it wants is a bounded row cursor: a viewport, a running `y`, a count of
-what was granted, and a `take(height)` that refuses a row the foot would cut --
-except the first, because a list showing nothing is worse than one showing a
-clipped row. `src/ui/RowBand.h` is where it goes, and not arbitrarily:
-`rowBand()` is the *query* over a list that tiles, and its header already
-documents the tiling invariant -- "each row's box starting where the one before
-it ended" -- that such a cursor is the *producer* of. Today that invariant is
-maintained by call sites agreeing to; a cursor would own it at both ends.
-
-`rebuildSidebarRows` (`TD-32`) is the same cursor with the bound removed: it
-builds the whole list because `rowBand` handles the viewport. So these two are
-worth doing together. `DocumentLayout::update` is **not** the same problem and
-should not be waited on -- its state is an incremental algorithm's, not a
-column of bands, and `TD-23` carries its own reasoning.
-
-What can be split out of this file first and independently is narrower and
-still worth naming: `applySetting` and `resetSetting` are the settings *store's*
-write path wearing a paint file's name, and they have no dependency on the
-surface at all.

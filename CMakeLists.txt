@@ -340,6 +340,7 @@ add_executable(micronotes_tests
   tests/TagColorTests.cpp
   tests/ThemeTests.cpp
   tests/TextFieldTests.cpp
+  tests/RowCursorTests.cpp
   tests/ScrollListTests.cpp
   tests/WikiLinkTests.cpp
   tests/WorkspaceModelTests.cpp

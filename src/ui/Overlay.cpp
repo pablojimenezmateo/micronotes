@@ -6,6 +6,7 @@
 
 #include "core/util/Fuzzy.h"
 #include "ui/Metrics.h"
+#include "ui/RowCursor.h"
 #include "ui/TagColors.h"
 
 #include <algorithm>
@@ -85,7 +86,7 @@ Overlay* OverlayStack::top() {
 }
 
 void OverlayStack::open(Overlay overlay) {
-  overlay.scroll = 0;
+  overlay.rows.rebase();
   // An overlay that opens on a choice already in force starts *there* rather
   // than at the top: a colour picker whose keyboard cursor begins on the first
   // swatch has thrown away the one piece of context it had, and the reader has
@@ -132,7 +133,7 @@ const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) con
   return overlay.filterCache;
 }
 
-OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const {
+OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const {
   Layout layout;
   // A reference into the standing answer: the layout only reads it, and nothing
   // in here changes the query it is keyed on. On a "Go to note" palette over a
@@ -168,19 +169,25 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
   // row too tall for the window is wrong, but a panel with no rows at all is a
   // card with nothing in it and nothing to say why.
   const int cap = std::max(1, overlay.maxRows);
-  const int first = std::clamp(overlay.scroll, 0, std::max(0, static_cast<int>(indices.size()) - 1));
-  int rowsShown = 0;
-  float listH = 0.0f;
+  const int first = std::clamp(overlay.rows.scroll, 0, std::max(0, static_cast<int>(indices.size()) - 1));
+  // Measured with the cursor the settings card and the sidebar place their rows
+  // with, so "how much of this list fits" is one piece of arithmetic in the
+  // shell rather than three. The rows themselves are placed with a second
+  // cursor below, once the panel's origin is known.
+  RowCursor fit(0.0f, 0.0f, 0.0f);
+  fit.stopAt(room);
   if(overlay.kind == OverlayKind::List) {
-    for(std::size_t i = static_cast<std::size_t>(first); i < indices.size() && rowsShown < cap; ++i) {
+    for(std::size_t i = static_cast<std::size_t>(first);
+        i < indices.size() && fit.placed() < static_cast<std::size_t>(cap); ++i) {
       const float step = rowHeight(overlay.items[static_cast<std::size_t>(indices[i])]);
-      if(rowsShown > 0 && listH + step > room) break;
-      listH += step;
-      ++rowsShown;
+      if(!fit.fits(step)) break;
+      fit.place(step);
     }
   }
+  const int rowsShown = static_cast<int>(fit.placed());
+  const float listH = fit.height();
   // Rows the panel actually held, which is what scrolling has to agree with.
-  lastRows_ = std::max(1, rowsShown);
+  overlay.rows.fitted(fit.placed());
   // The grid's own height, from how many rows the swatches fill.
   const int swatchRows = isGridOverlay(overlay.kind)
                            ? static_cast<int>((indices.size() + kSwatchColumns - 1) / kSwatchColumns)
@@ -258,13 +265,14 @@ OverlayStack::Layout OverlayStack::layoutFor(const Overlay& overlay, TextRendere
     }
     return layout;
   }
+  RowCursor rows(x, width, cursorY);
   for(int taken = 0; taken < rowsShown; ++taken) {
     const std::size_t i = static_cast<std::size_t>(first + taken);
     const float step = rowHeight(overlay.items[static_cast<std::size_t>(indices[i])]);
-    layout.itemRects.push_back({x + kSpace2 - 2.0f, cursorY, width - (kSpace2 - 2.0f) * 2.0f, step});
+    layout.itemRects.push_back(rows.place(step, kSpace2 - 2.0f));
     layout.itemIndices.push_back(indices[i]);
-    cursorY += step;
   }
+  cursorY = rows.y();
   if(overlay.kind == OverlayKind::Confirm) {
     // The consequence, then the buttons. It used to be the other way round --
     // the buttons went here and the hint was drawn at the panel's foot -- so
@@ -319,7 +327,7 @@ void OverlayStack::moveHighlight(int delta) {
 void OverlayStack::resetHighlight() {
   Overlay* overlay = top();
   if(!overlay) return;
-  overlay->scroll = 0;
+  overlay->rows.rebase();
   const auto indices = visibleIndices(*overlay);
   overlay->highlighted = indices.empty() ? 0 : indices.front();
   for(const int index : indices) {
@@ -332,27 +340,18 @@ void OverlayStack::resetHighlight() {
 void OverlayStack::ensureHighlightVisible() {
   Overlay* overlay = top();
   if(!overlay) return;
-  const auto indices = visibleIndices(*overlay);
-  const int rows = std::max(1, lastRows_);
-  const int count = static_cast<int>(indices.size());
-  int position = -1;
-  for(int i = 0; i < count; ++i) {
-    if(indices[static_cast<std::size_t>(i)] != overlay->highlighted) continue;
-    position = i;
-    break;
-  }
-  if(position < 0) return;
-  overlay->scroll = std::clamp(overlay->scroll, position - rows + 1, position);
-  overlay->scroll = std::clamp(overlay->scroll, 0, std::max(0, count - rows));
+  const auto& indices = visibleIndices(*overlay);
+  const auto at = std::find(indices.begin(), indices.end(), overlay->highlighted);
+  if(at == indices.end()) return;
+  overlay->rows.reveal(static_cast<int>(at - indices.begin()));
+  overlay->rows.clamp(indices.size());
 }
 
 bool OverlayStack::handleWheel(float dy) {
   Overlay* overlay = top();
   if(!overlay) return false;
   if(overlay->kind != OverlayKind::List) return true;
-  const int count = static_cast<int>(visibleIndices(*overlay).size());
-  overlay->scroll = std::clamp(overlay->scroll - static_cast<int>(dy * 3.0f), 0,
-                               std::max(0, count - std::max(1, lastRows_)));
+  overlay->rows.scrollBy(-static_cast<int>(dy * 3.0f), visibleIndices(*overlay).size());
   return true;
 }
 
@@ -729,7 +728,8 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     const Rect band {layout.panel.x, layout.itemRects.front().y - kScrollbarInset, layout.panel.w,
                      shown * pitch + kScrollbarInset * 2.0f};
     const int hidden = static_cast<int>(filtered.size() - layout.itemRects.size());
-    drawVerticalScrollbar(renderer, band, static_cast<int>(std::lround(static_cast<float>(overlay->scroll) * pitch)),
+    drawVerticalScrollbar(renderer, band,
+                          static_cast<int>(std::lround(static_cast<float>(overlay->rows.scroll) * pitch)),
                           static_cast<int>(std::lround(static_cast<float>(hidden) * pitch)));
   }
 

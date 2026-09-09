@@ -16,6 +16,13 @@
 // all three for it -- and one already had not been: the sidebar shipped with no
 // working scrollbar because the ceiling was never recorded. Here the three are
 // one type, so a new panel scrolls by holding one.
+//
+// `RowStrip` below is the same idea for a list that scrolls by whole rows rather
+// than by pixels, which is what a surface has to do when only the paint knows
+// how tall its rows came out.
+
+#include <cstddef>
+
 namespace micronotes::ui {
 
 // A wheel gesture accumulated to whole units.
@@ -31,6 +38,50 @@ struct WheelAccumulator {
   // Whole units to scroll by, positive downwards. `notches` is SDL's sign
   // convention, where a positive value means the content moves down.
   int take(float notches, float unitsPerNotch);
+};
+
+// A list scrolled by whole rows, whose rows are not all the same height.
+//
+// `ScrollList`'s sibling, and the reason there are two: that one counts pixels
+// against a content extent the layout knows in advance, and three surfaces here
+// cannot work that way. The settings rows, the About entries and the overlay's
+// list are all as tall as their own content -- a setting whose help wraps to two
+// lines is taller than one whose help fits on one -- so the *only* thing that
+// knows how many rows a pane held is the paint that placed them. `shown` is that
+// number, written by the paint and read by everything that clamps.
+//
+// Naming the pair is the point. The settings card kept `rowScroll`/`rowsShown`
+// for its settings and `aboutScroll`/`aboutRowsShown` for its About list, and
+// the overlay kept its offset on the overlay and its count on the stack -- so
+// the count belonged to whichever overlay was drawn last rather than to the list
+// it was counted from. Around those, the clamp, the wheel, the arrow keys and
+// the keyboard reveal were written out longhand at nine sites. A discrepancy
+// between any two of them is a list that cannot be scrolled to its own end,
+// which is a good deal worse than a wrong pixel.
+struct RowStrip {
+  // First row on screen, as a position in the list being shown.
+  int scroll = 0;
+  // Rows the last paint fitted. Never zero: a pane always shows its first row,
+  // even clipped, so that a list too tall for its pane still reads as a list.
+  int shown = 1;
+
+  // The furthest this list may be scrolled: the offset that puts its last row
+  // at the foot. It is also, and necessarily, the number of rows the pane could
+  // not hold -- which is what the scrollbar's travel is measured in, so the two
+  // cannot be given separate spellings and drift.
+  int last(std::size_t count) const;
+
+  void clamp(std::size_t count);
+  // `rows` positive scrolls towards the end.
+  void scrollBy(int rows, std::size_t count);
+  // Move as little as possible to bring row `index` on screen.
+  void reveal(int index);
+  // Back to the top, for a list whose content has been replaced -- a filter
+  // that has just matched something else entirely.
+  void rebase() { scroll = 0; }
+
+  // What the paint records when it is done placing rows.
+  void fitted(std::size_t rows);
 };
 
 class ScrollList {
