@@ -139,6 +139,213 @@ Rect sidebarListRect(Rect sidebar) {
   return {sidebar.x, top, sidebar.w, std::max(0.0f, sidebar.y + sidebar.h - top)};
 }
 
+namespace {
+
+// What every row's paint needs and no row changes: the panel's list rect, the
+// room the scrollbar wants at the trailing edge, the two faces, the row
+// rhythm, what is selected, and how wide a snippet measures.
+//
+// One value rather than seven parameters because they are read-only for the
+// whole frame and only mean anything together -- and because `trailingReserve`
+// in particular has to be the same number for the counts, the tag dots and the
+// labels' ellipsis, which is why `drawSidebar` asks for it once.
+struct SidebarFrame {
+  Rect list;
+  float trailingReserve = 0.0f;
+  ui::TextStyle rowStyle;
+  ui::TextStyle snippetStyle;
+  SidebarMetrics metrics;
+  const ui::UiSelection& selection;
+  std::function<float(std::string_view)> snippetWidth;
+};
+
+}
+
+// One row of the sidebar: a band, a search result, a tag, or a line of the
+// tree. Four shapes with four hit targets, dispatched on `row.kind`.
+//
+// Extracted from `drawSidebar`, which was 220 lines of which this was 177. It
+// stays in this translation unit: it runs once per visible row per frame.
+void drawSidebarRow(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
+                    const SidebarRow& row, std::size_t index, const SidebarFrame& frame) {
+  // Trimmed now that the row is known to be painted. See `fillSearchSnippets`.
+  fillSearchSnippets(ui, index, frame.list.w, frame.snippetWidth);
+  perf::addCounter(perf::CounterId::SidebarRowsDrawn);
+  const bool hot = ui.pointer.over(row.rect);
+  // Two columns, and every kind of row uses them: the gutter that holds a
+  // disclosure or an icon, and the label beside it. Indent moves both.
+  const float gutterX = row.rect.x + kSidebarGutterX + static_cast<float>(row.tree.depth) * kSidebarIndent;
+  const float labelX = row.rect.x + kSidebarLabelX + static_cast<float>(row.tree.depth) * kSidebarIndent;
+
+  if(row.kind == SidebarRow::Kind::SectionLabel) {
+    ui::drawSectionBand(renderer, text, row.rect, row.disclosure, row.label, row.trailing,
+                        row.collapsed, hot, frame.trailingReserve);
+    // The NOTEBOOKS band is the drop target for the library root, which has
+    // no row of its own in the tree. See `sidebarDropTargetAt`.
+    if(ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == index) {
+      stroke(renderer, row.rect, theme().accent);
+    }
+    if(row.section) {
+      ui.pointer.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
+    }
+    return;
+  }
+  if(row.kind == SidebarRow::Kind::SearchResult) {
+    const bool selected = row.noteId == frame.selection.noteId;
+    drawRow(renderer, row.rect, selected, hot);
+    if(!selected && !hot) {
+      hLine(renderer, row.rect.x + ui::kSpace2, row.rect.x + row.rect.w - ui::kSpace2,
+            row.rect.y + row.rect.h, theme().border);
+    }
+    const Rect titleRow {row.rect.x, row.rect.y, row.rect.w, frame.metrics.resultTitle};
+    text.draw(ellipsizeToWidth(text, row.title, static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace2), frame.rowStyle),
+              row.rect.x + kSidebarLabelX, ui::textTop(titleRow, text, frame.rowStyle),
+              selected ? theme().textPrimary : theme().textSecondary, frame.rowStyle);
+    float snippetY = row.rect.y + frame.metrics.resultTitle;
+    for(const auto& line : row.matchLines) {
+      // The match, marked with the same fill find-in-note uses, so a match is
+      // a match wherever it is shown. Drawn under the text rather than over
+      // it, and the line is already trimmed to keep the span in view.
+      const float snippetX = row.rect.x + kSidebarLabelX;
+      if(line.length > 0) {
+        const std::string_view shown = line.text;
+        const float from = static_cast<float>(text.width(shown.substr(0, line.start), frame.snippetStyle));
+        const float to = static_cast<float>(text.width(shown.substr(0, line.start + line.length), frame.snippetStyle));
+        ui::fill(renderer, {snippetX + from, snippetY,
+                                   std::max(2.0f, to - from), frame.metrics.snippet - 1.0f},
+                        theme().searchMatch);
+      }
+      text.draw(line.text, snippetX, snippetY, selected ? theme().accent : theme().textMuted, frame.snippetStyle);
+      snippetY += frame.metrics.snippet;
+    }
+    return;
+  }
+  if(row.kind == SidebarRow::Kind::Tag) {
+    const bool selected = frame.selection.tag == row.tag;
+    drawRow(renderer, row.rect, selected, hot);
+    // The tag's own colour where a note row has its icon, so a tag row and
+    // the dots on the notes carrying it are visibly the same mark. This is
+    // the whole of what the `#` used to be doing -- saying "this is a tag" --
+    // and a colour says it while also saying *which* tag.
+    ui::drawTagDot(renderer,
+                   {row.rect.x + kSidebarGutterX,
+                    std::round(row.rect.y + (row.rect.h - kTagDotSize) / 2.0f),
+                    kTagDotSize, kTagDotSize},
+                   ui::tagColor(ui.state.workspace().tagColors, row.tag));
+    // No `#`. It was a sigil in front of every row in a section already
+    // headed TAGS, so it said nothing the position did not, and it cost the
+    // first character of every name in the column.
+    const int room = static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace4);
+    text.draw(ellipsizeToWidth(text, row.tag, room, frame.rowStyle),
+              row.rect.x + kSidebarLabelX, ui::textTop(row.rect, text, frame.rowStyle),
+              selected ? theme().textPrimary : theme().textSecondary, frame.rowStyle);
+    return;
+  }
+
+  const bool isNote = row.tree.kind == ui::TreeRowKind::Note;
+  const bool isFile = row.tree.kind == ui::TreeRowKind::File;
+  // A companion row -- a file, or a folder in a files area -- is neither the
+  // open document nor the current notebook, so it never wears either mark.
+  const bool companion = isFile || row.tree.kind == ui::TreeRowKind::FilesFolder;
+  // A folder is the current context and a note is the open document, so only
+  // the note wears the accent strip: two markers at once would read as two
+  // selections rather than as one place and one file.
+  const bool selected = isNote && row.tree.noteId == frame.selection.noteId;
+  const bool current = !isNote && !companion && frame.selection.tag.empty() && frame.selection.folder == row.tree.folder;
+  const bool dropTarget = ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == index;
+  // Hover lifts the row's ground and nothing else, so the tree reads as "this
+  // is what I would click" without masquerading as selected.
+  drawRow(renderer, row.rect, theme().surfaceBackground,
+          selected || current || hot || dropTarget, selected);
+  if(dropTarget) stroke(renderer, row.rect, theme().accent);
+
+  if(row.disclosure.w > 0.0f) {
+    drawChevron(renderer, row.disclosure.x, row.disclosure.y + row.disclosure.h / 2.0f,
+                row.tree.expanded,
+                selected || current || ui.pointer.over(row.disclosure) ? theme().textPrimary
+                                                                  : theme().textMuted);
+  }
+  if(isNote) {
+    drawNoteIcon(renderer, row.tree.icon,
+                 {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
+                  kSidebarGutterWidth, kSidebarGutterWidth},
+                 selected ? theme().accent : theme().textMuted);
+  } else if(isFile) {
+    // One mark for every kind of file; see `ui::drawFileGlyph`.
+    ui::drawFileGlyph(renderer,
+                      {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
+                       kSidebarGutterWidth, kSidebarGutterWidth},
+                      theme().textMuted);
+  }
+  // A dot per tag at the trailing edge, which is what joins a note's row to
+  // the TAGS band below: the row named a folder and said nothing at all about
+  // the tags on it, so the one way of organising a library that cuts across
+  // the tree was invisible from the tree.
+  //
+  // The tags come off the note frame.list rather than off the row. The row frame.list is
+  // O(library) and is built once per change; copying every note's tag names
+  // into it would be a vector of strings per note to draw the three dozen
+  // rows a panel can show. This is one hash lookup on a row about to be
+  // painted.
+  const library::NoteListItem* tagged =
+    isNote ? ui.state.catalog().noteById(row.tree.noteId) : nullptr;
+  const std::size_t tagCount = tagged ? tagged->tags.size() : 0;
+  const float dotsW = tagCount > 0 ? kTagDotColumnWidth : 0.0f;
+
+  const float labelY = ui::textTop(row.rect, text, frame.rowStyle);
+  const float countW = frame.trailingReserve
+                     + (row.tree.noteCount > 0 && !isNote ? kCountColumnWidth
+                      : dotsW > 0.0f                      ? dotsW
+                                                          : ui::kSpace2);
+  // A folder is a container and a note is a leaf, so the folder's name is the
+  // brighter of the two -- the file tree's rule in every IDE, and the reverse
+  // of what a frame.list of documents would do.
+  //
+  // A files directory takes the leaf's ink even though it wears a chevron: it
+  // is a container of files rather than a notebook, and the dimmer name is
+  // what says so at a glance.
+  const SDL_Color ink = selected || current ? theme().textPrimary
+                      : isNote || companion ? theme().textSecondary
+                                            : theme().textPrimary;
+  text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), frame.rowStyle),
+            labelX, labelY, ink, frame.rowStyle);
+  if(!isNote && row.tree.noteCount > 0) {
+    text.draw(std::to_string(row.tree.noteCount),
+              row.rect.x + row.rect.w - frame.trailingReserve -
+                static_cast<float>(text.width(std::to_string(row.tree.noteCount), frame.rowStyle)) - ui::kSpace2,
+              labelY, current ? theme().accent : theme().textMuted, frame.rowStyle);
+  }
+  if(tagCount > 0) {
+    const auto& colors = ui.state.workspace().tagColors;
+    const auto dots = tagDotRects(row.rect, tagCount, frame.trailingReserve);
+    for(std::size_t d = 0; d < dots.size(); ++d) {
+      // Past the cap the last dot stands for the tags that did not fit, so it
+      // is drawn in the muted ink rather than in any one tag's colour -- a
+      // marker, not a tag -- and its tooltip names them. Hiding them without
+      // saying so would be worse than not drawing dots at all.
+      const bool overflow = dots.size() < tagCount && d + 1 == dots.size();
+      if(overflow) {
+        ui::drawTagDot(renderer, dots[d], theme().textMuted);
+        // The names it stands for, and only those. A count and a prefix would
+        // be the tooltip explaining itself instead of answering the one
+        // question a coloured dot raises.
+        std::string rest;
+        for(std::size_t t = d; t < tagged->tags.size(); ++t) {
+          rest += (rest.empty() ? "" : ", ") + tagged->tags[t];
+        }
+        ui.pointer.offerTooltip(dots[d], rest);
+        continue;
+      }
+      const auto& tag = tagged->tags[d];
+      ui::drawTagDot(renderer, dots[d], ui::tagColor(colors, tag));
+      // The tag's name, and nothing else. A 7px disc raises exactly one
+      // question -- *which* tag -- and "Filter by work" answers it while also
+      // narrating a click the reader has not made yet.
+      ui.pointer.offerTooltip(dots[d], tag);
+    }
+  }
+}
+
 void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   fill(renderer, rect, theme().surfaceBackground);
   ClipGuard clip(renderer, rect);
@@ -177,184 +384,10 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   // The visible band, not the library: two binary searches over a row list that
   // tiles the panel. See `sidebarRowRange`.
   const auto [firstRow, lastRow] = sidebarRowRange(ui.sidebar.rows, list.y, list.y + list.h);
+  const SidebarFrame frame {list, trailingReserve, rowStyle, snippetStyle, metrics, selection,
+                           snippetWidth};
   for(std::size_t i = firstRow; i < lastRow; ++i) {
-    // Trimmed now that the row is known to be painted. See `fillSearchSnippets`.
-    fillSearchSnippets(ui, i, list.w, snippetWidth);
-    const auto& row = ui.sidebar.rows[i];
-    perf::addCounter(perf::CounterId::SidebarRowsDrawn);
-    const bool hot = ui.pointer.over(row.rect);
-    // Two columns, and every kind of row uses them: the gutter that holds a
-    // disclosure or an icon, and the label beside it. Indent moves both.
-    const float gutterX = row.rect.x + kSidebarGutterX + static_cast<float>(row.tree.depth) * kSidebarIndent;
-    const float labelX = row.rect.x + kSidebarLabelX + static_cast<float>(row.tree.depth) * kSidebarIndent;
-
-    if(row.kind == SidebarRow::Kind::SectionLabel) {
-      ui::drawSectionBand(renderer, text, row.rect, row.disclosure, row.label, row.trailing,
-                          row.collapsed, hot, trailingReserve);
-      // The NOTEBOOKS band is the drop target for the library root, which has
-      // no row of its own in the tree. See `sidebarDropTargetAt`.
-      if(ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == i) {
-        stroke(renderer, row.rect, theme().accent);
-      }
-      if(row.section) {
-        ui.pointer.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
-      }
-      continue;
-    }
-    if(row.kind == SidebarRow::Kind::SearchResult) {
-      const bool selected = row.noteId == selection.noteId;
-      drawRow(renderer, row.rect, selected, hot);
-      if(!selected && !hot) {
-        hLine(renderer, row.rect.x + ui::kSpace2, row.rect.x + row.rect.w - ui::kSpace2,
-              row.rect.y + row.rect.h, theme().border);
-      }
-      const Rect titleRow {row.rect.x, row.rect.y, row.rect.w, metrics.resultTitle};
-      text.draw(ellipsizeToWidth(text, row.title, static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace2), rowStyle),
-                row.rect.x + kSidebarLabelX, ui::textTop(titleRow, text, rowStyle),
-                selected ? theme().textPrimary : theme().textSecondary, rowStyle);
-      float snippetY = row.rect.y + metrics.resultTitle;
-      for(const auto& line : row.matchLines) {
-        // The match, marked with the same fill find-in-note uses, so a match is
-        // a match wherever it is shown. Drawn under the text rather than over
-        // it, and the line is already trimmed to keep the span in view.
-        const float snippetX = row.rect.x + kSidebarLabelX;
-        if(line.length > 0) {
-          const std::string_view shown = line.text;
-          const float from = static_cast<float>(text.width(shown.substr(0, line.start), snippetStyle));
-          const float to = static_cast<float>(text.width(shown.substr(0, line.start + line.length), snippetStyle));
-          ui::fill(renderer, {snippetX + from, snippetY,
-                                     std::max(2.0f, to - from), metrics.snippet - 1.0f},
-                          theme().searchMatch);
-        }
-        text.draw(line.text, snippetX, snippetY, selected ? theme().accent : theme().textMuted, snippetStyle);
-        snippetY += metrics.snippet;
-      }
-      continue;
-    }
-    if(row.kind == SidebarRow::Kind::Tag) {
-      const bool selected = selection.tag == row.tag;
-      drawRow(renderer, row.rect, selected, hot);
-      // The tag's own colour where a note row has its icon, so a tag row and
-      // the dots on the notes carrying it are visibly the same mark. This is
-      // the whole of what the `#` used to be doing -- saying "this is a tag" --
-      // and a colour says it while also saying *which* tag.
-      ui::drawTagDot(renderer,
-                     {row.rect.x + kSidebarGutterX,
-                      std::round(row.rect.y + (row.rect.h - kTagDotSize) / 2.0f),
-                      kTagDotSize, kTagDotSize},
-                     ui::tagColor(ui.state.workspace().tagColors, row.tag));
-      // No `#`. It was a sigil in front of every row in a section already
-      // headed TAGS, so it said nothing the position did not, and it cost the
-      // first character of every name in the column.
-      const int room = static_cast<int>(row.rect.w - kSidebarLabelX - ui::kSpace4);
-      text.draw(ellipsizeToWidth(text, row.tag, room, rowStyle),
-                row.rect.x + kSidebarLabelX, ui::textTop(row.rect, text, rowStyle),
-                selected ? theme().textPrimary : theme().textSecondary, rowStyle);
-      continue;
-    }
-
-    const bool isNote = row.tree.kind == ui::TreeRowKind::Note;
-    const bool isFile = row.tree.kind == ui::TreeRowKind::File;
-    // A companion row -- a file, or a folder in a files area -- is neither the
-    // open document nor the current notebook, so it never wears either mark.
-    const bool companion = isFile || row.tree.kind == ui::TreeRowKind::FilesFolder;
-    // A folder is the current context and a note is the open document, so only
-    // the note wears the accent strip: two markers at once would read as two
-    // selections rather than as one place and one file.
-    const bool selected = isNote && row.tree.noteId == selection.noteId;
-    const bool current = !isNote && !companion && selection.tag.empty() && selection.folder == row.tree.folder;
-    const bool dropTarget = ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == i;
-    // Hover lifts the row's ground and nothing else, so the tree reads as "this
-    // is what I would click" without masquerading as selected.
-    drawRow(renderer, row.rect, theme().surfaceBackground,
-            selected || current || hot || dropTarget, selected);
-    if(dropTarget) stroke(renderer, row.rect, theme().accent);
-
-    if(row.disclosure.w > 0.0f) {
-      drawChevron(renderer, row.disclosure.x, row.disclosure.y + row.disclosure.h / 2.0f,
-                  row.tree.expanded,
-                  selected || current || ui.pointer.over(row.disclosure) ? theme().textPrimary
-                                                                    : theme().textMuted);
-    }
-    if(isNote) {
-      drawNoteIcon(renderer, row.tree.icon,
-                   {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
-                    kSidebarGutterWidth, kSidebarGutterWidth},
-                   selected ? theme().accent : theme().textMuted);
-    } else if(isFile) {
-      // One mark for every kind of file; see `ui::drawFileGlyph`.
-      ui::drawFileGlyph(renderer,
-                        {gutterX, row.rect.y + (row.rect.h - kSidebarGutterWidth) / 2.0f,
-                         kSidebarGutterWidth, kSidebarGutterWidth},
-                        theme().textMuted);
-    }
-    // A dot per tag at the trailing edge, which is what joins a note's row to
-    // the TAGS band below: the row named a folder and said nothing at all about
-    // the tags on it, so the one way of organising a library that cuts across
-    // the tree was invisible from the tree.
-    //
-    // The tags come off the note list rather than off the row. The row list is
-    // O(library) and is built once per change; copying every note's tag names
-    // into it would be a vector of strings per note to draw the three dozen
-    // rows a panel can show. This is one hash lookup on a row about to be
-    // painted.
-    const library::NoteListItem* tagged =
-      isNote ? ui.state.catalog().noteById(row.tree.noteId) : nullptr;
-    const std::size_t tagCount = tagged ? tagged->tags.size() : 0;
-    const float dotsW = tagCount > 0 ? kTagDotColumnWidth : 0.0f;
-
-    const float labelY = ui::textTop(row.rect, text, rowStyle);
-    const float countW = trailingReserve
-                       + (row.tree.noteCount > 0 && !isNote ? kCountColumnWidth
-                        : dotsW > 0.0f                      ? dotsW
-                                                            : ui::kSpace2);
-    // A folder is a container and a note is a leaf, so the folder's name is the
-    // brighter of the two -- the file tree's rule in every IDE, and the reverse
-    // of what a list of documents would do.
-    //
-    // A files directory takes the leaf's ink even though it wears a chevron: it
-    // is a container of files rather than a notebook, and the dimmer name is
-    // what says so at a glance.
-    const SDL_Color ink = selected || current ? theme().textPrimary
-                        : isNote || companion ? theme().textSecondary
-                                              : theme().textPrimary;
-    text.draw(ellipsizeToWidth(text, row.tree.label, static_cast<int>(row.rect.x + row.rect.w - labelX - countW), rowStyle),
-              labelX, labelY, ink, rowStyle);
-    if(!isNote && row.tree.noteCount > 0) {
-      text.draw(std::to_string(row.tree.noteCount),
-                row.rect.x + row.rect.w - trailingReserve -
-                  static_cast<float>(text.width(std::to_string(row.tree.noteCount), rowStyle)) - ui::kSpace2,
-                labelY, current ? theme().accent : theme().textMuted, rowStyle);
-    }
-    if(tagCount > 0) {
-      const auto& colors = ui.state.workspace().tagColors;
-      const auto dots = tagDotRects(row.rect, tagCount, trailingReserve);
-      for(std::size_t d = 0; d < dots.size(); ++d) {
-        // Past the cap the last dot stands for the tags that did not fit, so it
-        // is drawn in the muted ink rather than in any one tag's colour -- a
-        // marker, not a tag -- and its tooltip names them. Hiding them without
-        // saying so would be worse than not drawing dots at all.
-        const bool overflow = dots.size() < tagCount && d + 1 == dots.size();
-        if(overflow) {
-          ui::drawTagDot(renderer, dots[d], theme().textMuted);
-          // The names it stands for, and only those. A count and a prefix would
-          // be the tooltip explaining itself instead of answering the one
-          // question a coloured dot raises.
-          std::string rest;
-          for(std::size_t t = d; t < tagged->tags.size(); ++t) {
-            rest += (rest.empty() ? "" : ", ") + tagged->tags[t];
-          }
-          ui.pointer.offerTooltip(dots[d], rest);
-          continue;
-        }
-        const auto& tag = tagged->tags[d];
-        ui::drawTagDot(renderer, dots[d], ui::tagColor(colors, tag));
-        // The tag's name, and nothing else. A 7px disc raises exactly one
-        // question -- *which* tag -- and "Filter by work" answers it while also
-        // narrating a click the reader has not made yet.
-        ui.pointer.offerTooltip(dots[d], tag);
-      }
-    }
+    drawSidebarRow(renderer, text, ui, ui.sidebar.rows[i], i, frame);
   }
   drawVerticalScrollbar(renderer, list, ui.sidebar.list.scroll(), ui.sidebar.list.maxScroll(),
                         ui.pointer.scrollDrag == ScrollDrag::Sidebar);
