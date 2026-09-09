@@ -115,14 +115,24 @@ constexpr MenuItemSpec kHelpItems[] {
   item(ActionId::About),
 };
 
+// The mnemonic is the initial in every case here, which is what makes the bar
+// learnable: Alt and the letter you can see. `Note` and `Go` are the only pair
+// that could have collided and do not, so nothing needs a second letter yet --
+// and `menus_have_distinct_mnemonics` fails the build if a menu added later
+// takes one that is already spoken for.
 constexpr MenuSpec kMenus[] {
-  {MenuId::File, "File", kFileItems},
-  {MenuId::Edit, "Edit", kEditItems},
-  {MenuId::View, "View", kViewItems},
-  {MenuId::Go, "Go", kGoItems},
-  {MenuId::Note, "Note", kNoteItems},
-  {MenuId::Help, "Help", kHelpItems},
+  {MenuId::File, "File", 'F', kFileItems},
+  {MenuId::Edit, "Edit", 'E', kEditItems},
+  {MenuId::View, "View", 'V', kViewItems},
+  {MenuId::Go, "Go", 'G', kGoItems},
+  {MenuId::Note, "Note", 'N', kNoteItems},
+  {MenuId::Help, "Help", 'H', kHelpItems},
 };
+
+// ASCII only, which is what the labels and the keycodes both are.
+constexpr char lowerAscii(char c) {
+  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
 
 // The width a menu's own label asks for on the bar.
 //
@@ -160,6 +170,24 @@ float barItemWidth(float labelWidth) {
 
 std::span<const MenuSpec> menuSpecs() {
   return kMenus;
+}
+
+std::size_t menuMnemonicIndex(const MenuSpec& menu) {
+  if(menu.mnemonic == 0) return std::string_view::npos;
+  const char wanted = lowerAscii(menu.mnemonic);
+  for(std::size_t i = 0; i < menu.label.size(); ++i) {
+    if(lowerAscii(menu.label[i]) == wanted) return i;
+  }
+  return std::string_view::npos;
+}
+
+MenuId menuForMnemonic(char letter) {
+  if(letter == 0) return MenuId::None;
+  const char wanted = lowerAscii(letter);
+  for(const auto& menu : kMenus) {
+    if(menu.mnemonic != 0 && lowerAscii(menu.mnemonic) == wanted) return menu.id;
+  }
+  return MenuId::None;
 }
 
 const MenuSpec* findMenu(MenuId id) {

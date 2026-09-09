@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <set>
 #include <string>
+#include <string_view>
 
 using micronotes::ui::ActionId;
 using micronotes::ui::MenuBarLayout;
@@ -308,4 +309,35 @@ MICRONOTES_TEST(every_menu_item_has_a_label) {
       MICRONOTES_REQUIRE(!micronotes::ui::menuItemLabel(item).empty());
     }
   }
+}
+
+// Every menu on the bar can be opened by a letter, and the bar can say which
+// letter that is -- which it can only do if the letter is in its own label.
+MICRONOTES_TEST(menus_have_distinct_mnemonics_their_labels_contain) {
+  std::set<char> taken;
+  for(const auto& menu : menuSpecs()) {
+    // A menu with no mnemonic is one the keyboard cannot reach, which is the
+    // whole thing this is here to prevent.
+    MICRONOTES_REQUIRE(menu.mnemonic != 0);
+    // Underlining it means measuring a prefix and a substring of the label, so
+    // a mnemonic the label does not carry would underline nothing and leave the
+    // key working invisibly.
+    MICRONOTES_REQUIRE(micronotes::ui::menuMnemonicIndex(menu) != std::string_view::npos);
+    // And two menus on one letter would make one of them unreachable, with
+    // nothing on screen to say which.
+    MICRONOTES_REQUIRE(taken.insert(menu.mnemonic).second);
+    // Round trip: the letter opens the menu it is drawn under.
+    MICRONOTES_REQUIRE(micronotes::ui::menuForMnemonic(menu.mnemonic) == menu.id);
+  }
+}
+
+MICRONOTES_TEST(menus_resolve_a_mnemonic_whatever_case_it_arrives_in) {
+  // SDL hands a keycode over in lower case whether or not shift was down, and
+  // the table is written in the case the label uses.
+  MICRONOTES_REQUIRE(micronotes::ui::menuForMnemonic('f') == MenuId::File);
+  MICRONOTES_REQUIRE(micronotes::ui::menuForMnemonic('F') == MenuId::File);
+  MICRONOTES_REQUIRE(micronotes::ui::menuForMnemonic('n') == MenuId::Note);
+  // A letter no menu claims opens nothing rather than the first menu.
+  MICRONOTES_REQUIRE(micronotes::ui::menuForMnemonic('z') == MenuId::None);
+  MICRONOTES_REQUIRE(micronotes::ui::menuForMnemonic(0) == MenuId::None);
 }

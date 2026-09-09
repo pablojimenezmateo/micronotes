@@ -128,31 +128,6 @@ record rather than an accident of the first schema.
 
 
 
-## TD-22 — the menu bar has no keyboard mnemonics
-
-`src/app/MenuBar.cpp`, `src/ui/Menus.h`.
-
-An open menu is fully navigable from the keyboard -- the arrows walk it, Left
-and Right step to the neighbouring menu, Enter chooses and Escape shuts it --
-but there is no way to *open* one without the pointer. `Alt+F` does not reach
-File, and neither does F10.
-
-**What it costs today.** Not much on its own: every item in every menu is also
-an `ActionId` with a chord or a palette row, so nothing is unreachable. What it
-costs is the claim the menu bar is there to make. The bar exists because a shell
-whose only routes to a command are a chord and a palette is one where every
-command has to be learnt before it can be used -- and a bar you can only reach
-by taking a hand off the keyboard is half of that argument given back.
-
-**Why it has not been paid.** Mnemonics are not one change but three. The label
-needs to carry which letter is the mnemonic (microide's `MenuSpec` does not
-model this either, so there is nothing to copy); the draw needs to underline
-that letter, which means measuring a prefix and a substring rather than a label;
-and `Alt` has to stop being an ordinary modifier in the key chain -- micronotes
-binds `Ctrl+Alt+Left`/`Right` to the panel toggles, so a bare `Alt` press has to
-be distinguished from `Alt` held as part of a chord, which is a keyup-driven
-state machine rather than a branch. F10 alone would be a third of a fix and
-would sit oddly next to a bar that does not underline anything.
 
 ## TD-23 — `DocumentLayout::update` is one algorithm in one function
 

@@ -12,6 +12,7 @@
 #include "app/EditorBlocks.h"
 #include "app/Fields.h"
 #include "app/Folds.h"
+#include "app/MenuBar.h"
 #include "app/Notes.h"
 #include "app/OverlayRouter.h"
 #include "app/PageView.h"
@@ -120,6 +121,12 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
   // three of the table's bindings (`F2`, `Ctrl+Q`, and `Ctrl+O` as the alias
   // for the note switcher) reached no branch at all, so they were advertised in
   // the palette and the shortcut list while doing nothing.
+  // Before the binding table, because `Alt` is a modifier in it: a chord that
+  // happens to spell a mnemonic must not be shadowed, and none does -- every
+  // `Alt` binding micronotes has also holds `Ctrl`, which `openMenuByKey`
+  // refuses.
+  if(openMenuByKey(ui, key, ctrl, shift, alt)) return;
+
   if(const auto* bound = ui::findActionForKey(key, scancode, ctrl, shift, alt); bound && bound->keyRunsIt) {
     performCommand(ui, std::string(bound->name));
     return;

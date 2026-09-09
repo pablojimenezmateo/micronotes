@@ -52,11 +52,30 @@ struct MenuItemSpec {
 struct MenuSpec {
   MenuId id = MenuId::None;
   std::string_view label;
+  // The letter that opens this menu from the keyboard, and the one the bar
+  // underlines. Zero for a menu with none.
+  //
+  // A field rather than an `&File` marker in the label, because the label is
+  // read by the layout, the measure and the draw, and every one of them would
+  // have had to know to strip a sigil -- the one that forgot would put an
+  // ampersand on the bar or measure the wrong width. The sibling's `MenuSpec`
+  // does not model this at all, so there was nothing to copy.
+  char mnemonic = 0;
   std::span<const MenuItemSpec> items;
 };
 
 std::span<const MenuSpec> menuSpecs();
 const MenuSpec* findMenu(MenuId id);
+
+// Where the mnemonic letter sits in a menu's own label, or `npos`.
+//
+// The underline goes under the letter *in the label*, so a mnemonic the label
+// does not contain draws nothing rather than guessing. Case-insensitive, and
+// the first occurrence wins.
+std::size_t menuMnemonicIndex(const MenuSpec& menu);
+
+// The menu `letter` opens, or `MenuId::None`. Case-insensitive.
+MenuId menuForMnemonic(char letter);
 
 // What a row prints: the override if the table gave one, otherwise the
 // action's label. A separator has neither.

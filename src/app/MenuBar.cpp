@@ -74,6 +74,30 @@ OpenMenu openMenuFor(TextRenderer& text, const UiRuntime& ui, Rect rect, Rect bo
   return {spec->items, popup};
 }
 
+// The rule under the letter `Alt` opens this menu by.
+//
+// Drawn always, not only while `Alt` is held. The bar exists because a shell
+// whose only routes to a command are a chord and a palette is one where every
+// command has to be learnt before it can be used -- and a key you have to hold
+// something down to be told about is a key you are not told about.
+//
+// Two measurements: the prefix places it, the letter sizes it. That is the
+// whole reason a mnemonic is not free -- everything else on this bar measures
+// one whole label.
+void drawMnemonicUnderline(TextRenderer& text, SDL_Renderer* renderer, const ui::MenuSpec& spec,
+                           float labelX, float labelY, SDL_Color ink, const ui::TextStyle& style) {
+  const std::size_t at = ui::menuMnemonicIndex(spec);
+  if(at == std::string_view::npos) return;
+  const auto prefix = spec.label.substr(0, at);
+  const auto letter = spec.label.substr(at, 1);
+  const float x = labelX + static_cast<float>(text.width(prefix, style));
+  const float w = static_cast<float>(text.width(letter, style));
+  if(w <= 0.0f) return;
+  // One pixel under the baseline box, the width of the letter and no more.
+  const float y = std::round(labelY + static_cast<float>(text.lineHeight(style)) - 2.0f);
+  fill(renderer, {std::round(x), y, w, 1.0f}, ink);
+}
+
 void closeMenu(UiRuntime& ui) {
   ui.chrome.openMenu = MenuId::None;
   ui.chrome.menuHighlight = 0;
@@ -169,9 +193,11 @@ void drawMenuBar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
       fill(renderer, item.rect, theme().rowHighlight);
     }
     const float width = static_cast<float>(text.width(spec->label, style));
-    text.draw(spec->label, std::round(item.rect.x + (item.rect.w - width) / 2.0f),
-              ui::textTop(item.rect, text, style),
-              item.active || hot ? theme().chromeActiveText : theme().chromeText, style);
+    const float labelX = std::round(item.rect.x + (item.rect.w - width) / 2.0f);
+    const float labelY = ui::textTop(item.rect, text, style);
+    const SDL_Color ink = item.active || hot ? theme().chromeActiveText : theme().chromeText;
+    text.draw(spec->label, labelX, labelY, ink, style);
+    drawMnemonicUnderline(text, renderer, *spec, labelX, labelY, ink, style);
   }
 
   if(!ui::empty(layout.chevron)) {
@@ -345,6 +371,33 @@ bool handleMenuBarMotion(TextRenderer& text, UiRuntime& ui, Rect rect, Rect boun
   return false;
 }
 
+bool openMenuByKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, bool shift, bool alt) {
+  if(ctrl) return false;
+  // The first menu on the bar, which is the table's first and not the layout's:
+  // a window too narrow to show File would otherwise put F10 on whatever
+  // survived the overflow.
+  if(key == SDLK_F10 && !alt && !shift) {
+    const auto specs = ui::menuSpecs();
+    if(specs.empty()) return false;
+    if(ui.chrome.openMenu == specs.front().id) closeMenu(ui);
+    else {
+      ui.chrome.openMenu = specs.front().id;
+      ui.chrome.menuHighlight = 0;
+    }
+    return true;
+  }
+  if(!alt || key < SDLK_A || key > SDLK_Z) return false;
+  const MenuId id = ui::menuForMnemonic(static_cast<char>(key));
+  if(id == MenuId::None) return false;
+  // Alt+F on an open File menu shuts it, the way clicking File again does.
+  if(ui.chrome.openMenu == id) closeMenu(ui);
+  else {
+    ui.chrome.openMenu = id;
+    ui.chrome.menuHighlight = 0;
+  }
+  return true;
+}
+
 MenuBarKey handleMenuBarKey(TextRenderer& text, UiRuntime& ui, Rect rect, Rect bounds,
                             SDL_Keycode key) {
   MenuBarKey result;
@@ -368,6 +421,15 @@ MenuBarKey handleMenuBarKey(TextRenderer& text, UiRuntime& ui, Rect rect, Rect b
       return;
     }
   };
+
+  // Alt and a letter switches menus while one is open, the way sliding along
+  // the bar with the button down does. Read from the modifier state because the
+  // walk is given a keycode and not the mods that came with it.
+  const SDL_Keymod mod = SDL_GetModState();
+  if(openMenuByKey(ui, key, (mod & SDL_KMOD_CTRL) != 0, (mod & SDL_KMOD_SHIFT) != 0,
+                   (mod & SDL_KMOD_ALT) != 0)) {
+    return result;
+  }
 
   switch(key) {
     case SDLK_ESCAPE:

@@ -61,6 +61,24 @@ struct MenuBarKey {
 MenuBarKey handleMenuBarKey(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, ui::Rect bounds,
                             SDL_Keycode key);
 
+// Opening a menu without the pointer: `Alt` and the letter the bar underlines,
+// or `F10` for the first one. Returns whether the key was one of those.
+//
+// An open menu was already fully navigable from the keyboard -- the arrows walk
+// it, Left and Right step to the neighbour, Enter chooses, Escape shuts it --
+// and there was no way to *open* one at all. That is half of the bar's own
+// argument given back: it exists because a shell whose only routes to a command
+// are a chord and a palette is one where every command has to be learnt before
+// it can be used, and a bar you can only reach by taking a hand off the
+// keyboard is not read, it is pointed at.
+//
+// `Alt` stays an ordinary modifier here, which is what keeps this a branch
+// rather than a keyup-driven state machine: micronotes binds `Ctrl+Alt+Left`
+// and `Ctrl+Alt+Right`, so what has to be told apart is `Alt+F` from
+// `Ctrl+Alt+F` -- and `Ctrl` is in the mask. Nothing is bound to a *bare* `Alt`
+// press, so nothing has to notice one.
+bool openMenuByKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, bool shift, bool alt);
+
 // Whether the pointer is over something clickable, so the cursor can say so,
 // and whether it is over a part of the bar a borderless window may be dragged
 // by -- which is everything the menus and the window controls left.
