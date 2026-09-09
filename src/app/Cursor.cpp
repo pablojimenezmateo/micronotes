@@ -4,6 +4,7 @@
 
 #include "app/Breadcrumb.h"
 #include "app/MenuBar.h"
+#include "app/PageChrome.h"
 #include "app/RawPane.h"
 #include "app/RightPanel.h"
 #include "app/Scroll.h"
@@ -142,9 +143,10 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
   // Every link the frame drew, wherever it drew it. Asked after the panes so a
   // scrollbar lying over one still wins, and outside them so that a link in the
   // page header, or in whichever pane of a split the pointer is in, is a link.
-  for(const auto& link : ui.linkRegions) {
-    if(contains(link.rect, x, y)) return CursorKind::Pointer;
-  }
+  //
+  // Through `linkAt`, which is also what the click and the middle-click ask, so
+  // the shape the pointer takes cannot promise a click that lands elsewhere.
+  if(linkAt(ui, x, y)) return CursorKind::Pointer;
 
   return CursorKind::Default;
 }

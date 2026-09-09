@@ -33,6 +33,16 @@ std::optional<std::string> codeUnderCopyButton(const PageView& page, std::string
 // `[[wikilink]]` opens (or creates) a note, a bare `#anchor` scrolls the page
 // showing this one, a URL goes to the desktop, and anything else is a file in
 // the library opened with whatever the desktop uses for it.
+// The link under the pointer, or null.
+//
+// One lookup, because there were three: `pointOnLink`, `followLinkAt` and the
+// cursor shape each walked `ui.linkRegions` for themselves with their own
+// `contains`. Three spellings of "which link is under the pointer" is three
+// chances for the cursor to promise a click that lands somewhere else -- the
+// same failure `ui::layoutTabs` had, where the hit test and the paint
+// disagreed and a click on the second tab opened the first.
+const LinkRegion* linkAt(const UiRuntime& ui, float x, float y);
+
 // Whether there is a link under the pointer at all, without following it.
 //
 // The middle-click handler needs to know before it decides what the click
