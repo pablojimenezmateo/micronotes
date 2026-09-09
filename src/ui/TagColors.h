@@ -2,6 +2,8 @@
 
 #include <SDL3/SDL_pixels.h>
 
+#include "core/util/Hash.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <map>

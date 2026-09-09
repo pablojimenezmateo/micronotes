@@ -4,7 +4,6 @@
 
 #include "app/PageView.h"
 #include "core/editor/MarkdownEditor.h"
-#include "core/editor/SoftWrap.h"
 #include "core/editor/TextField.h"
 #include "core/markdown/MarkdownParser.h"
 #include "core/platform/DirectoryWatcher.h"
@@ -32,7 +31,6 @@
 #include "ui/NoteProperties.h"
 #include "ui/Outline.h"
 #include "ui/FoldState.h"
-#include "core/util/Hash.h"
 #include "ui/Actions.h"
 #include "ui/CaretBlink.h"
 #include "ui/Menus.h"

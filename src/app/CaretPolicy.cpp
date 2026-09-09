@@ -1,5 +1,7 @@
 #include "app/CaretPolicy.h"
 
+#include "core/util/Hash.h"
+
 namespace micronotes::app {
 
 std::uint64_t caretStateKey(const UiRuntime& ui) {

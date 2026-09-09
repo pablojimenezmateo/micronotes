@@ -1,4 +1,5 @@
 #include "CoreAliases.h"
+#include "core/util/Hash.h"
 #include "ui/TagColors.h"
 
 #include "core/render/ColorMath.h"

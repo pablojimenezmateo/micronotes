@@ -2,6 +2,8 @@
 
 #include "app/Shell.h"
 
+#include "core/editor/SoftWrap.h"
+
 #include "ui/Metrics.h"
 #include "ui/Settings.h"
 #include "ui/ShellLayout.h"
