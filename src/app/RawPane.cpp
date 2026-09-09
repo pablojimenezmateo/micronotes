@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace micronotes::app {
@@ -25,8 +26,52 @@ using ui::fill;
 using ui::stroke;
 using ui::theme;
 
+// Whether the mono face really is fixed-pitch, and by how much.
+//
+// Zero when it is not, which is the answer that keeps the old path. "Monospaced"
+// is a claim about a face and not a fact about one, and the pane is drawn in
+// whatever face the machine resolved.
+//
+// Sixteen characters rather than one, because a single glyph measures its *ink*
+// and the last glyph of a string can overhang its own advance -- `W` and `%` in
+// the bundled face are one pixel wider drawn than they are wide to walk. Over a
+// probe they cancel: a run of sixteen is sixteen advances exactly, which is the
+// property the wrap actually depends on.
+static int monoCellAdvance(const TextRenderer& text) {
+  static constexpr std::string_view kProbe = "0123456789ABCDEF";
+  const int advance = text.width("0", false, true);
+  if(advance <= 0) return 0;
+  const int probe = text.width(kProbe, false, true);
+  return probe == advance * static_cast<int>(kProbe.size()) ? advance : 0;
+}
+
+static bool isAsciiRun(std::string_view value) {
+  for(const unsigned char byte : value) {
+    if(byte >= 0x80) return false;
+  }
+  return true;
+}
+
+// The pane shows the file as a monospaced *grid*, so a run of ASCII is as wide
+// as it is long: n cells, one advance each. No shaping, no measure-cache
+// traffic, and -- the part that mattered -- no binary search over strings
+// nothing has ever measured.
+//
+// `editor::softWrap` finds a break by bisecting the row: `measure(text[pos..mid])`
+// for seven or eight different `mid`, several thousand rows of them. Every one
+// was a distinct string, so the measure cache missed on all of them *and
+// inserted*, evicting thousands of the entries the page layout depends on. Over
+// the real faces that was 70 ms per keystroke on a 200 KB note -- 1,800 times
+// the cost of the rest of the keystroke put together -- and it took the shaping
+// cache down with it. See `docs/performance.md`, "The shell lane".
+//
+// A run carrying any byte above ASCII is measured rather than counted: a cell is
+// not what a CJK glyph or an emoji takes, and being approximately right about
+// the width of a line is not something a wrap gets to be.
 static editor::MeasureText editorMeasure(TextRenderer& text) {
-  return [&text](std::string_view value) {
+  const int advance = monoCellAdvance(text);
+  return [&text, advance](std::string_view value) {
+    if(advance > 0 && isAsciiRun(value)) return static_cast<int>(value.size()) * advance;
     return text.width(value, false, true);
   };
 }

@@ -2907,3 +2907,44 @@ fallback and not a second mode. `LibraryIndex::ftsStoresBodies()` is the one
 question that can tell them apart, and it reads the table's own DDL rather than
 querying it -- a contentless table still declares every column and answers NULL
 for it, so a `SELECT body FROM notes_fts` prepares and steps happily on both.
+
+
+### Resolved: the raw pane shaped every prefix of every line to find its breaks
+
+The lane above measured the raw pane's whole-note rewrap at **70,721 us** per
+keystroke -- 1,800 times the cost of the rest of a keystroke through the shell.
+It is **720 us** now, and nothing about the wrap changed.
+
+What changed is what a width is. The pane shows the file as a *monospaced grid*,
+so a run of ASCII is as wide as it is long: `n` cells, one advance each. It was
+asking the font instead, and `editor::softWrap` asks in the worst possible
+pattern -- it finds a break by bisecting the row, `measure(text[pos..mid])` for
+seven or eight different `mid`, several thousand rows of them. Every probe is a
+distinct string, so the measure cache missed on all of them **and inserted**,
+evicting thousands of the entries the *page* layout depends on. The pane did not
+merely cost 70 ms; it took the shaping cache down with it.
+
+| a 200 KB note, per keystroke | |
+|---|---:|
+| whole-note rewrap, shaping every prefix | 70,721 us |
+| whole-note rewrap, counting cells | **720 us** |
+| the rest of the keystroke, for scale | 39 us |
+
+Two guards, because "monospaced" is a claim about a face and not a fact about
+one. The advance is checked against a sixteen-character probe -- sixteen rather
+than one, because a single glyph measures its *ink* and the last glyph of a
+string can overhang its own advance (`W` and `%` in the bundled face are a pixel
+wider drawn than they are wide to walk), while over a probe they cancel. A face
+that fails the check keeps the old path. And a run carrying any byte above ASCII
+is measured rather than counted, because a cell is not what a CJK glyph or an
+emoji takes, and being approximately right about the width of a line is not
+something a wrap gets to be.
+
+`tools/session-compare.sh` reports the pixels unchanged, which is the part worth
+saying: the wrap this produces is the wrap the shaping produced, for every line
+the fixture holds.
+
+The rewrap is still the whole note on every keystroke -- `editor::softWrap` has
+no incremental form -- and at 720 us against a 2 ms keystroke budget that is now
+a thing to know rather than a thing to fix. `shell.raw_pane_rewrap` is the
+budget that keeps it that way.
