@@ -320,6 +320,40 @@ struct LayoutOptions {
   std::uint64_t wikiLinkRevision = 0;
 };
 
+// One line of the file, tokenized. `Flow` walks a run of these and decides
+// where the visual lines fall.
+using LineGroup = std::vector<Token>;
+
+// Where a block's text is allowed to go. One value rather than six parameters
+// because every one of them is read-only for the whole of a block and they
+// only make sense together: a `textLeft` without the `width` that follows it
+// does not describe a column.
+struct FlowGeometry {
+  // Source offset the block starts at. A run's `srcStart`/`srcEnd` are
+  // recorded relative to it, so the block can be re-placed without re-shaping.
+  std::size_t base = 0;
+  float textLeft = 0.0f;
+  float width = 0.0f;
+  float lineHeight = 0.0f;
+  // Where the first line's top sits, in the block's own space.
+  float top = 0.0f;
+  bool wrap = true;
+};
+
+// The two buffers `Flow` needs per block and neither owns. They are borrowed so
+// that a document's worth of blocks allocates them once rather than once each;
+// the flow clears them on construction, so one of these can be kept for the
+// life of a layout and handed to every block.
+struct FlowScratch {
+  // Whitespace held back until the next word decides whether the line breaks
+  // before or after it: an index into the group being walked plus the width it
+  // was measured at.
+  std::vector<std::pair<std::size_t, float>> pending;
+  // The widths of the unbreakable cluster being accumulated, so the break
+  // decision is made once for the run rather than once per token.
+  std::vector<float> cluster;
+};
+
 class DocumentLayout {
 public:
   static constexpr std::size_t kNone = static_cast<std::size_t>(-1);
@@ -647,14 +681,9 @@ private:
   // Scratch for the per-block flow. `Flow` is constructed once per block, so a
   // buffer it owns is grown from empty ten thousand times over a document --
   // which is most of what laying one out allocates. Held here instead, the
-  // whitespace buffer is grown once and reused by every block after the first.
+  // buffers are grown once and reused by every block after the first.
   // `mutable` because laying a block out is logically a const query.
-  mutable std::vector<std::pair<std::size_t, float>> flowPending_;
-  // Scratch for the same flow's unbreakable clusters: the widths of a run of
-  // consecutive non-space tokens, held so the break decision can be made once
-  // for the run rather than once per token. Borrowed for the same reason the
-  // whitespace buffer is.
-  mutable std::vector<float> flowCluster_;
+  mutable FlowScratch flowScratch_;
   // The source line spans of a fenced code block or a block dropped to raw.
   // Same reason: one per such block, returned by value, was one allocation per
   // such block.

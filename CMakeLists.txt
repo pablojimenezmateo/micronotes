@@ -177,6 +177,7 @@ set(MICRONOTES_APP_SOURCES
   src/doc/LinkTarget.cpp
   src/doc/WikiLink.cpp
   src/doc/Layout.cpp
+  src/doc/LayoutUpdate.cpp
   src/doc/LayoutQueries.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
@@ -333,6 +334,7 @@ add_executable(micronotes_tests
   tests/DurableFileTests.cpp
   tests/EditorTests.cpp
   tests/EditsTests.cpp
+  tests/FlowTests.cpp
   tests/FoldTests.cpp
   tests/FramePolicyTests.cpp
   tests/FrameTraceTests.cpp
