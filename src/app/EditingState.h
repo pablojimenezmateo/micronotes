@@ -28,9 +28,23 @@ namespace micronotes::app {
 // frame -- a drag that starts in the search box and leaves it -- and because
 // the anchor means a different thing in each: a byte offset into the note, and
 // a character index into the field.
+// Which surface a note-text drag is being made on.
+//
+// The motion that extends a selection has to map the pointer through the same
+// page the press did, and it used to re-decide that per event from the pane
+// mode: "live, else the raw pane". In split view that named the raw pane for a
+// drag begun in the reading pane, so dragging in the reader selected whatever
+// those coordinates meant in a differently wrapped column beside it.
+enum class SelectSurface {
+  LivePage,
+  RawPane,
+  ReadingPage
+};
+
 struct DragSelect {
   bool active = false;
   std::size_t anchor = 0;
+  SelectSurface surface = SelectSurface::LivePage;
 };
 
 // Blocks selected as objects: the arrows walk them, and one command acts over

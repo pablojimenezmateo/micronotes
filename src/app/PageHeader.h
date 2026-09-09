@@ -41,6 +41,9 @@ struct UiRuntime;
 float pageHeaderHeight(ui::TextRenderer& text, UiRuntime& ui);
 
 // Draws it into `column` with its top at `top`, both in window coordinates.
-void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect column, float top);
+// No renderer: with the tag chips gone the header is text and nothing else --
+// no ground, no dots, no rules. Its rows are the front-matter keys the file
+// carried that micronotes does not model.
+void drawPageHeader(ui::TextRenderer& text, UiRuntime& ui, ui::Rect column, float top);
 
 }

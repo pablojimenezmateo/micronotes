@@ -83,7 +83,7 @@ float pageHeaderHeight(ui::TextRenderer& text, UiRuntime& ui) {
   return kSpaceAboveProperties + propertiesHeight(rows) + kSpaceBelowHeader;
 }
 
-void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect column, float top) {
+void drawPageHeader(ui::TextRenderer& text, UiRuntime& ui, Rect column, float top) {
   const auto& rows = refreshedHeader(ui);
   if(rows.empty()) return;
 
@@ -98,36 +98,9 @@ void drawPageHeader(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     const float keyBaseline = y + (kPropertyRowHeight - static_cast<float>(text.lineHeight(key))) / 2.0f;
     text.draw(ui::ellipsizeToWidth(text, row.key, static_cast<int>(keyColumn - ui::kSpace3), key),
               column.x, keyBaseline, theme().textMuted, key);
-    if(row.chips.empty()) {
-      const float baseline = y + (kPropertyRowHeight - static_cast<float>(text.lineHeight(value))) / 2.0f;
-      text.draw(ui::ellipsizeToWidth(text, row.value, static_cast<int>(valueRoom), value),
-                valueLeft, baseline, theme().textSecondary, value);
-      y += kPropertyRowHeight;
-      continue;
-    }
-    float x = valueLeft;
-    for(const auto& chip : row.chips) {
-      // The tag's own colour instead of a `#`. The sigil said "this is a tag",
-      // which the chip's own ground and the `tags` key beside it already say
-      // twice over; the colour says which tag, and matches the dot the sidebar
-      // draws on every note carrying it.
-      const float dot = row.key == "tags" ? kTagDotSize + ui::kTreeLabelGap : 0.0f;
-      const float width = static_cast<float>(text.width(chip, key)) + ui::kSpace3 + dot;
-      if(x + width > valueLeft + valueRoom) break;
-      const Rect box {x, y + 3.0f, width, kPropertyRowHeight - 7.0f};
-      fill(renderer, box, theme().surfaceRaised);
-      float labelX = x + ui::kSpace2 - 2.0f;
-      if(dot > 0.0f) {
-        ui::drawTagDot(renderer,
-                       {labelX, std::round(box.y + (box.h - kTagDotSize) / 2.0f), kTagDotSize,
-                        kTagDotSize},
-                       ui::tagColor(ui.state.workspace().tagColors, chip));
-        labelX += dot;
-      }
-      text.draw(chip, labelX,
-                box.y + (box.h - static_cast<float>(text.lineHeight(key))) / 2.0f, theme().textSecondary, key);
-      x += width + ui::kSpace1;
-    }
+    const float baseline = y + (kPropertyRowHeight - static_cast<float>(text.lineHeight(value))) / 2.0f;
+    text.draw(ui::ellipsizeToWidth(text, row.value, static_cast<int>(valueRoom), value),
+              valueLeft, baseline, theme().textSecondary, value);
     y += kPropertyRowHeight;
   }
 }

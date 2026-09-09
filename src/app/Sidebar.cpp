@@ -234,6 +234,11 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     if(row.kind == SidebarRow::Kind::SectionLabel) {
       ui::drawSectionBand(renderer, text, row.rect, row.disclosure, row.label, row.trailing,
                           row.collapsed, hot, trailingReserve);
+      // The NOTEBOOKS band is the drop target for the library root, which has
+      // no row of its own in the tree. See `sidebarDropTargetAt`.
+      if(ui.sidebar.drag.dropRow && *ui.sidebar.drag.dropRow == i) {
+        stroke(renderer, row.rect, theme().accent);
+      }
       if(row.section) {
         ui.pointer.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
       }

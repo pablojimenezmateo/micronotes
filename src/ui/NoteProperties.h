@@ -20,22 +20,22 @@ namespace micronotes::ui {
 // test, and a test cannot open a window.
 struct NoteProperty {
   std::string key;
-  // A scalar value, with a multi-line one flattened onto this line. Empty when
-  // the row carries chips instead.
+  // A scalar value, with a multi-line one flattened onto this line.
   std::string value;
-  // Tags, which are drawn as chips rather than as a run of text. A row has one
-  // or the other, never both.
-  std::vector<std::string> chips;
 };
 
-// The rows for `metadata`, in the order they should be shown: tags first,
-// because they are the key micronotes itself understands, then everything the
-// file carried in the order the file carried it.
+// The rows for `metadata`, in the order the file carried them.
 //
-// `id`, `title` and `icon` are deliberately absent. They are the note's
-// identity rather than facts about it, and the page already shows all three --
-// the title as the title, the icon beside it, and the id nowhere, because a
+// `id`, `title`, `icon` and `tags` are deliberately absent. They are the note's
+// identity rather than facts about it, and the shell already shows all of them
+// somewhere better: the title as the title, the icon beside it, the tags as
+// coloured dots on the breadcrumb over the note, and the id nowhere, because a
 // generated key nobody typed is not something a reader needs on the page.
+//
+// `tags` was here, as a row of chips above the first line of every tagged note,
+// and it was the loudest thing on the page: a band of ground and a coloured dot
+// per tag, ahead of the note's own text, restating what the breadcrumb one line
+// higher now says in eight pixels.
 std::vector<NoteProperty> notePropertiesOf(const library::NoteMetadata& metadata);
 
 }

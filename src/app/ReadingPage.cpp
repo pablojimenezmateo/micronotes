@@ -27,7 +27,15 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
   ui.readingPage.layout(text, ui.editor.text(), 0, rect);
   settlePageLayout(ui, ui.readingPage);
 
-  ui.readingPage.draw(renderer, text, 0, PageSelection {}, ui.focus == FocusArea::Viewer,
+  // The buffer's selection, which is what a drag in this pane makes: the pane
+  // is read-only, not untouchable, and a reader selecting a paragraph to copy
+  // has to be able to see what they have.
+  PageSelection selection;
+  if(ui.editor.hasSelection()) {
+    selection.start = ui.editor.selectionStart();
+    selection.end = ui.editor.selectionEnd();
+  }
+  ui.readingPage.draw(renderer, text, 0, selection, ui.focus == FocusArea::Viewer,
                       ui.fields.find.text());
   publishPageChrome(renderer, text, ui, ui.readingPage);
 

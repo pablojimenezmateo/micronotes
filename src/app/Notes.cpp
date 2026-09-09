@@ -107,6 +107,11 @@ bool handleTagOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     if(result.itemId == "filter") selectTag(ui, result.value);
     else if(result.itemId == "color") openTagColorPicker(ui, result.value);
     else if(result.itemId == "auto-color") clearTagColor(ui, result.value);
+    else if(result.itemId == "delete") openDeleteTagConfirm(ui, result.value);
+    return true;
+  }
+  if(result.overlayId == "delete-tag") {
+    deleteTag(ui, result.value);
     return true;
   }
   if(result.overlayId == "tag-color") {
@@ -122,38 +127,55 @@ void clearTagColor(UiRuntime& ui, std::string_view tag) {
   ui.status = std::string(tag) + " back to its automatic colour";
 }
 
-NotePaths notePathsFor(const UiRuntime& ui, std::string_view noteId) {
-  // The note named, or the one on the page. Off the note list rather than off
-  // `openNote()`, so a right click on a sidebar row or a tab answers about
-  // *that* one and not about whatever happens to be open.
-  const auto* note = ui.state.catalog().noteById(noteId.empty() ? ui.state.selection().noteId : noteId);
-  if(!note || note->path.empty()) return {};
-
-  NotePaths paths;
-  const auto path = note->path.lexically_normal();
+LibraryPaths libraryPathsFor(const UiRuntime& ui, const std::filesystem::path& absolute) {
+  if(absolute.empty()) return {};
+  LibraryPaths paths;
+  const auto path = absolute.lexically_normal();
   paths.absolute = path.string();
   // `lexically_relative` rather than trimming a string prefix, so a root
   // spelled with a trailing slash, a `.` or a `..` in it still gives the same
   // answer. Generic separators, because a relative path is the spelling that
   // goes into a note or a message to somebody else.
-  const auto relative = path.lexically_relative(ui.state.catalog().root().lexically_normal());
-  const auto text = relative.generic_string();
-  // Empty, "." or climbing out with ".." all mean the note is not under the
-  // root. Left empty rather than falling back to the absolute path: a
-  // "relative path" that is absolute is the wrong answer given confidently.
-  if(!text.empty() && text != "." && !text.starts_with("..")) paths.relative = text;
+  const auto text = path.lexically_relative(ui.state.catalog().root().lexically_normal())
+                      .generic_string();
+  // Empty or climbing out with ".." mean it is not under the root. Left empty
+  // rather than falling back to the absolute path: a "relative path" that is
+  // absolute is the wrong answer given confidently. "." is the root itself,
+  // which *is* under the root and is spelled as itself.
+  if(!text.empty() && !text.starts_with("..")) paths.relative = text;
   return paths;
 }
 
-bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId) {
+LibraryPaths notePathsFor(const UiRuntime& ui, std::string_view noteId) {
+  // The note named, or the one on the page. Off the note list rather than off
+  // `openNote()`, so a right click on a sidebar row or a tab answers about
+  // *that* one and not about whatever happens to be open.
+  const auto* note = ui.state.catalog().noteById(noteId.empty() ? ui.state.selection().noteId : noteId);
+  if(!note) return {};
+  return libraryPathsFor(ui, note->path);
+}
+
+LibraryPaths folderPathsFor(const UiRuntime& ui, const std::filesystem::path& folder) {
+  if(!ui.state.catalog().isOpen()) return {};
+  const auto& root = ui.state.catalog().root();
+  return libraryPathsFor(ui, folder.empty() ? root : root / folder);
+}
+
+namespace {
+
+// The three path commands, once, over whatever was named. `missing` is what to
+// say when there is nothing to name, and `outside` when the thing is real and
+// sits outside the library -- the two sentences are the only part of this that
+// differs between a note and a notebook.
+bool carryOutPathCommand(UiRuntime& ui, std::string_view command, const LibraryPaths& paths,
+                         const char* missing, const char* outside) {
   const bool onDisk = command == "show-on-disk";
   const bool relative = command == "copy-relative-path";
   const bool absolute = command == "copy-absolute-path";
   if(!onDisk && !relative && !absolute) return false;
 
-  const NotePaths paths = notePathsFor(ui, noteId);
   if(paths.absolute.empty()) {
-    ui.status = "No note to locate";
+    ui.status = missing;
     return true;
   }
   const std::filesystem::path path = paths.absolute;
@@ -163,12 +185,25 @@ bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_
     return true;
   }
   if(relative && paths.relative.empty()) {
-    ui.status = "That note is not inside the library";
+    ui.status = outside;
     return true;
   }
   const std::string& text = relative ? paths.relative : paths.absolute;
   ui.status = setClipboardText(text) ? "Copied " + text : "Clipboard unavailable";
   return true;
+}
+
+}
+
+bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId) {
+  return carryOutPathCommand(ui, command, notePathsFor(ui, noteId), "No note to locate",
+                             "That note is not inside the library");
+}
+
+bool handleFolderPathCommand(UiRuntime& ui, std::string_view command,
+                             const std::filesystem::path& folder) {
+  return carryOutPathCommand(ui, command, folderPathsFor(ui, folder), "No notebook to locate",
+                             "That notebook is not inside the library");
 }
 
 const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative) {

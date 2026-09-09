@@ -39,9 +39,10 @@ using micronotes::ui::contains;
 // selection. Two copies of a rule about *time* is the kind that drifts
 // silently: nothing about a fourth click behaving differently in one pane than
 // the other would fail a test or look wrong in a screenshot.
-void beginTextSelection(UiRuntime& ui) {
+void beginTextSelection(UiRuntime& ui, SelectSurface surface) {
   ui.textSelect.active = true;
   ui.textSelect.anchor = ui.editor.cursor();
+  ui.textSelect.surface = surface;
   const int clicks = ui.editorClicks.extend(SDL_GetTicks());
   if(clicks < 2) return;
   // Re-anchored to the widened selection, so dragging on from a double click
@@ -219,16 +220,35 @@ void pressPage(TextRenderer& text, UiRuntime& ui, Rect content, float x, float y
     }
     ui.editor.moveCursor(ui.livePage.offsetAt(x, y));
     ui.revealEditorCursor = true;
-    beginTextSelection(ui);
+    beginTextSelection(ui, SelectSurface::LivePage);
     return;
   }
   const ContentPanes panes = contentPanes(ui, content);
   if(panes.hasViewer && contains(panes.viewer, x, y)) {
     ui.focus = FocusArea::Viewer;
+    if(button != SDL_BUTTON_LEFT) return;
+    // A task is a control wherever it is drawn. The reading pane drew its
+    // checkboxes and answered `checkboxAt` for them, and a click on one did
+    // nothing at all: a tick-box you cannot tick is a picture of a task.
+    if(const auto blockStart = ui.readingPage.checkboxAt(x, y)) {
+      const std::size_t caret = ui.editor.cursor();
+      if(applyEdit(ui, doc::toggleTodo(ui.editor.text(), *blockStart, editorBlocks(ui)))) {
+        // The flip is a one-byte swap, so every other offset survives it.
+        ui.editor.moveCursor(std::min(caret, ui.editor.text().size()));
+        ui.revealEditorCursor = false;
+        ui.status = "Toggled task";
+      }
+      return;
+    }
+    // And text is text wherever it is drawn. The pane is read-only, not
+    // untouchable: the selection it makes is the buffer's, so the note it is
+    // reading is the note that gets copied.
+    ui.editor.moveCursor(ui.readingPage.offsetAt(x, y));
+    beginTextSelection(ui, SelectSurface::ReadingPage);
   } else {
     ui.focus = FocusArea::Editor;
     placeEditorCursor(text, ui, panes.editor, x, y);
-    beginTextSelection(ui);
+    beginTextSelection(ui, SelectSurface::RawPane);
   }
 }
 

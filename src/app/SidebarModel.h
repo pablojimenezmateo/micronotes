@@ -70,13 +70,12 @@ inline constexpr std::size_t kMaxRecentRows = 5;
 // nothing about which notes carried them. So the one way of organising a
 // library that cuts across the tree was invisible from the tree.
 //
-// Capped, because a row is one line tall and a note with nine tags would push
-// its own name off the panel. Past the cap the last dot is a marker rather than
-// a tag, and its tooltip names the ones that did not fit -- hiding them
-// silently would be worse than not drawing any.
-inline constexpr std::size_t kMaxTagDots = 4;
-inline constexpr float kTagDotSize = 7.0f;
-inline constexpr float kTagDotGap = 4.0f;
+// How one is drawn -- `ui::kMaxTagDots`, `ui::kTagDotSize`, `ui::kTagDotGap` --
+// is in `ui/TagColors.h` with the colours, because three surfaces draw them and
+// only one of the three is this one.
+using ui::kMaxTagDots;
+using ui::kTagDotGap;
+using ui::kTagDotSize;
 // What a row with dots reserves at its trailing edge, so a long note title is
 // ellipsized before it reaches them.
 inline constexpr float kTagDotColumnWidth =
@@ -191,6 +190,30 @@ std::pair<std::size_t, std::size_t> sidebarRowRange(const std::vector<SidebarRow
 // callers each deciding which rectangle the rows live in is four chances to
 // pick a different one, and one of them did.
 std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, float x, float y);
+
+// Where a sidebar drag would land, and which row says so.
+//
+// The tree has no row for the library root -- see `ui::TreeModel::rows` for why
+// it does not -- so there was nowhere to drop a note or a notebook to move it
+// back out to the top level. The only row whose folder was the root's was a
+// *note* already sitting there, so a library whose root held nothing had no way
+// back to it at all, by drag or otherwise.
+//
+// The NOTEBOOKS band is that row. It already names the root's contents, it is
+// always drawn, and dropping on the name of a container is what dropping on a
+// container means everywhere else.
+//
+// One function because the motion path highlights the target and the release
+// path acts on it, and the two disagreeing is a note filed somewhere the reader
+// was not shown.
+struct SidebarDropTarget {
+  bool valid = false;
+  std::size_t row = 0;
+  // Where the dragged thing goes. Empty is the library root.
+  std::filesystem::path folder;
+};
+
+SidebarDropTarget sidebarDropTargetAt(const UiRuntime& ui, float x, float y);
 
 // How a sidebar row was reached. It decides two things that move together, and
 // which used to be two separate booleans passed side by side:

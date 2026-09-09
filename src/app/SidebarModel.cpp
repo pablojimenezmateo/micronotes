@@ -684,4 +684,19 @@ std::optional<std::size_t> sidebarRowAt(const UiRuntime& ui, float x, float y) {
   return std::nullopt;
 }
 
+SidebarDropTarget sidebarDropTargetAt(const UiRuntime& ui, float x, float y) {
+  const auto index = sidebarRowAt(ui, x, y);
+  if(!index) return {};
+  const SidebarRow& row = ui.sidebar.rows[*index];
+  // A note row stands for the folder holding it, so dropping between two notes
+  // does the obvious thing rather than nothing.
+  if(row.kind == SidebarRow::Kind::Tree) return {true, *index, row.tree.folder};
+  // And the band that names the root's contents stands for the root.
+  if(row.kind == SidebarRow::Kind::SectionLabel && row.section &&
+     *row.section == ui::SidebarSection::Notebooks) {
+    return {true, *index, {}};
+  }
+  return {};
+}
+
 }

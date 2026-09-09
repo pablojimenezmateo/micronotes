@@ -21,22 +21,21 @@ MICRONOTES_TEST(note_properties_leave_out_the_notes_own_identity) {
   metadata.id = "n123";
   metadata.title = "Roadmap";
   metadata.icon = "\xf0\x9f\x93\x8c";
+  metadata.tags = {"planning"};
   MICRONOTES_REQUIRE(notePropertiesOf(metadata).empty());
 }
 
-MICRONOTES_TEST(note_properties_put_tags_first_and_as_chips) {
+// Tags are shown, but not here. They were a row of chips above the note's first
+// line -- a band of ground and a coloured dot per tag, ahead of the note's own
+// text -- and they are eight pixels on the breadcrumb one line higher now.
+MICRONOTES_TEST(note_properties_leave_the_tags_to_the_breadcrumb) {
   NoteMetadata metadata;
   metadata.tags = {"planning", "work"};
   metadata.extra = {"aliases: plan"};
   const auto rows = notePropertiesOf(metadata);
-  MICRONOTES_REQUIRE(rows.size() == 2);
-  MICRONOTES_REQUIRE(rows[0].key == "tags");
-  const std::vector<std::string> expected {"planning", "work"};
-  MICRONOTES_REQUIRE(rows[0].chips == expected);
-  // A row carries chips or a value, never both.
-  MICRONOTES_REQUIRE(rows[0].value.empty());
-  MICRONOTES_REQUIRE(rows[1].key == "aliases");
-  MICRONOTES_REQUIRE(rows[1].chips.empty());
+  MICRONOTES_REQUIRE(rows.size() == 1);
+  MICRONOTES_REQUIRE(rows[0].key == "aliases");
+  MICRONOTES_REQUIRE(rows[0].value == "plan");
 }
 
 // The parser hands over the source lines of a key it does not model. A scalar

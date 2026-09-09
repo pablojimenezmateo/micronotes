@@ -129,7 +129,7 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     if(ui.focus == FocusArea::Editor) {
       ui.editor.selectAll();
       publishEditorPrimarySelection(ui);
-      ui.revealEditorCursor = true;
+      ui.revealEditorCursor = ui.focus == FocusArea::Editor;
     }
     else if(auto* field = focusedField(ui)) {
       field->editor.selectAll();
@@ -143,7 +143,10 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
       const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end();
       ui.status = setClipboardText(std::string_view(ui.editor.text()).substr(start, end - start))
                     ? "Copied block" : "Copy failed: " + std::string(SDL_GetError());
-    } else if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
+    } else if(readsTheNote(ui.focus) && ui.editor.hasSelection()) {
+      // `Viewer` as well as `Editor`: the reading pane makes a selection in the
+      // same buffer, and a selection you can see and cannot copy is worse than
+      // one you cannot make.
       ui.status = setClipboardText(ui.editor.selectedText()) ? "Copied selection" : "Copy failed: " + std::string(SDL_GetError());
     } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
       // Copies the actual selected range. It used to copy the whole field,

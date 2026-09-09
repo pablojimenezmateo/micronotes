@@ -138,6 +138,15 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
       return CursorKind::Pointer;
     }
     if(ui.readingPage.copyButtonAt(x, y)) return CursorKind::Pointer;
+    // A task is a control here as much as on the live surface, and the text is
+    // selectable here as much as there. Both were silent: the pane answered
+    // every pointer with the default arrow, which is what a picture of a
+    // document looks like rather than a document.
+    if(ui.readingPage.checkboxAt(x, y)) return CursorKind::Pointer;
+    // After the links below would be wrong -- a link is asked for across the
+    // whole frame -- so this is deliberately the last thing the pane claims,
+    // and only inside its own page rect.
+    if(contains(page, x, y) && linkAt(ui, x, y) == nullptr) return CursorKind::Text;
   }
 
   // Every link the frame drew, wherever it drew it. Asked after the panes so a

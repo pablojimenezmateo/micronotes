@@ -148,9 +148,11 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
         // A generous hit area: the drawn box is deliberately small.
         const Rect hit {box.x - 4.0f, box.y - 4.0f, box.w + 8.0f, box.h + 8.0f};
         checkboxes_.push_back({hit, block.start});
-        // No hover state on a page nobody can type into: a box that lights up
-        // and then does nothing is worse than one that never invited the click.
-        const bool hot = !readOnly_ && ui::contains(hit, pointerX_, pointerY_);
+        // Including on a read-only page: a task is a control there too, and it
+        // ticks. It used not to, and the hover was suppressed for exactly that
+        // reason -- a box that lights up and then does nothing is worse than
+        // one that never invited the click.
+        const bool hot = ui::contains(hit, pointerX_, pointerY_);
         if(block.checked) {
           fill(renderer, box, theme().accent);
           const SDL_Color tick = theme().onAccent;

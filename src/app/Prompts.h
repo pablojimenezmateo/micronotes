@@ -42,6 +42,14 @@ void saveFolderRename(UiRuntime& ui);
 void openLibraryPrompt(UiRuntime& ui);
 
 // Confirms, and what they run when confirmed.
+
+// Deleting a tag, which is not deleting a thing: a tag exists because notes
+// carry it, so removing one rewrites the front matter of every note that does.
+// The open note goes through the guarded save with the buffer's body, so an
+// unsaved edit is not thrown away by a change to a list of labels.
+void openDeleteTagConfirm(UiRuntime& ui, std::string tag);
+void deleteTag(UiRuntime& ui, const std::string& tag);
+
 void openDeleteNoteConfirm(UiRuntime& ui);
 void openDeleteFolderConfirm(UiRuntime& ui);
 void deleteSelected(UiRuntime& ui);

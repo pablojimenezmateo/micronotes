@@ -34,6 +34,18 @@ namespace micronotes::ui {
 // wheel. That is a feature and not a shortcut: every swatch is one somebody
 // checked against both grounds, so no pick can produce a dot nobody can see.
 
+// How a tag dot is drawn, wherever one is drawn: the sidebar's note rows, the
+// outline panel's tag list and the breadcrumb over the open note.
+//
+// Capped, because every one of those places is one line tall and a note with
+// nine tags would push its own name out of the way. Past the cap the last dot
+// is a marker rather than a tag, and whatever draws it names the ones that did
+// not fit in a tooltip -- hiding them silently would be worse than drawing no
+// dots at all.
+inline constexpr std::size_t kMaxTagDots = 4;
+inline constexpr float kTagDotSize = 7.0f;
+inline constexpr float kTagDotGap = 4.0f;
+
 // The swatches, and the order the picker lays them out in. Twelve is enough
 // that a library's tags are told apart at a glance and few enough that the
 // picker is one glance rather than a search.

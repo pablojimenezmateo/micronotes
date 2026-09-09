@@ -18,12 +18,6 @@ using library::frontMatterSequenceItem;
 
 std::vector<NoteProperty> notePropertiesOf(const library::NoteMetadata& metadata) {
   std::vector<NoteProperty> rows;
-  if(!metadata.tags.empty()) {
-    NoteProperty tags;
-    tags.key = "tags";
-    tags.chips = metadata.tags;
-    rows.push_back(std::move(tags));
-  }
   for(const auto& line : metadata.extra) {
     if(continuesFrontMatterValue(line)) {
       // A continuation before any key at all is a malformed header, not a row.

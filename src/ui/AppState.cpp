@@ -8,6 +8,7 @@
 #include "core/perf/PerformanceCounters.h"
 #include "core/platform/DurableFile.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace micronotes::ui {
@@ -198,6 +199,37 @@ bool AppState::updateSelectedTags(const std::vector<std::string>& tags, std::str
   adoptIdIfMissing(metadata);
   metadata.tags = tags;
   return writeOpenNote(std::move(metadata), body, NamePolicy::Keep).ok;
+}
+
+std::size_t AppState::removeTagEverywhere(std::string_view tag, std::string_view openBody) {
+  if(tag.empty() || !catalog_.isOpen()) return 0;
+  // The paths are copied out first: every write below drops the note list the
+  // borrow would point into, so walking it as we go would walk a freed vector.
+  std::vector<std::pair<std::string, std::filesystem::path>> carrying;
+  for(const auto& note : catalog_.notes()) {
+    if(std::find(note.tags.begin(), note.tags.end(), tag) == note.tags.end()) continue;
+    carrying.push_back({note.id, note.path});
+  }
+
+  const std::string openId = openNote_.noteId();
+  std::size_t changed = 0;
+  for(const auto& [id, path] : carrying) {
+    if(id == openId) {
+      // Through the guarded write, with the buffer's body. This is the one note
+      // whose file on disk may be behind what is on screen, and rewriting it
+      // from the disk would throw away everything typed since the last save.
+      library::NoteMetadata metadata = openNote_.metadata();
+      std::erase(metadata.tags, tag);
+      if(writeOpenNote(std::move(metadata), openBody, NamePolicy::Keep).ok) ++changed;
+      continue;
+    }
+    auto note = catalog_.loadNote(path);
+    std::erase(note.metadata.tags, tag);
+    if(catalog_.writeNote(path, note.metadata, note.body)) ++changed;
+  }
+  // The tag was a filter as well as a label, and it no longer names anything.
+  if(selection_.tag == tag) selection_.showFolder({});
+  return changed;
 }
 
 std::optional<library::NoteListItem> AppState::createNote(const std::string& title,

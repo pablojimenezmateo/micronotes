@@ -6,11 +6,14 @@
 
 #include "ui/Metrics.h"
 
+#include "ui/TagColors.h"
 #include "ui/Theme.h"
 #include "ui/Glyphs.h"
 #include "ui/Painter.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -44,6 +47,45 @@ constexpr float kCrumbIconSize = 14.0f;
 // a document glyph in the same box, so matching the box would not match the
 // weight.
 constexpr float kFavoriteGlyphSize = 13.0f;
+
+// What a note's tags ask for beside its name.
+//
+// They were a row of chips in the page header, above the note's first line: a
+// band of ground and a coloured dot per tag, ahead of the note's own text. The
+// dots say the same thing in eight pixels, in the same colours the sidebar puts
+// on every row carrying the tag, on the band that already names the note.
+float tagDotsWidth(std::size_t tagCount) {
+  if(tagCount == 0) return 0.0f;
+  const std::size_t shown = std::min(tagCount, ui::kMaxTagDots);
+  return static_cast<float>(shown) * (ui::kTagDotSize + ui::kTagDotGap) + ui::kSpace1;
+}
+
+void drawTagDots(SDL_Renderer* renderer, UiRuntime& ui, const std::vector<std::string>& tags,
+                 float x, Rect band) {
+  if(tags.empty()) return;
+  const auto& colors = ui.state.workspace().tagColors;
+  const std::size_t shown = std::min(tags.size(), ui::kMaxTagDots);
+  const float y = std::round(band.y + (band.h - ui::kTagDotSize) / 2.0f);
+  for(std::size_t i = 0; i < shown; ++i) {
+    const Rect dot {std::round(x), y, ui::kTagDotSize, ui::kTagDotSize};
+    // Past the cap the last dot stands for the tags that did not fit, so it is
+    // drawn in the muted ink rather than in any one tag's colour -- a marker,
+    // not a tag -- and its tooltip names them. The sidebar's rows do the same,
+    // for the same reason: hiding tags without saying so would be worse than
+    // drawing no dots at all.
+    const bool overflow = shown < tags.size() && i + 1 == shown;
+    if(overflow) {
+      std::string rest;
+      for(std::size_t t = i; t < tags.size(); ++t) rest += (rest.empty() ? "" : ", ") + tags[t];
+      ui::drawTagDot(renderer, dot, theme().textMuted);
+      ui.pointer.offerTooltip(dot, rest);
+    } else {
+      ui::drawTagDot(renderer, dot, ui::tagColor(colors, tags[i]));
+      ui.pointer.offerTooltip(dot, tags[i]);
+    }
+    x += ui::kTagDotSize + ui::kTagDotGap;
+  }
+}
 
 }
 
@@ -99,8 +141,14 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
                   kCrumbIconSize},
                  theme().textMuted);
     x += kCrumbIconSize + ui::kSpace1;
-    text.draw(ellipsizeToWidth(text, note->title, static_cast<int>(limit - x), style), x, baseline,
-              theme().textPrimary, style);
+    // The dots are reserved for before the title is trimmed, so a long name is
+    // ellipsized rather than pushing its own tags off the band.
+    const float tagRoom = tagDotsWidth(note->tags.size());
+    const auto title = ellipsizeToWidth(text, note->title, static_cast<int>(limit - x - tagRoom),
+                                        style);
+    text.draw(title, x, baseline, theme().textPrimary, style);
+    x += static_cast<float>(text.width(title, style)) + ui::kSpace2;
+    drawTagDots(renderer, ui, note->tags, x, rect);
   }
 
   if(!note) return;

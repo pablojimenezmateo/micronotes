@@ -87,6 +87,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     else if(result.itemId == "new-note") createNoteInFolder(ui, ui.state.selection().folder);
     else if(result.itemId == "rename") beginFolderRename(ui);
     else if(result.itemId == "delete") openDeleteFolderConfirm(ui);
+    else if(handleFolderPathCommand(ui, result.itemId, ui.state.selection().folder)) {}
   }
 }
 

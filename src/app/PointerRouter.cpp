@@ -189,11 +189,9 @@ void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button) {
     ui.pointer.scrollDrag = ScrollDrag::None;
   }
   if(button != SDL_BUTTON_LEFT || !ui.sidebar.drag.active()) return;
-  const auto index = sidebarRowAt(ui, x, y);
-  if(index && ui.sidebar.rows[*index].kind == SidebarRow::Kind::Tree) {
-    // A note row stands for the folder holding it, so dropping between two
-    // notes does the obvious thing rather than nothing.
-    const auto target = ui.sidebar.rows[*index].tree.folder;
+  const auto drop = sidebarDropTargetAt(ui, x, y);
+  if(drop.valid) {
+    const auto target = drop.folder;
     if(ui.sidebar.drag.note) {
       selectNoteById(ui, ui.sidebar.drag.noteId);
       if(ui.state.moveSelectedNoteToFolder(target)) {
@@ -239,14 +237,26 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
     return;
   }
   if(ui.textSelect.active) {
-    if(ui.paneMode() == ui::PaneMode::Live) {
-      ui.editor.selectRange(ui.textSelect.anchor, ui.livePage.offsetAt(x, y));
-    } else {
-      const ShellLayout layout = shellLayout(ui, width, height);
-      const Rect editorRect = contentPanes(ui, layout.content).editor;
-      ui.editor.selectRange(ui.textSelect.anchor, editorIndexAtPoint(text, ui, editorRect, x, y));
+    // Through the surface the press started on, not through whatever the pane
+    // mode names now. See `SelectSurface`.
+    switch(ui.textSelect.surface) {
+      case SelectSurface::LivePage:
+        ui.editor.selectRange(ui.textSelect.anchor, ui.livePage.offsetAt(x, y));
+        ui.revealEditorCursor = true;
+        break;
+      case SelectSurface::ReadingPage:
+        // No caret to reveal: the reading pane has none, and scrolling it to a
+        // caret it does not draw would move the text out from under the drag.
+        ui.editor.selectRange(ui.textSelect.anchor, ui.readingPage.offsetAt(x, y));
+        break;
+      case SelectSurface::RawPane: {
+        const ShellLayout layout = shellLayout(ui, width, height);
+        const Rect editorRect = contentPanes(ui, layout.content).editor;
+        ui.editor.selectRange(ui.textSelect.anchor, editorIndexAtPoint(text, ui, editorRect, x, y));
+        ui.revealEditorCursor = true;
+        break;
+      }
     }
-    ui.revealEditorCursor = true;
     return;
   }
   if(ui.pointer.scrollDrag != ScrollDrag::None) {
@@ -278,10 +288,9 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
     return;
   }
   if(ui.sidebar.drag.active()) {
-    const auto row = sidebarRowAt(ui, x, y);
-    ui.sidebar.drag.dropRow = row && ui.sidebar.rows[*row].kind == SidebarRow::Kind::Tree
-                          ? row
-                          : std::optional<std::size_t> {};
+    const auto drop = sidebarDropTargetAt(ui, x, y);
+    ui.sidebar.drag.dropRow = drop.valid ? std::optional<std::size_t> {drop.row}
+                                         : std::optional<std::size_t> {};
     return;
   }
   if(ui.sidebar.resizing) {

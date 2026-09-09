@@ -9,6 +9,7 @@
 #include "library/Metadata.h"
 #include "core/platform/PathUtils.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -222,11 +223,18 @@ void openFolderPalette(UiRuntime& ui) {
   overlay.hint = "Enter move   Esc cancel";
   overlay.width = 420.0f;
   const auto rootLabel = ui.state.catalog().root().filename().generic_string();
+  // The root first, and unconditionally. `folders()` lists the root only when a
+  // note already sits directly in it -- it is built from the directories the
+  // walk found plus the folders the notes name -- so a library that had tidied
+  // every note into a notebook offered no way back out to the top level.
+  bool listedRoot = false;
   for(const auto& folder : ui.state.catalog().folders()) {
+    if(folder.path.empty()) listedRoot = true;
     overlay.items.push_back({folder.path.generic_string().empty() ? "/" : folder.path.generic_string(),
                              folder.path.empty() ? rootLabel : folder.path.generic_string(),
                              "", std::to_string(folder.noteCount), true, false});
   }
+  if(!listedRoot) overlay.items.insert(overlay.items.begin(), {"/", rootLabel, "", "0", true, false});
   ui.overlays.open(std::move(overlay));
 }
 
@@ -278,6 +286,49 @@ void openDeleteNoteConfirm(UiRuntime& ui) {
   overlay.confirmLabel = "Delete";
   overlay.width = 380.0f;
   ui.overlays.open(std::move(overlay));
+}
+
+void openDeleteTagConfirm(UiRuntime& ui, std::string tag) {
+  if(tag.empty()) return;
+  std::size_t carrying = 0;
+  for(const auto& note : ui.state.catalog().notes()) {
+    if(std::find(note.tags.begin(), note.tags.end(), tag) != note.tags.end()) ++carrying;
+  }
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::Confirm;
+  overlay.id = "delete-tag";
+  overlay.title = "Delete tag \"" + tag + "\"?";
+  // The count, because a tag is not a thing on its own: deleting it edits every
+  // note carrying it, and how many that is is the only number that says whether
+  // this is a tidy-up or a rewrite of half the library.
+  overlay.hint = "It is removed from " + std::to_string(carrying) +
+                 (carrying == 1 ? " note. Their text is not touched."
+                                : " notes. Their text is not touched.");
+  overlay.confirmLabel = "Delete";
+  overlay.width = 420.0f;
+  // Carried in `value`, the way the tag menu carries it: a result names the
+  // item chosen, and which tag it was about is the other half of the answer.
+  overlay.value.beginWith(std::move(tag), false);
+  ui.overlays.open(std::move(overlay));
+}
+
+void deleteTag(UiRuntime& ui, const std::string& tag) {
+  if(tag.empty()) return;
+  const std::size_t changed = ui.state.removeTagEverywhere(tag, ui.editor.text());
+  if(changed == 0) {
+    ui.status = "No note carried " + tag;
+    return;
+  }
+  // The colour went with the tag. Left behind, it would be waiting to be
+  // applied to a tag of the same name written months later, which is a
+  // preference nobody set.
+  ui.state.editWorkspace().tagColors.clear(tag);
+  // The buffer now matches the file: the open note's front matter was rewritten
+  // through the guarded save with exactly these bytes in it.
+  ui.editor.markSaved();
+  invalidateWikiNotes(ui);
+  ui.status = "Removed " + tag + " from " + std::to_string(changed) +
+              (changed == 1 ? " note" : " notes");
 }
 
 void openDeleteFolderConfirm(UiRuntime& ui) {

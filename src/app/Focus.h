@@ -23,6 +23,17 @@ enum class FocusArea {
   RenameFolder
 };
 
+// Whether this focus is on the note's own text -- the live surface, the raw
+// pane or the reading pane -- rather than on a prompt or the sidebar.
+//
+// The two panes that only *read* the note still hold a selection in the same
+// buffer, so anything about the selection is asked of all of them: a paragraph
+// selected in the reading pane and a paragraph selected in the live one are the
+// same bytes, and only one of them used to be copyable.
+inline bool readsTheNote(FocusArea focus) {
+  return focus == FocusArea::Editor || focus == FocusArea::Viewer;
+}
+
 // Its name, for the input trace. Here rather than in `app/Shell.h`, where it
 // sat: a switch over this enum belongs with the enum, and nothing about it
 // needs a running shell.

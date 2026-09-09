@@ -79,37 +79,46 @@ void clearTagColor(UiRuntime& ui, std::string_view tag);
 // which tag it was about is the other half of the answer.
 bool handleTagOverlayResult(UiRuntime& ui, const ui::OverlayResult& result);
 
-// The two spellings of a note's path, as the copy commands put them on the
-// clipboard. Empty `absolute` means there is no such note.
+// The two spellings of something's path, as the copy commands put them on the
+// clipboard. Empty `absolute` means there is no such thing to name.
 //
 // Split from the commands so the part with the reasoning in it can be checked
 // without a clipboard: writing to one needs an initialized video subsystem and
 // a cooperating compositor, neither of which a unit test has, so a test that
 // went through the command could only ever assert "the clipboard refused".
-struct NotePaths {
+struct LibraryPaths {
   std::string absolute;
-  // Relative to the library root. Empty when the note is not under it, which
+  // Relative to the library root. Empty when the thing is not under it, which
   // is the one case "relative path" has no honest answer for.
   std::string relative;
 };
 
-NotePaths notePathsFor(const UiRuntime& ui, std::string_view noteId);
+// Both spellings of an absolute path under the library root.
+LibraryPaths libraryPathsFor(const UiRuntime& ui, const std::filesystem::path& absolute);
+LibraryPaths notePathsFor(const UiRuntime& ui, std::string_view noteId);
+// A notebook's, by its library-relative path. Empty names the library root,
+// which has a path like any other folder and is worth being able to copy.
+LibraryPaths folderPathsFor(const UiRuntime& ui, const std::filesystem::path& folder);
 
-// Carries out "show on disk", "copy relative path" or "copy absolute path" for
-// the note `noteId` names, and reports whether `command` was one of the three.
+// Carries out "show on disk", "copy relative path" or "copy absolute path", and
+// reports whether `command` was one of the three.
 //
 // `noteId` empty means the note on the page, which is what the palette and the
 // menu bar mean by "the note"; the sidebar's and the tab strip's menus name
 // theirs, because a right click there is about the row or the tab under the
-// pointer rather than about whatever happens to be open.
+// pointer rather than about whatever happens to be open. The folder form is
+// about the notebook the sidebar tree has selected, which a right click on a
+// tree row has just moved.
 //
 // A relative path is relative to the library root, which is what makes it worth
 // having: it is the path that means the same thing to somebody else looking at
 // the same library, and so the one that can go in a note, a commit message or a
 // message to a colleague. It is refused rather than silently falling back to
-// the absolute one when the note somehow sits outside the library, because a
+// the absolute one when the thing somehow sits outside the library, because a
 // "relative path" that is absolute is the wrong answer given confidently.
 bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId);
+bool handleFolderPathCommand(UiRuntime& ui, std::string_view command,
+                             const std::filesystem::path& folder);
 
 // The note a Markdown link's path names, or null when it names something that
 // is not a note in this library.

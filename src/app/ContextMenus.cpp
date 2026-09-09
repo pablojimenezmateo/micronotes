@@ -112,6 +112,11 @@ void openTagMenu(UiRuntime& ui, std::string_view tag, float x, float y) {
     // Offered only when there is something to undo. A "reset" that resets
     // nothing is a menu item that teaches the reader the menu is decorative.
     {"auto-color", "Automatic colour", "", "", custom, false},
+    {"", "", "", "", false, false, false, true},
+    // A tag has no file of its own -- it exists because notes carry it -- so
+    // the only way to be rid of one was to open every note carrying it and edit
+    // its front matter by hand.
+    {"delete", "Delete tag...", "", "", true, true, false, false},
   };
   ui.overlays.open(std::move(overlay));
 }
@@ -193,6 +198,14 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
     {"new-note", "New note here", "", "", hasFolder, false, false, false},
     {"", "", "", "", false, false, false, true},
     {"rename", "Rename", "", "", hasFolder, false, false, false},
+    {"", "", "", "", false, false, false, true},
+    // A notebook is a directory, and the same three questions are worth asking
+    // about it as about a note. The note menu has had them since they were
+    // written; the tree's did not, so the path of a folder was the one thing in
+    // the library a reader had to leave the app to find out.
+    {"show-on-disk", "Show on disk", "", "", true, false, false, false},
+    {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
+    {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
     {"", "", "", "", false, false, false, true},
     {"delete", "Delete", "", "", hasFolder, true, false, false},
   };

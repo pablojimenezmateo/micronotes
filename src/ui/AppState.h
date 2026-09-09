@@ -170,6 +170,12 @@ public:
   bool setSelectedNoteIcon(const std::string& icon, std::string_view body);
   bool updateSelectedTags(const std::vector<std::string>& tags, std::string_view body);
 
+  // Removes `tag` from every note carrying it, and reports how many notes
+  // changed. `openBody` is what the editor is holding: the open note is one of
+  // the notes being rewritten, and it is the one whose file must not be written
+  // from a body read off the disk.
+  std::size_t removeTagEverywhere(std::string_view tag, std::string_view openBody);
+
   // A note created here opens in a tab of its own like any other, which is what
   // hardcoding the old `false` got wrong: following a dead `[[wikilink]]`
   // created the note and then replaced the note that linked to it, losing the

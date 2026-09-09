@@ -59,7 +59,7 @@ void publishPageChrome(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
   {
     const ui::ClipGuard clip(renderer, page.pageRect());
     const Rect header = page.headerRect();
-    drawPageHeader(renderer, text, ui, header, header.y);
+    drawPageHeader(text, ui, header, header.y);
   }
   for(const auto& link : page.links()) ui.linkRegions.push_back({link.rect, link.target, link.wiki});
 }
