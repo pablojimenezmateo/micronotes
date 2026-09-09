@@ -166,7 +166,7 @@ namespace {
 // filled together because both turn on the same key, and asking for either is
 // what says the note or the library has moved.
 const RightPanelState::LibraryViews& libraryViews(UiRuntime& ui) {
-  const NoteRevision key {ui.state.selection().noteId, ui.state.revision()};
+  const NoteRevision key {ui.state.selection().noteId, ui.state.catalog().revision()};
   if(const auto* views = ui.rightPanel.library.get(key)) {
     perf::addCounter(perf::CounterId::RightPanelLibraryReused);
     return *views;
@@ -175,12 +175,12 @@ const RightPanelState::LibraryViews& libraryViews(UiRuntime& ui) {
   auto& views = ui.rightPanel.library.rebuild(key);
   views.backlinks.clear();
   views.tags.clear();
-  if(key.noteId.empty() || !ui.state.hasLibrary()) return views;
+  if(key.noteId.empty() || !ui.state.catalog().isOpen()) return views;
   views.backlinks = ui.state.backlinksToSelected();
   // From the open-note record rather than the file. This used to read and parse
   // the whole note -- for a row of chips -- on every library revision, and the
   // revision moves on every save.
-  views.tags = ui.state.openNote().metadata.tags;
+  views.tags = ui.state.openNote().metadata().tags;
   return views;
 }
 

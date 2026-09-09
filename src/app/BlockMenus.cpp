@@ -118,7 +118,7 @@ void commitSlashMenu(UiRuntime& ui, const std::string& itemId) {
 // The source edit goes through the undo stack as any block edit does; the
 // target is not open, so it is written directly.
 void moveBlocksToNote(UiRuntime& ui, const std::string& targetId) {
-  const auto target = ui.state.findNote(targetId);
+  const auto target = ui.state.catalog().findNote(targetId);
   if(!target || target->id == ui.state.selection().noteId) {
     ui.status = "Pick a different note";
     return;

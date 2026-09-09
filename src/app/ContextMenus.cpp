@@ -59,7 +59,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
 
 void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
   if(noteId.empty()) return;
-  const auto* note = ui.state.noteById(noteId);
+  const auto* note = ui.state.catalog().noteById(noteId);
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::List;
   overlay.id = "tab-menu";
@@ -154,7 +154,7 @@ void openTagColorPicker(UiRuntime& ui, std::string tag) {
 // shell at the size they are used, so a note looks the same on every machine.
 void openIconPicker(UiRuntime& ui) {
   const auto& note = ui.state.openNote();
-  if(note.noteId.empty()) {
+  if(note.noteId().empty()) {
     ui.status = "No note selected";
     return;
   }
@@ -171,7 +171,7 @@ void openIconPicker(UiRuntime& ui) {
   }
   overlay.current = 0;
   for(std::size_t i = 0; i < overlay.items.size(); ++i) {
-    if(overlay.items[i].id != note.metadata.icon) continue;
+    if(overlay.items[i].id != note.metadata().icon) continue;
     overlay.current = static_cast<int>(i);
     break;
   }

@@ -55,7 +55,7 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h, theme().border);
 
   const ui::TextStyle style = ui::chromeStyle();
-  const auto note = ui.state.hasLibrary() ? ui.state.findNote(ui.state.selection().noteId)
+  const auto note = ui.state.catalog().isOpen() ? ui.state.catalog().findNote(ui.state.selection().noteId)
                                           : std::nullopt;
   // The same rule the status bar and every row in the shell uses. This was
   // `rect.y + max(4, (rect.h - line) / 2)`, unrounded and with a floor of its
@@ -79,9 +79,9 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
       trail.push_back(walk);
     }
   }
-  if(!ui.state.hasLibrary()) trail.clear();
+  if(!ui.state.catalog().isOpen()) trail.clear();
   for(std::size_t i = 0; i < trail.size() && x < limit; ++i) {
-    const auto label = trail[i].empty() ? ui.state.libraryRoot().filename().generic_string()
+    const auto label = trail[i].empty() ? ui.state.catalog().root().filename().generic_string()
                                         : trail[i].filename().generic_string();
     const float w = static_cast<float>(text.width(label, style));
     const Rect hit {x - ui::kSpace1, rect.y + 1.0f, w + ui::kSpace2, rect.h - 2.0f};

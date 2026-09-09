@@ -74,10 +74,10 @@ MICRONOTES_TEST(app_state_creates_loads_saves_and_refreshes_notes) {
   auto created = state.createNote("Untitled", "work", "# Untitled\n\nbody");
   MICRONOTES_REQUIRE(created.has_value());
   MICRONOTES_REQUIRE(state.selection().noteId == created->id);
-  MICRONOTES_REQUIRE(state.folders().size() == 1);
+  MICRONOTES_REQUIRE(state.catalog().folders().size() == 1);
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
 
-  auto loaded = state.readSelectedNote();
+  auto loaded = state.openNote().read();
   MICRONOTES_REQUIRE(loaded.has_value());
   MICRONOTES_REQUIRE(loaded->body.find("body") != std::string::npos);
   auto duplicate = state.createNote("Untitled", "work", "# Untitled\n\nsecond body");
@@ -87,28 +87,29 @@ MICRONOTES_TEST(app_state_creates_loads_saves_and_refreshes_notes) {
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "work" / "Untitled.md"));
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "work" / "Untitled-2.md"));
   state.selectNote(created->id);
-  auto originalAfterDuplicate = state.readSelectedNote();
+  auto originalAfterDuplicate = state.openNote().read();
   MICRONOTES_REQUIRE(originalAfterDuplicate.has_value());
   MICRONOTES_REQUIRE(originalAfterDuplicate->body.find("body") != std::string::npos);
   MICRONOTES_REQUIRE(originalAfterDuplicate->body.find("second body") == std::string::npos);
   state.selectNote(duplicate->id);
   MICRONOTES_REQUIRE(state.deleteSelectedNote());
   state.selectNote(created->id);
-  MICRONOTES_REQUIRE(state.saveSelectedNote("# Body heading\n\nchanged searchable text").ok);
-  auto saved = state.readSelectedNote();
+  const std::string body = "# Body heading\n\nchanged searchable text";
+  MICRONOTES_REQUIRE(state.saveSelectedNote(body).ok);
+  auto saved = state.openNote().read();
   MICRONOTES_REQUIRE(saved.has_value());
   MICRONOTES_REQUIRE(saved->metadata.title == "Untitled");
   MICRONOTES_REQUIRE(saved->body.find("# Body heading") == 0);
   state.setSearch("searchable");
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
-  MICRONOTES_REQUIRE(state.updateSelectedTags({"fast", "local"}));
+  MICRONOTES_REQUIRE(state.updateSelectedTags({"fast", "local"}, body));
   state.selectTag("fast");
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
-  auto retagged = state.readSelectedNote();
+  auto retagged = state.openNote().read();
   MICRONOTES_REQUIRE(retagged.has_value());
   MICRONOTES_REQUIRE(retagged->metadata.tags.size() == 2);
-  MICRONOTES_REQUIRE(state.renameSelectedNote("Renamed"));
-  auto renamed = state.readSelectedNote();
+  MICRONOTES_REQUIRE(state.renameSelectedNote("Renamed", body));
+  auto renamed = state.openNote().read();
   MICRONOTES_REQUIRE(renamed.has_value());
   MICRONOTES_REQUIRE(renamed->metadata.title == "Renamed");
   MICRONOTES_REQUIRE(renamed->body.find("# Body heading") == 0);
@@ -140,14 +141,14 @@ MICRONOTES_TEST(app_state_recovers_unsaved_selected_note_body) {
   MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
   auto created = state.createNote("Recover", {}, "saved body");
   MICRONOTES_REQUIRE(created.has_value());
-  MICRONOTES_REQUIRE(state.saveSelectedNoteRecovery("draft body"));
-  auto recovered = state.selectedRecoveryBody();
+  MICRONOTES_REQUIRE(state.openNote().saveRecovery("draft body"));
+  auto recovered = state.openNote().recoveryBody();
   MICRONOTES_REQUIRE(recovered.has_value());
   MICRONOTES_REQUIRE(*recovered == "draft body");
 
   MICRONOTES_REQUIRE(state.saveSelectedNote("draft body").ok);
-  MICRONOTES_REQUIRE(!state.selectedRecoveryBody().has_value());
-  auto saved = state.readSelectedNote();
+  MICRONOTES_REQUIRE(!state.openNote().recoveryBody().has_value());
+  auto saved = state.openNote().read();
   MICRONOTES_REQUIRE(saved.has_value());
   MICRONOTES_REQUIRE(saved->body == "draft body");
 
@@ -166,11 +167,11 @@ MICRONOTES_TEST(app_state_keeps_an_external_change_instead_of_overwriting_it) {
   const auto created = state.createNote("Shared", {}, "mine\n");
   MICRONOTES_REQUIRE(created.has_value());
   MICRONOTES_REQUIRE(state.saveSelectedNote("mine\n").ok);
-  MICRONOTES_REQUIRE(state.selectedNoteDiskState() == micronotes::ui::DiskState::Agrees);
+  MICRONOTES_REQUIRE(state.openNote().diskState() == micronotes::ui::DiskState::Agrees);
 
   // Somebody else rewrites the file: a second editor, a checkout, a sync.
   writeExternally(created->path, "---\nid: " + created->id + "\ntitle: Shared\n---\n\ntheirs\n");
-  MICRONOTES_REQUIRE(state.selectedNoteDiskState() == micronotes::ui::DiskState::Changed);
+  MICRONOTES_REQUIRE(state.openNote().diskState() == micronotes::ui::DiskState::Changed);
 
   const auto result = state.saveSelectedNote("mine, edited\n");
   MICRONOTES_REQUIRE(result.ok);
@@ -186,10 +187,10 @@ MICRONOTES_TEST(app_state_keeps_an_external_change_instead_of_overwriting_it) {
   MICRONOTES_REQUIRE(kept.extension() == ".md");
   const auto conflictId = micronotes::library::Library(root).loadNote(kept).metadata.id;
   MICRONOTES_REQUIRE(!conflictId.empty() && conflictId != created->id);
-  MICRONOTES_REQUIRE(state.allNotes().size() == 2);
+  MICRONOTES_REQUIRE(state.catalog().notes().size() == 2);
 
   // And the save has agreed with the file again, so the next one is ordinary.
-  MICRONOTES_REQUIRE(state.selectedNoteDiskState() == micronotes::ui::DiskState::Agrees);
+  MICRONOTES_REQUIRE(state.openNote().diskState() == micronotes::ui::DiskState::Agrees);
   MICRONOTES_REQUIRE(state.saveSelectedNote("mine, again\n").conflictCopy.empty());
 
   std::filesystem::remove_all(root);
@@ -207,16 +208,16 @@ MICRONOTES_TEST(app_state_reloads_a_note_that_changed_on_disk) {
 
   writeExternally(created->path,
                   "---\nid: " + created->id + "\ntitle: Reload\ntags: added\n---\n\nsecond\n");
-  MICRONOTES_REQUIRE(state.selectedNoteDiskState() == micronotes::ui::DiskState::Changed);
+  MICRONOTES_REQUIRE(state.openNote().diskState() == micronotes::ui::DiskState::Changed);
   MICRONOTES_REQUIRE(state.reloadSelectedNote());
 
   // The body, the front matter and the index all followed.
-  const auto reloaded = state.readSelectedNote();
+  const auto reloaded = state.openNote().read();
   MICRONOTES_REQUIRE(reloaded.has_value());
   MICRONOTES_REQUIRE(reloaded->body == "second\n");
-  MICRONOTES_REQUIRE(state.openNote().metadata.tags.size() == 1);
-  MICRONOTES_REQUIRE(state.openNote().metadata.tags.front() == "added");
-  MICRONOTES_REQUIRE(state.selectedNoteDiskState() == micronotes::ui::DiskState::Agrees);
+  MICRONOTES_REQUIRE(state.openNote().metadata().tags.size() == 1);
+  MICRONOTES_REQUIRE(state.openNote().metadata().tags.front() == "added");
+  MICRONOTES_REQUIRE(state.openNote().diskState() == micronotes::ui::DiskState::Agrees);
   state.setSearch("second");
   MICRONOTES_REQUIRE(state.currentNotes().size() == 1);
   state.setSearch("first");
@@ -242,8 +243,8 @@ MICRONOTES_TEST(app_state_follows_a_note_whose_id_changed_on_disk) {
   MICRONOTES_REQUIRE(state.reloadSelectedNote());
   MICRONOTES_REQUIRE(state.selection().noteId == "brand-new-id");
   MICRONOTES_REQUIRE(state.workspace().tabs.front().noteId == "brand-new-id");
-  MICRONOTES_REQUIRE(state.readSelectedNote().has_value());
-  MICRONOTES_REQUIRE(state.allNotes().size() == 1);
+  MICRONOTES_REQUIRE(state.openNote().read().has_value());
+  MICRONOTES_REQUIRE(state.catalog().notes().size() == 1);
 
   std::filesystem::remove_all(root);
 }
@@ -260,8 +261,8 @@ MICRONOTES_TEST(app_state_carries_the_selection_when_a_foreign_note_adopts_an_id
 
   micronotes::ui::AppState state;
   MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
-  MICRONOTES_REQUIRE(state.allNotes().size() == 1);
-  const auto pathId = state.allNotes().front().id;
+  MICRONOTES_REQUIRE(state.catalog().notes().size() == 1);
+  const auto pathId = state.catalog().notes().front().id;
   state.selectNote(pathId);
   MICRONOTES_REQUIRE(state.editWorkspace().toggleFavorite(pathId));
 
@@ -269,10 +270,10 @@ MICRONOTES_TEST(app_state_carries_the_selection_when_a_foreign_note_adopts_an_id
   MICRONOTES_REQUIRE(state.selection().noteId != pathId);
   MICRONOTES_REQUIRE(!state.selection().noteId.empty());
   // Still open, still selected, still favorite, and still one note.
-  MICRONOTES_REQUIRE(state.readSelectedNote().has_value());
+  MICRONOTES_REQUIRE(state.openNote().read().has_value());
   MICRONOTES_REQUIRE(state.workspace().isFavorite(state.selection().noteId));
   MICRONOTES_REQUIRE(state.workspace().tabs.front().noteId == state.selection().noteId);
-  MICRONOTES_REQUIRE(state.allNotes().size() == 1);
+  MICRONOTES_REQUIRE(state.catalog().notes().size() == 1);
 
   std::filesystem::remove_all(root);
 }
@@ -290,7 +291,7 @@ MICRONOTES_TEST(app_state_writes_a_vanished_note_back) {
   MICRONOTES_REQUIRE(state.saveSelectedNote("body\n").ok);
 
   std::filesystem::remove(created->path);
-  MICRONOTES_REQUIRE(state.selectedNoteDiskState() == micronotes::ui::DiskState::Vanished);
+  MICRONOTES_REQUIRE(state.openNote().diskState() == micronotes::ui::DiskState::Vanished);
   const auto result = state.saveSelectedNote("body still here\n");
   MICRONOTES_REQUIRE(result.ok);
   // Nothing was filed aside, because there was nothing there to keep.
@@ -313,14 +314,14 @@ MICRONOTES_TEST(app_state_numbers_a_rename_onto_a_name_already_taken) {
   const auto second = state.createNote("Scratch", "pi4", "second");
   MICRONOTES_REQUIRE(second.has_value());
 
-  MICRONOTES_REQUIRE(state.renameSelectedNote("TODO"));
+  MICRONOTES_REQUIRE(state.renameSelectedNote("TODO", "second"));
   MICRONOTES_REQUIRE(state.selectedTitle() == "TODO-2");
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "pi4" / "TODO.md"));
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "pi4" / "TODO-2.md"));
 
   // And renaming a note to the name it already has is not a collision with
   // itself: the numbering must not creep every time the prompt is confirmed.
-  MICRONOTES_REQUIRE(state.renameSelectedNote("TODO-2"));
+  MICRONOTES_REQUIRE(state.renameSelectedNote("TODO-2", "second"));
   MICRONOTES_REQUIRE(state.selectedTitle() == "TODO-2");
   std::filesystem::remove_all(root);
 }

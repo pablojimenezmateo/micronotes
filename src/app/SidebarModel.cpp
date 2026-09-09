@@ -59,7 +59,7 @@ float searchResultRowHeight(std::size_t matchLines, const SidebarMetrics& metric
 // is a hit on SQLite.
 const std::vector<library::SearchResult>& searchResults(UiRuntime& ui) {
   const auto& selection = ui.state.selection();
-  const SearchKey key {selection.search, selection.searchScope, ui.state.revision()};
+  const SearchKey key {selection.search, selection.searchScope, ui.state.catalog().revision()};
   if(const auto* results = ui.sidebar.searchResults.get(key)) return *results;
   return ui.sidebar.searchResults.store(key, ui.state.currentSearchResults());
 }
@@ -163,7 +163,7 @@ public:
       if(drawn >= limit) break;
       // By id index rather than by scan. Thirteen shortcuts against a thousand
       // notes was thirteen thousand string compares to draw thirteen rows.
-      const auto* found = ui_.state.noteById(id);
+      const auto* found = ui_.state.catalog().noteById(id);
       if(!found) continue;
       noteRow(*found);
       ++drawn;
@@ -201,7 +201,7 @@ public:
     std::size_t found = 0;
     for(const auto& id : ids) {
       if(found >= limit) break;
-      if(ui_.state.noteById(id)) ++found;
+      if(ui_.state.catalog().noteById(id)) ++found;
     }
     return found;
   }
@@ -228,7 +228,7 @@ private:
 void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   RowBuilder build(ui, rect, metrics);
 
-  const auto& notes = ui.state.allNotes();
+  const auto& notes = ui.state.catalog().notes();
 
   // A running query replaces the tree rather than appearing beside it. The
   // sidebar answers one question at a time, and Esc puts the tree back.
@@ -271,14 +271,14 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
   // The tree is a band like the other three. It had no heading at all, which is
   // most of what made the divisions unclear: an unlabelled group between two
   // labelled ones reads as the tail of the one above it.
-  auto treeRows = ui.sidebar.tree.rows(ui.state.folders(), notes);
+  auto treeRows = ui.sidebar.tree.rows(ui.state.catalog().folders(), notes);
   if(!treeRows.empty()) {
     if(build.section(ui::SidebarSection::Notebooks, "Notebooks", notes.size())) {
       for(auto& row : treeRows) build.treeRow(std::move(row));
     }
   }
 
-  const auto& tags = ui.state.tags();
+  const auto& tags = ui.state.catalog().tags();
   if(!tags.empty()) {
     // Tags are a filter over the tree, not a second way to organise it, so they
     // sit below it.
@@ -344,7 +344,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
   const auto& workspace = ui.state.workspace();
   const auto& previous = ui.sidebar.rowsKey;
   const bool reusable = previous.valid &&
-    previous.stateRevision == ui.state.revision() &&
+    previous.stateRevision == ui.state.catalog().revision() &&
     previous.treeRevision == ui.sidebar.tree.revision() &&
     previous.search == ui.fields.search.text() &&
     previous.searchScope == ui.fields.searchScope &&
@@ -384,7 +384,7 @@ void buildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics) {
 
   auto& key = ui.sidebar.rowsKey;
   key.valid = true;
-  key.stateRevision = ui.state.revision();
+  key.stateRevision = ui.state.catalog().revision();
   key.treeRevision = ui.sidebar.tree.revision();
   key.search = ui.fields.search.text();
   key.searchScope = ui.fields.searchScope;
@@ -631,7 +631,7 @@ std::vector<Rect> tagDotRects(Rect row, std::size_t tagCount, float trailingRese
 std::optional<std::string> sidebarTagDotAt(const UiRuntime& ui, const SidebarRow& row,
                                            float x, float y) {
   if(row.kind != SidebarRow::Kind::Tree || row.tree.kind != ui::TreeRowKind::Note) return std::nullopt;
-  const auto* note = ui.state.noteById(row.tree.noteId);
+  const auto* note = ui.state.catalog().noteById(row.tree.noteId);
   if(!note || note->tags.empty()) return std::nullopt;
   // Through the same function the draw lays them out with, so the target is the
   // dot on screen. At seven pixels a second spelling of "the third from the

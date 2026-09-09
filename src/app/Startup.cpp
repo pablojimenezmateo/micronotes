@@ -26,7 +26,7 @@ void openTitles(UiRuntime& ui, std::string_view titles) {
   while(!titles.empty()) {
     const auto comma = titles.find(',');
     const auto title = titles.substr(0, comma);
-    for(const auto& note : ui.state.allNotes()) {
+    for(const auto& note : ui.state.catalog().notes()) {
       if(note.title.find(title) == std::string::npos) continue;
       ui.state.selectNote(note.id);
       showFolder(ui, note.folder);

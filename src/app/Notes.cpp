@@ -40,11 +40,11 @@ void resetPageScroll(UiRuntime& ui) {
 // of careful durable-write machinery, defeated by the buffer being filled
 // through the wrong door.
 void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
-  const auto note = ui.state.readSelectedNote();
+  const auto note = ui.state.openNote().read();
   if(!note) return;
   const std::string noteId = ui.state.selection().noteId;
   ui.loadedNoteId = noteId;
-  const auto recovered = ui.state.selectedRecoveryBody();
+  const auto recovered = ui.state.openNote().recoveryBody();
   const bool unsaved = recovered && *recovered != note->body;
   ui.editor.setText(unsaved ? *recovered : note->body);
   // Marked dirty so the recovered text is treated as unsaved work rather than
@@ -124,7 +124,7 @@ NotePaths notePathsFor(const UiRuntime& ui, std::string_view noteId) {
   // The note named, or the one on the page. Off the note list rather than off
   // `openNote()`, so a right click on a sidebar row or a tab answers about
   // *that* one and not about whatever happens to be open.
-  const auto* note = ui.state.noteById(noteId.empty() ? ui.state.selection().noteId : noteId);
+  const auto* note = ui.state.catalog().noteById(noteId.empty() ? ui.state.selection().noteId : noteId);
   if(!note || note->path.empty()) return {};
 
   NotePaths paths;
@@ -134,7 +134,7 @@ NotePaths notePathsFor(const UiRuntime& ui, std::string_view noteId) {
   // spelled with a trailing slash, a `.` or a `..` in it still gives the same
   // answer. Generic separators, because a relative path is the spelling that
   // goes into a note or a message to somebody else.
-  const auto relative = path.lexically_relative(ui.state.libraryRoot().lexically_normal());
+  const auto relative = path.lexically_relative(ui.state.catalog().root().lexically_normal());
   const auto text = relative.generic_string();
   // Empty, "." or climbing out with ".." all mean the note is not under the
   // root. Left empty rather than falling back to the absolute path: a
@@ -170,21 +170,21 @@ bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_
 }
 
 const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view relative) {
-  if(relative.empty() || !ui.state.hasLibrary()) return nullptr;
+  if(relative.empty() || !ui.state.catalog().isOpen()) return nullptr;
   // A URL is somebody else's business, and so is an absolute path: a link out
   // of the library is not a link to a note in it.
   if(doc::isRemoteTarget(relative)) return nullptr;
   const std::string decoded = doc::decodeLinkTarget(relative);
   if(decoded.empty() || decoded.front() == '/') return nullptr;
 
-  const auto root = ui.state.libraryRoot();
+  const auto root = ui.state.catalog().root();
   // Two bases, most specific first. A relative path in a note means "relative
   // to this note", which is what every Markdown renderer does and what a link
   // written by hand inside a subfolder assumes; resolving against the root as
   // well is what keeps working the links that were written the other way, and
   // there is no way to tell those apart other than to try both.
   std::filesystem::path bases[2] = {root, root};
-  if(const auto* open = ui.state.noteById(ui.state.selection().noteId)) {
+  if(const auto* open = ui.state.catalog().noteById(ui.state.selection().noteId)) {
     bases[0] = root / open->folder;
   }
   for(const auto& base : bases) {
@@ -204,7 +204,7 @@ const library::NoteListItem* noteAtLinkTarget(UiRuntime& ui, std::string_view re
     // the app means by "a note", so a `.md` file the index has not taken up --
     // one inside a hidden folder, say -- stays the desktop's job, and the
     // answer costs no syscall.
-    for(const auto& note : ui.state.allNotes()) {
+    for(const auto& note : ui.state.catalog().notes()) {
       if(note.path == candidate) return &note;
     }
   }
@@ -216,7 +216,7 @@ bool clearTagFilter(UiRuntime& ui) {
   // The note stays open. Leaving the filter is a question about what the
   // sidebar lists, not about what is being read -- closing the note as well
   // would make going back cost the reader their place.
-  const auto note = ui.state.findNote(ui.state.selection().noteId);
+  const auto note = ui.state.catalog().findNote(ui.state.selection().noteId);
   ui.state.selectTag({});
   // Onto the folder the open note lives in, with the tree opened to it, so the
   // list comes back showing where you ended up rather than at the root having
@@ -250,8 +250,8 @@ void loadSelectedIntoEditor(UiRuntime& ui) {
 }
 
 bool reloadSelectedIfChangedOnDisk(UiRuntime& ui) {
-  if(!ui.state.hasLibrary() || ui.state.selection().noteId.empty()) return false;
-  switch(ui.state.selectedNoteDiskState()) {
+  if(!ui.state.catalog().isOpen() || ui.state.selection().noteId.empty()) return false;
+  switch(ui.state.openNote().diskState()) {
     case ui::DiskState::Agrees:
       return false;
     case ui::DiskState::Vanished:
@@ -284,14 +284,14 @@ bool reloadSelectedIfChangedOnDisk(UiRuntime& ui) {
 }
 
 void rescanLibraryAfterExternalChange(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) return;
+  if(!ui.state.catalog().isOpen()) return;
   invalidateWikiNotes(ui);
   ui.state.refreshLibrary();
   reloadSelectedIfChangedOnDisk(ui);
 }
 
 bool applyWatchedChanges(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) return false;
+  if(!ui.state.catalog().isOpen()) return false;
   const bool rescan = ui.watcher.takeRescanRequest();
   const auto paths = ui.watcher.takeChanges();
   if(rescan) {
@@ -315,10 +315,10 @@ bool applyWatchedChanges(UiRuntime& ui) {
     touchedAnything = true;
   }
   if(!touchedAnything) return false;
-  if(listChanged) {
-    ui.state.invalidateNoteList();
-    invalidateWikiNotes(ui);
-  }
+  // The catalog has already dropped its own memos for every file whose note-
+  // list fields moved; what it cannot know about is the wiki-link cache the
+  // shell keeps over the same list.
+  if(listChanged) invalidateWikiNotes(ui);
   // Last, and only for the note on screen: the index is now right about every
   // file that moved, and this is the one whose bytes a person is looking at.
   reloadSelectedIfChangedOnDisk(ui);
@@ -326,7 +326,7 @@ bool applyWatchedChanges(UiRuntime& ui) {
 }
 
 void beginRename(UiRuntime& ui) {
-  if(ui.state.openNote().noteId.empty()) {
+  if(ui.state.openNote().noteId().empty()) {
     ui.status = "Select a note before renaming";
     return;
   }
@@ -348,7 +348,7 @@ void saveRename(UiRuntime& ui) {
   }
   invalidateWikiNotes(ui);
   const std::string asked = ui.fields.rename.text();
-  if(ui.state.renameSelectedNote(asked)) {
+  if(ui.state.renameSelectedNote(asked, ui.editor.text())) {
     loadSelectedIntoEditor(ui);
     ui.focus = FocusArea::Editor;
     // A note is a file, and a folder cannot hold two files of one name, so a
@@ -366,7 +366,7 @@ void saveRename(UiRuntime& ui) {
 }
 
 void createNote(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     ui.status = "Start with --library <path> before creating notes";
     return;
   }
@@ -397,7 +397,7 @@ void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder) {
 }
 
 bool saveCurrent(UiRuntime& ui, bool quiet) {
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     if(!quiet) ui.status = "No library open";
     return false;
   }

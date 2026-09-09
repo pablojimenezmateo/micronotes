@@ -336,7 +336,7 @@ MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
   ui.editor.setText("mine\n");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
   MICRONOTES_REQUIRE(ui.editor.text() == "mine\n");
-  const auto path = ui.state.openNote().path;
+  const auto path = ui.state.openNote().path();
   const auto noteId = ui.state.selection().noteId;
   MICRONOTES_REQUIRE(ui.watcher.active());
 
@@ -347,14 +347,14 @@ MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
   // of comparing the disk rather than remembering who wrote it.
   ui.editor.setText("mine, edited\n");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
-  const auto revisionAfterSave = ui.state.revision();
+  const auto revisionAfterSave = ui.state.catalog().revision();
   for(int attempt = 0; attempt < 60; ++attempt) {
     micronotes::app::applyWatchedChanges(ui);
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
   MICRONOTES_REQUIRE(ui.editor.text() == "mine, edited\n");
   MICRONOTES_REQUIRE(!ui.editor.dirty());
-  MICRONOTES_REQUIRE(ui.state.revision() == revisionAfterSave);
+  MICRONOTES_REQUIRE(ui.state.catalog().revision() == revisionAfterSave);
 
   // Now somebody else rewrites it.
   {
@@ -392,7 +392,7 @@ MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
   micronotes::app::createNote(ui);
   ui.editor.setText("mine\n");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
-  const auto path = ui.state.openNote().path;
+  const auto path = ui.state.openNote().path();
   const auto noteId = ui.state.selection().noteId;
 
   // Unsaved work in the buffer, and a change on disk underneath it.
@@ -412,7 +412,7 @@ MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
   // of its own, and the status line names it so it can be found.
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui, /*quiet=*/true));
   MICRONOTES_REQUIRE(ui.status.find("was kept as") != std::string::npos);
-  MICRONOTES_REQUIRE(ui.state.allNotes().size() == 2);
+  MICRONOTES_REQUIRE(ui.state.catalog().notes().size() == 2);
   ui.state.setSearch("theirs");
   MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
   ui.state.setSearch("my unsaved draft");
@@ -533,7 +533,7 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
   ui.sidebar.tree.setExpanded(folder, false);
   MICRONOTES_REQUIRE(!ui.sidebar.tree.expanded(folder));
 
-  const auto* alpha = ui.state.noteById("gi-alpha");
+  const auto* alpha = ui.state.catalog().noteById("gi-alpha");
   MICRONOTES_REQUIRE(alpha != nullptr);
   MICRONOTES_REQUIRE(alpha->folder == folder);
 
@@ -546,7 +546,7 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
 
   // And the note is now a row inside that folder rather than only in a flat
   // list above it -- which is the thing the user was looking for.
-  const auto rows = ui.sidebar.tree.rows(ui.state.folders(), ui.state.allNotes());
+  const auto rows = ui.sidebar.tree.rows(ui.state.catalog().folders(), ui.state.catalog().notes());
   bool folderRow = false;
   bool noteUnderIt = false;
   for(const auto& row : rows) {

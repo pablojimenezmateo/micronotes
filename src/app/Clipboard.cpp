@@ -21,7 +21,7 @@ namespace {
 using micronotes::attachments::fileNameForMime;
 
 static bool ensureSelectedNote(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     ui.status = "Open a library before attaching files";
     return false;
   }
@@ -48,10 +48,10 @@ bool publishEditorPrimarySelection(UiRuntime& ui) {
 bool attachPathToEditor(UiRuntime& ui, const std::filesystem::path& source) {
   if(!ensureSelectedNote(ui)) return false;
   const auto& selected = ui.state.openNote();
-  if(selected.noteId.empty()) return false;
+  if(selected.noteId().empty()) return false;
   attachments::AttachmentService service;
   try {
-    const auto link = service.attachFile(ui.state.libraryRoot(), selected.metadata.id, source);
+    const auto link = service.attachFile(ui.state.catalog().root(), selected.metadata().id, source);
     insertAttachmentMarkdown(ui, link);
     ui.status = "Attached " + source.filename().string();
     return true;
@@ -84,14 +84,14 @@ bool pasteClipboardImage(UiRuntime& ui) {
   }
 
   const auto& selected = ui.state.openNote();
-  if(selected.noteId.empty()) {
+  if(selected.noteId().empty()) {
     SDL_free(data);
     return false;
   }
 
   attachments::AttachmentService service;
   try {
-    const auto link = service.attachBytes(ui.state.libraryRoot(), selected.metadata.id, fileNameForMime(mime), data, size);
+    const auto link = service.attachBytes(ui.state.catalog().root(), selected.metadata().id, fileNameForMime(mime), data, size);
     SDL_free(data);
     insertAttachmentMarkdown(ui, link);
     ui.status = "Pasted image attachment";

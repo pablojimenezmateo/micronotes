@@ -81,33 +81,6 @@ block to raw source when you click into it. If it is not, the file deletes; if
 it is, it is meant to be a different engine, and the debt is only the geometry
 it duplicates -- which `ui::pageRectIn` and `ui::pageColumnIn` already hold.
 
-## TD-16 — a header edit writes the body it read off the disk
-
-`AppState::saveSelectedNoteHeader`, and the three callers that go through it:
-`renameSelectedNote`, `setSelectedNoteIcon`, `updateSelectedTags`.
-
-All three change only the note's front matter, and all three get the *body* to
-write back by reading the file. So each of them depends on an invariant nothing
-states or checks: that the editor buffer has already been saved, and the disk
-therefore holds the same bytes the buffer does.
-
-**What it costs today.** Nothing visible, because the invariant does hold. Every
-path into these three saves first -- `beginRename` and `beginTagEdit` call
-`saveCurrent`, and an open overlay captures input so the buffer cannot become
-dirty between the prompt opening and being committed. It also costs a whole-file
-read and a whole-file write per icon or tag change, of bytes the editor is
-already holding.
-
-**Why it has not been paid.** The fix is to pass the body in -- these become
-`saveSelectedNote` with a different header -- which means the three callers hand
-over `ui.editor.text()`, and `AppState` stops being able to write a note's
-header without the shell's cooperation. That is probably the right shape, and it
-is a change to three signatures and their call sites for a bug that cannot
-currently happen. It is here because "cannot currently happen" rests on the
-overlay's input capture, which is a UI decision a long way from this file: the
-day an overlay stops capturing, or a shortcut sets an icon without one, this
-silently writes a stale body over a fresh one and there is no test that fails.
-
 ## TD-17 — the index stores a second copy of every note body
 
 `src/library/LibraryIndex.cpp`, schema 4: `notes.body` and `notes_fts.body` both
@@ -132,25 +105,6 @@ today it leaves them both stale. None of that is hard, and none of it is
 justified by a few megabytes -- but the duplication should be a decision on the
 record rather than an accident of the first schema.
 
-## TD-18 — the watcher's degraded mode has no test
-
-`platform::DirectoryWatcher`, `kMaxWatches` and every path that calls
-`requestRescan()` because it could not name what changed.
-
-**What it costs today.** Nothing measurable, and it is the code most likely to
-matter on somebody else's machine. A library larger than the per-user
-`max_user_watches`, or larger than the watcher's own 8,192-directory budget,
-falls back to asking for a full refresh instead of naming paths -- which is
-correct, and is exercised by no test. Neither is the kernel's `IN_Q_OVERFLOW`
-path.
-
-**Why it has not been paid.** Both need a fixture that is expensive or
-privileged to build: eight thousand directories, or enough events in flight to
-overflow a 16,384-event queue. The rescan *request* is covered -- the
-tree-changes-shape test asserts it -- so what is untested is the two triggers
-rather than the response to them. `SetEntryBudget`-style injection (a testing
-seam that lowers the budget) is the obvious way in, and is worth adding the next
-time this file is opened.
 
 ## TD-19 — the harness has no lane for a keystroke through the shell
 
@@ -316,51 +270,3 @@ half -- but it is still a new stage in the frame, with its own lifetime against
 the renderer, and it belongs in a pass that measures it rather than in one that
 notices it.
 
-## TD-36 — `ui::AppState` is five things behind one door
-
-`src/ui/AppState.h`. Fifty public methods over five fields.
-
-The five are visible in the header's own section comments, which is the tell:
-
-| what it owns | fields | methods |
-|---|---|---:|
-| the library, indexed, and its memos | `library_`, `index_`, `organization_`, `revision_` | 15 |
-| what is selected | `selection_` | 6 |
-| how the window is arranged | `workspace_` | 5 |
-| the open note, as last read from disk | `openNote_` | 5 |
-| writes that reach a file | (all of the above) | 19 |
-
-Only the last group needs more than one of them. `folders()`, `tags()`,
-`allNotes()`, `noteById()`, `trashEntries()`, `revision()`, `refreshLibrary()`
-and `refreshNoteFile()` never touch the selection or the workspace; they are
-"the library, its index and its memos, kept in step", which is a class.
-
-**What it costs today.** The header carries the encapsulation the type cannot:
-`workspace()` and `editWorkspace()` are two accessors that exist only because
-handing out one mutable reference made `AppState`'s interface whatever
-`WorkspaceModel` happened to make public, and the comment on them says so. The
-same pressure produced `findNote` beside `noteById` (a copy and a borrow of one
-lookup) and `readSelectedNote` beside `openNote` (the body and everything but
-the body). Each pair is right; there being four of them is the smell.
-
-It has already cost three bugs of one kind, all now fixed and all the same
-shape: a rule that spans two of the five groups written out at its call sites
-rather than owned by either. A note's id moving in three lists; the favorites
-and recents being functions over `WorkspaceModel` reached through here; the
-three filters' exclusivity, which `renameSelectedFolder` did not know about.
-The fourth is still open as `TD-16` — a header edit reads the body off the disk
-because the write group cannot ask the buffer for it.
-
-**Why it has not been paid.** Because the honest version is not a rename. The
-library group is read straight from surfaces all over the shell -- `openNote`
-26 sites, `revision` 26, `hasLibrary` 24, `libraryRoot` 24, `currentNotes` 16,
-`allNotes` 14 -- so extracting it either changes ~130 call sites to say
-`state.library().x`, or leaves fifty forwarding methods behind and changes
-nothing a reader can see. The first is the real shape and is a day of
-mechanical edits with a green suite throughout; the second is worse than
-leaving it alone.
-
-The decision is which of those, and it is a decision because the forwarding
-version *looks* like progress. If it is taken, take it in the order the groups
-are listed above: the library group is the one with no dependency on the other
-four, so it can move first and on its own.

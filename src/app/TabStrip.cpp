@@ -27,7 +27,7 @@ using ui::theme;
 std::vector<std::string> tabTitles(const UiRuntime& ui) {
   std::vector<std::string> titles;
   for(const auto& tab : ui.state.workspace().tabs) {
-    const auto note = ui.state.findNote(tab.noteId);
+    const auto note = ui.state.catalog().findNote(tab.noteId);
     titles.push_back(note ? note->title : "Missing note");
   }
   return titles;

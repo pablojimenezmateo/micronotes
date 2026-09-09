@@ -64,7 +64,7 @@ const std::filesystem::path& ImagePathCache::keep(std::string_view target, std::
 
 const std::vector<library::NoteListItem>& WikiTargets::all(const ui::AppState& state) {
   if(!valid_) {
-    notes_ = state.allNotes();
+    notes_ = state.catalog().notes();
     valid_ = true;
   }
   return notes_;

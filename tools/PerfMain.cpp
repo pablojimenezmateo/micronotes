@@ -785,7 +785,7 @@ static bool persistenceBudgets(const std::filesystem::path& root, const std::str
     std::cerr << "persistence lane: could not open the fixture library\n";
     return false;
   }
-  const auto notes = state.allNotes();
+  const auto notes = state.catalog().notes();
   if(notes.empty()) {
     std::cerr << "persistence lane: the fixture library has no notes\n";
     return false;
@@ -811,10 +811,10 @@ static bool persistenceBudgets(const std::filesystem::path& root, const std::str
   // copy and a notify however busy the writer is.
   gate("save.recovery_post", measureWallIterations("save.recovery_post", 200, [&](int i) {
          text.push_back(static_cast<char>('a' + (i % 26)));
-         (void)state.saveSelectedNoteRecovery(text);
+         (void)state.openNote().saveRecovery(text);
        }),
        kRecoveryPostBudgetMicros);
-  (void)state.clearSelectedNoteRecovery();
+  (void)state.openNote().clearRecovery();
 
   // A save with nothing else open, so the number is the write and the index
   // update rather than the note list rebuild the two above also pay for.
@@ -1303,12 +1303,12 @@ int main() {
     microcore::perf::ScopeTimer timer("fixture.app_state.open_select_and_list");
     state.openOrCreateLibrary(root);
     state.selectFolder("work");
-    (void)state.folders();
-    (void)state.tags();
+    (void)state.catalog().folders();
+    (void)state.catalog().tags();
     auto notes = state.currentNotes();
     if(!notes.empty()) {
       state.selectNote(notes.front().id);
-      (void)state.readSelectedNote();
+      (void)state.openNote().read();
     }
   }
 

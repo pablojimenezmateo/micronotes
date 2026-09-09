@@ -118,7 +118,7 @@ bool menuItemChecked(const UiRuntime& ui, ui::ActionId action) {
 }
 
 bool menuItemEnabled(const UiRuntime& ui, ui::ActionId action) {
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     // With no library open there is nothing to act on but the two things that
     // can get you one, and the two that are always available.
     return action == ui::ActionId::Settings || action == ui::ActionId::Quit ||

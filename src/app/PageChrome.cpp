@@ -54,7 +54,7 @@ bool followLinkAt(UiRuntime& ui, float x, float y) {
       ui.status = openWithDesktop(target) ? "Opened " + target : "Open failed";
       return true;
     }
-    if(!ui.state.hasLibrary()) {
+    if(!ui.state.catalog().isOpen()) {
       ui.status = "No library for local link";
       return true;
     }
@@ -95,7 +95,7 @@ bool followLinkAt(UiRuntime& ui, float x, float y) {
     }
     try {
       attachments::AttachmentService service;
-      const auto command = service.openCommand(ui.state.libraryRoot(), relative);
+      const auto command = service.openCommand(ui.state.catalog().root(), relative);
       ui.status = spawnDetached(command)
                     ? "Opened " + std::filesystem::path(relative).filename().string()
                     : "Open failed";

@@ -240,7 +240,7 @@ std::vector<ui::SettingsRow> settingsRows(const UiRuntime& ui) {
                   SettingControl::Checkbox, workspace.rightPanelVisible, {},
                   workspace.rightPanelVisible});
 
-  std::string library = ui.state.hasLibrary() ? platform::displayPath(ui.state.libraryRoot())
+  std::string library = ui.state.catalog().isOpen() ? platform::displayPath(ui.state.catalog().root())
                                               : std::string("Not set");
   rows.push_back({"library", "Library", "Library folder",
                   "The one folder micronotes reads and writes. Plain Markdown files; nothing "

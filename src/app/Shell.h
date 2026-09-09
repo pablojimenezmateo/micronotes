@@ -187,8 +187,8 @@ struct UiRuntime {
   // rather than at save time, so a crash between keystrokes loses nothing.
   void markEdited() {
     lastEdit = SDL_GetTicks();
-    if(!state.hasLibrary() || state.selection().noteId.empty()) return;
-    if(!state.saveSelectedNoteRecovery(editor.text())) status = "Recovery save failed";
+    if(!state.catalog().isOpen() || state.selection().noteId.empty()) return;
+    if(!state.openNote().saveRecovery(editor.text())) status = "Recovery save failed";
   }
 };
 

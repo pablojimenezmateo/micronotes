@@ -85,7 +85,7 @@ static void drawSidebarEmpty(TextRenderer& text, UiRuntime& ui, Rect list) {
   const float x = list.x + ui::kSpace2;
   const float y = list.y + ui::kSpace2;
   const float width = list.w - ui::kSpace2 * 2.0f;
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     drawEmptyMessage(text, "No library", "Point micronotes at a folder of notes.",
                      x, y, width, ui::keysFor(ui::ActionId::Settings) + "  Settings");
   } else if(!ui.fields.search.empty()) {
@@ -337,7 +337,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     // rows a panel can show. This is one hash lookup on a row about to be
     // painted.
     const library::NoteListItem* tagged =
-      isNote ? ui.state.noteById(row.tree.noteId) : nullptr;
+      isNote ? ui.state.catalog().noteById(row.tree.noteId) : nullptr;
     const std::size_t tagCount = tagged ? tagged->tags.size() : 0;
     const float dotsW = tagCount > 0 ? kTagDotColumnWidth : 0.0f;
 

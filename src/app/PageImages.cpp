@@ -25,8 +25,8 @@ namespace {
 // syscalls for its first layout.
 const std::filesystem::path& resolvedImagePath(UiRuntime& ui, std::string_view target) {
   static const std::filesystem::path kNone;
-  if(!ui.state.hasLibrary()) return kNone;
-  const auto& root = ui.state.libraryRoot();
+  if(!ui.state.catalog().isOpen()) return kNone;
+  const auto& root = ui.state.catalog().root();
   ui.imagePaths.retarget(root);
   if(const auto* found = ui.imagePaths.find(target)) return *found;
   std::filesystem::path path;

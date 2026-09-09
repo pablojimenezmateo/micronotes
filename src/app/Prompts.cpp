@@ -36,7 +36,7 @@ bool hasSelectedFolder(UiRuntime& ui, const char* verb) {
 void beginTagEdit(UiRuntime& ui) {
   if(ui.editor.dirty() && !saveCurrent(ui)) return;
   const auto& note = ui.state.openNote();
-  if(note.noteId.empty()) {
+  if(note.noteId().empty()) {
     ui.status = "Select a note before editing tags";
     return;
   }
@@ -44,14 +44,14 @@ void beginTagEdit(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "tags";
   overlay.title = "Tags for \"" + std::string(ui.state.selectedTitle()) + "\"";
-  overlay.value.beginWith(joinTags(note.metadata.tags));
+  overlay.value.beginWith(joinTags(note.metadata().tags));
   overlay.placeholder = "space separated";
   overlay.hint = "Enter to save, Esc to cancel";
   ui.overlays.open(std::move(overlay));
 }
 
 void saveTags(UiRuntime& ui) {
-  if(ui.state.updateSelectedTags(splitTags(ui.fields.tag.text()))) {
+  if(ui.state.updateSelectedTags(splitTags(ui.fields.tag.text()), ui.editor.text())) {
     ui.focus = FocusArea::Editor;
     ui.status = "Saved tags";
   } else {
@@ -60,7 +60,7 @@ void saveTags(UiRuntime& ui) {
 }
 
 void beginFolderCreate(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     ui.status = "Open a library before creating notebooks";
     return;
   }
@@ -161,8 +161,8 @@ void openNotePalette(UiRuntime& ui, std::string overlayId, std::string title) {
   overlay.placeholder = "Type a note title";
   overlay.hint = "Enter open   Esc cancel";
   overlay.width = 460.0f;
-  const auto root = ui.state.libraryRoot();
-  for(const auto& note : ui.state.allNotes()) {
+  const auto root = ui.state.catalog().root();
+  for(const auto& note : ui.state.catalog().notes()) {
     const auto folder = note.folder.generic_string();
     // The title alone: an icon is a drawn mark now, and its id ("bookmark")
     // pasted in front of a note's name is a word the reader never chose.
@@ -185,8 +185,8 @@ void openFolderPalette(UiRuntime& ui) {
   overlay.placeholder = "Type a notebook name";
   overlay.hint = "Enter move   Esc cancel";
   overlay.width = 420.0f;
-  const auto rootLabel = ui.state.libraryRoot().filename().generic_string();
-  for(const auto& folder : ui.state.folders()) {
+  const auto rootLabel = ui.state.catalog().root().filename().generic_string();
+  for(const auto& folder : ui.state.catalog().folders()) {
     overlay.items.push_back({folder.path.generic_string().empty() ? "/" : folder.path.generic_string(),
                              folder.path.empty() ? rootLabel : folder.path.generic_string(),
                              "", std::to_string(folder.noteCount), true, false});
@@ -195,7 +195,7 @@ void openFolderPalette(UiRuntime& ui) {
 }
 
 void openTrashPalette(UiRuntime& ui) {
-  const auto entries = ui.state.trashEntries();
+  const auto entries = ui.state.catalog().trashEntries();
   if(entries.empty()) {
     ui.status = "Trash is empty";
     return;
@@ -221,7 +221,7 @@ void openLibraryPrompt(UiRuntime& ui) {
   overlay.kind = ui::OverlayKind::TextPrompt;
   overlay.id = "settings-library";
   overlay.title = "Library folder";
-  overlay.value.beginWith(ui.state.hasLibrary() ? platform::displayPath(ui.state.libraryRoot()) : std::string {});
+  overlay.value.beginWith(ui.state.catalog().isOpen() ? platform::displayPath(ui.state.catalog().root()) : std::string {});
   overlay.placeholder = "~/Notes";
   overlay.hint = "Enter open   Esc cancel   a folder that is not there is created";
   overlay.width = 520.0f;
@@ -230,7 +230,7 @@ void openLibraryPrompt(UiRuntime& ui) {
 
 void openDeleteNoteConfirm(UiRuntime& ui) {
   const auto& note = ui.state.openNote();
-  if(note.noteId.empty()) {
+  if(note.noteId().empty()) {
     ui.status = "Select a note before deleting";
     return;
   }

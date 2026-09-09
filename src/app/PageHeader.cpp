@@ -53,19 +53,19 @@ ui::TextStyle valueStyle() {
 // unequal. Rename, tags and icon all go through refreshLibrary(), which is
 // where the revision moves.
 const std::vector<ui::NoteProperty>& refreshedHeader(UiRuntime& ui) {
-  const NoteRevision key {ui.state.selection().noteId, ui.state.revision()};
+  const NoteRevision key {ui.state.selection().noteId, ui.state.catalog().revision()};
   if(const auto* rows = ui.pageHeader.get(key)) return *rows;
 
   auto& rows = ui.pageHeader.rebuild(key);
   rows.clear();
-  if(key.noteId.empty() || !ui.state.hasLibrary()) return rows;
+  if(key.noteId.empty() || !ui.state.catalog().isOpen()) return rows;
   // From the open-note record, which costs nothing. This used to be
   // `selectedNote()`: a read and a front-matter parse of the whole note, keyed
   // on the library revision -- which moves on every save. Drawing the header
   // re-read the note once a second while somebody was typing into it.
   const auto& note = ui.state.openNote();
-  if(note.noteId.empty()) return rows;
-  rows = ui::notePropertiesOf(note.metadata);
+  if(note.noteId().empty()) return rows;
+  rows = ui::notePropertiesOf(note.metadata());
   return rows;
 }
 

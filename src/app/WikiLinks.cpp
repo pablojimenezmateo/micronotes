@@ -54,7 +54,7 @@ void openWikiLink(UiRuntime& ui, std::string_view target) {
   // Created beside the note that links to it, which is where someone writing
   // a link would have filed it by hand.
   std::filesystem::path folder = ui.state.selection().folder;
-  if(const auto current = ui.state.findNote(ui.state.selection().noteId)) {
+  if(const auto current = ui.state.catalog().findNote(ui.state.selection().noteId)) {
     folder = current->folder;
   }
   if(!saveCurrent(ui, true)) return;
@@ -90,8 +90,8 @@ void openWikiMenu(UiRuntime& ui, std::size_t wikiStart) {
   overlay.hint = "Enter links, Esc keeps typing";
   // The note behind stays lit: this list is about the line the caret is on.
   overlay.dimsBehind = false;
-  const auto root = ui.state.libraryRoot();
-  for(const auto& note : ui.state.allNotes()) {
+  const auto root = ui.state.catalog().root();
+  for(const auto& note : ui.state.catalog().notes()) {
     const auto folder = note.folder.generic_string();
     overlay.items.push_back({note.title, note.title, folder.empty() ? "" : folder, "", true, false});
   }

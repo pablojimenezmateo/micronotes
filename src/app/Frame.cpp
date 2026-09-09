@@ -75,7 +75,7 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
     const perf::ScopeTimer timer("shell.breadcrumb");
     drawBreadcrumb(renderer, text, ui, layout.breadcrumb);
   }
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     fill(renderer, layout.content, theme().editorBackground);
     // The one screen someone can arrive at knowing nothing, so it says what
     // the app is for before it says which key to press.

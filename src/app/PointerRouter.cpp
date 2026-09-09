@@ -198,13 +198,13 @@ void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button) {
       selectNoteById(ui, ui.sidebar.drag.noteId);
       if(ui.state.moveSelectedNoteToFolder(target)) {
         ui.sidebar.tree.reveal(target);
-        ui.status = "Moved note to " + (target.empty() ? ui.state.libraryRoot().filename().generic_string() : target.generic_string());
+        ui.status = "Moved note to " + (target.empty() ? ui.state.catalog().root().filename().generic_string() : target.generic_string());
       } else {
         ui.status = "Move note failed";
       }
     } else if(ui.state.moveFolderInto(ui.sidebar.drag.folderPath, target)) {
       ui.sidebar.tree.reveal(target / ui.sidebar.drag.folderPath.filename());
-      ui.status = "Moved notebook into " + (target.empty() ? ui.state.libraryRoot().filename().generic_string() : target.generic_string());
+      ui.status = "Moved notebook into " + (target.empty() ? ui.state.catalog().root().filename().generic_string() : target.generic_string());
     } else if(target != ui.sidebar.drag.folderPath.parent_path() && target != ui.sidebar.drag.folderPath) {
       ui.status = "Cannot move a notebook into itself";
     }

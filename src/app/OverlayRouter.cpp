@@ -60,7 +60,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     }
   } else if(result.overlayId == "jump-note") {
     selectNoteById(ui, result.itemId);
-    if(const auto note = ui.state.findNote(result.itemId)) {
+    if(const auto note = ui.state.catalog().findNote(result.itemId)) {
       ui.fields.search.reset();
       showFolder(ui, note->folder);
       ui.state.selectNote(result.itemId);
@@ -75,7 +75,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   } else if(result.overlayId == "restore-trash") {
     ui.status = ui.state.restoreFromTrash(result.itemId) ? "Restored from trash" : "Restore failed";
   } else if(result.overlayId == "note-icon") {
-    ui.status = ui.state.setSelectedNoteIcon(result.itemId)
+    ui.status = ui.state.setSelectedNoteIcon(result.itemId, ui.editor.text())
                   ? (result.itemId.empty() ? "Removed icon" : "Set icon")
                   : "Could not set icon";
   } else if(result.overlayId == "settings-library") {

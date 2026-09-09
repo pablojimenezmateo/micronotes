@@ -65,7 +65,7 @@ void switchLibrary(UiRuntime& ui, const std::string& typed) {
   }
   const std::filesystem::path root(value);
   std::error_code ec;
-  if(ui.state.hasLibrary() && std::filesystem::equivalent(root, ui.state.libraryRoot(), ec) && !ec) {
+  if(ui.state.catalog().isOpen() && std::filesystem::equivalent(root, ui.state.catalog().root(), ec) && !ec) {
     ui.status = "Already open";
     return;
   }

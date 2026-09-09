@@ -180,12 +180,14 @@ set(MICRONOTES_APP_SOURCES
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/Metadata.cpp
+  src/library/NoteCatalog.cpp
   src/library/Organization.cpp
   src/library/RecoveryStore.cpp
   src/library/SearchScope.cpp
   src/library/WikiResolve.cpp
   src/ui/Actions.cpp
   src/ui/AppState.cpp
+  src/ui/OpenNoteRecord.cpp
   src/ui/FoldState.cpp
   src/ui/CaretBlink.cpp
   src/ui/NoteProperties.cpp

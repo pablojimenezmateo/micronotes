@@ -7,7 +7,7 @@
 namespace micronotes::app {
 
 bool autosavePending(const UiRuntime& ui) {
-  return ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty();
+  return ui.state.catalog().isOpen() && ui.editor.dirty() && !ui.state.selection().noteId.empty();
 }
 
 Uint64 autosaveDueAt(const UiRuntime& ui) {

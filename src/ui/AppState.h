@@ -2,15 +2,12 @@
 
 #include "CoreAliases.h"
 
-#include "core/platform/DurableFile.h"
-
-#include "library/Library.h"
-#include "library/LibraryIndex.h"
+#include "library/NoteCatalog.h"
 #include "library/Organization.h"
-#include "library/RecoveryStore.h"
+#include "library/SearchScope.h"
+#include "ui/OpenNoteRecord.h"
 #include "ui/WorkspaceModel.h"
 
-#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -60,32 +57,6 @@ struct UiSelection {
   }
 };
 
-struct LoadedNote {
-  library::NoteListItem item;
-  library::NoteMetadata metadata;
-  std::string body;
-};
-
-// The note the editor has open, as it was last read from or written to disk.
-//
-// Every question about the open note that is not about its *body* is answered
-// from here instead of by opening the file again. It used to be a full read and
-// a front-matter parse per asker per library revision, and the library revision
-// moved on every save: the page header, the right-hand panel and the save
-// itself each re-read the whole note once a second while somebody was typing
-// into it.
-//
-// `disk` is what makes the save path safe. It is the identity of the file the
-// front matter and the body were read from, so a stat before writing says
-// whether anything else has touched the note in the meantime -- which is the
-// difference between overwriting a `git checkout` and noticing it.
-struct OpenNote {
-  std::string noteId;   // empty when nothing is open
-  std::filesystem::path path;
-  library::NoteMetadata metadata;
-  platform::FileSignature disk;
-};
-
 // What a save did.
 //
 // A bool could not say the one thing worth saying: that the note had been
@@ -98,25 +69,31 @@ struct SaveResult {
   std::string conflictCopy;
 };
 
-// Why the editor's copy of a note is out of step with the file.
-enum class DiskState {
-  Agrees,     // the file is as micronotes last read or wrote it
-  Changed,    // something else has rewritten it
-  Vanished,   // it was there and is not any more
-  Unknown     // the stat failed; treated as Changed everywhere it matters
-};
-
+// What is selected, how the window is arranged, and the commands that change a
+// note because of it.
+//
+// It used to be five things behind one door: the library and its index, the
+// selection, the workspace, the open note's record, and every write that
+// reaches a file. Two of the five are their own types now --
+// `library::NoteCatalog` and `ui::OpenNoteRecord` -- and what is left is the
+// part that genuinely needs more than one of them: a command like "delete the
+// selected note" is a library write, a memo to forget and a tab to close, and
+// the class that owns the join is the one place those three stay in step.
+//
+// Everything that is only about the library is asked of `catalog()`; everything
+// that is only about the open note's file is asked of `openNote()`.
 class AppState {
 public:
-  // --- the library ---------------------------------------------------------
-
   bool openOrCreateLibrary(const std::filesystem::path& root);
-  bool hasLibrary() const;
-  const std::filesystem::path& libraryRoot() const;
-  // Bumped every time the library is re-read. A view that caches an answer
-  // derived from the library keys its cache on this rather than trying to name
-  // every mutation that could have invalidated it.
-  std::uint64_t revision() const;
+
+  // The library, its index and the memos over both. Const: a surface reads the
+  // library, and every write to it is a command below, because a write is never
+  // only a write -- the selection, the open note's record and the tab strip all
+  // follow one.
+  const library::NoteCatalog& catalog() const;
+  // The open note as last read from or written to disk, and the draft of it
+  // that survives a crash. Const for the same reason.
+  const OpenNoteRecord& openNote() const;
 
   // --- what is selected, and what the window is showing --------------------
 
@@ -143,46 +120,21 @@ public:
   void stepTab(int delta);
   void setSearch(std::string query, library::SearchScope scope = library::SearchScope::All);
 
-  // --- reading the library -------------------------------------------------
+  // --- the library, through the selection ----------------------------------
 
-  // References into the organization service's memos. The sidebar reads all
-  // three every frame; handing back copies meant rebuilding the note list, the
-  // folder list and the tag list once per frame for a library that had not
-  // changed since the last one.
-  const std::vector<library::FolderNode>& folders() const;
-  const std::vector<std::string>& tags() const;
+  // The notes the sidebar's list is showing: a folder's, a tag's, or a query's.
   std::vector<library::NoteListItem> currentNotes() const;
-  const std::vector<library::NoteListItem>& allNotes() const;
   std::vector<library::SearchResult> currentSearchResults() const;
   // Notes whose text links to the open one. Empty when nothing is open.
   std::vector<library::Backlink> backlinksToSelected() const;
-  std::optional<library::NoteListItem> findNote(std::string_view noteId) const;
-  // The same lookup as a borrow. A caller that only reads what it found should
-  // take this: `findNote` copies a path and three strings out of a list the
-  // caller already holds a reference to.
-  const library::NoteListItem* noteById(std::string_view noteId) const;
-  std::vector<library::TrashEntry> trashEntries() const;
-
-  // --- reading the open note -----------------------------------------------
-
-  // The open note's front matter and the identity of its file. Opens the file
-  // at most once per note rather than once per caller; see `OpenNote`.
-  const OpenNote& openNote() const;
-  // The open note's *body*, off the disk, with its front matter. The one reader
-  // of a note's text: anything that wants a title, a tag or an icon wants
-  // `openNote()` and costs nothing.
-  std::optional<LoadedNote> readSelectedNote() const;
-  // Whether the file still says what micronotes last read or wrote. One stat.
-  DiskState selectedNoteDiskState() const;
   // The open note's name, as the library lists it. The note list already
   // applies the rule -- the front matter's `title`, or the file's stem when it
   // carries none -- so the four callers that re-derived it from the metadata
   // were recomputing an answer that was already sitting in the list. Empty when
   // nothing is open.
   std::string_view selectedTitle() const;
-  std::optional<std::string> selectedRecoveryBody() const;
 
-  // --- writes that reach the disk ------------------------------------------
+  // --- commands that reach the disk ----------------------------------------
   //
   // Everything below here changes a file in the reader's library. Grouped
   // because the difference matters and the header did not show it: the
@@ -190,13 +142,14 @@ public:
   // flat list of fifty-five, and nothing said which of them could lose an
   // afternoon's work.
   //
-  // The rule that governs all of them is `saveSelectedNote`'s. A note's file is
-  // never written without checking what is there first -- `AppState` carries a
-  // `platform::FileSignature` per open note and compares it before overwriting
-  // -- because a path that skips that comparison destroys an edit made in
-  // another program. If two versions exist and cannot be merged, both end up in
-  // the library; micronotes does not choose. See `docs/library-format.md`,
-  // "Changes Made Outside micronotes", and the rule in `AGENTS.md`.
+  // Every one of them that rewrites the open note goes through one guarded
+  // write. A note's file is never written without checking what is there first
+  // -- `OpenNoteRecord` carries a `platform::FileSignature` per open note and
+  // it is compared before overwriting -- because a path that skips that
+  // comparison destroys an edit made in another program. If two versions exist
+  // and cannot be merged, both end up in the library; micronotes does not
+  // choose. See `docs/library-format.md`, "Changes Made Outside micronotes",
+  // and the rule in `AGENTS.md`.
 
   // Writes `body` to the open note.
   //
@@ -205,15 +158,17 @@ public:
   // first, and `SaveResult::conflictCopy` names it. Nothing is silently
   // overwritten, and nothing stalls -- the buffer is written either way, so
   // typing does not stop because a sync daemon touched the file.
-  //
-  // The index update is for the one file that changed, not a rescan of the
-  // library, and the note list's memos survive a save that only moved the body.
   SaveResult saveSelectedNote(std::string_view body);
-  // Queues the recovery copy of the open note. Returns false when a write
-  // posted earlier has since failed; see `library::RecoveryStore` for why the
-  // answer is about an earlier post rather than this one.
-  bool saveSelectedNoteRecovery(std::string_view body) const;
-  bool clearSelectedNoteRecovery() const;
+
+  // The three header edits. Each takes the body the *editor* is holding rather
+  // than reading one off the disk, which is what makes them safe: the version
+  // that reaches the file is the one on screen. They used to read the body
+  // back, which was correct only while every route into them happened to save
+  // first -- an invariant nothing stated and no test held.
+  bool renameSelectedNote(const std::string& title, std::string_view body);
+  // An empty icon removes the front matter key rather than writing it blank.
+  bool setSelectedNoteIcon(const std::string& icon, std::string_view body);
+  bool updateSelectedTags(const std::vector<std::string>& tags, std::string_view body);
 
   // A note created here opens in a tab of its own like any other, which is what
   // hardcoding the old `false` got wrong: following a dead `[[wikilink]]`
@@ -228,13 +183,6 @@ public:
   bool deleteSelectedNote();
   bool moveSelectedNoteToFolder(const std::filesystem::path& folder);
   bool restoreFromTrash(const std::string& name);
-
-  // The three header edits. All of them go through `saveSelectedNoteHeader`,
-  // and all of them require the buffer to have been saved first -- see TD-16.
-  bool renameSelectedNote(const std::string& title);
-  // An empty icon removes the front matter key rather than writing it blank.
-  bool setSelectedNoteIcon(const std::string& icon);
-  bool updateSelectedTags(const std::vector<std::string>& tags);
 
   bool createFolder(const std::filesystem::path& folder);
   bool renameSelectedFolder(const std::filesystem::path& folder);
@@ -258,20 +206,13 @@ public:
 
   // --- keeping up with what changed underneath -----------------------------
 
-  // Re-reads the library from disk: a recursive walk, a stat per note, a read of
-  // every row in the index, and then every memo the note list has built is
-  // dropped. Right when *something* changed and nobody can say what -- a window
-  // regaining focus, a folder operation -- and wrong on the save path, which
+  // Re-reads the whole library. Right when *something* changed and nobody can
+  // say what -- a window regaining focus -- and wrong on the save path, which
   // knows exactly which file it wrote.
   bool refreshLibrary();
   // Re-indexes one file, without a walk. Returns whether that changed anything
   // the note list shows. Used by the watcher, which is told which file moved.
   bool refreshNoteFile(const std::filesystem::path& path);
-  // Drops the memos derived from the note list -- the list itself, the folder
-  // counts, the tag list, the id map. For a caller that has re-indexed several
-  // files with `refreshNoteFile` and wants to pay for one rebuild rather than
-  // one per file.
-  void invalidateNoteList();
   // Forgets everything read about the open note and re-indexes its file, so the
   // next question about it goes back to the disk. For a note that changed
   // underneath the app: the record is a memo of a file that no longer says
@@ -283,38 +224,32 @@ public:
   bool reloadSelectedNote();
 
 private:
-  // Replaces the open note's front matter without touching its body. Private
-  // because the three header edits above are the only ways in and the only ways
-  // that should be: the body written back is the one on disk, so a caller that
-  // has not saved the buffer first would write a stale one. See TD-16.
-  bool saveSelectedNoteHeader(const library::NoteMetadata& metadata);
-  // Re-indexes a file *this app has just written*: the front matter and body
-  // are handed over instead of being read back out of it. Private because
-  // "just written" is a claim only the write paths above can make.
-  bool refreshWrittenNoteFile(const std::filesystem::path& path,
-                              const library::NoteMetadata& metadata, std::string_view body);
-  // Establishes `openNote_` for whatever the selection names, reading the file
-  // when the selection has moved to a note this has not seen. `body` takes the
-  // text when the caller wants it, so opening a note is one read rather than
-  // one for the body and another for the front matter.
-  const OpenNote& loadOpenNote(std::string* body) const;
-  // Records a single-file re-index: moves the revision when a row actually
-  // moved, and reports whether the note list has to be rebuilt.
-  bool applied(const library::LibraryIndex::FileRefresh& refresh);
+  // Whether the file the open note came from keeps its name, or takes the one
+  // `metadata.title` implies. A rename is the same write as a save with the
+  // same guard in front of it; the only difference is this.
+  enum class NamePolicy { Keep, FollowTitle };
 
-  WorkspaceModel workspace_;
+  // The one path that rewrites the open note's file. Everything above that
+  // writes a note -- the save, the rename, the icon, the tags -- arrives here,
+  // so the external-change check, the record update and the retired recovery
+  // copy are written once rather than four times and forgotten in one of them.
+  SaveResult writeOpenNote(library::NoteMetadata metadata, std::string_view body,
+                           NamePolicy naming);
+  // A note that arrived without front matter gets a permanent id the first time
+  // micronotes writes it, so its identity survives a later move.
+  void adoptIdIfMissing(library::NoteMetadata& metadata) const;
+  // The note's id moved. Everything pointing at the old one -- the selection,
+  // its tab, the favorites, the recents -- has to follow, or the note the user
+  // is looking at disappears out from under them.
+  void followIdChange(const std::string& previous, const std::string& adopted);
+
+  library::NoteCatalog catalog_;
   UiSelection selection_;
-  std::optional<library::Library> library_;
-  // The open note's front matter, read once per note. Mutable because reading
-  // it is memoisation rather than a change of state: every asker holds a const
-  // `AppState`.
-  mutable std::optional<OpenNote> openNote_;
-  mutable std::optional<library::OrganizationService> organization_;
-  library::LibraryIndex index_;
-  // Mutable because posting recovery is a side effect of editing, not of
-  // changing the state: every caller of it holds a const `AppState`.
-  mutable library::RecoveryStore recovery_;
-  std::uint64_t revision_ = 0;
+  WorkspaceModel workspace_;
+  // Bound to the two above at construction: the record is a memo *of* whatever
+  // is selected, so it reads them rather than being pushed at. Declared last so
+  // both are alive before it binds.
+  OpenNoteRecord openNote_ {catalog_, selection_.noteId};
 };
 
 }

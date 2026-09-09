@@ -47,11 +47,11 @@ bool writeConfiguredLibraryRoot(const std::filesystem::path& root) {
 }
 
 void persistLibraryState(UiRuntime& ui) {
-  if(!ui.state.hasLibrary()) return;
-  ui.state.saveUiState(uiStatePath(ui.state.libraryRoot()));
-  if(ui.folds.dirty()) ui.folds.save(foldStatePath(ui.state.libraryRoot()));
+  if(!ui.state.catalog().isOpen()) return;
+  ui.state.saveUiState(uiStatePath(ui.state.catalog().root()));
+  if(ui.folds.dirty()) ui.folds.save(foldStatePath(ui.state.catalog().root()));
   if(ui.sidebar.tree.dirty()) {
-    platform::writeFileDurably(treeStatePath(ui.state.libraryRoot()), ui.sidebar.tree.serialize());
+    platform::writeFileDurably(treeStatePath(ui.state.catalog().root()), ui.sidebar.tree.serialize());
   }
 }
 
@@ -69,19 +69,19 @@ void installWatcherWake(UiRuntime& ui) {
 
 bool attachFromCli(UiRuntime& ui, const std::filesystem::path& source) {
   if(source.empty()) return true;
-  if(!ui.state.hasLibrary()) {
+  if(!ui.state.catalog().isOpen()) {
     std::cerr << "--attach requires --library\n";
     return false;
   }
-  ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
-  const auto selected = ui.state.readSelectedNote();
+  ui.state.loadUiState(uiStatePath(ui.state.catalog().root()));
+  const auto selected = ui.state.openNote().read();
   if(!selected) {
     std::cerr << "--attach requires a selected note saved in UI state\n";
     return false;
   }
   attachments::AttachmentService service;
   try {
-    const auto link = service.attachFile(ui.state.libraryRoot(), selected->metadata.id, source);
+    const auto link = service.attachFile(ui.state.catalog().root(), selected->metadata.id, source);
     ui.editor.setText(selected->body);
     ui.editor.insert("\n" + link.markdown + "\n");
     ui.state.saveSelectedNote(ui.editor.text());
@@ -102,11 +102,11 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   // A tree that cannot be watched -- the per-user inotify limit, a filesystem
   // that does not support it -- is not an error. The focus-gained refresh is
   // still there, and it is what micronotes had before this.
-  ui.watcher.watch(ui.state.libraryRoot(), {microcore::kAppDotDir});
-  ui.state.loadUiState(uiStatePath(ui.state.libraryRoot()));
-  ui.folds.load(foldStatePath(ui.state.libraryRoot()));
+  ui.watcher.watch(ui.state.catalog().root(), {microcore::kAppDotDir});
+  ui.state.loadUiState(uiStatePath(ui.state.catalog().root()));
+  ui.folds.load(foldStatePath(ui.state.catalog().root()));
   std::ostringstream treeBuffer;
-  if(std::ifstream treeState(treeStatePath(ui.state.libraryRoot())); treeState) {
+  if(std::ifstream treeState(treeStatePath(ui.state.catalog().root())); treeState) {
     treeBuffer << treeState.rdbuf();
   }
   ui.sidebar.tree.load(treeBuffer.str());

@@ -39,7 +39,10 @@ App-only code stays outside, in the layer that owns the concept:
 - `src/doc/` -- the Markdown *document*: the block and inline scanners, the
   incremental layout, the edits, `[[wikilink]]` syntax, what a link target means.
 - `src/library/` -- the *folder of notes*: the index, front matter, search
-  scope, trash, and which note a `[[target]]` resolves to.
+  scope, trash, and which note a `[[target]]` resolves to. `NoteCatalog` is the
+  library, its index and the memos over both kept in step -- every write to a
+  note's file goes through it so that re-indexing what was just written is not
+  something a caller can forget.
 - `src/ui/` -- what draws and what models a surface. Everything in here either
   paints, measures, or is state a surface keeps. A helper that only counts
   bytes belongs in `core/util/`; one that takes a `measure` belongs here.
@@ -208,10 +211,11 @@ when the counters went in it turned out to be 70% of every frame.
   change. Commit it separately from the work that uncovered it.
 - Keep deterministic logic out of SDL event glue and paint code. Thin
   orchestration layers are easier to test.
-- **Never write a note's file without checking what is there.** `AppState`
-  carries a `platform::FileSignature` per open note and `saveSelectedNote`
-  compares it before writing; a path that skips that comparison can destroy an
-  edit made in another program. If two versions of a note exist and cannot be
+- **Never write a note's file without checking what is there.**
+  `ui::OpenNoteRecord` carries a `platform::FileSignature` per open note and
+  `AppState::writeOpenNote` -- the one path every save, rename, icon and tag
+  edit goes through -- compares it before writing; a path that skips that
+  comparison can destroy an edit made in another program. If two versions of a note exist and cannot be
   merged, both end up in the library -- micronotes does not choose. See
   `docs/library-format.md`, "Changes Made Outside micronotes".
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
