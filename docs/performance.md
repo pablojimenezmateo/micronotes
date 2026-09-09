@@ -1384,13 +1384,14 @@ Every one of those is a linear pass over integers or bytes with no branches, no
 hashing and no pointer chasing, which is why they add up to 16 us where the walks
 they replaced were 337. Three of them are named as open items below.
 
-### Open: an edit still touches every block below it
+### Measured and declined: an edit still touches every block below it
 
-`layout.blocks_shifted` reads 451,230 over the run and the block tail's `start`
-shift is the same shape: an edit near the top of a note updates a position on
-every block under it, even though nothing about those blocks changed except where
-they sit. (The block half is one integer add per block now rather than four --
-see `SourceBlock` below -- so what is left of this is the placement's.)
+`layout.blocks_shifted` reads 455,938 over a harness run and the block tail's
+`start` shift is the same shape: an edit near the top of a note updates a
+position on every block under it, even though nothing about those blocks changed
+except where they sit. (The block half is one integer add per block now rather
+than four -- see `SourceBlock` below -- so what is left of this is the
+placement's.)
 
 Both are the same design decision -- positions are *materialised*, as an absolute
 `top` per block and an absolute row index per block -- and the alternative is to
@@ -1402,8 +1403,13 @@ on both counts, so this is written down as the thing to reach for if the shift
 ever shows up rather than as a fix waiting to happen.
 
 The measurement that would justify it is `layout.blocks_shifted` per update
-against `layout.blocks`: today it is 1,812 against 9,612 on average, and a
-keystroke that does not rewrap its own block moves nothing at all.
+against `layout.blocks`: 455,938 shifts over the 383 updates that did any work,
+against a document of 9,612 blocks -- about 1,200 positions touched per edit,
+an eighth of the note -- and a keystroke that does not rewrap its own block
+moves nothing at all. Re-measured after the shell lane and the `UpdatePass`
+split, and unchanged in shape. It stays declined: the shift has not shown up,
+and the tree would put an O(log n) probe on the render path to remove work that
+is not on it.
 
 ### Resolved: `resolveFolds` was O(blocks) on every edit *that has a fold in it*
 

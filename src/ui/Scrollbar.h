@@ -13,7 +13,7 @@
 // moves it -- and one answer, which is the whole point: `PageView` used to
 // carry a private copy of these numbers, paint the live page's bar from it and
 // be hit-tested against this one, so the two agreeing was a coincidence rather
-// than a fact (TD-20).
+// than a fact.
 namespace micronotes::ui {
 
 // A vertical scrollbar down the right of a viewport, drawn only when there is
@@ -25,7 +25,7 @@ namespace micronotes::ui {
 // the drag that moves it -- so what is drawn and what responds cannot drift.
 // They did: `PageView` carried a private copy of these numbers, painted the
 // live page's scrollbar from it, and was hit-tested against ui's, so the two
-// agreeing was a coincidence rather than a fact (TD-20).
+// agreeing was a coincidence rather than a fact.
 struct ScrollbarGeometry {
   Rect track;
   Rect thumb;

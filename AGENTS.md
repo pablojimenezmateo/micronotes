@@ -7,7 +7,10 @@ First-stop operating guide for agents working in this repository.
 - `micronotes` is a Linux-only Markdown notes app in C++20, CMake, SDL3, SQLite.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
-  something is unaccounted for, and add to it rather than leaving a `TODO`.
+  something is unaccounted for, and add to it rather than leaving a `TODO`. It
+  is **currently empty**, which is a claim rather than an oversight -- so
+  something that looks unaccounted for probably is, and the honest answers are
+  to fix it or to open an entry that says what it costs and why not.
 - `src/core/` is the app-agnostic layer. Read the rule below before touching it.
 - The tree is layered and the layers only point one way: **core < doc < library
   < ui < app**. `architecture_the_layers_only_point_one_way` checks it, because

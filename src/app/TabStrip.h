@@ -17,8 +17,8 @@ struct UiRuntime;
 // What the strip drew, recorded as it drew it.
 //
 // The strip used to lay itself out again on every question about it: once for
-// the paint, once for the click, once more for the cursor shape. That is
-// `TD-20`, and it is not an efficiency complaint -- `layoutTabs` narrows every
+// the paint, once for the click, once more for the cursor shape. That is not
+// an efficiency complaint -- `layoutTabs` narrows every
 // tab to the widest title when that is less than an even share of the strip, so
 // its result depends on the text measurer it is handed, and three callers each
 // deciding to call it the same way is three chances not to. One of them did

@@ -431,8 +431,7 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
 
 // The tab strip lays itself out exactly once, in the draw.
 //
-// That is the shape `TD-20` asked for, and the reason it is asserted here is
-// that nothing else can see it. `ui::layoutTabs` narrows every tab to the
+// Asserted here because nothing else can see it. `ui::layoutTabs` narrows every tab to the
 // widest title when that is less than an even share of the strip, so its
 // result depends on the text measurer it is handed -- and a second caller that
 // hands it a different one, or none, gets a *different strip* with no error and

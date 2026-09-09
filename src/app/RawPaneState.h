@@ -12,12 +12,13 @@
 
 // The pane that shows the note as a monospaced file.
 //
-// Named apart from the other two panes because it is a third renderer, and the
-// plan on the record is that it may go: `docs/tech-debt.md` TD-14 says the file
-// is "kept apart so that replacing it is a matter of deleting one file", and
-// this is the state half of that promise. If the pane goes, this header goes
-// with it and nothing else has to be untangled -- which was not true while its
-// five fields sat among `UiRuntime`'s hundred.
+// Named apart from the other two panes because it is a third renderer, and one
+// that was for a long time expected to go. It stays -- it is the escape hatch
+// for anything the live surface does not model, and being a different engine is
+// what it is *for* rather than what is wrong with it -- but the separation is
+// worth keeping: if it ever does go, this header goes with it and nothing else
+// has to be untangled, which was not true while its five fields sat among
+// `UiRuntime`'s hundred.
 namespace micronotes::app {
 
 // What the pane's soft wrap was computed from: the buffer, the column, and the

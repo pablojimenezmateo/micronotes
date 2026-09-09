@@ -79,8 +79,7 @@ static editor::MeasureText editorMeasure(TextRenderer& text) {
 // The note soft-wrapped to the pane's column, rewrapped only when something it
 // depends on has moved.
 //
-// Keyed on the editor's revision rather than on a copy of the note, which is
-// most of `TD-14`. The old key was the source text itself: 17.6 us per
+// Keyed on the editor's revision rather than on a copy of the note. The old key was the source text itself: 17.6 us per
 // keystroke to copy a 200 KB note into it and 9.8 us per frame to compare
 // against it, for a question the revision answers in one word. The text size
 // is in the key as well -- the wrap width is a rect and does not move when the
@@ -88,7 +87,9 @@ static editor::MeasureText editorMeasure(TextRenderer& text) {
 // the note to a font it was no longer drawn in.
 //
 // What is *not* fixed is the rewrap itself: it is still the whole note, because
-// `editor::softWrap` has no incremental form. See `docs/tech-debt.md`, TD-14.
+// `editor::softWrap` has no incremental form. At 0.7 ms against a 2 ms keystroke
+// budget that is a thing to know rather than a thing to fix, and
+// `shell.raw_pane_rewrap` in the harness is what keeps it that way.
 const std::vector<editor::SoftWrapRow>& rawPaneRows(TextRenderer& text, UiRuntime& ui, Rect rect) {
   const Rect writing = editorWritingRect(rect);
   const RawRowsKey key {ui.editor.revision(), static_cast<int>(std::max(1.0f, writing.w - 20.0f)),

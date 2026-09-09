@@ -1006,11 +1006,11 @@ static constexpr std::uint64_t kShellStatusBudgetMicros = 50;
 // scenario whose cost moves most with what else the machine is doing.
 static constexpr std::uint64_t kShellPageBudgetMicros = 20000;
 // The raw pane rewraps the whole note on every keystroke and has no incremental
-// form, which is what is left of `TD-14`. What it no longer does is *shape*
-// anything to find out where a line ends: the pane is a monospaced grid, so a
-// run of ASCII is as wide as it is long. That took it from 70 ms to 0.7 ms, and
-// a budget in the hundreds of microseconds is a budget again rather than a
-// ceiling on a number nobody was pleased with.
+// form. What it no longer does is *shape* anything to find out where a line
+// ends: the pane is a monospaced grid, so a run of ASCII is as wide as it is
+// long. That took it from 70 ms to 0.7 ms, and a budget in the hundreds of
+// microseconds is a budget again rather than a ceiling on a number nobody was
+// pleased with.
 static constexpr std::uint64_t kShellRawBudgetMicros = 3000;
 static constexpr std::uint64_t kShellKeystrokeBudgetMicros = 24000;
 

@@ -62,7 +62,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     // thing; a strip that scrolls is invisible at *both* ends, and breaking on
     // the tab scrolled off the left drew nothing at all from the first time the
     // strip overflowed. The hit test beside it already used `continue`, so the
-    // two disagreed about the same list -- see TD-20.
+    // two disagreed about the same list.
     if(!slot.visible) continue;
     const bool active = slot.index == workspace.activeTab;
     const bool hot = ui::contains(slot.rect, ui.pointer.x, ui.pointer.y);

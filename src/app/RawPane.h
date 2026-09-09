@@ -26,11 +26,12 @@ void placeEditorCursor(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, flo
 // The pane's soft wrap of the buffer, memoised on the revision, the column and
 // the text size.
 //
-// Exposed because it is the number `TD-14` is about: the rewrap is the whole
-// note on every keystroke, and until the harness had a lane that could reach it
-// that was a figure somebody had measured once by hand. The pane is the only
-// surface in the shell with a wrap of its own -- it shows the file as bytes, so
-// its line breaks are the file's and not the layout's.
+// Exposed for the harness's shell lane, which is what put a number on it: the
+// rewrap is the whole note on every keystroke, and before the lane existed that
+// was a figure somebody had measured once by hand -- and had measured against a
+// fixed-advance stub, which is why it was wrong by two orders of magnitude. The
+// pane is the only surface in the shell with a wrap of its own: it shows the
+// file as bytes, so its line breaks are the file's and not the layout's.
 const std::vector<editor::SoftWrapRow>& rawPaneRows(ui::TextRenderer& text, UiRuntime& ui,
                                                     ui::Rect rect);
 
