@@ -16,6 +16,12 @@ that is the cheapest regression test this file has: screenshot each and `cmp`
 them. Anything that differs outside the status bar is a bug in one of them.
 
 In each: the content wraps without overflow, scrolls, and links stay clickable.
+**Nothing scrolls sideways, and nothing needs to.** Micronotes has one axis on
+purpose: a code line longer than the column wraps and wears a mark at the point
+the column broke it, and a table wider than the page shares the page between its
+columns and wraps inside the cells. A break the *file* contains never wears the
+mark -- that distinction is `doc::VisualLine::continuation`, and without it every
+hand-wrapped line in a note would claim to have been broken by the window.
 In the live surface, additionally: a block's syntax markers appear only while
 the caret is inside it, `Ctrl+.` folds any heading or list item that owns
 something, and typing anywhere leaves the rest of the file byte-identical.

@@ -1827,3 +1827,52 @@ MICRONOTES_TEST(layout_recolours_a_wikilink_when_the_library_changes_under_it) {
   layout.update(source, options);
   MICRONOTES_REQUIRE(roleOfTheLink() == micronotes::doc::TextRole::WikiLinkUnresolved);
 }
+
+// Nothing scrolls sideways, so nothing may be wider than its column.
+//
+// A fenced code block and a block dropped to raw were the two that did not
+// wrap: a long line ran off the right of its own column and stopped there. The
+// clip kept it inside the column, which is the right treatment only if there is
+// a way to follow it, and there was not.
+//
+// What separates a wrap from a line the file itself ended is
+// `VisualLine::continuation`, and it has to: the mark that says "the column
+// broke this" would otherwise appear on every hand-wrapped line in the note.
+MICRONOTES_TEST(layout_wraps_a_code_line_too_long_for_its_column) {
+  const auto lines = [](const std::string& source, float width) {
+    DocumentLayout layout;
+    layout.setMetrics(stubMetrics());
+    LayoutOptions options;
+    options.width = width;
+    layout.update(source, options);
+    return layout.layout(0).lines;
+  };
+
+  // Eight characters per glyph in the stub, so this line is far wider than the
+  // column and has no space in it to break at.
+  const std::string code = "```\nabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\n```\n";
+  const auto wrapped = lines(code, 200.0f);
+  MICRONOTES_REQUIRE(wrapped.size() > 1);
+  // The first is where the line started; every one after it continues that line.
+  MICRONOTES_REQUIRE(!wrapped.front().continuation);
+  bool anyContinuation = false;
+  for(const auto& line : wrapped) anyContinuation = anyContinuation || line.continuation;
+  MICRONOTES_REQUIRE(anyContinuation);
+
+  // Wide enough for the whole line: one line, and nothing continues anything.
+  const auto whole = lines(code, 4000.0f);
+  for(const auto& line : whole) MICRONOTES_REQUIRE(!line.continuation);
+}
+
+// The other half of the same distinction: a line the *writer* ended is not a
+// continuation, however many of them there are.
+MICRONOTES_TEST(layout_does_not_call_a_writers_line_break_a_wrap) {
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 4000.0f;  // wide enough that nothing wraps on screen
+  layout.update("one\ntwo\nthree", options);
+  const auto& lines = layout.layout(0).lines;
+  MICRONOTES_REQUIRE(lines.size() == 3);
+  for(const auto& line : lines) MICRONOTES_REQUIRE(!line.continuation);
+}

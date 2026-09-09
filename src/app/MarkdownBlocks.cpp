@@ -75,14 +75,40 @@ int blockLineStep(TextRenderer& text, const markdown::Block& block) {
   return lineStepFor(text, style, heading ? 1.25f : ui::type().lineHeightRatio);
 }
 
+// How wide one column of a table is, given how many there are and how much room
+// the page has.
+//
+// The columns share what the page has, and the floor yields rather than the
+// page. It used to floor at 48 pixels and stop there, so a table with more
+// columns than the page could hold at 48 each ran off the right with its last
+// columns clipped and no way to reach them -- and an index note whose last
+// column is a link is exactly that table. micronotes has one axis on purpose,
+// so what is too wide reflows; the cells wrap inside whatever width they get.
+//
+// A floor is still needed, because below a couple of characters a cell shows
+// nothing at all and a row of slivers is not a table. That is thirty columns on
+// an ordinary page, which is a table nobody is reading in a notes app, and it
+// is clipped as it always was.
+constexpr float kMinTableCellWidth = 24.0f;
+
+// One function because the measure and the draw both need exactly this number:
+// a table laid out to one width and drawn at another has rules that do not line
+// up with its own text.
+float tableColumnWidth(float width, int cols) {
+  const float even = (width - static_cast<float>(cols + 1)) / static_cast<float>(std::max(1, cols));
+  return std::max(kMinTableCellWidth, even);
+}
+
+int tableColumnCount(const markdown::Block& block) {
+  int count = 0;
+  for(const auto& row : block.tableRows) count = std::max(count, static_cast<int>(row.cells.size()));
+  return count;
+}
+
 float tableHeight(TextRenderer& text, const markdown::Block& block, float width) {
   const float rowPadY = 8.0f;
-  const int cols = std::max(1, [&]() {
-    int count = 0;
-    for(const auto& row : block.tableRows) count = std::max(count, static_cast<int>(row.cells.size()));
-    return count;
-  }());
-  const float cellW = std::max(48.0f, (width - static_cast<float>(cols + 1)) / static_cast<float>(cols));
+  const int cols = std::max(1, tableColumnCount(block));
+  const float cellW = tableColumnWidth(width, cols);
   float h = 0.0f;
   for(const auto& row : block.tableRows) {
     int rowLines = 1;
@@ -95,10 +121,9 @@ float tableHeight(TextRenderer& text, const markdown::Block& block, float width)
 }
 
 void drawTable(SDL_Renderer* renderer, TextRenderer& text, std::vector<LinkRegion>& links, const markdown::Block& block, Rect rect) {
-  int cols = 0;
-  for(const auto& row : block.tableRows) cols = std::max(cols, static_cast<int>(row.cells.size()));
+  const int cols = tableColumnCount(block);
   if(cols <= 0) return;
-  const float cellW = std::max(48.0f, (rect.w - static_cast<float>(cols + 1)) / static_cast<float>(cols));
+  const float cellW = tableColumnWidth(rect.w, cols);
   float y = rect.y;
   for(const auto& row : block.tableRows) {
     int rowLines = 1;

@@ -35,6 +35,13 @@ void drawResetGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 // buttons and anything else that scrolls a strip.
 void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color);
 
+// The mark at the end of a line the column broke: a shaft turning back on
+// itself, which is what a continuation is shown as everywhere it is shown.
+// Drawn rather than typeset for the reason every mark here is -- the mono face
+// carries no U+21A9, and the face that does is a bitmap strike that would be
+// resampled to eight pixels.
+void drawWrapGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
+
 // A magnifier, for the search field.
 void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 

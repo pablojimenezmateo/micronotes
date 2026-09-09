@@ -32,35 +32,6 @@ than left as open sections somebody has to re-measure to act on:
   `docs/performance.md` carries the breakdown.
 
 
-## TD-34 — nothing scrolls sideways
-
-`app/Scroll.cpp`'s `routeWheel` takes `wheel.y` and the loop hands it nothing
-else: `event.wheel.x` is read nowhere in the tree. No surface carries an
-x-offset either -- `ui::ScrollList` and `ui::RowStrip` are one axis, and
-`PageView` has `scroll()`/`maxScroll()` and no horizontal pair.
-
-**What it costs today.** Content wider than its column cannot be reached. A
-table wider than the page, a code line longer than the column and a note title
-longer than the sidebar are all clipped and that is the end of it -- the paint
-already installs the clip (`PageViewPaint`'s `columnClip` keeps a code block
-"inside the column: a long line scrolls off its own right edge rather than out
-over the gutter"), which is the right treatment only if there is a way to
-follow it. There is not. The reading pane's `00-Index`-style tables are the
-common case: a fifteen-row table of links whose last column is unreachable.
-
-A trackpad's horizontal gesture is also silently dropped rather than falling
-back to a vertical scroll, so a two-finger swipe that is slightly off-axis
-scrolls and one that is on-axis does nothing.
-
-**Why it has not been paid.** It is not one change. Every scrolling surface
-grows a second axis, `ui::scrollbarGeometry` becomes two bars with a corner
-between them, `ui::RowCursor`/`ui::rowBand` are vertical by construction, and
-the wheel router has to decide what a diagonal gesture means. The prior
-question is a design one and is worth answering first: a Markdown reader may be
-better served by *wrapping* what is too wide -- a table that reflows, a code
-block that soft-wraps with a continuation marker -- in which case the axis is
-never needed and the clip becomes the bug rather than the containment. Doing
-both would be the worst outcome, so the decision comes before the work.
 
 ## TD-35 — a resize repaints a frame behind the window
 

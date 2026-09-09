@@ -128,11 +128,26 @@ struct TextRun {
 // 200 KB note made, and the same 13,000 `free` calls again when the cache swept
 // -- to hold on average four runs. Half-open, and always within the owning
 // block's `runs`.
+// Room kept clear at the trailing edge of a line that is the *file's* own -- a
+// fenced code block, or a block dropped to raw -- for the mark that says the
+// column broke it.
+//
+// Only there. Such a line breaks mid-token and so fills the column exactly,
+// which leaves a mark drawn at the edge sitting on top of the code. A paragraph
+// breaks at a space and leaves the room itself, so it keeps its full column and
+// wears the mark only when the last word on the line ended short of it.
+inline constexpr float kWrapMarkReserve = 12.0f;
+
 struct VisualLine {
   float y = 0.0f;
   float height = 0.0f;
   std::uint32_t runBegin = 0;
   std::uint32_t runEnd = 0;
+  // This line begins in the middle of a line of the *file*: the one above it
+  // was too long for the column and broke. A line that begins because the file
+  // ended one -- a paragraph's own newline, a fresh line of code -- is not a
+  // continuation, which is the distinction the wrap mark is about.
+  bool continuation = false;
 
   std::uint32_t runCount() const {
     return runEnd - runBegin;

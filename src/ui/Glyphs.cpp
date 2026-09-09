@@ -112,6 +112,23 @@ void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color
   SDL_RenderLine(renderer, cx + dx, cy, cx - dx, cy + arm);
 }
 
+void drawWrapGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+  // A shaft along the lower third pointing left, and a riser at its right end:
+  // the line goes on, and it goes on below.
+  const float left = std::round(box.x + 1.0f);
+  const float right = std::round(box.x + box.w - 1.0f);
+  const float shaft = std::round(box.y + box.h * 0.66f);
+  const float top = std::round(box.y + box.h * 0.2f);
+  SDL_RenderLine(renderer, left, shaft, right, shaft);
+  SDL_RenderLine(renderer, right, shaft, right, top);
+  // The head, two strokes rather than a filled triangle: at seven pixels a fill
+  // is a blob and two lines stay a point.
+  const float head = std::max(2.0f, box.h * 0.22f);
+  SDL_RenderLine(renderer, left, shaft, left + head, shaft - head);
+  SDL_RenderLine(renderer, left, shaft, left + head, shaft + head);
+}
+
 void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   // A ring and a handle. The ring is a rounded outline rather than a circle: at
   // twelve pixels the difference is invisible and the outline is exact.

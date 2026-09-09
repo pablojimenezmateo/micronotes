@@ -116,7 +116,8 @@ public:
         if(pendingBreak_) {
           // The spaces that ended the line belong to the line they ended.
           flushPending();
-          pushLine();
+          // A break the writer put there, not one the column forced.
+          pushLine(false);
           pendingBreak_ = false;
         }
         // Everything else joins the cluster being built. A hidden marker and an
@@ -131,7 +132,7 @@ public:
       }
       placeCluster();
       flushPending();
-      pushLine();
+      pushLine(false);
       pendingBreak_ = false;
     }
   }
@@ -199,7 +200,10 @@ private:
     clusterWidth_ = 0.0f;
   }
 
-  void pushLine() {
+  // `continues` says the line of the *file* runs on past this visual line, which
+  // makes the next one a continuation. False closes a line the file itself
+  // ended, and false is what a group boundary and a hard break both pass.
+  void pushLine(bool continues = true) {
     // The runs are already in the block's array, in order. Closing a line is
     // recording where it ends -- no vector to allocate, no runs to move, and
     // nothing to free again when the cache drops the block.
@@ -208,6 +212,8 @@ private:
     line.height = lineHeight_;
     line.runBegin = lineFirstRun_;
     line.runEnd = static_cast<std::uint32_t>(out_.runs.size());
+    line.continuation = continuation_;
+    continuation_ = continues;
     lineFirstRun_ = line.runEnd;
     out_.lines.push_back(line);
     y_ += lineHeight_;
@@ -245,6 +251,9 @@ private:
   float right_ = 0.0f;
   float lineHeight_ = 0.0f;
   bool wrap_ = true;
+  // Whether the line about to be closed began inside a line of the file. See
+  // `pushLine`.
+  bool continuation_ = false;
   // A line ending has been seen and the spaces it came with are still held. See
   // `run`: the break lands when the next word does.
   bool pendingBreak_ = false;
@@ -1372,7 +1381,12 @@ DocumentLayout::BlockStyle DocumentLayout::styleForBlock(const SourceBlock& bloc
     case BlockKind::Code:
       style.base.mono = true;
       style.base.size = type.mono;
-      style.padTop = 8.0f;
+      // A band above the code when it names its language, because that is where
+      // the name is drawn. It used to be drawn *on* the first line of code,
+      // which was invisible while a long line ran off the right of the column
+      // and stopped there, and became a permanent collision the moment such a
+      // line started wrapping into the column instead.
+      style.padTop = block.hasInfo() && !flags.raw ? 22.0f : 8.0f;
       style.padBottom = 12.0f;
       break;
     case BlockKind::Divider:
@@ -1588,7 +1602,13 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
 
   const BlockStyle style = styleForBlock(block, flags, out);
   const RunStyle& base = style.base;
-  const float available = std::max(40.0f, options_.width - out.textLeft);
+  // The block's content, staged as one group per line's worth of source. Two
+  // shapes and no third: a fenced code block or a block dropped to raw is the
+  // file's own lines, and everything else is one group with the inline grammar
+  // applied to it. Decided here because the wrap mark's reserve turns on it.
+  const bool asSourceLines = flags.raw || block.kind == BlockKind::Code;
+  const float available =
+    std::max(40.0f, options_.width - out.textLeft - (asSourceLines ? kWrapMarkReserve : 0.0f));
   const float lineHeight = metrics_.lineHeight ? metrics_.lineHeight(base)
                                                : base.size * options_.type.lineHeightRatio;
   const auto appendTrailingLine = [&](float y) {
@@ -1639,11 +1659,6 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     return out;
   }
 
-  // The block's content, staged into `flowGroups_` as one group per line's
-  // worth of source. Two shapes and no third: a fenced code block or a block
-  // dropped to raw is the file's own lines, and everything else is one group
-  // with the inline grammar applied to it.
-  const bool asSourceLines = flags.raw || block.kind == BlockKind::Code;
   const std::size_t groupCount = asSourceLines ? stageSourceLines(block, flags, base)
                                                : stageInlineContent(block, flags, base, out);
 
@@ -1652,9 +1667,15 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
   float bottom = 0.0f;
   {
     const perf::ScopeTimer flowTimer("layout.block.flow");
-    Flow flow(metrics_, block.start, out.textLeft, available, lineHeight,
-              !flags.raw && block.kind != BlockKind::Code, style.padTop, out, flowPending_,
-              flowCluster_);
+    // Everything wraps, including a fenced code block and a block dropped to
+    // raw. They used to be the two that did not, and a long line in either ran
+    // off the right of its own column and stopped there: the clip kept it
+    // inside the column, which is the right treatment only if there is a way to
+    // follow it, and there was not. A wrapped line carries a mark at the point
+    // it broke -- see `VisualLine::continuation` -- so a break the column
+    // forced is never mistaken for one the file contains.
+    Flow flow(metrics_, block.start, out.textLeft, available, lineHeight, /*wrap=*/true,
+              style.padTop, out, flowPending_, flowCluster_);
     flow.run(flowGroups_, groupCount);
     bottom = flow.bottom();
   }

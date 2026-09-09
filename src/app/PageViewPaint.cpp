@@ -182,9 +182,32 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
       columnClip.emplace(renderer, Rect {ox, std::max(page_.y + 1.0f, top), columnWidth_,
                                          std::min(layout.height, page_.y + page_.h - top)});
     }
-    for(const auto& line : layout.lines) {
+    for(std::size_t lineIndex = 0; lineIndex < layout.lines.size(); ++lineIndex) {
+      const doc::VisualLine& line = layout.lines[lineIndex];
       const float lineY = top + line.y;
       if(lineY + line.height < viewTop || lineY > viewBottom) continue;
+      // A line the *column* broke wears a mark at the point it broke, so a
+      // reader can tell it from a line the file itself ended. Drawn on the line
+      // that wrapped rather than on the one that continues it, at the trailing
+      // edge, which is where the eye is when it runs out of room.
+      if(lineIndex + 1 < layout.lines.size() && layout.lines[lineIndex + 1].continuation) {
+        const float size = std::max(6.0f, line.height * 0.45f);
+        const float markX = ox + columnWidth_ - size - 2.0f;
+        // Only where it has somewhere to go. A code line keeps
+        // `doc::kWrapMarkReserve` clear for it; a paragraph does not, because it
+        // breaks at a space and almost always leaves the room itself -- and on
+        // the rare line that ends flush with the column, a mark drawn over the
+        // last word would say less than the flush edge already does.
+        float lineRight = ox + layout.textLeft;
+        for(const auto& run : layout.runsOf(line)) {
+          lineRight = std::max(lineRight, ox + run.rect.x + run.rect.w);
+        }
+        if(lineRight <= markX - 2.0f) {
+          ui::drawWrapGlyph(renderer,
+                            {markX, std::round(lineY + (line.height - size) / 2.0f), size, size},
+                            theme().textDisabled);
+        }
+      }
       for(const auto& run : layout.runsOf(line)) {
         if(run.text.empty()) continue;
         ++runsDrawn;
@@ -416,7 +439,9 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
     if(top + layout.height < page_.y || top > page_.y + page_.h) continue;
 
     const float right = ox + columnWidth_ - 6.0f;
-    const float y = top + 5.0f;
+    // In the band the layout reserves above a labelled block, not on its first
+    // line of code. See `styleForBlock`.
+    const float y = top + 3.0f;
     const std::string copy = "Copy";
     const Rect button {right - static_cast<float>(text.width(copy, label)) - 14.0f, y, 
                        static_cast<float>(text.width(copy, label)) + 14.0f, 19.0f};
