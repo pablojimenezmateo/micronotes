@@ -59,11 +59,6 @@ doc::Metrics documentMetrics(ui::TextRenderer& text) {
   return metrics;
 }
 
-void PageView::setRevisions(std::uint64_t source, std::uint64_t folds) {
-  sourceRevision_ = source;
-  foldRevision_ = folds;
-}
-
 void PageView::setHooks(PageViewHooks hooks) {
   hooks_ = std::move(hooks);
   wired_ = true;
@@ -73,28 +68,30 @@ bool PageView::wired() const {
   return wired_;
 }
 
-void PageView::setWikiLinkRevision(std::uint64_t revision) {
-  wikiLinkRevision_ = revision;
-}
-
-void PageView::setImageRevision(std::uint64_t revision) {
-  imageRevision_ = revision;
-}
-
 void PageView::setReadOnly(bool readOnly) {
   readOnly_ = readOnly;
 }
 
-void PageView::setCaretVisible(bool visible) {
-  caretVisible_ = visible;
-}
-
-void PageView::setFoldsActive(bool active) {
-  foldsActive_ = active;
-}
-
-void PageView::setEditedSpan(const editor::TextEdit& editorSpan) {
-  editedSpan_ = editorSpan.shiftedBy(1);
+// The whole per-frame contract, applied in one place.
+//
+// The `+ 1` on both the revision and the span is the page's "cannot say" being
+// zero: a caller's revision has to be shifted into that space before the
+// layout's reuse check can believe it. Done here, once, rather than by each
+// surface -- which is where the two copies of the off-by-one used to live.
+void PageView::beginFrame(const PageFrame& frame) {
+  sourceRevision_ = frame.sourceRevision + 1ull;
+  editedSpan_ = frame.editedSpan.shiftedBy(1);
+  foldRevision_ = frame.foldRevision;
+  foldsActive_ = frame.foldsActive;
+  wikiLinkRevision_ = frame.wikiLinkRevision;
+  imageRevision_ = frame.imageRevision;
+  headerHeight_ = std::max(0.0f, frame.headerHeight);
+  pointerX_ = frame.pointerX;
+  pointerY_ = frame.pointerY;
+  blockSelection_ = frame.blockSelection;
+  dropOffset_ = frame.dropOffset;
+  selecting_ = frame.selecting;
+  caretVisible_ = frame.caretVisible;
 }
 
 const doc::DocumentLayout& PageView::document() const {
@@ -237,10 +234,6 @@ void PageView::setFolds(PageFolds folds) {
   folds_ = std::move(folds);
 }
 
-void PageView::setHeaderHeight(float height) {
-  headerHeight_ = std::max(0.0f, height);
-}
-
 Rect PageView::headerRect() const {
   // Directly above the first block, which is where originY() points. It sits in
   // the scrolling space, so this rect walks off the top of the page as the note
@@ -369,23 +362,6 @@ std::size_t PageView::dropOffsetAt(float y) const {
     if(docY < top + document_.layout(i).height / 2.0f) return blocks[i].start;
   }
   return document_.source().size();
-}
-
-void PageView::setPointer(float x, float y) {
-  pointerX_ = x;
-  pointerY_ = y;
-}
-
-void PageView::setBlockSelection(PageBlockSelection selection) {
-  blockSelection_ = selection;
-}
-
-void PageView::setDropOffset(std::optional<std::size_t> offset) {
-  dropOffset_ = offset;
-}
-
-void PageView::setSelecting(bool selecting) {
-  selecting_ = selecting;
 }
 
 // The blocks whose boxes reach the viewport, widened backwards to the head of a

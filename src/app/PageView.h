@@ -121,6 +121,71 @@ struct PageToolbarButton {
   std::string label;
 };
 
+// Everything a page has to be told before it can lay a frame out.
+//
+// One value handed over in one call, rather than eleven setters called in an
+// order each caller remembers for itself. `drawLive` and `drawReading` opened
+// with the same feeding sequence -- wiki revision, image revision, source
+// revision, edited span, pointer, header height -- assembled by hand at both,
+// and the failure mode when one of them fell behind was silent and asymmetric:
+// a page that is not told about a new revision does not break, it *keeps a
+// stale layout*. That is not hypothetical. The reading pane rendered
+// `[[Some Note]]` as literal brackets for as long as it did because it had not
+// been given the wikilink pass the live surface had.
+//
+// The defaults are the other half of it. Every field here is a decision, and a
+// surface that does not make one gets the decision written down rather than
+// whatever it happened to leave behind from the frame before.
+struct PageFrame {
+  // The *editor's* revision, not the page's.
+  //
+  // The page stamps its layouts with `revision + 1`, because zero is its
+  // "cannot say" -- so a caller's number has to be shifted into that space
+  // before the layout can check it. Both pages applied the `+1` themselves,
+  // which is two copies of an off-by-one; `editedSpan` beside it was already
+  // shifted here rather than there, and now they agree.
+  std::uint64_t sourceRevision = 0;
+  // Where the last edit landed, in the same space. It lets the layout bound the
+  // comparison it would otherwise make over the whole note to find the edit; a
+  // stamp that does not line up with what the layout holds is discarded there,
+  // so a stale one costs the comparison rather than the answer.
+  editor::TextEdit editedSpan;
+
+  // A stamp that moves whenever the fold predicate would answer differently.
+  // Constant by default, which is exactly what tells the layout that a surface
+  // with no folds in it -- the reading pane -- never has to be re-asked.
+  std::uint64_t foldRevision = 1;
+  // Whether *this note* has anything collapsed. Per frame rather than folded
+  // into the predicate, because the layout skips resolving folds entirely when
+  // it is handed none, and that is a stronger statement than a predicate that
+  // always answers false.
+  bool foldsActive = false;
+
+  // The two hooks whose answers are not in a block's own bytes, stamped: a link
+  // that starts or stops resolving, a picture that finishes loading. Without
+  // them a cached block keeps the colour or the height it was built with.
+  std::uint64_t wikiLinkRevision = 0;
+  std::uint64_t imageRevision = 0;
+
+  // Room reserved above the note's first block. Measured before the layout
+  // because it is scrolling space the page has to reserve, not a banner the
+  // note passes under.
+  float headerHeight = 0.0f;
+
+  // Off the page by default: a surface nobody is pointing at has no hover.
+  float pointerX = -1.0f;
+  float pointerY = -1.0f;
+
+  // The four a reading pane leaves alone, and which are most of what makes the
+  // live surface live.
+  PageBlockSelection blockSelection;
+  std::optional<std::size_t> dropOffset;
+  // Suppresses the toolbar while a click is still being dragged into a
+  // selection, so it cannot land under the pointer mid-drag.
+  bool selecting = false;
+  bool caretVisible = true;
+};
+
 // Renders a note as formatted, editable content: the caret is a byte offset in
 // the buffer and every pixel maps back to one.
 class PageView {
@@ -133,49 +198,22 @@ public:
   // whether it has done it yet.
   void setHooks(PageViewHooks hooks);
   bool wired() const;
-  // The one part of the wikilink wiring that moves per frame: a stamp that
-  // shifts whenever `wikiLinkResolves` could answer differently. A block's
-  // cached layout is keyed on its own bytes, and this is the one thing it
-  // depends on that is not in them, so without it a link that starts or stops
-  // resolving keeps its old colour until the block is edited.
-  void setWikiLinkRevision(std::uint64_t revision);
-  // The same for pictures: a stamp that moves whenever `measureImage` could
-  // answer differently, which is what a texture finishing its load does.
-  void setImageRevision(std::uint64_t revision);
-
   // Reading rather than editing. The caret, the hover gutter and the selection
   // toolbar are the whole of what an editable surface adds, and all three are
   // already conditional on focus or on the pointer -- so the reading pane is
   // this page with them turned off, rather than a second renderer for the same
   // Markdown. Markers stay hidden whatever the caret says.
   void setReadOnly(bool readOnly);
-  // Whether to paint the caret this frame. See `ui::CaretBlink`; handed in for
-  // the reason the overlay's is, so the two panes of a split blink together.
-  void setCaretVisible(bool visible);
+
+  // Everything this frame's layout depends on, in one call. See `PageFrame`:
+  // the sequence used to be eleven setters, assembled by hand at each of the
+  // two surfaces, and a page not told about a new revision keeps a stale layout
+  // rather than failing.
+  void beginFrame(const PageFrame& frame);
 
   // Lays the note out for this frame. `rect` is the whole content pane.
   void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
 
-  // Stamps for the layout's reuse check: a counter that moves whenever `source`
-  // changes, and one that moves whenever `folds_.collapsed` would answer
-  // differently. Without them an idle frame proves both by walking the whole
-  // note. Zero -- the default -- means "cannot say", and the layout falls back
-  // to comparing bytes and re-asking the fold predicate per block.
-  void setRevisions(std::uint64_t source, std::uint64_t folds);
-  // Where the last edit landed, stamped with the two source revisions it took
-  // the buffer between. It lets the layout bound the comparison it otherwise
-  // makes over the whole note to find the edit; a stamp that does not line up
-  // with what the layout holds is discarded there, so a stale one costs the
-  // comparison rather than the answer.
-  // Where the last edit landed, in the *editor's* revision space.
-  //
-  // Shifted into the page's here rather than at the call sites: the page stamps
-  // its layouts with `revision + 1`, because zero is its "cannot say", and a
-  // claim about the editor's revisions has to be moved into that space before
-  // the layout can check it. The live page and the reading page each applied
-  // the `+1` themselves, which is two copies of an off-by-one and two copies of
-  // the "nothing to say" check.
-  void setEditedSpan(const editor::TextEdit& editorSpan);
   void draw(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t caret, const PageSelection& selection,
             bool focused, std::string_view findQuery);
 
@@ -197,29 +235,16 @@ public:
   std::optional<std::size_t> copyButtonAt(float x, float y) const;
 
   // Also installed once. Whether the *current* note has anything collapsed is
-  // per-frame state instead: the layout skips resolving folds entirely when it
-  // is handed no predicate, which is a stronger statement than a predicate that
-  // always answers false, so the predicate stays installed and this decides
-  // whether it is passed on.
+  // per-frame state instead -- `PageFrame::foldsActive` -- because the layout
+  // skips resolving folds entirely when it is handed no predicate, which is a
+  // stronger statement than a predicate that always answers false. So the
+  // predicate stays installed and the frame decides whether it is passed on.
   void setFolds(PageFolds folds);
-  void setFoldsActive(bool active);
 
-  // Room reserved above the note's first block, for whatever the application
-  // wants to draw there. It is taken out of the scrolling space rather than off
-  // the top of the viewport, so the header scrolls away with the content and
-  // the note reads as one document instead of as a pane under a banner.
-  void setHeaderHeight(float height);
-  // Where that room ended up this frame, in window coordinates. Moves with the
-  // scroll, which is the point.
+  // Where the room `PageFrame::headerHeight` asked for ended up this frame, in
+  // window coordinates. Moves with the scroll, which is the point.
   ui::Rect headerRect() const;
 
-  // Per-frame view state, set before `draw`.
-  void setPointer(float x, float y);
-  void setBlockSelection(PageBlockSelection selection);
-  void setDropOffset(std::optional<std::size_t> offset);
-  // Suppresses the toolbar while a click is still being dragged into a
-  // selection, so it cannot land under the pointer mid-drag.
-  void setSelecting(bool selecting);
   std::size_t rowRelative(std::size_t offset, int deltaRows) const;
   std::size_t rowsPerPage() const;
 

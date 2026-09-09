@@ -261,6 +261,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/PointerRouter.cpp
   src/app/Prompts.cpp
   src/app/RawPane.cpp
+  src/app/PageSurface.cpp
   src/app/ReadingPage.cpp
   src/app/RightPanel.cpp
   src/app/Screenshot.cpp

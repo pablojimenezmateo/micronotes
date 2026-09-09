@@ -164,8 +164,7 @@ struct LaidOutPage {
   }
 
   void layout(std::string_view source) {
-    page.setRevisions(1, 1);
-    page.setHeaderHeight(0.0f);
+    page.beginFrame({});
     page.layout(text, source, micronotes::doc::DocumentLayout::kNone, {0.0f, 0.0f, 800.0f, 600.0f});
   }
 };
@@ -211,8 +210,7 @@ MICRONOTES_TEST(shell_a_read_only_page_never_reveals_a_blocks_markers) {
     LaidOutPage page;
     if(!page.ready()) return -1.0f;
     page.page.setReadOnly(readOnly);
-    page.page.setRevisions(1, 1);
-    page.page.setHeaderHeight(0.0f);
+    page.page.beginFrame({});
     page.page.layout(page.text, source, 2, {0.0f, 0.0f, 800.0f, 600.0f});
     float total = 0.0f;
     const auto& block = page.page.document().layout(0);
@@ -452,11 +450,13 @@ MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_splice
   const auto counter = [](CounterId id) {
     return microcore::perf::captureCounters()[static_cast<std::size_t>(id)];
   };
-  // What `drawLive` does: stamp the page with the editor's revision plus one --
-  // zero means "cannot say" to the layout's reuse check -- and lay it out.
+  // What `drawLive` does: hand the page the frame's inputs -- the editor's own
+  // revision, which the page shifts into the space where zero means "cannot
+  // say" -- and lay it out.
   const auto layOutTheLivePage = [&] {
-    ui.livePage.setRevisions(ui.editor.revision() + 1ull, 1);
-    ui.livePage.setHeaderHeight(0.0f);
+    micronotes::app::PageFrame frame;
+    frame.sourceRevision = ui.editor.revision();
+    ui.livePage.beginFrame(frame);
     ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), {0.0f, 0.0f, 800.0f, 600.0f});
   };
   const auto rebuildTheOutline = [&] {
