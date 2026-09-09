@@ -52,8 +52,13 @@ constexpr float kIndentStep = ui::kSpace3;
 // scrollbar, while a selected note in the sidebar beside it was an inset
 // rounded fill -- two lists of rows, two shapes of selection, for the same
 // "this one".
-Rect rowRect(Rect list, float y, float height) {
-  return {list.x + ui::kSpace2, y, std::max(0.0f, list.w - ui::kSpace2 * 2.0f), height};
+//
+// The trailing half of that was only half fixed: `kSpace2` is 8px and the
+// scrollbar's lane is 12, so the band still ran under the thumb by 4. It takes
+// the reserve now, which is zero when the list fits.
+Rect rowRect(Rect list, float y, float height, float trailingReserve) {
+  const float inset = ui::kSpace2;
+  return {list.x + inset, y, std::max(0.0f, list.w - inset * 2.0f - trailingReserve), height};
 }
 
 // The tab a click lands on, and where each one is drawn. One geometry, read by
@@ -91,10 +96,18 @@ constexpr ui::RightPanelView kViews[] = {ui::RightPanelView::Outline, ui::RightP
 // is arithmetic. It used to be a `vector<PanelRow>` built for every heading in
 // the note and then walked until the first one fell off the bottom -- an
 // allocation per frame to address the twenty rows a panel can show.
-Rect outlineRowRect(Rect rect, std::size_t index, float pitch, int scroll) {
+// What the panel's list is keeping clear at its trailing edge this frame. One
+// question, asked by the three draws and by the two hit tests, so a row's band
+// and the click that lands on it cannot disagree about where the row ends.
+float panelTrailingReserve(const UiRuntime& ui, Rect rect) {
+  return ui::scrollbarReserve(listRect(rect), ui.rightPanel.list.scroll(),
+                              ui.rightPanel.list.maxScroll());
+}
+
+Rect outlineRowRect(const UiRuntime& ui, Rect rect, std::size_t index, float pitch, int scroll) {
   const Rect list = listRect(rect);
   return rowRect(list, list.y + ui::kSpace1 + static_cast<float>(index) * pitch - static_cast<float>(scroll),
-                 pitch);
+                 pitch, panelTrailingReserve(ui, rect));
 }
 
 // How far the panel can be scrolled, given everything the current view would
@@ -249,7 +262,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     // one with twenty.
     const std::size_t first = static_cast<std::size_t>(std::max(0.0f, static_cast<float>(scroll) - ui::kSpace1) / pitch);
     for(std::size_t i = first; i < entries.size(); ++i) {
-      const Rect row = outlineRowRect(rect, i, pitch, scroll);
+      const Rect row = outlineRowRect(ui, rect, i, pitch, scroll);
       if(row.y > list.y + list.h) break;
       const auto& entry = entries[i];
       const bool here = i == current;
@@ -284,7 +297,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
     ui.rightPanel.backlinkRows.clear();
     for(const auto& link : backlinks) {
       if(y + pitch >= list.y && y <= list.y + list.h) {
-        const Rect row = rowRect(list, y, pitch);
+        const Rect row = rowRect(list, y, pitch, panelTrailingReserve(ui, rect));
         ui::drawRow(renderer, row, false, ui::contains(row, ui.pointer.x, ui.pointer.y));
         const int room = static_cast<int>(row.w - kPadX * 2.0f);
         // Two lines centred in the row together, rather than dropped a fixed
@@ -330,7 +343,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   ui.rightPanel.tagRows.clear();
   for(const auto& tag : tags) {
     if(y + pitch >= list.y && y <= list.y + list.h) {
-      const Rect row = rowRect(list, y, pitch);
+      const Rect row = rowRect(list, y, pitch, panelTrailingReserve(ui, rect));
       const bool selected = activeTag == tag;
       ui::drawRow(renderer, row, selected, ui::contains(row, ui.pointer.x, ui.pointer.y));
       // The tag's colour, and no `#`. Exactly the sidebar's tag row: this is
@@ -388,7 +401,7 @@ bool rightPanelHasControlAt(UiRuntime& ui, const ui::TextRenderer& text, Rect re
   if(offset < 0.0f) return false;
   const auto index = static_cast<std::size_t>(offset / pitch);
   return index < entries.size() &&
-         ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.list.scroll()), x, y);
+         ui::contains(outlineRowRect(ui, rect, index, pitch, ui.rightPanel.list.scroll()), x, y);
 }
 
 bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rect, float x, float y) {
@@ -434,7 +447,7 @@ bool handleRightPanelClick(UiRuntime& ui, const ui::TextRenderer& text, Rect rec
   const float offset = y - (list.y + ui::kSpace1) + static_cast<float>(ui.rightPanel.list.scroll());
   if(offset >= 0.0f) {
     const auto index = static_cast<std::size_t>(offset / pitch);
-    if(index < entries.size() && ui::contains(outlineRowRect(rect, index, pitch, ui.rightPanel.list.scroll()), x, y)) {
+    if(index < entries.size() && ui::contains(outlineRowRect(ui, rect, index, pitch, ui.rightPanel.list.scroll()), x, y)) {
       // Clicking a heading is a way of scrolling to it, so the caret goes to its
       // text rather than to the marker in front of it.
       ui.editor.moveCursor(entries[index].offset);

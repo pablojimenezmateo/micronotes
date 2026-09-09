@@ -68,7 +68,7 @@ Rect drawTitledCard(SDL_Renderer* renderer, Rect card, float headerHeight) {
 
 void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect chevron,
                      std::string_view label, std::string_view trailing, bool collapsed,
-                     bool hovered) {
+                     bool hovered, float trailingReserve) {
   const bool collapsible = chevron.w > 0.0f;
   // A step up out of the panel, which is what makes it a band. Hover lifts it
   // one further, but only when there is something to shut: a caption that
@@ -87,7 +87,7 @@ void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect
   // single chrome size for the same reason; what distinguishes a band from a
   // row is its ground and its outdent, never a smaller type.
   const TextStyle style = chromeStyle();
-  float right = band.x + band.w - kSidebarInset;
+  float right = band.x + band.w - kSidebarInset - trailingReserve;
   if(!trailing.empty()) {
     const float width = static_cast<float>(text.width(trailing, style));
     text.draw(trailing, right - width, textTop(band, text, style), theme().textMuted, style);

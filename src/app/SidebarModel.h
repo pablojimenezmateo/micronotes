@@ -83,13 +83,20 @@ inline constexpr float kTagDotColumnWidth =
   static_cast<float>(kMaxTagDots) * (kTagDotSize + kTagDotGap) + ui::kSpace1;
 
 // Where row `row`'s tag dots go, in the order the tags are listed, and at most
-// `kMaxTagDots` of them. Laid out right to left from the row's trailing edge.
+// `kMaxTagDots` of them. Laid out right to left from the row's trailing edge,
+// less `trailingReserve` -- the scrollbar's lane when one is showing, from
+// `ui::scrollbarReserve`. It is a parameter rather than read from the runtime
+// here because the same number has to reach the label's ellipsis and the
+// section bands' counts in the same frame, and one caller computing it once is
+// what makes those three agree.
 //
 // One function for the draw and the two hit tests -- what the pointer is over
 // and what a click chose -- because a dot is 7 pixels wide and three
 // independent spellings of "the third dot from the right" is three chances to
-// be off by one, on a target that small.
-std::vector<ui::Rect> tagDotRects(ui::Rect row, std::size_t tagCount);
+// be off by one, on a target that small. That is also why the reserve goes
+// through here: a lane applied to the paint and not to the hit test would move
+// every dot 14 pixels away from the tooltip that names it.
+std::vector<ui::Rect> tagDotRects(ui::Rect row, std::size_t tagCount, float trailingReserve);
 
 // The tag whose dot is under the pointer on `row`, or nothing.
 //

@@ -607,7 +607,7 @@ void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
   }
 }
 
-std::vector<Rect> tagDotRects(Rect row, std::size_t tagCount) {
+std::vector<Rect> tagDotRects(Rect row, std::size_t tagCount, float trailingReserve) {
   std::vector<Rect> dots;
   if(tagCount == 0) return dots;
   const std::size_t shown = std::min(tagCount, kMaxTagDots);
@@ -615,7 +615,7 @@ std::vector<Rect> tagDotRects(Rect row, std::size_t tagCount) {
   // Right to left from the trailing edge, so a note with one tag puts its dot
   // where a note with four puts its last: the column reads as a column whatever
   // is in it, rather than shifting with each row's tag count.
-  float x = row.x + row.w - ui::kSpace1 - kTagDotSize;
+  float x = row.x + row.w - trailingReserve - ui::kSpace1 - kTagDotSize;
   const float y = std::round(row.y + (row.h - kTagDotSize) / 2.0f);
   for(std::size_t i = 0; i < shown; ++i) {
     dots.push_back({std::round(x), y, kTagDotSize, kTagDotSize});
@@ -636,7 +636,7 @@ std::optional<std::string> sidebarTagDotAt(const UiRuntime& ui, const SidebarRow
   // Through the same function the draw lays them out with, so the target is the
   // dot on screen. At seven pixels a second spelling of "the third from the
   // right" would be off by one somewhere and nobody would be able to say where.
-  const auto dots = tagDotRects(row.rect, note->tags.size());
+  const auto dots = tagDotRects(row.rect, note->tags.size(), ui.sidebar.trailingReserve);
   for(std::size_t i = 0; i < dots.size(); ++i) {
     if(!contains(dots[i], x, y)) continue;
     // The overflow marker filters by the first tag it stands for. It is not the

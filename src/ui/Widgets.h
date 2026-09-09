@@ -72,9 +72,13 @@ Rect drawTitledCard(SDL_Renderer* renderer, Rect card, float headerHeight);
 // nothing under them to shut. A caption gets no control and no hover.
 // `trailing` is a count, right-aligned, and is worth most on a band that is
 // shut -- the one case where what is under it cannot be counted by looking.
+// `trailingReserve` is what the band may not paint into at that edge, which is
+// the scrollbar's lane when one is showing: see `ui::scrollbarReserve`. The
+// band fills its whole width either way -- it is the ground that makes it a
+// band -- so this narrows the *count*, not the rect.
 void drawSectionBand(SDL_Renderer* renderer, TextRenderer& text, Rect band, Rect chevron,
                      std::string_view label, std::string_view trailing, bool collapsed,
-                     bool hovered);
+                     bool hovered, float trailingReserve);
 
 // An empty place says what it is, what to do about it, and which keys do that.
 // The third line is what turns a dead end into an offer, so it is dimmer than

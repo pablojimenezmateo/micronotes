@@ -40,6 +40,25 @@ std::optional<ScrollbarGeometry> scrollbarGeometry(Rect viewport, int scroll, in
 void drawScrollbar(SDL_Renderer* renderer, const ScrollbarGeometry& geometry, bool active);
 void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, int maxScroll,
                            bool active = false);
+// How much of a viewport's trailing edge the bar occupies, or zero when the
+// content fits and no bar is drawn.
+//
+// What a list has to keep clear at its trailing edge, and the reason it is a
+// function rather than a constant is the "or zero": a short list should not
+// give up the room. The sidebar kept nothing clear, so a folder's note count
+// sat 8px from the edge, a section band's count 10px, and a note's row of tag
+// dots 4px -- all three inside the 12px the thumb covers, with the dots worst
+// because they are the furthest out. The overlap was known about on the *click*
+// path, where a comment says the thumb "overlaps the trailing edge of every row
+// it covers" and the scrollbar is hit-tested first because of it; nothing said
+// so on the paint path.
+//
+// The reserve clears the track and leaves the inset over again as a gap, so
+// trailing content stops short of the rail rather than touching it. The sibling
+// microide reserves the same way, conditionally, from
+// `kWorkspaceDiffScrollbarReserve`.
+float scrollbarReserve(Rect viewport, int scroll, int maxScroll);
+
 // The thumb, grown so it can be grabbed. One inflate governs the grab region
 // and the region that changes the cursor, so they cannot drift apart.
 Rect scrollbarHitRect(Rect thumb);

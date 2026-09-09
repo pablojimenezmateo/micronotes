@@ -184,6 +184,17 @@ struct SidebarState {
   // without recomputing the whole window layout.
   Rect rect;
   ScrollList list;
+  // What the last draw kept clear at the trailing edge of every row: the
+  // scrollbar's lane when one was showing, and zero when the list fitted. See
+  // `ui::scrollbarReserve`.
+  //
+  // Recorded by the draw and read by the hit tests, which is the same
+  // discipline `ui.tabStrip` follows and for the same reason: the number
+  // depends on whether a bar is showing *this* frame, so a hit test that
+  // recomputed it would be answering for a panel that had not been painted
+  // yet. A tag dot is seven pixels wide; the paint and the tooltip disagreeing
+  // by fourteen would put every dot's name on its neighbour.
+  float trailingReserve = 0.0f;
   // Which row the keyboard is on, as an index into `rows`.
   int cursor = 0;
 

@@ -201,6 +201,14 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + ui::kSidebarSearchBand - 1.0f, theme().border);
 
   const Rect list = sidebarListRect(rect);
+  // What the trailing edge of every row and band has to keep clear, asked once
+  // for the frame so the counts, the dots and the labels' ellipsis all agree.
+  // Zero when the list fits, which is the whole reason it is not a constant.
+  const float trailingReserve = ui::scrollbarReserve(list, ui.sidebar.list.scroll(),
+                                                     ui.sidebar.list.maxScroll());
+  // Recorded for the hit tests, which must place a tag dot exactly where this
+  // frame painted it. See `SidebarState::trailingReserve`.
+  ui.sidebar.trailingReserve = trailingReserve;
   const ui::TextStyle rowStyle = ui::chromeStyle();
   const ui::TextStyle snippetStyle = snippetTextStyle();
   // Measured here and handed to the model, which stays free of the font: the
@@ -235,7 +243,7 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
 
     if(row.kind == SidebarRow::Kind::SectionLabel) {
       ui::drawSectionBand(renderer, text, row.rect, row.disclosure, row.label, row.trailing,
-                          row.collapsed, hot);
+                          row.collapsed, hot, trailingReserve);
       if(row.section) {
         ui.pointer.offerTooltip(row.rect, (row.collapsed ? "Show " : "Hide ") + row.label);
       }
@@ -334,9 +342,10 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
     const float dotsW = tagCount > 0 ? kTagDotColumnWidth : 0.0f;
 
     const float labelY = ui::textTop(row.rect, text, rowStyle);
-    const float countW = row.tree.noteCount > 0 && !isNote ? kCountColumnWidth
-                       : dotsW > 0.0f                      ? dotsW
-                                                           : ui::kSpace2;
+    const float countW = trailingReserve
+                       + (row.tree.noteCount > 0 && !isNote ? kCountColumnWidth
+                        : dotsW > 0.0f                      ? dotsW
+                                                            : ui::kSpace2);
     // A folder is a container and a note is a leaf, so the folder's name is the
     // brighter of the two -- the file tree's rule in every IDE, and the reverse
     // of what a list of documents would do.
@@ -347,13 +356,13 @@ void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect
               labelX, labelY, ink, rowStyle);
     if(!isNote && row.tree.noteCount > 0) {
       text.draw(std::to_string(row.tree.noteCount),
-                row.rect.x + row.rect.w -
+                row.rect.x + row.rect.w - trailingReserve -
                   static_cast<float>(text.width(std::to_string(row.tree.noteCount), rowStyle)) - ui::kSpace2,
                 labelY, current ? theme().accent : theme().textMuted, rowStyle);
     }
     if(tagCount > 0) {
       const auto& colors = ui.state.workspace().tagColors;
-      const auto dots = tagDotRects(row.rect, tagCount);
+      const auto dots = tagDotRects(row.rect, tagCount, trailingReserve);
       for(std::size_t d = 0; d < dots.size(); ++d) {
         // Past the cap the last dot stands for the tags that did not fit, so it
         // is drawn in the muted ink rather than in any one tag's colour -- a

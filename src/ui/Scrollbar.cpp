@@ -47,6 +47,11 @@ void drawVerticalScrollbar(SDL_Renderer* renderer, Rect viewport, int scroll, in
   }
 }
 
+float scrollbarReserve(Rect viewport, int scroll, int maxScroll) {
+  if(!scrollbarGeometry(viewport, scroll, maxScroll)) return 0.0f;
+  return kScrollbarThickness + kScrollbarInset * 2.0f;
+}
+
 Rect scrollbarHitRect(Rect thumb) {
   if(empty(thumb)) return thumb;
   return {thumb.x - kScrollbarHitInflate, thumb.y - kScrollbarHitInflate,

@@ -1073,9 +1073,9 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
 // from the tree.
 MICRONOTES_TEST(shell_tag_dots_are_laid_out_once_for_the_draw_and_the_hit_test) {
   const micronotes::ui::Rect row {8.0f, 100.0f, 240.0f, 20.0f};
-  MICRONOTES_REQUIRE(micronotes::app::tagDotRects(row, 0).empty());
+  MICRONOTES_REQUIRE(micronotes::app::tagDotRects(row, 0, 0.0f).empty());
 
-  const auto one = micronotes::app::tagDotRects(row, 1);
+  const auto one = micronotes::app::tagDotRects(row, 1, 0.0f);
   MICRONOTES_REQUIRE(one.size() == 1);
   // Inside the row, and clear of its trailing edge.
   MICRONOTES_REQUIRE(one[0].x + one[0].w <= row.x + row.w);
@@ -1084,7 +1084,7 @@ MICRONOTES_TEST(shell_tag_dots_are_laid_out_once_for_the_draw_and_the_hit_test) 
   // Laid out right to left, so a note with one tag puts its dot where a note
   // with four puts its last: the column reads as a column whatever is in it,
   // rather than shifting with each row's tag count.
-  const auto four = micronotes::app::tagDotRects(row, 4);
+  const auto four = micronotes::app::tagDotRects(row, 4, 0.0f);
   MICRONOTES_REQUIRE(four.size() == 4);
   MICRONOTES_REQUIRE(four.back().x == one[0].x);
   // Returned in tag order even though they are placed in reverse, so no caller
@@ -1099,10 +1099,22 @@ MICRONOTES_TEST(shell_tag_dots_are_laid_out_once_for_the_draw_and_the_hit_test) 
 
   // Capped. A row is one line tall, and a note with nine tags would otherwise
   // push its own name off the panel.
-  const auto many = micronotes::app::tagDotRects(row, 9);
+  const auto many = micronotes::app::tagDotRects(row, 9, 0.0f);
   MICRONOTES_REQUIRE(many.size() == micronotes::app::kMaxTagDots);
   // The column the row reserves has to hold what the layout puts in it.
   MICRONOTES_REQUIRE(many.front().x >= row.x + row.w - micronotes::app::kTagDotColumnWidth);
+
+  // A scrollbar's lane is the panel's, not the row's. Every dot moves clear of
+  // it by exactly the reserve, which is what stops the column being painted
+  // under the thumb -- the dots were the worst of three trailing placements
+  // that ignored it, sitting 4px from an edge the bar covers 12px of.
+  const float reserve = 14.0f;
+  const auto reserved = micronotes::app::tagDotRects(row, 4, reserve);
+  MICRONOTES_REQUIRE(reserved.size() == four.size());
+  for(std::size_t i = 0; i < reserved.size(); ++i) {
+    MICRONOTES_REQUIRE(reserved[i].x == four[i].x - reserve);
+  }
+  MICRONOTES_REQUIRE(reserved.back().x + reserved.back().w <= row.x + row.w - reserve);
 }
 
 // And the dot answers a click, which is the half that makes it a control rather
@@ -1136,7 +1148,9 @@ MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
   }
   MICRONOTES_REQUIRE(noteRow != nullptr);
 
-  const auto dots = micronotes::app::tagDotRects(noteRow->rect, 3);
+  // The same reserve the hit test below reads, which is what the pair is for.
+  const auto dots =
+    micronotes::app::tagDotRects(noteRow->rect, 3, ui.sidebar.trailingReserve);
   MICRONOTES_REQUIRE(dots.size() == 3);
   // Each dot names its own tag, in the order the note lists them.
   const char* expected[] = {"alpha", "beta", "gamma"};
