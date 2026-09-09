@@ -4,12 +4,15 @@
 #include "core/platform/DirectoryWatcher.h"
 #include "core/platform/DurableFile.h"
 
+#include <sys/inotify.h>
+
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -253,4 +256,74 @@ MICRONOTES_TEST(directory_watcher_stops_and_restarts_cleanly) {
 
   std::filesystem::remove_all(dir);
   std::filesystem::remove_all(other);
+}
+
+MICRONOTES_TEST(directory_watcher_asks_for_a_rescan_when_the_tree_outgrows_its_budget) {
+  // The shipped budget is 8,192 directories and the per-user `max_user_watches`
+  // is usually eight times that, so reaching either from a test means building
+  // a fixture nobody wants to build. The budget is lowered instead: what is
+  // under test is the *fallback*, and the fallback does not care which of the
+  // two limits was the one that ran out.
+  const auto dir = freshDir("micronotes-watch-budget");
+  for(int i = 0; i < 6; ++i) std::filesystem::create_directories(dir / ("sub-" + std::to_string(i)));
+
+  DirectoryWatcher watcher;
+  watcher.setDirectoryBudgetForTesting(3);
+  MICRONOTES_REQUIRE(watcher.watch(dir));
+  // Watching is still on -- a watcher that cannot name every path is not a
+  // watcher that has stopped -- but it has said so.
+  MICRONOTES_REQUIRE(watcher.active());
+  MICRONOTES_REQUIRE(watcher.watchCount() <= 3);
+  MICRONOTES_REQUIRE(watcher.takeRescanRequest());
+  // And the request is a one-shot: the caller has rescanned, so asking again
+  // must not send it round a second time.
+  MICRONOTES_REQUIRE(!watcher.takeRescanRequest());
+
+  watcher.stop();
+  std::filesystem::remove_all(dir);
+}
+
+MICRONOTES_TEST(directory_watcher_reads_a_dropped_event_queue_as_a_rescan) {
+  // `IN_Q_OVERFLOW` needs sixteen thousand events in flight to provoke, and a
+  // directory moved out from under its own watch needs the move to win a race
+  // with the walk. Both are decisions about a mask and a name, so both are
+  // asked here directly -- the descriptor was the only expensive half.
+  using microcore::platform::decideWatchEvent;
+  using microcore::platform::WatchAction;
+  const std::vector<std::string> ignored {".micronotes"};
+
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_Q_OVERFLOW, "", ignored) == WatchAction::Rescan);
+  // The overflow event carries no watch descriptor and no name, and it still
+  // has to be heard: it is the one that says the list of paths is a lie.
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_Q_OVERFLOW | IN_CLOSE_WRITE, "note.md", ignored)
+                     == WatchAction::Rescan);
+
+  // The watched directory itself, gone or moved away.
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_DELETE_SELF, "", ignored) == WatchAction::Forget);
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_MOVE_SELF, "", ignored) == WatchAction::Forget);
+
+  // A directory arriving has to be watched before anything appears in it, and
+  // rescanned because a rename can deliver one already full.
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_CREATE | IN_ISDIR, "notes", ignored)
+                     == WatchAction::WatchSubtree);
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_MOVED_TO | IN_ISDIR, "notes", ignored)
+                     == WatchAction::WatchSubtree);
+  // Except the app's own state directory: rewriting the index is not a change
+  // to the library.
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_CREATE | IN_ISDIR, ".micronotes", ignored)
+                     == WatchAction::Ignore);
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_DELETE | IN_ISDIR, "notes", ignored)
+                     == WatchAction::Rescan);
+
+  // An ordinary file, and the staging file a durable write leaves beside it for
+  // the length of a rename.
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_CLOSE_WRITE, "note.md", ignored) == WatchAction::Changed);
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_MOVED_TO, "note.md", ignored) == WatchAction::Changed);
+  const std::string staging =
+      "." + std::string(microcore::platform::kTemporaryWriteMarker) + "note.md";
+  MICRONOTES_REQUIRE(microcore::platform::isTemporaryWriteName(staging));
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_CLOSE_WRITE, staging, ignored) == WatchAction::Ignore);
+  // An event with no name is about the watch rather than about a file in it,
+  // and everything of that kind has already been answered above.
+  MICRONOTES_REQUIRE(decideWatchEvent(IN_CLOSE_WRITE, "", ignored) == WatchAction::Ignore);
 }

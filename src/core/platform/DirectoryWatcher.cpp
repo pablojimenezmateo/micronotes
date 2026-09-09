@@ -38,6 +38,35 @@ void closeIfOpen(int& fd) {
 
 }
 
+WatchAction decideWatchEvent(std::uint32_t mask, std::string_view name,
+                             const std::vector<std::string>& ignoredNames) {
+  // Events were dropped by the kernel, so the list of paths is no longer the
+  // list of what changed.
+  if((mask & IN_Q_OVERFLOW) != 0) return WatchAction::Rescan;
+  // A directory this was watching is gone. Whatever was inside it went with it,
+  // and inotify will not say what, so the caller re-reads.
+  if((mask & (IN_DELETE_SELF | IN_MOVE_SELF)) != 0) return WatchAction::Forget;
+  if(name.empty()) return WatchAction::Ignore;
+
+  const bool ignored =
+      std::find(ignoredNames.begin(), ignoredNames.end(), name) != ignoredNames.end();
+  if((mask & IN_ISDIR) != 0) {
+    // A new directory has to be watched before anything appears in it, and a
+    // directory that arrived by rename may already be full -- so its contents
+    // are a rescan rather than a list.
+    if((mask & (IN_CREATE | IN_MOVED_TO)) != 0) {
+      return ignored ? WatchAction::Ignore : WatchAction::WatchSubtree;
+    }
+    if((mask & (IN_DELETE | IN_MOVED_FROM)) != 0) return WatchAction::Rescan;
+    return WatchAction::Ignore;
+  }
+  // The app's own staging files. A durable write puts one beside its target for
+  // the length of a rename, and reporting it would have the caller chasing a
+  // file that is about to stop existing under that name.
+  if(isTemporaryWriteName(name)) return WatchAction::Ignore;
+  return WatchAction::Changed;
+}
+
 DirectoryWatcher::~DirectoryWatcher() {
   stop();
 }
@@ -55,6 +84,11 @@ bool DirectoryWatcher::active() const {
 std::size_t DirectoryWatcher::watchCount() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return directories_.size();
+}
+
+void DirectoryWatcher::setDirectoryBudgetForTesting(std::size_t directories) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  budget_ = std::max<std::size_t>(1, std::min(directories, kMaxWatches));
 }
 
 bool DirectoryWatcher::watch(std::filesystem::path root, std::vector<std::string> ignoredNames) {
@@ -89,7 +123,7 @@ bool DirectoryWatcher::watch(std::filesystem::path root, std::vector<std::string
 }
 
 bool DirectoryWatcher::addTree(const std::filesystem::path& dir) {
-  if(directories_.size() >= kMaxWatches) return false;
+  if(directories_.size() >= budget_) return false;
   const int wd = ::inotify_add_watch(inotify_, dir.c_str(), kMask);
   // ENOSPC is the per-user watch limit, which is a property of the machine
   // rather than a bug. Either way the answer is the same: this tree cannot be
@@ -156,51 +190,42 @@ void DirectoryWatcher::run() {
         const auto* event = reinterpret_cast<const inotify_event*>(buffer.data() + at);
         at += static_cast<ssize_t>(sizeof(inotify_event)) + event->len;
 
-        if((event->mask & IN_Q_OVERFLOW) != 0) {
-          // Events were dropped by the kernel, so the list of paths is no longer
-          // the list of what changed.
+        const std::string_view name = event->len == 0 ? std::string_view()
+                                                      : std::string_view(event->name);
+        const WatchAction action = decideWatchEvent(event->mask, name, ignored_);
+        if(action == WatchAction::Ignore) continue;
+        if(action == WatchAction::Rescan && (event->mask & IN_Q_OVERFLOW) != 0) {
           requestRescan();
           anything = true;
           continue;
         }
+        // Every remaining action is about a directory this is watching, so an
+        // event for a watch already dropped has nothing left to say.
         const auto directory = directories_.find(event->wd);
         if(directory == directories_.end()) continue;
 
-        if((event->mask & (IN_DELETE_SELF | IN_MOVE_SELF)) != 0) {
-          // A directory this was watching is gone. Whatever was inside it went
-          // with it, and inotify will not say what, so the caller re-reads.
-          ::inotify_rm_watch(inotify, event->wd);
-          directories_.erase(directory);
-          requestRescan();
-          anything = true;
-          continue;
-        }
-        if(event->len == 0) continue;
-
-        const std::filesystem::path path = directory->second / event->name;
-        if((event->mask & IN_ISDIR) != 0) {
-          // A new directory has to be watched before anything appears in it, and
-          // a directory that arrived by rename may already be full -- so its
-          // contents are a rescan rather than a list.
-          if((event->mask & (IN_CREATE | IN_MOVED_TO)) != 0) {
-            const auto name = path.filename().string();
-            if(std::find(ignored_.begin(), ignored_.end(), name) == ignored_.end()) {
-              if(!addTree(path)) requestRescan();
-              requestRescan();
-              anything = true;
-            }
-          } else if((event->mask & (IN_DELETE | IN_MOVED_FROM)) != 0) {
-            requestRescan();
-            anything = true;
-          }
-          continue;
-        }
-        // The app's own staging files. A durable write puts one beside its
-        // target for the length of a rename, and reporting it would have the
-        // caller chasing a file that is about to stop existing under that name.
-        if(isTemporaryWriteName(event->name)) continue;
-        changed_.insert(path.string());
         anything = true;
+        switch(action) {
+          case WatchAction::Forget:
+            ::inotify_rm_watch(inotify, event->wd);
+            directories_.erase(directory);
+            requestRescan();
+            break;
+          case WatchAction::WatchSubtree:
+            // The rescan is unconditional: the directory may have arrived by
+            // rename with files already in it, which produce no events at all.
+            (void)addTree(directory->second / name);
+            requestRescan();
+            break;
+          case WatchAction::Rescan:
+            requestRescan();
+            break;
+          case WatchAction::Changed:
+            changed_.insert((directory->second / name).string());
+            break;
+          case WatchAction::Ignore:
+            break;
+        }
       }
     }
 

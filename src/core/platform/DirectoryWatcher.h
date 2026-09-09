@@ -2,16 +2,40 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace microcore::platform {
+
+// What the watcher does about one event the kernel reported.
+enum class WatchAction {
+  Ignore,        // nothing the caller has to hear about
+  Rescan,        // something changed that cannot be named as a path
+  Forget,        // the watched directory itself is gone: drop the watch, rescan
+  WatchSubtree,  // a directory arrived: watch it, and rescan what it brought
+  Changed        // this file changed
+};
+
+// The watcher's decision table, as a function of a mask and a name.
+//
+// It is out here rather than inside the read loop because the two branches that
+// matter most cannot be provoked by a test: the kernel dropping events when its
+// queue overflows, and a watched directory being moved out from under its own
+// watch. Both need a fixture that is expensive or privileged to build, and both
+// are decided from a mask and a name -- so the decision is separable from the
+// descriptor, and only the descriptor was ever the hard part.
+//
+// `name` is the event's `name` field, empty when it carried none.
+WatchAction decideWatchEvent(std::uint32_t mask, std::string_view name,
+                             const std::vector<std::string>& ignoredNames);
 
 // Watches a directory tree and says which files in it changed.
 //
@@ -80,6 +104,12 @@ public:
   // Directories currently watched. Diagnostics, and a test seam.
   std::size_t watchCount() const;
 
+  // Lowers the directory budget below `kMaxWatches`, for a test that wants to
+  // see the degraded mode without building eight thousand directories to get
+  // there. Takes effect on the next `watch`; clamped to at least one, because a
+  // watcher of nothing is not the state this models.
+  void setDirectoryBudgetForTesting(std::size_t directories);
+
   // The most directories one tree may take before the watcher gives up naming
   // paths and asks for rescans instead. Well under the usual
   // `max_user_watches`, because a watcher is not entitled to spend the whole
@@ -96,6 +126,8 @@ private:
 
   mutable std::mutex mutex_;
   std::filesystem::path root_;
+  // `kMaxWatches` in every build; lowered only by the seam above.
+  std::size_t budget_ = kMaxWatches;
   std::vector<std::string> ignored_;
   // Watch descriptor to the directory it names, so an event's `name` field can
   // be turned back into a path. inotify reports the directory, never the file.
