@@ -206,38 +206,58 @@ MICRONOTES_TEST(focused_edits_copying_a_block_selection_leaves_the_note_alone) {
   MICRONOTES_REQUIRE(!ui.status.text.empty());
 }
 
-MICRONOTES_TEST(focused_edits_cutting_a_block_selection_removes_it_from_the_note) {
+// Cut's contract, which holds whether or not there is a clipboard to reach.
+//
+// There usually is not, here: these run headless, so `setClipboardText` fails
+// and cut takes its refusal path. That makes this the *only* way to state the
+// invariant that matters, and it is the one that was broken -- all three arms
+// used to copy, erase unconditionally, and then report that the copy had
+// failed, so a compositor that refused the selection left the text gone from
+// the note and absent from the clipboard.
+//
+// Either the text went somewhere and left the note, or it did neither. Never
+// the note without the clipboard.
+MICRONOTES_TEST(focused_edits_cut_never_erases_what_it_could_not_copy) {
   UiRuntime ui;
   openTwoBlocks(ui);
-  MICRONOTES_REQUIRE(ui.blockSelection.active);
   const std::string before = ui.editor.text();
 
   cutSelectionInFocus(ui);
 
-  // The block is gone from the buffer. Before this arm existed the text was
-  // untouched and the status line said nothing.
-  micronotes::tests::require(ui.editor.text() != before,
-                             "cut left the note unchanged with blocks selected");
-  MICRONOTES_REQUIRE(ui.editor.text().find("First block.") == std::string::npos);
-  MICRONOTES_REQUIRE(ui.editor.text().find("Second block.") != std::string::npos);
-  MICRONOTES_REQUIRE(!ui.status.text.empty());
+  const bool erased = ui.editor.text() != before;
+  const bool refused = ui.status.text.rfind("Cut failed", 0) == 0;
+  micronotes::tests::require(erased != refused,
+                             "cut must either remove the blocks and say so, or remove nothing and "
+                             "say why -- it reported \"" + ui.status.text + "\" and " +
+                               (erased ? "erased anyway" : "left the note alone"));
+  if(refused) {
+    micronotes::tests::require(ui.editor.text() == before,
+                               "cut reported a failure and erased the blocks anyway");
+  }
 }
 
-// The pair agrees about *what* is selected: whatever copy would take is what
-// cut removes. That is the invariant the two branches now share a helper for.
-MICRONOTES_TEST(focused_edits_cut_removes_exactly_what_copy_would_take) {
-  UiRuntime copied;
-  openTwoBlocks(copied);
-  const std::string whole = copied.editor.text();
+// The same contract for a text selection rather than a block one.
+MICRONOTES_TEST(focused_edits_cut_of_a_text_selection_is_all_or_nothing) {
+  UiRuntime ui;
+  ui.editor.setText("alpha beta\n");
+  ui.focus = FocusArea::Editor;
+  ui.editor.selectRange(0, 5);
+  const std::string before = ui.editor.text();
 
-  UiRuntime cut;
-  openTwoBlocks(cut);
-  cutSelectionInFocus(cut);
-  const std::string remaining = cut.editor.text();
+  cutSelectionInFocus(ui);
 
-  // What cut removed is a prefix of the note, and it is the whole first block
-  // rather than the fragment between two carets.
-  MICRONOTES_REQUIRE(remaining.size() < whole.size());
-  MICRONOTES_REQUIRE(whole.find(remaining) != std::string::npos ||
-                     whole.rfind(remaining) != std::string::npos);
+  const bool erased = ui.editor.text() != before;
+  const bool refused = ui.status.text.rfind("Cut failed", 0) == 0;
+  MICRONOTES_REQUIRE(erased != refused);
+}
+
+// And copy never changes the buffer whatever the clipboard does, which is the
+// property cut now matches rather than the one it used to contradict.
+MICRONOTES_TEST(focused_edits_copy_never_changes_the_note) {
+  UiRuntime ui;
+  openTwoBlocks(ui);
+  const std::string before = ui.editor.text();
+  copySelectionInFocus(ui);
+  MICRONOTES_REQUIRE(ui.editor.text() == before);
+  MICRONOTES_REQUIRE(!ui.status.text.empty());
 }

@@ -46,6 +46,20 @@ bool blocksAreSelected(const UiRuntime& ui) {
   return ui.focus == FocusArea::Editor && ui.blockSelection.active;
 }
 
+// Whether a cut has to stop, having reported why.
+//
+// A cut that could not reach the clipboard must not erase anything. All three
+// arms used to copy, erase unconditionally, and then *say* the copy had failed
+// -- so a compositor that refused the selection left the text gone from the
+// note and absent from the clipboard, recoverable only by knowing to press
+// undo. Copy has no such branch: a failed copy changes nothing by construction,
+// which is what cut now matches.
+bool cutFailed(UiRuntime& ui, bool copied) {
+  if(copied) return false;
+  ui.status = "Cut failed: " + std::string(SDL_GetError());
+  return true;
+}
+
 }
 
 void copySelectionInFocus(UiRuntime& ui) {
@@ -70,23 +84,25 @@ void cutSelectionInFocus(UiRuntime& ui) {
   // clears it -- so without this arm Ctrl+X fell through every branch and did
   // nothing, silently, while Ctrl+C copied the blocks.
   if(blocksAreSelected(ui)) {
-    const bool copied = setClipboardText(selectedBlockText(ui));
-    // The same deletion `performBlockCommand("delete")` runs, so cut is copy
-    // and delete rather than a third opinion about what a block selection is.
-    performBlockCommand(ui, "delete");
-    if(!copied) ui.status = "Cut copied text failed: " + std::string(SDL_GetError());
-    else ui.status = "Cut block";
+    if(!cutFailed(ui, setClipboardText(selectedBlockText(ui)))) {
+      // The same deletion `performBlockCommand("delete")` runs, so cut is copy
+      // and delete rather than a third opinion about what a block selection is.
+      performBlockCommand(ui, "delete");
+      ui.status = "Cut block";
+    }
   } else if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
-    const bool copied = setClipboardText(ui.editor.selectedText());
-    ui.editor.eraseSelection();
-    ui.markEdited();
-    ui.revealEditorCursor = true;
-    ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
+    if(!cutFailed(ui, setClipboardText(ui.editor.selectedText()))) {
+      ui.editor.eraseSelection();
+      ui.markEdited();
+      ui.revealEditorCursor = true;
+      ui.status = "Cut selection";
+    }
   } else if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
-    const bool copied = setClipboardText(field->editor.selectedText());
-    field->editor.eraseSelection();
-    syncFocusedInput(ui);
-    ui.status = copied ? "Cut selection" : "Cut copied text failed: " + std::string(SDL_GetError());
+    if(!cutFailed(ui, setClipboardText(field->editor.selectedText()))) {
+      field->editor.eraseSelection();
+      syncFocusedInput(ui);
+      ui.status = "Cut selection";
+    }
   }
 }
 
