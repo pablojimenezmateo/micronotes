@@ -260,6 +260,17 @@ private:
   // Not const: the layout is the only thing that knows how many rows the panel
   // held, and that count belongs to the overlay whose list it counted.
   Layout layoutFor(Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const;
+
+  // The three pieces `draw` paints, defined in `OverlayPaint.cpp`. Members
+  // rather than free helpers because `Layout` is private: the geometry is the
+  // layout's to describe, and nobody outside this class should compose one.
+  // No `TextRenderer`: a grid draws swatches and marks, never type.
+  void drawGrid(SDL_Renderer* renderer, const Overlay& overlay, const Layout& layout) const;
+  void drawRows(SDL_Renderer* renderer, TextRenderer& text, const Overlay& overlay,
+                const Layout& layout) const;
+  // One function because it was two, guarded two different ways for the same
+  // draw. See the definition.
+  static void drawHint(TextRenderer& text, const Overlay& overlay, const Layout& layout);
   const std::vector<int>& visibleIndices(const Overlay& overlay) const;
   std::optional<OverlayResult> commit();
   void moveHighlight(int delta);
