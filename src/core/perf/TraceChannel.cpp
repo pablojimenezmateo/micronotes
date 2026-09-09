@@ -1,5 +1,7 @@
 #include "core/perf/TraceChannel.h"
 
+#include "core/util/TransparentStringHash.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -102,21 +104,14 @@ bool mainThreadKnown() {
   return gMainThreadMarked.load(std::memory_order_relaxed);
 }
 
-// Lets the map be looked up by string_view without materializing a std::string
-// on every record. The label is only copied when the entry is first created.
-struct TransparentStringHash {
-  using is_transparent = void;
-  std::size_t operator()(std::string_view value) const {
-    return std::hash<std::string_view> {}(value);
-  }
-};
-
 struct TraceChannel::Impl {
   mutable std::mutex mutex;
   Clock::time_point origin = Clock::now();
   // Keyed by an owned string: a label can be assembled per call (ScopeLabel),
   // so a view into the caller's buffer would dangle.
-  std::unordered_map<std::string, Entry, TransparentStringHash, std::equal_to<>> entries;
+  // Looked up by string_view without materializing a std::string on every
+  // record; the label is copied only when the entry is first created.
+  std::unordered_map<std::string, Entry, microcore::util::TransparentStringHash, std::equal_to<>> entries;
 };
 
 TraceChannel::TraceChannel(const char* prefix, const char* streamEnv, const char* aggregateEnv,

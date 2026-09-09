@@ -6,6 +6,8 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "core/util/TransparentStringHash.h"
+
 #include <sqlite3.h>
 
 struct sqlite3;
@@ -99,18 +101,13 @@ public:
 private:
   friend class Statement;
 
+  sqlite3* db_ = nullptr;
   // Transparently hashed, so probing the cache with a `string_view` does not
   // build a `std::string` from the SQL first. Every prepare paid that -- a heap
   // allocation and a copy of a statement up to 300 bytes long -- to look up a
   // statement whose whole purpose is to avoid work.
-  struct SqlHash {
-    using is_transparent = void;
-    std::size_t operator()(std::string_view sql) const {
-      return std::hash<std::string_view> {}(sql);
-    }
-  };
-  sqlite3* db_ = nullptr;
-  std::unordered_map<std::string, Statement::Slot, SqlHash, std::equal_to<>> cache_;
+  std::unordered_map<std::string, Statement::Slot, util::TransparentStringHash, std::equal_to<>>
+    cache_;
 };
 
 // --- statement values -------------------------------------------------------
