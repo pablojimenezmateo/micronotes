@@ -48,7 +48,7 @@ is two decisions rather than one. That is down from three, and the one that is
 left is the one furthest from the others: the raw pane deliberately shows the
 file as bytes, so its line breaks are the file's and not the layout's.
 
-It used to cost one more thing, and that half is paid: `editorRows` was keyed on
+It used to cost one more thing, and that half is paid: `rawPaneRows` was keyed on
 a **copy of the note**, so every keystroke copied a 200 KB buffer into the cache
 key (17.6 us) and every frame compared the buffer against it (9.8 us) to answer
 a question the editor's revision answers in one word. The key is

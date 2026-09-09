@@ -1356,25 +1356,56 @@ MICRONOTES_TEST(layout_discards_an_edited_span_that_describes_another_pair_of_bu
   run({}, "an absent span");
 }
 
-MICRONOTES_TEST(layout_folds_a_hand_wrapped_line_ending_into_one_space) {
-  const auto drawnText = [](const std::string& source) {
+// A line the writer ended is a line the reader sees ended.
+//
+// CommonMark folds a single newline inside a paragraph into a space, and this
+// used to as well. A note is not a document being typeset: it is written in
+// lines, and somebody who presses Enter once and keeps typing means the next
+// word to start underneath rather than beside. The *text* is unchanged either
+// way -- the newline is still one space's worth of run, so the source stays
+// byte-aligned with what is drawn and a caret can be put on it -- and what
+// changes is where the line ends.
+MICRONOTES_TEST(layout_ends_a_line_where_the_writer_ended_one) {
+  struct Drawn {
+    std::string text;
+    std::size_t lines = 0;
+  };
+  const auto drawn = [](const std::string& source) {
     DocumentLayout layout;
     layout.setMetrics(stubMetrics());
     LayoutOptions options;
     options.width = 4000.0f;  // wide enough that nothing wraps on screen
     layout.update(source, options);
-    std::string drawn;
+    Drawn out;
     const auto& first = layout.layout(0);
+    out.lines = first.lines.size();
     for(const auto& line : first.lines) {
-      for(const auto& run : first.runsOf(line)) drawn += run.text;
+      for(const auto& run : first.runsOf(line)) out.text += run.text;
     }
-    return drawn;
+    return out;
   };
 
-  MICRONOTES_REQUIRE(drawnText("A plain paragraph hand wrapped\n   across two source lines.\n") ==
+  // Every byte of the source is still drawn, in order, with the line ending as
+  // the one space the file means.
+  MICRONOTES_REQUIRE(drawn("A plain paragraph hand wrapped\n   across two source lines.\n").text ==
                      "A plain paragraph hand wrapped across two source lines.");
-  MICRONOTES_REQUIRE(drawnText("A **marked up** paragraph wrapped\n   across two source lines.\n") ==
+  MICRONOTES_REQUIRE(drawn("A **marked up** paragraph wrapped\n   across two source lines.\n").text ==
                      "A marked up paragraph wrapped across two source lines.");
+
+  // Two source lines, two lines on screen, at a width where neither would have
+  // wrapped on its own. Written without the file's own trailing newline: a
+  // source that ends in one gets the document's empty caret line, which is a
+  // separate rule and is pinned on its own below.
+  MICRONOTES_REQUIRE(drawn("A plain paragraph hand wrapped\n   across two source lines.").lines == 2);
+  MICRONOTES_REQUIRE(drawn("A **marked up** paragraph wrapped\n   across two source lines.").lines == 2);
+  MICRONOTES_REQUIRE(drawn("one\ntwo\nthree").lines == 3);
+  MICRONOTES_REQUIRE(drawn("just the one line").lines == 1);
+
+  // The break is a *break*, not an empty line: two source lines are two lines,
+  // and the file's terminating newline still buys exactly the one caret line it
+  // always did rather than a second one.
+  MICRONOTES_REQUIRE(drawn("just the one line\n").lines == 2);
+  MICRONOTES_REQUIRE(drawn("A plain paragraph hand wrapped\n   across two source lines.\n").lines == 3);
 }
 
 // The visual-row index used to be a record per row, and both of its readers --

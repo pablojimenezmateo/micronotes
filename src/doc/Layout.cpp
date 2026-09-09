@@ -52,7 +52,8 @@ constexpr float kImageGap = 8.0f;
 // sweep for what a bigger one was measured to cost.
 constexpr std::size_t kSpareEntries = 256;
 
-Token makeToken(std::string_view source, std::size_t start, std::size_t end, const RunStyle& style, TextRole role, bool marker, bool hidden, int link) {
+Token makeToken(std::string_view source, std::size_t start, std::size_t end, const RunStyle& style,
+                TextRole role, bool marker, bool hidden, int link, bool lineBreak = false) {
   Token token;
   token.start = start;
   token.end = end;
@@ -61,6 +62,7 @@ Token makeToken(std::string_view source, std::size_t start, std::size_t end, con
   token.isMarker = marker;
   token.hidden = hidden;
   token.link = link;
+  token.lineBreak = lineBreak;
   if(!hidden) token.text = displayText(source.substr(start, end - start));
   token.space = !token.text.empty() && std::all_of(token.text.begin(), token.text.end(), [](char c) { return c == ' '; });
   return token;
@@ -105,7 +107,17 @@ public:
           // all -- into this queue, for roughly half the tokens in a document.
           pending_.push_back({i, metrics_.measure(token.text, token.style)});
           pendingWidth_ += pending_.back().second;
+          // Held rather than taken now. A trailing newline is the block's own
+          // terminator and must not add an empty line under it, so the break is
+          // applied when the next word arrives -- if one does.
+          if(token.lineBreak && wrap_) pendingBreak_ = true;
           continue;
+        }
+        if(pendingBreak_) {
+          // The spaces that ended the line belong to the line they ended.
+          flushPending();
+          pushLine();
+          pendingBreak_ = false;
         }
         // Everything else joins the cluster being built. A hidden marker and an
         // empty run measure zero and still take their place in it, so the
@@ -120,6 +132,7 @@ public:
       placeCluster();
       flushPending();
       pushLine();
+      pendingBreak_ = false;
     }
   }
 
@@ -232,6 +245,9 @@ private:
   float right_ = 0.0f;
   float lineHeight_ = 0.0f;
   bool wrap_ = true;
+  // A line ending has been seen and the spaces it came with are still held. See
+  // `run`: the break lands when the next word does.
+  bool pendingBreak_ = false;
   float y_ = 0.0f;
   float penX_ = 0.0f;
   // Where the line being built started in `out_.runs`.
@@ -288,15 +304,14 @@ void appendPlainTokens(std::string_view source, std::size_t from, std::size_t to
     const bool space = isAsciiSpace(source[i]);
     std::size_t j = i + 1;
     while(j < to && isAsciiSpace(source[j]) == space) ++j;
-    const bool foldsLineEnding = space && j - i > 1 &&
-                                 source.substr(i, j - i).find('\n') != std::string_view::npos;
-    if(foldsLineEnding) {
+    const bool endsLine = space && source.substr(i, j - i).find('\n') != std::string_view::npos;
+    if(endsLine && j - i > 1) {
       out.push_back(makeToken(source, i, j - 1, base, TextRole::Body, false, true, -1));
-      out.push_back(makeToken(source, j - 1, j, base, TextRole::Body, false, false, -1));
+      out.push_back(makeToken(source, j - 1, j, base, TextRole::Body, false, false, -1, true));
       i = j;
       continue;
     }
-    out.push_back(makeToken(source, i, j, base, TextRole::Body, false, false, -1));
+    out.push_back(makeToken(source, i, j, base, TextRole::Body, false, false, -1, endsLine));
     i = j;
   }
 }
@@ -315,20 +330,22 @@ void appendContentTokens(std::string_view source, std::size_t from, std::size_t 
     const bool hidden = attr.marker && !revealed;
     const RunStyle style = styleFrom(base, attr, monoSize);
     const TextRole role = attr.marker ? TextRole::Marker : attr.role;
-    // A line ending inside a block is one space, however many bytes it took:
-    // the newline itself, plus the indentation of the line continuing it. All
-    // but the last byte are emitted hidden, which is zero width and still
-    // addressable, so the source stays byte-aligned with what is drawn and a
-    // hand-wrapped sentence reads as the one space the file means.
-    const bool foldsLineEnding = space && !hidden && j - i > 1 &&
-                                 source.substr(i, j - i).find('\n') != std::string_view::npos;
-    if(foldsLineEnding) {
+    // A line ending inside a block takes however many bytes it took -- the
+    // newline itself, plus the indentation of the line continuing it -- and
+    // ends the line on screen. All but the last byte are emitted hidden, which
+    // is zero width and still addressable, so the source stays byte-aligned
+    // with what is drawn.
+    const bool endsLine =
+      space && !hidden && source.substr(i, j - i).find('\n') != std::string_view::npos;
+    if(endsLine && j - i > 1) {
       out.push_back(makeToken(source, i, j - 1, style, role, attr.marker, true, -1));
-      out.push_back(makeToken(source, j - 1, j, style, role, attr.marker, false, attr.marker ? -1 : attr.link));
+      out.push_back(makeToken(source, j - 1, j, style, role, attr.marker, false,
+                              attr.marker ? -1 : attr.link, true));
       i = j;
       continue;
     }
-    out.push_back(makeToken(source, i, j, style, role, attr.marker, hidden, attr.marker ? -1 : attr.link));
+    out.push_back(makeToken(source, i, j, style, role, attr.marker, hidden,
+                            attr.marker ? -1 : attr.link, endsLine));
     i = j;
   }
 }

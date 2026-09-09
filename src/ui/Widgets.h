@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/editor/TextField.h"
 #include "ui/Rect.h"
 #include "ui/TextRenderer.h"
 #include "ui/Tooltip.h"
@@ -23,6 +24,45 @@ namespace micronotes::ui {
 // A text field's frame: the panel ground with a 1px rule round it, accent when
 // it has the keyboard.
 void drawTextFieldFrame(SDL_Renderer* renderer, Rect box, bool active);
+
+// Where and how a single-line field's contents go inside that frame.
+struct TextFieldPaint {
+  // The rect the text is laid out and clipped to -- the frame for a framed
+  // field, the text line itself for one drawn bare.
+  Rect box;
+  // Top of the text line. `ui::textTop` is what every centred line in the shell
+  // uses; a caller whose box *is* the line passes the line's own top.
+  float textY = 0.0f;
+  // Inset of the text from the box's left edge.
+  float padX = 0.0f;
+  // How far the caret and the selection band sit inside the box, top and
+  // bottom. Negative to grow them past it, which a bare field wants.
+  float insetY = 0.0f;
+  // Shown in the muted ink when the field is empty. *Under* the caret, not
+  // instead of it.
+  std::string_view placeholder;
+  bool focused = false;
+  // The blink's on-phase, settled once a frame so every caret on screen blinks
+  // together. See `ui::CaretBlink`.
+  bool caretVisible = true;
+};
+
+// A single-line field's contents: the selection band, the text or its
+// placeholder, and the caret. Returns where the caret landed, so a caller can
+// hand the IME a candidate rectangle; empty when the field has no keyboard.
+//
+// Three surfaces drew this by hand -- the sidebar's search box, the overlay's
+// prompt, the settings card's filter -- and two of the three drew the
+// placeholder *instead of* the field rather than under it, so an empty prompt
+// had no insertion point at all. A field with no caret is not a text field,
+// which is the sentence `editor::SingleLineView` was written to make true, and
+// two of its three callers gave it back on the one input that most needs it.
+//
+// The field is taken by reference because laying it out settles `scrollX`: how
+// far a long value has scrolled to keep the caret in sight is carried across
+// frames, so the box does not snap back to the left on every repaint.
+Rect drawTextFieldText(SDL_Renderer* renderer, TextRenderer& text, const TextStyle& style,
+                       editor::TextField& field, const TextFieldPaint& paint);
 
 // A button with its label centred. `tone` picks the fill: a neutral button
 // takes the raised ground, a destructive one takes the warning colour.

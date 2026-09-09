@@ -1,11 +1,15 @@
 #pragma once
 
+#include "CoreAliases.h"
+
+#include "core/editor/SoftWrap.h"
 #include "ui/TextRenderer.h"
 #include "ui/Rect.h"
 
 #include <SDL3/SDL.h>
 
 #include <cstddef>
+#include <vector>
 
 namespace micronotes::app {
 
@@ -18,6 +22,17 @@ struct UiRuntime;
 void drawEditor(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
 std::size_t editorIndexAtPoint(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y);
 void placeEditorCursor(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect, float x, float y);
+
+// The pane's soft wrap of the buffer, memoised on the revision, the column and
+// the text size.
+//
+// Exposed because it is the number `TD-14` is about: the rewrap is the whole
+// note on every keystroke, and until the harness had a lane that could reach it
+// that was a figure somebody had measured once by hand. The pane is the only
+// surface in the shell with a wrap of its own -- it shows the file as bytes, so
+// its line breaks are the file's and not the layout's.
+const std::vector<editor::SoftWrapRow>& rawPaneRows(ui::TextRenderer& text, UiRuntime& ui,
+                                                    ui::Rect rect);
 
 // The box the text is actually drawn in. How far the pane can scroll is
 // `ui.raw.list`, recorded by the draw: asking for it used to mean soft-wrapping

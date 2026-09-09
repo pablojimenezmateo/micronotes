@@ -567,33 +567,21 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     // `textTop`, like every other centred line in the shell. These four sites
     // each centred by hand and none of them rounded, so the palette's text
     // landed on half pixels and its glyph stems smeared.
-    const float textY = textTop(layout.field, text, bodyStyle);
-    if(overlay->value.empty()) {
-      text.draw(overlay->placeholder, layout.field.x + kRowPadX, textY, theme().textMuted, bodyStyle);
-    } else {
-      // The field lays itself out: the view reports where the caret and the
-      // selection sit after scrolling, so a long value keeps the caret in
-      // sight instead of always pinning the end of the text.
-      const float inner = layout.field.w - kRowPadX * 2.0f;
-      const auto measure = [&](std::string_view value) { return text.width(value, bodyStyle); };
-      const auto view = editor::layoutSingleLine(overlay->value.editor, inner, overlay->value.scrollX, measure);
-      overlay->value.scrollX = view.scrollX;
-      const float left = layout.field.x + kRowPadX - view.scrollX;
-      ClipGuard clip(renderer, layout.field);
-      if(view.hasSelection) {
-        fill(renderer, {left + view.selectionStartX, layout.field.y + 3.0f,
-                        view.selectionEndX - view.selectionStartX, layout.field.h - 6.0f},
-             theme().selectionFill);
-      }
-      text.draw(overlay->value.text(), left, textY, theme().textPrimary, bodyStyle);
-      // On the blink's on-phase only; the shell settles that once a frame so
-      // this caret and the page's cannot blink out of step. See
-      // `OverlayStack::setCaretVisible`.
-      if(caretVisible_) {
-        fill(renderer, {left + view.caretX, layout.field.y + 4.0f, 2.0f, layout.field.h - 8.0f},
-             theme().accent);
-      }
-    }
+    // One painter, shared with the sidebar's search box and the settings card's
+    // filter. The prompt used to draw its placeholder *instead of* its field,
+    // so an empty prompt -- which every prompt is for its first keystroke --
+    // had no insertion point at all.
+    TextFieldPaint paint;
+    paint.box = layout.field;
+    paint.textY = textTop(layout.field, text, bodyStyle);
+    paint.padX = kRowPadX;
+    paint.insetY = 4.0f;
+    paint.placeholder = overlay->placeholder;
+    paint.focused = true;
+    // The shell settles the blink once a frame so this caret and the page's
+    // cannot blink out of step. See `OverlayStack::setCaretVisible`.
+    paint.caretVisible = caretVisible_;
+    drawTextFieldText(renderer, text, bodyStyle, overlay->value, paint);
   }
 
   if(overlay->isGrid()) {

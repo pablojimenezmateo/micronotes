@@ -25,7 +25,9 @@ static bool ensureSelectedNote(UiRuntime& ui) {
     ui.status = "Open a library before attaching files";
     return false;
   }
-  if(ui.state.selection().noteId.empty()) createNote(ui);
+  // Named rather than asked for: the file being attached is already on its way
+  // in, and a modal between the drop and the paste would lose it.
+  if(ui.state.selection().noteId.empty()) createNote(ui, "Untitled");
   return !ui.state.selection().noteId.empty();
 }
 

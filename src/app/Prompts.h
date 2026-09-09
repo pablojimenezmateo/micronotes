@@ -23,6 +23,17 @@ namespace micronotes::app {
 struct UiRuntime;
 
 // Text prompts, and the commits that close them.
+
+// The name a new note gets, asked for before the note exists.
+//
+// Creating one used to make `Untitled` straight away and leave the reader to
+// rename it: two gestures for one intention, and a library full of `Untitled`
+// files every time the second was forgotten.
+void beginNoteCreate(UiRuntime& ui);
+// The same prompt, reopened with what was typed and something to say about it.
+void beginNoteCreate(UiRuntime& ui, std::string value, std::string hint);
+void saveNoteCreate(UiRuntime& ui, const std::string& asked);
+
 void beginTagEdit(UiRuntime& ui);
 void saveTags(UiRuntime& ui);
 void beginFolderCreate(UiRuntime& ui);

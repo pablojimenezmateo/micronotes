@@ -87,7 +87,7 @@ void switchLibrary(UiRuntime& ui, const std::string& typed) {
 void performCommand(UiRuntime& ui, const std::string& id) {
   if(id == "jump") openNotePalette(ui, "jump-note", "Go to note");
   else if(id == "command-palette") openCommandPalette(ui);
-  else if(id == "new-note") createNote(ui);
+  else if(id == "new-note") beginNoteCreate(ui);
   else if(id == "new-folder") beginFolderCreate(ui);
   else if(id == "save") saveCurrent(ui);
   else if(id == "rename") beginRename(ui);

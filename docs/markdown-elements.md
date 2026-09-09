@@ -50,8 +50,16 @@ inside the viewer bounds.
 This paragraph contains a hard line break after this sentence.  
 This line should begin directly below it.
 
-Soft line breaks in Markdown
-should render as normal spaces inside the paragraph.
+A single newline inside a paragraph
+also begins a new line here.
+
+That last one is a deliberate departure from CommonMark, which folds a single
+newline into a space. A note is not a document being typeset: it is written in
+lines, and somebody who presses Enter once and keeps typing means the next word
+to start underneath rather than beside. The bytes are untouched either way --
+the newline is still drawn as the one space's worth of run it takes up, so the
+caret can be put on it and the file is not reflowed -- and what changes is only
+where the line ends.
 
 ## Folding
 

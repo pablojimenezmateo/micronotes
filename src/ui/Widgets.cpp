@@ -3,6 +3,8 @@
 #include "CoreAliases.h"
 #include "core/editor/SoftWrap.h"
 #include "core/render/ColorMath.h"
+#include "core/editor/SingleLineView.h"
+#include "ui/ClipGuard.h"
 #include "ui/Glyphs.h"
 #include "ui/Metrics.h"
 #include "ui/Painter.h"
@@ -19,6 +21,38 @@ namespace micronotes::ui {
 void drawTextFieldFrame(SDL_Renderer* renderer, Rect box, bool active) {
   fill(renderer, box, theme().surfaceBackground);
   stroke(renderer, box, active ? theme().accent : theme().border);
+}
+
+Rect drawTextFieldText(SDL_Renderer* renderer, TextRenderer& text, const TextStyle& style,
+                       editor::TextField& field, const TextFieldPaint& paint) {
+  const Rect box = paint.box;
+  const float inner = std::max(1.0f, box.w - paint.padX * 2.0f);
+  const auto measure = [&](std::string_view value) { return text.width(value, style); };
+  const auto view = editor::layoutSingleLine(field.editor, inner, field.scrollX, measure);
+  field.scrollX = view.scrollX;
+
+  const ClipGuard clip(renderer, box);
+  const float left = box.x + paint.padX - view.scrollX;
+  const float bandY = box.y + paint.insetY;
+  const float bandH = std::max(1.0f, box.h - paint.insetY * 2.0f);
+  if(paint.focused && view.hasSelection) {
+    fill(renderer, {left + view.selectionStartX, bandY, view.selectionEndX - view.selectionStartX,
+                    bandH},
+         theme().selectionFill);
+  }
+  if(field.empty()) {
+    if(!paint.placeholder.empty()) {
+      text.draw(paint.placeholder, box.x + paint.padX, paint.textY, theme().textMuted, style);
+    }
+  } else {
+    text.draw(field.text(), left, paint.textY, theme().textPrimary, style);
+  }
+  if(!paint.focused) return {};
+  const Rect caret {left + view.caretX, bandY, 2.0f, bandH};
+  if(paint.caretVisible) fill(renderer, caret, theme().accent);
+  // Returned whether or not this is the blink's on-phase: the IME wants to know
+  // where the insertion point *is*, not whether it happens to be painted.
+  return caret;
 }
 
 void drawButton(SDL_Renderer* renderer, TextRenderer& text, Rect box, std::string_view label,

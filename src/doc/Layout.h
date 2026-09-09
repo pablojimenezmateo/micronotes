@@ -77,6 +77,12 @@ struct Token {
   bool isMarker = false;
   bool hidden = false;
   bool space = false;
+  // This token is where a line of the file ended, and the line on screen ends
+  // with it. A single newline inside a paragraph is a *break* here, not the
+  // space CommonMark folds it into: a note is written in lines, and a reader
+  // who ends a line expects the next word to start below it rather than beside
+  // it. See `docs/markdown-elements.md`, "Paragraphs And Line Breaks".
+  bool lineBreak = false;
   int link = -1;
 };
 

@@ -153,37 +153,27 @@ Rect sidebarListRect(Rect sidebar) {
 void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
                           editor::TextField& field, Rect box, bool focused,
                           std::string_view placeholder) {
-  const ui::TextStyle style = ui::chromeStyle();
-  const auto view = editor::layoutSingleLine(field.editor, box.w, field.scrollX, fieldMeasure(text));
-  field.scrollX = view.scrollX;
-
-  ClipGuard clip(renderer, box);
-  const float originX = box.x - view.scrollX;
-  if(focused && view.hasSelection) {
-    fill(renderer, {originX + view.selectionStartX, box.y - 2.0f,
-                    view.selectionEndX - view.selectionStartX, box.h + 4.0f}, theme().selectionFill);
-  }
-  if(field.empty() && !placeholder.empty()) {
-    text.draw(placeholder, box.x, box.y, theme().textMuted, style);
-  } else {
-    text.draw(field.text(), originX, box.y, theme().textPrimary, style);
-  }
-  if(focused) {
-    const float caretX = originX + view.caretX;
-    // Painted only on the blink's on-phase. See `ui::CaretBlink`: a solid bar
-    // in a mono face reads as a pipe character rather than as an insertion
-    // point, so the caret used to say "your typing goes here" in exactly the
-    // same voice as the text beside it.
-    if(ui.caret.visible) {
-      fill(renderer, {caretX, box.y - 2.0f, 2.0f, box.h + 4.0f}, theme().accent);
-    }
-    // Give the IME a candidate rectangle here too. Without it a dead-key or
-    // composition popup opened while typing in a field lands at the window
-    // origin instead of next to the text being composed.
-    ui.caret.reported = true;
-    ui.caret.rect = SDL_Rect {static_cast<int>(caretX), static_cast<int>(box.y - 2.0f),
-                             2, static_cast<int>(box.h + 4.0f)};
-  }
+  ui::TextFieldPaint paint;
+  paint.box = box;
+  paint.textY = box.y;
+  // Negative: this box *is* the text line, so the caret and the band have to
+  // grow past it rather than sit inside it.
+  paint.insetY = -2.0f;
+  paint.placeholder = placeholder;
+  paint.focused = focused;
+  // Painted only on the blink's on-phase. See `ui::CaretBlink`: a solid bar in
+  // a mono face reads as a pipe character rather than as an insertion point, so
+  // the caret used to say "your typing goes here" in exactly the same voice as
+  // the text beside it.
+  paint.caretVisible = ui.caret.visible;
+  const Rect caret = ui::drawTextFieldText(renderer, text, ui::chromeStyle(), field, paint);
+  if(ui::empty(caret)) return;
+  // Give the IME a candidate rectangle here too. Without it a dead-key or
+  // composition popup opened while typing in a field lands at the window origin
+  // instead of next to the text being composed.
+  ui.caret.reported = true;
+  ui.caret.rect = SDL_Rect {static_cast<int>(caret.x), static_cast<int>(caret.y), 2,
+                            static_cast<int>(caret.h)};
 }
 
 // Byte offset in `field` under a pointer at window x, for a field drawn in

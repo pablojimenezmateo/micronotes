@@ -26,7 +26,7 @@ namespace micronotes::app {
 // The pane shows the file as bytes, so its line breaks are the file's rather
 // than the layout's -- which is why it is the one surface in the shell with a
 // wrap of its own to memoise. Keyed on the editor's revision rather than on a
-// copy of the note; see `editorRows` for what that was costing.
+// copy of the note; see `rawPaneRows` for what that was costing.
 struct RawRowsKey {
   std::uint64_t revision = 0;
   int wrapWidth = -1;

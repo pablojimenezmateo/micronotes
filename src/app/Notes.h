@@ -188,7 +188,12 @@ bool applyWatchedChanges(UiRuntime& ui);
 void beginRename(UiRuntime& ui);
 void saveRename(UiRuntime& ui);
 
-void createNote(UiRuntime& ui);
+// Creates a note called `title` in the selected folder and opens it. The name
+// is asked for first -- see `beginNoteCreate` in `app/Prompts.h` -- except on
+// the two paths that cannot stop to ask: a save with nothing selected, and a
+// file dropped on a window with no note open.
+bool createNote(UiRuntime& ui, const std::string& title);
+// Chooses the notebook, then asks for the name.
 void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder);
 
 // Writes the open note if it has unsaved changes. `quiet` suppresses the status

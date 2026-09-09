@@ -1,5 +1,7 @@
 #include "app/Notes.h"
 
+#include "app/Prompts.h"
+
 #include "doc/LinkTarget.h"
 
 #include "app/ContextMenus.h"
@@ -365,35 +367,41 @@ void saveRename(UiRuntime& ui) {
   }
 }
 
-void createNote(UiRuntime& ui) {
+bool createNote(UiRuntime& ui, const std::string& title) {
   if(!ui.state.catalog().isOpen()) {
     ui.status = "Start with --library <path> before creating notes";
-    return;
+    return false;
   }
-  if(ui.editor.dirty() && !saveCurrent(ui)) return;
+  if(ui.editor.dirty() && !saveCurrent(ui)) return false;
   const auto folder = ui.state.selection().folder;
   invalidateWikiNotes(ui);
-  // An empty body, not a `# Untitled` heading. The page draws the note's name
+  // An empty body, not a `# <title>` heading. The page draws the note's name
   // above its first block, so seeding one only put the name on screen twice and
   // left the caret on the second copy; the empty page prompts for a first line
   // instead, which is where the caret already is.
-  if(auto created = ui.state.createNote("Untitled", folder, "")) {
-    ui.loadedNoteId = created->id;
-    ui.editor.setText("");
-    ui.raw.list.rebase();
-    resetPageScroll(ui);
-    ui.revealEditorCursor = true;
-    ui.focus = FocusArea::Editor;
-    ui.status = "Created " + created->title;
+  auto created = ui.state.createNote(title, folder, "");
+  if(!created) {
+    ui.status = "Could not create the note";
+    return false;
   }
+  ui.loadedNoteId = created->id;
+  ui.editor.setText("");
+  ui.raw.list.rebase();
+  resetPageScroll(ui);
+  ui.revealEditorCursor = true;
+  ui.focus = FocusArea::Editor;
+  ui.status = "Created " + created->title;
+  return true;
 }
 
 void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
-  const auto previousFolder = ui.state.selection().folder;
+  // The folder is chosen *before* the name is asked for, so the prompt's answer
+  // needs nothing carried with it. Escaping the prompt leaves the sidebar
+  // showing the notebook that was right-clicked, which is where the reader was
+  // pointing when they asked.
   ui.state.selectFolder(folder);
-  createNote(ui);
-  if(ui.state.selection().noteId.empty()) ui.state.selectFolder(previousFolder);
+  beginNoteCreate(ui);
 }
 
 bool saveCurrent(UiRuntime& ui, bool quiet) {
@@ -402,7 +410,9 @@ bool saveCurrent(UiRuntime& ui, bool quiet) {
     return false;
   }
   if(ui.state.selection().noteId.empty()) {
-    createNote(ui);
+    // No prompt on this path: a save the reader asked for, and an autosave they
+    // did not, must not stop to open a modal over the note being written.
+    createNote(ui, "Untitled");
   }
   const auto result = ui.state.saveSelectedNote(ui.editor.text());
   if(!result.ok) {

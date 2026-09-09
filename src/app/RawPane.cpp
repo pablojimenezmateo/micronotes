@@ -44,7 +44,7 @@ static editor::MeasureText editorMeasure(TextRenderer& text) {
 //
 // What is *not* fixed is the rewrap itself: it is still the whole note, because
 // `editor::softWrap` has no incremental form. See `docs/tech-debt.md`, TD-14.
-const std::vector<editor::SoftWrapRow>& editorRows(TextRenderer& text, UiRuntime& ui, Rect rect) {
+const std::vector<editor::SoftWrapRow>& rawPaneRows(TextRenderer& text, UiRuntime& ui, Rect rect) {
   const Rect writing = editorWritingRect(rect);
   const RawRowsKey key {ui.editor.revision(), static_cast<int>(std::max(1.0f, writing.w - 20.0f)),
                         ui::textSize()};
@@ -74,7 +74,7 @@ void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRunt
 
 std::size_t editorIndexAtPoint(TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
   const int lineHeight = text.lineHeight();
-  const auto& rows = editorRows(text, ui, rect);
+  const auto& rows = rawPaneRows(text, ui, rect);
   const Rect writing = editorWritingRect(rect);
   const int visibleLine = std::max(0, static_cast<int>((y - (writing.y + 12)) / static_cast<float>(lineHeight)));
   const int rowIndex = std::clamp(ui.raw.list.scroll() + visibleLine, 0, std::max(0, static_cast<int>(rows.size()) - 1));
@@ -93,7 +93,7 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   const Rect writing = editorWritingRect(rect);
   drawSurface(renderer, writing, theme().editorBackground, ui.focus == FocusArea::Editor ? theme().accent : theme().border);
   const int lineHeight = text.lineHeight();
-  const auto& rows = editorRows(text, ui, rect);
+  const auto& rows = rawPaneRows(text, ui, rect);
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
   const int cursorRow = editor::rowForOffset(rows, ui.editor.cursor());
   if(ui.revealEditorCursor) {

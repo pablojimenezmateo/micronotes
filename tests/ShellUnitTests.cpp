@@ -332,7 +332,7 @@ MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
 
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
-  micronotes::app::createNote(ui);
+  micronotes::app::createNote(ui, "Untitled");
   ui.editor.setText("mine\n");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
   MICRONOTES_REQUIRE(ui.editor.text() == "mine\n");
@@ -389,7 +389,7 @@ MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
 
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
-  micronotes::app::createNote(ui);
+  micronotes::app::createNote(ui, "Untitled");
   ui.editor.setText("mine\n");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
   const auto path = ui.state.openNote().path();

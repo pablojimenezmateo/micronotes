@@ -20,6 +20,8 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   if(result.overlayId == "rename-note") {
     ui.fields.rename.beginWith(result.value, false);
     saveRename(ui);
+  } else if(result.overlayId == "new-note-name") {
+    saveNoteCreate(ui, result.value);
   } else if(result.overlayId == "tags") {
     ui.fields.tag.beginWith(result.value, false);
     saveTags(ui);
@@ -31,7 +33,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   } else if(result.overlayId == "delete-folder") {
     deleteSelectedFolder(ui);
   } else if(result.overlayId == "note-menu") {
-    if(result.itemId == "new") createNote(ui);
+    if(result.itemId == "new") beginNoteCreate(ui);
     else if(result.itemId == "rename") beginRename(ui);
     else if(result.itemId == "delete") openDeleteNoteConfirm(ui);
     // The rest are the palette's, so the menu and the palette cannot drift.

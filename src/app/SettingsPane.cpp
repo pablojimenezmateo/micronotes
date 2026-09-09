@@ -302,23 +302,15 @@ void drawFilterField(SDL_Renderer* renderer, ui::TextRenderer& text,
                      ui::SettingsSurfaceState& surface, Rect field) {
   const bool focused = surface.focus == SettingsPaneFocus::Filter;
   ui::drawTextFieldFrame(renderer, field, focused);
-  const float textY = ui::textTop(field, text, labelStyle());
-  if(surface.query.empty()) {
-    text.draw(surface.mode == SettingsMode::About ? "Search commands and keys" : "Type to filter",
-              field.x + ui::kSpace2, textY, ui::theme().textMuted, labelStyle());
-    return;
-  }
-  const auto measure = [&](std::string_view value) { return text.width(value, labelStyle()); };
-  const auto view = editor::layoutSingleLine(surface.query.editor, field.w - ui::kSpace2 * 2.0f,
-                                             surface.query.scrollX, measure);
-  surface.query.scrollX = view.scrollX;
-  const float left = field.x + ui::kSpace2 - view.scrollX;
-  ui::ClipGuard clip(renderer, field);
-  text.draw(surface.query.text(), left, textY, ui::theme().textPrimary, labelStyle());
-  if(focused) {
-    ui::fill(renderer, {left + view.caretX, field.y + 6.0f, 2.0f, field.h - 12.0f},
-             ui::theme().accent);
-  }
+  ui::TextFieldPaint paint;
+  paint.box = field;
+  paint.textY = ui::textTop(field, text, labelStyle());
+  paint.padX = ui::kSpace2;
+  paint.insetY = 6.0f;
+  paint.placeholder = surface.mode == SettingsMode::About ? "Search commands and keys"
+                                                          : "Type to filter";
+  paint.focused = focused;
+  ui::drawTextFieldText(renderer, text, labelStyle(), surface.query, paint);
 }
 
 // The foot: what the filter left, and the way out.

@@ -59,6 +59,42 @@ void saveTags(UiRuntime& ui) {
   }
 }
 
+void beginNoteCreate(UiRuntime& ui, std::string value, std::string hint) {
+  if(!ui.state.catalog().isOpen()) {
+    ui.status = "Start with --library <path> before creating notes";
+    return;
+  }
+  ui::Overlay overlay;
+  overlay.kind = ui::OverlayKind::TextPrompt;
+  overlay.id = "new-note-name";
+  overlay.title = "New note";
+  overlay.value.beginWith(std::move(value));
+  overlay.placeholder = "Note title";
+  overlay.hint = std::move(hint);
+  ui.overlays.open(std::move(overlay));
+}
+
+void beginNoteCreate(UiRuntime& ui) {
+  beginNoteCreate(ui, "Untitled", "Enter to create, Esc to cancel");
+}
+
+void saveNoteCreate(UiRuntime& ui, const std::string& asked) {
+  const std::string title = asked.empty() ? "Untitled" : asked;
+  // A note is a file, so two notes in one notebook cannot both be called
+  // `TODO`. The rename prompt numbers the second one and says so, because by
+  // then the note exists and refusing would leave it under a name nobody
+  // chose; here nothing exists yet, so the reader is asked again rather than
+  // handed a `TODO-2` they did not type.
+  const auto& catalog = ui.state.catalog();
+  const auto folder = ui.state.selection().folder;
+  if(catalog.uniqueTitle(title, folder) != title) {
+    beginNoteCreate(ui, title, "A note called \"" + title + "\" is already here");
+    ui.status = "That name is taken";
+    return;
+  }
+  createNote(ui, title);
+}
+
 void beginFolderCreate(UiRuntime& ui) {
   if(!ui.state.catalog().isOpen()) {
     ui.status = "Open a library before creating notebooks";
