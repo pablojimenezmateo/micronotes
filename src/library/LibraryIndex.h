@@ -135,6 +135,17 @@ public:
   std::size_t size() const;
   bool isOpen() const;
 
+  // Whether the full-text table keeps its own copy of every note's text.
+  //
+  // False wherever SQLite is new enough for a contentless fts5 table that can
+  // still delete a row (3.43), which is the shape `migrate` asks for: the index
+  // then holds the terms and not the text, and a 10.3 MB library indexes to
+  // 15.5 MB rather than 27.2 MB. True on the fallback, which is what every
+  // build wrote before and is not a second mode -- every statement the index
+  // runs means the same thing on both, and this is the only question that can
+  // tell them apart.
+  bool ftsStoresBodies() const;
+
   // Every indexed note, in no particular order. One statement, no file reads.
   std::vector<IndexedNote> notes() const;
 

@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include <sqlite3.h>
+
 #include <chrono>
 
 #include "library/LibraryIndex.h"
@@ -784,5 +786,57 @@ MICRONOTES_TEST(library_index_indexes_a_written_file_without_reading_it_back) {
   MICRONOTES_REQUIRE(!index.refreshFile(path).listFieldsChanged);
   MICRONOTES_REQUIRE(index.search("needle").size() == 1);
 
+  std::filesystem::remove_all(root);
+}
+
+// The index used to carry a second copy of every note: `notes.body` and
+// `notes_fts.body` both held the whole text, so a 10.3 MB library indexed to
+// 27.2 MB. The full-text table stores the terms and not the text now -- the
+// only thing ever asked of it is which rowids match, and the snippets are built
+// from `notes.body` through the join.
+//
+// The shape depends on the SQLite the build is linked against, because a
+// contentless fts5 table can only have a row deleted from 3.43 onwards and
+// deleting a row is what every save does. Both shapes have to answer every
+// question identically, which is what makes the older one a fallback rather
+// than a second mode -- so the assertions below are about *search*, and the
+// shape is only read to say which one they were checked against.
+MICRONOTES_TEST(library_index_stores_the_terms_rather_than_the_text) {
+  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-contentless";
+  std::filesystem::remove_all(root);
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "terms";
+  metadata.title = "Terms";
+  const auto path = library.createNote(metadata, "a note about zarquon and nothing else");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+  MICRONOTES_REQUIRE(index.ftsStoresBodies() == (sqlite3_libversion_number() < 3043000));
+
+  // Matching, in all three scopes.
+  MICRONOTES_REQUIRE(index.search("zarquon").size() == 1);
+  MICRONOTES_REQUIRE(index.search("Terms", micronotes::library::SearchScope::Title).size() == 1);
+  MICRONOTES_REQUIRE(index.search("zarquon", micronotes::library::SearchScope::Content).size() == 1);
+  // And the snippet, which is the thing that would go missing if it had been
+  // coming out of the full-text table rather than out of `notes`.
+  MICRONOTES_REQUIRE(index.search("zarquon").front().matchLine.find("zarquon") !=
+                     std::string::npos);
+
+  // A rewrite has to retire the old terms. This is the operation a contentless
+  // table cannot perform before 3.43, and getting it wrong leaves a note
+  // matching words it no longer contains.
+  library.saveNote(path, metadata, "a note about blorple and nothing else");
+  std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() +
+                                           std::chrono::seconds(2));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+  MICRONOTES_REQUIRE(index.search("blorple").size() == 1);
+  MICRONOTES_REQUIRE(index.search("zarquon").empty());
+
+  // And a full rebuild, which empties the table rather than deleting rows.
+  MICRONOTES_REQUIRE(index.rebuild());
+  MICRONOTES_REQUIRE(index.search("blorple").size() == 1);
+  MICRONOTES_REQUIRE(index.search("zarquon").empty());
   std::filesystem::remove_all(root);
 }

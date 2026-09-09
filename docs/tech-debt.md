@@ -103,33 +103,6 @@ it is, it is meant to be a different engine, and the debt is only the geometry
 it duplicates -- which `ui::pageRectIn` and `ui::pageColumnIn` already hold.
 
 
-## TD-17 — the index stores a second copy of every note body
-
-`src/library/LibraryIndex.cpp`, schema 4: `notes.body` and `notes_fts.body` both
-hold the whole text of every note.
-
-**What it costs today.** The SQLite index is roughly twice the size of the
-library it indexes, on disk and in the page cache. For a 1,000-note fixture of
-200 KB notes that is a few hundred megabytes of duplication; for an ordinary
-library it is a few megabytes and nobody would notice. Every save writes the
-body twice for the same reason -- once to the row, once to the fts entry --
-though neither write copies it any more.
-
-**Why it has not been paid.** fts5 supports an external-content table
-(`content='notes'`), which stores no copy and reads the column from `notes` when
-it needs it. That is the right answer and it is a schema bump plus a careful
-look at three things: `collectRows` currently selects `notes.body` through a
-join, which becomes free rather than cheaper; the `rowid` contract between the
-two tables becomes load-bearing rather than an optimisation (see the comment on
-`NoteWriter`); and an external-content table will not rebuild itself, so a
-crash between the row write and the fts write leaves them disagreeing where
-today it leaves them both stale. None of that is hard, and none of it is
-justified by a few megabytes -- but the duplication should be a decision on the
-record rather than an accident of the first schema.
-
-
-
-
 
 ## TD-34 — nothing scrolls sideways
 

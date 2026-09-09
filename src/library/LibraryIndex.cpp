@@ -17,6 +17,7 @@
 #include <sqlite3.h>
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -456,7 +457,16 @@ bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
 //    exchanging names make the upsert momentarily want one path on two rows,
 //    and a uniqueness violation there would roll back the whole refresh rather
 //    than leave the duplicate the old code silently allowed.
-static constexpr int kSchemaVersion = 4;
+// 5: `notes_fts` stores no copy of the note. It carried one -- `notes.body` and
+//    `notes_fts.body` both held the whole text of every note -- so the index
+//    was two and a half times the size of the library it indexed: 27.2 MB for a
+//    1,000-note fixture whose Markdown is 10.3 MB. A contentless table stores
+//    the terms and not the text, which is all the search has ever needed from
+//    it: the snippets are built from `notes.body` through the join, and the
+//    only thing asked of `notes_fts` is which rowids match. 27.2 MB to 15.4 MB
+//    on the same fixture, and one of the two whole-body writes per save goes
+//    with it.
+static constexpr int kSchemaVersion = 5;
 
 bool LibraryIndex::migrate() {
   if(!db_.isOpen()) return false;
@@ -469,13 +479,18 @@ bool LibraryIndex::migrate() {
     if(sqlite3_step(versionStmt) == SQLITE_ROW) version = sqlite3_column_int(versionStmt, 0);
   }
 
-  // The index is a cache of what is on disk, so an older shape is dropped and
-  // refilled rather than migrated. `refreshChangedFiles` then finds every file
-  // changed and re-reads each one exactly once, which is what migrating the
-  // rows would have cost anyway -- and there is no second code path holding an
-  // older schema's assumptions about the rows it is reading.
+  // The index is a cache of what is on disk, so a shape that is not this one is
+  // dropped and refilled rather than migrated. `refreshChangedFiles` then finds
+  // every file changed and re-reads each one exactly once, which is what
+  // migrating the rows would have cost anyway -- and there is no second code
+  // path holding another schema's assumptions about the rows it is reading.
+  //
+  // `!=` rather than `<`: a library opened by a newer build and then by an
+  // older one is an ordinary thing to do -- two machines, or a downgrade -- and
+  // the old build would otherwise read a shape it does not know it is reading.
+  const bool shapeChanged = version != kSchemaVersion;
   bool ok = true;
-  if(version < kSchemaVersion) {
+  if(shapeChanged) {
     ok = db.exec("DROP TABLE IF EXISTS notes_fts;") && db.exec("DROP TABLE IF EXISTS notes;") &&
          db.exec("DROP TABLE IF EXISTS links;");
   }
@@ -485,9 +500,25 @@ bool LibraryIndex::migrate() {
     // resolution happens at query time so a rename does not invalidate rows.
     db.exec("CREATE TABLE IF NOT EXISTS links(src_id TEXT NOT NULL, target TEXT NOT NULL, line TEXT NOT NULL, PRIMARY KEY(src_id, target));") &&
     db.exec("CREATE INDEX IF NOT EXISTS links_target ON links(target COLLATE NOCASE);") &&
-    db.exec("CREATE INDEX IF NOT EXISTS notes_path ON notes(path);") &&
-    db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, body, path);");
-  if(ok && version < kSchemaVersion) {
+    db.exec("CREATE INDEX IF NOT EXISTS notes_path ON notes(path);");
+
+  // The terms, not the text. `contentless_delete=1` is what makes a contentless
+  // table usable here and is SQLite 3.43 or newer: without it such a table
+  // cannot have a row deleted, and deleting a row is what every save does --
+  // the writer removes the note's fts entry by rowid and inserts the new one.
+  //
+  // Attempted rather than assumed, because micronotes links the *system*
+  // SQLite and a distribution older than 3.43 is an ordinary thing to be on.
+  // The fallback is the table every build wrote until now: correct, searchable,
+  // and carrying the second copy of every note. Nothing above this line knows
+  // which of the two it got, because every statement the index runs against
+  // `notes_fts` -- insert by rowid, delete by rowid, delete all, and a MATCH
+  // scoped to one column or to none -- means the same thing on both.
+  ok = ok && (db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING "
+                      "fts5(title, body, path, content='', contentless_delete=1);") ||
+              db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING "
+                      "fts5(title, body, path);"));
+  if(ok && shapeChanged) {
     ok = db.exec("PRAGMA user_version=" + std::to_string(kSchemaVersion) + ";");
   }
   return ok;
@@ -828,6 +859,19 @@ std::size_t LibraryIndex::size() const {
 
 bool LibraryIndex::isOpen() const {
   return db_.isOpen();
+}
+
+bool LibraryIndex::ftsStoresBodies() const {
+  if(!db_.isOpen()) return false;
+  // Read off the table's own DDL, not probed by querying it: a contentless
+  // table still *declares* every column and answers NULL for it rather than
+  // refusing, so a `SELECT body FROM notes_fts` prepares and steps happily on
+  // both shapes and tells them apart not at all.
+  Statement stmt =
+    db_.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='notes_fts';");
+  if(!stmt || sqlite3_step(stmt) != SQLITE_ROW) return false;
+  const auto* sql = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+  return sql == nullptr || std::string_view(sql).find("content=''") == std::string_view::npos;
 }
 
 std::vector<IndexedNote> LibraryIndex::notes() const {

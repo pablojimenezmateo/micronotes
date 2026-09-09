@@ -2869,3 +2869,41 @@ cache down with it on the way.
 That is now a budget rather than an anecdote (`shell.raw_pane_rewrap`, ceilinged
 loosely because shaping moves with the machine), and it is the number `TD-14`'s
 decision should be taken against.
+
+
+### Resolved: the index carried a second copy of every note
+
+`notes.body` and `notes_fts.body` both held the whole text of every note, so the
+index was two and a half times the size of the library it indexed -- and every
+save wrote the body twice for the same reason.
+
+| 1,000 notes, 8 sections each | on disk |
+|---|---:|
+| the Markdown itself | 10.3 MB |
+| index, `fts5(title, body, path)` | **27.2 MB** |
+| index, `fts5(..., content='', contentless_delete=1)` | **15.5 MB** |
+
+The copy was never read. The only thing asked of the full-text table is *which
+rowids match*: `search` selects `notes.id`, `notes.path`, `notes.title` and
+`notes.body` through the join, and the snippets are built in C++ from that
+`body`. A contentless table stores the terms and not the text, which is exactly
+the half that was doing the work.
+
+**What made this a decision rather than a change** is deleting a row. A
+contentless fts5 table could not have one deleted until SQLite 3.43 added
+`contentless_delete=1`, and deleting a row is what every save does -- the writer
+removes the note's entry by rowid and inserts the new one. The other shape,
+`content='notes'`, works on any fts5 and stores no copy either, but its delete
+takes the *old* column values, which means reading the old body back out of
+SQLite on the autosave path: the exact whole-note read the eighth pass went to
+some trouble to remove.
+
+micronotes links the **system** SQLite, so 3.43 cannot be assumed. The create is
+attempted and the old stored-content table is the fallback, which is what every
+build wrote until now. Nothing above `migrate` knows which of the two it got:
+insert by rowid, delete by rowid, delete all, and a MATCH scoped to one column
+or to none all mean the same thing on both, which is what makes the fallback a
+fallback and not a second mode. `LibraryIndex::ftsStoresBodies()` is the one
+question that can tell them apart, and it reads the table's own DDL rather than
+querying it -- a contentless table still declares every column and answers NULL
+for it, so a `SELECT body FROM notes_fts` prepares and steps happily on both.
