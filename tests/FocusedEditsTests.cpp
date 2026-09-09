@@ -1,9 +1,11 @@
 #include "TestSupport.h"
 
 #include "app/Commands.h"
+#include "app/EditCommands.h"
 #include "app/Fields.h"
 #include "app/FocusedEdits.h"
 #include "app/Shell.h"
+#include "ui/Actions.h"
 
 #include <string>
 #include <string_view>
@@ -105,4 +107,56 @@ MICRONOTES_TEST(focused_edits_select_all_selects_the_focused_field) {
   selectAllInFocus(ui);
   MICRONOTES_REQUIRE(focusedField(ui)->editor.hasSelection());
   MICRONOTES_REQUIRE(focusedField(ui)->editor.selectedText() == "abc");
+}
+
+// The keyboard's block-shape chords and the table that produces them.
+//
+// The router used to name the kind, the level and the label for each digit a
+// second time, and the labels had drifted -- "heading 1" from the keyboard
+// against "Heading 1" from the menu, for the same shape in the same note. The
+// digit lives in `blockKinds()` now, so there is one answer; this checks the
+// two things a single table can still get wrong.
+MICRONOTES_TEST(block_kind_chords_are_unique_and_resolve_to_a_shape) {
+  int bound = 0;
+  for(const auto& entry : micronotes::app::blockKinds()) {
+    if(entry.chordDigit == 0) continue;
+    ++bound;
+    // A digit is claimed by at most one shape, or the second one is dead.
+    const auto* found = micronotes::app::blockKindForChordDigit(entry.chordDigit);
+    micronotes::tests::require(found == &entry,
+                               std::string("two block kinds claim Ctrl+Shift+") + entry.chordDigit);
+  }
+  MICRONOTES_REQUIRE(bound > 0);
+}
+
+// And what the shortcut list advertises is what the table binds. This is the
+// check that was missing: the hint said "Ctrl+Shift+1-9" while 4, 5 and 6
+// reached no branch at all, so three advertised shortcuts did nothing -- the
+// same failure `F2` and `Ctrl+Q` had before the action registry was one table.
+MICRONOTES_TEST(block_kind_chord_hint_advertises_only_digits_that_work) {
+  const auto* spec = micronotes::ui::findAction("turn-into");
+  MICRONOTES_REQUIRE(spec != nullptr);
+  const std::string hint(spec->keyHint);
+  MICRONOTES_REQUIRE(!hint.empty());
+
+  for(char digit = '0'; digit <= '9'; ++digit) {
+    // Present in the hint either as a listed digit or inside a "a-b" range.
+    bool advertised = false;
+    for(std::size_t i = 0; i < hint.size(); ++i) {
+      if(hint[i] < '0' || hint[i] > '9') continue;
+      if(i + 2 < hint.size() && hint[i + 1] == '-' && hint[i + 2] >= '0' && hint[i + 2] <= '9') {
+        if(digit >= hint[i] && digit <= hint[i + 2]) advertised = true;
+      } else if(hint[i] == digit) {
+        advertised = true;
+      }
+    }
+    const bool works = micronotes::app::blockKindForChordDigit(digit) != nullptr;
+    micronotes::tests::require(
+      advertised == works,
+      std::string("Ctrl+Shift+") + digit + (advertised ? " is advertised in the shortcut list but "
+                                                         "no block kind claims it"
+                                                       : " turns a block into something but the "
+                                                         "shortcut list does not mention it") +
+        " -- hint is \"" + hint + "\"");
+  }
 }

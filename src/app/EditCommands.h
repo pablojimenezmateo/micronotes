@@ -85,10 +85,23 @@ struct BlockKindEntry {
   const char* detail;
   doc::BlockKind kind;
   int level;
+  // The digit that turns a block into this one with Ctrl+Shift, or 0 for a
+  // shape the keyboard cannot reach directly.
+  //
+  // Here rather than in the key router because the router had all of it
+  // written out a second time -- the kind, the level *and* the label -- and the
+  // labels had drifted: the keyboard said "heading 1" and "a bullet" where this
+  // table says "Heading 1" and "Bulleted list", so the status message depended
+  // on which way you asked. The shortcut list had drifted further, advertising
+  // "Ctrl+Shift+1-9" when 4, 5 and 6 reached no branch at all.
+  char chordDigit = 0;
 };
 
 std::span<const BlockKindEntry> blockKinds();
 const BlockKindEntry* blockKindFor(std::string_view id);
+// The block shape Ctrl+Shift+<digit> produces, or null when that digit is not
+// bound. One lookup, so the keyboard cannot offer a shape the table does not.
+const BlockKindEntry* blockKindForChordDigit(char digit);
 
 bool moveSelectedBlocks(UiRuntime& ui, int delta);
 

@@ -86,6 +86,17 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
   const auto shortcut = [&](SDL_Keycode keycode, SDL_Scancode code) {
     return ctrl && (key == keycode || scancode == code);
   };
+  // The digit this key is, or 0. By scancode as well as keycode for the same
+  // reason `shortcut` is: on a layout where Shift+1 does not produce '1', the
+  // keycode is whatever the layout says and the scancode is still the 1 key.
+  const auto digitPressed = [](SDL_Keycode code, SDL_Scancode scan) -> char {
+    if(code >= SDLK_0 && code <= SDLK_9) return static_cast<char>('0' + (code - SDLK_0));
+    if(scan == SDL_SCANCODE_0) return '0';
+    if(scan >= SDL_SCANCODE_1 && scan <= SDL_SCANCODE_9) {
+      return static_cast<char>('1' + (scan - SDL_SCANCODE_1));
+    }
+    return 0;
+  };
   if(ui.overlays.active()) {
     bool handled = false;
     const auto result = ui.overlays.handleKey(key, ctrl, shift, handled);
@@ -154,20 +165,12 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     if(ui.focus == FocusArea::Editor) performBlockCommand(ui, "delete");
   } else if(shortcut(SDLK_D, SDL_SCANCODE_D)) {
     if(ui.focus == FocusArea::Editor) performBlockCommand(ui, "duplicate");
-  } else if(shift && shortcut(SDLK_0, SDL_SCANCODE_0)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Paragraph, 0, "text");
-  } else if(shift && shortcut(SDLK_1, SDL_SCANCODE_1)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Heading, 1, "heading 1");
-  } else if(shift && shortcut(SDLK_2, SDL_SCANCODE_2)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Heading, 2, "heading 2");
-  } else if(shift && shortcut(SDLK_3, SDL_SCANCODE_3)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Heading, 3, "heading 3");
-  } else if(shift && shortcut(SDLK_7, SDL_SCANCODE_7)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Ordered, 0, "a numbered item");
-  } else if(shift && shortcut(SDLK_8, SDL_SCANCODE_8)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Bullet, 0, "a bullet");
-  } else if(shift && shortcut(SDLK_9, SDL_SCANCODE_9)) {
-    turnCurrentBlockInto(ui, doc::BlockKind::Todo, 0, "a task");
+  } else if(shift && ctrl && blockKindForChordDigit(digitPressed(key, scancode))) {
+    // The digit, the shape it makes and the label it reports all come from
+    // `blockKinds()`, which is also what the block menu and the slash menu
+    // read. This used to be seven branches naming the kind, the level and the
+    // label again -- and the labels had drifted from the table's.
+    performBlockCommand(ui, blockKindForChordDigit(digitPressed(key, scancode))->id);
   } else if(key == SDLK_ESCAPE) {
     // One press undoes one narrowing; `app/Dismiss.h` owns which, and why.
     const Dismissed undid = dismissOne(ui);
