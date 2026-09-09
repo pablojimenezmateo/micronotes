@@ -159,6 +159,14 @@ before touching the code, is what made that pass arithmetic rather than opinion.
 The persistence lane is wall-clock, deliberately: a durable write is two `fsync`
 barriers, and on process CPU time an 18 ms save reads as 60 us of work.
 
+The **shell lane** is the one to add to when the work is above `doc::Layout`. It
+drives a real `UiRuntime` through a keystroke -- the editor, the live page, the
+outline panel, the status bar, the raw pane -- over the real faces and stops
+short of the paint. Anything memoised on `ui.editor.revision()` is by
+construction recomputed on every keystroke, and the memo makes it look handled;
+that is the shape this lane exists to catch, and it caught one the day it was
+written (see `docs/performance.md`, "The shell lane").
+
 Capture the pixels before and after as well: a paint or layout optimisation that
 cannot be observed is safe, and `cmp` of two screenshots is the cheapest proof
 there is.

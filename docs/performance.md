@@ -2814,3 +2814,58 @@ suspect — it is a literal `SDL_Delay` in the hot loop, and it is what the debt
 entry named — and it cost nothing at all, because something further down was
 already absorbing it. **A wait inside a paced loop is free until you unpace the
 loop.**
+
+
+### The shell lane, and the first thing it found
+
+`TD-19` said the harness had no lane for a keystroke through the *shell*: every
+edit lane drove `doc::Layout` directly, so anything memoised on
+`ui.editor.revision()` — which is by construction recomputed on every keystroke,
+with the memo making it look handled — was invisible to `run-checks.sh perf`.
+Two findings of exactly that shape shipped and were found by reading code: the
+outline panel rebuilding its block partition per keystroke (240 us) and the
+status bar recounting the whole note (247 us).
+
+The lane exists now. It drives a real `UiRuntime` — a real editor, a real live
+page, the real right-hand panel — over the real faces, and stops short of the
+paint: no window, no textures, no present. Everything above the paint is where
+all three findings were. It asks in the order `drawApp` does, because the
+outline borrows the partition the live page splices and `blocksAt` refuses to
+hand over one from a revision the layout has not reached; a lane that asked in
+the other order would measure the scan and call it the cost of the panel. That
+ordering is asserted rather than assumed — the lane fails if the outline scanned
+more often than it borrowed.
+
+On a 200 KB note, on an idle machine:
+
+| | median |
+|---|---:|
+| `shell.edit` — the buffer splice alone | 1 us |
+| `shell.status_bar` — the word and character counts | 1 us |
+| `shell.live_page` — layout over the real faces | 16 us |
+| `shell.outline_panel` — edit, layout, then the outline | 29 us |
+| `shell.keystroke` — all of the above, in frame order | **39 us** |
+| `shell.raw_pane_rewrap` — edit, then the raw pane's rows | **70,721 us** |
+
+The first five are the two ninth-pass findings staying fixed. The sixth is the
+lane earning itself on the first run.
+
+**`TD-14`'s number was off by two orders of magnitude.** The entry recorded the
+raw pane's whole-note rewrap at 807 us per keystroke; over a real face it is
+**70 ms**, and it is 1,800 times the cost of the rest of the keystroke put
+together. The 807 us was measured against a fixed-advance stand-in, which is
+what every lane here used before the font lane existed, and a fixed advance is
+precisely the assumption this code does not get to make.
+
+The reason is in `editor::softWrap`'s break search. Finding where a line breaks
+is a binary search over the row's *prefixes*, and every probe is a distinct
+string: `measure(text[pos..mid])` for seven or eight different `mid` per row,
+several thousand rows, none of them a string anything has measured before. So
+the measure cache cannot help — and worse, each miss *inserts*, and the cache is
+direct-mapped, so a single rewrap evicts thousands of the entries the page
+layout depends on. The pane does not merely cost 70 ms; it takes the shaping
+cache down with it on the way.
+
+That is now a budget rather than an anecdote (`shell.raw_pane_rewrap`, ceilinged
+loosely because shaping moves with the machine), and it is the number `TD-14`'s
+decision should be taken against.

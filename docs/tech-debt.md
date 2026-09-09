@@ -57,16 +57,37 @@ wrap width is a rect and does not move when the reader makes the text bigger, so
 at one width the pane kept wrapping the note to a font it was no longer drawn in.
 
 What is left is the rewrap itself, which is still the whole note on every
-keystroke:
+keystroke -- and the number this entry carried for it was wrong by two orders of
+magnitude:
 
-| | per |
+| | per keystroke |
 |---|---:|
-| full soft wrap | **807 us** per keystroke |
+| full soft wrap, fixed-advance stand-in | 807 us |
+| full soft wrap, **over a real face** | **70,721 us** |
+| the whole rest of a keystroke through the shell | 39 us |
 
-That is three times what the ninth pass removed from the outline panel and the
-status bar put together, on the same event. What it needs is an incremental soft
-wrap, which is the second engine this entry is about. If the pane goes, the
-number goes with it.
+The 807 us was measured against `stubMetrics()`, which is what every lane in the
+harness used before the font lane existed -- and a fixed advance is exactly the
+assumption this code does not get to make. `tools/PerfMain.cpp`'s shell lane
+measures it over the real faces now, and it is **1,800 times** the cost of the
+rest of the keystroke put together: the edit, the live page's layout, the
+outline panel and the status bar come to 39 us between them.
+
+The reason is `editor::softWrap`'s break search. Where a line breaks is found by
+a binary search over the row's *prefixes*, so each row costs seven or eight
+`measure(text[pos..mid])` calls on strings nothing has ever measured -- several
+thousand rows of them. The measure cache cannot help, and because it is
+direct-mapped and every miss inserts, one rewrap evicts thousands of the entries
+the *page* layout depends on. The pane does not merely cost 70 ms; it takes the
+shaping cache down with it.
+
+What it needs is either an incremental soft wrap -- rewrap the logical lines the
+edit touched, which `editor::TextEdit` already names -- or the cell grid the
+sibling uses (`../microide`'s `TextLayout::AdvanceVisualColumnAt`: a column
+model with a width table, so a monospaced pane never shapes anything to find out
+where a line ends). The second is the honest answer for a pane whose whole
+premise is that the file is monospaced, and it is most of "replace the pane".
+If the pane goes, the number goes with it.
 
 **Why it is still here.** `RawPane`'s own header says it is "kept apart so that
 replacing it is a matter of deleting one file", which is the right plan -- and
@@ -106,36 +127,6 @@ justified by a few megabytes -- but the duplication should be a decision on the
 record rather than an accident of the first schema.
 
 
-## TD-19 — the harness has no lane for a keystroke through the shell
-
-`tools/PerfMain.cpp`. Every edit lane drives `doc::Layout` directly.
-
-**What it costs today.** It cost two findings in the ninth pass, each larger
-than the layout work the existing budgets do measure: the outline panel rebuilt
-its block partition on every keystroke (240 us on a 200 KB note) and the status
-bar recounted the whole note on every keystroke (247 us), against a keystroke
-whose layout update is 14 us. Both shipped, both were invisible, and both were
-found by reading code rather than by any instrument. `TD-14` names a third of
-the same kind, still open at 807 us.
-
-The shape is specific and it will recur: anything memoised on
-`ui.editor.revision()` is *by construction* recomputed on every keystroke, and
-the memo makes it look handled. They are `ui::Memo` now rather than four loose
-fields each, which makes them findable -- `rg 'ui::Memo'` lists them -- but
-findable is not measured, and a memo keyed on the revision is exactly the thing
-this lane would catch.
-
-**Why it has not been paid.** The lane needs a `UiRuntime` and a `TextRenderer`
-driven through a real key handler, and the pieces are all there now -- the shell
-is a library, the test binary already builds a `UiRuntime`, and
-`ui.editor.insert()` plus the surfaces' own entry points is most of a keystroke.
-What is missing is a decision about what it measures: `drawApp` needs a renderer,
-so either the lane stops short of the paint (and measures the models, which is
-where all three findings were) or the harness grows a headless window and stops
-being the thing that runs in three seconds with no display. The first is
-worth doing and is an afternoon; it was not done in the same pass that found the
-bugs, because a lane written to catch the bug you already know about is the one
-that catches nothing else.
 
 ## TD-22 — the menu bar has no keyboard mnemonics
 

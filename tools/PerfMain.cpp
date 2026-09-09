@@ -1006,9 +1006,15 @@ static constexpr std::uint64_t kShellStatusBudgetMicros = 50;
 // scenario whose cost moves most with what else the machine is doing.
 static constexpr std::uint64_t kShellPageBudgetMicros = 20000;
 // The raw pane rewraps the whole note on every keystroke and has no incremental
-// form. This budget is not a target -- it is a ceiling on `TD-14`'s number, so
-// that the one surface the app knows is slow cannot get slower unnoticed.
-static constexpr std::uint64_t kShellRawBudgetMicros = 3000;
+// form. This budget is not a target and is not a number anybody should be
+// pleased with: it is a ceiling on `TD-14`'s cost, so that the one surface the
+// app already knows is slow cannot get slower without anybody noticing.
+//
+// It is this large because the cost is *shaping*, and shaping is the thing here
+// that moves most with what else the machine is doing -- the font lane's own
+// budgets are loose by the same factor and for the same reason. Read the
+// allocation column beside it instead: that one is deterministic.
+static constexpr std::uint64_t kShellRawBudgetMicros = 300000;
 static constexpr std::uint64_t kShellKeystrokeBudgetMicros = 24000;
 
 static bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
