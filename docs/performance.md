@@ -3087,3 +3087,99 @@ Tearing during a drag is not a cost worth naming next to a window that has not
 been painted at all, and a present that beats the display is a frame thrown
 away -- which is why vsync is on the rest of the time, and why the pacing comes
 straight back the moment the drag settles.
+
+## The tenth pass: decomposing a hot path, and the question the clock could not answer
+
+This pass was an architecture pass rather than a performance one -- `doc/Layout.cpp`
+was 1,732 lines holding three unrelated subjects -- but splitting it ran straight
+into a performance question, and the answer is worth writing down because it
+governs every future split.
+
+### The question
+
+`Flow`, the line breaker, was 208 lines of `class Flow` in `Layout.cpp`'s
+anonymous namespace. Being local to that translation unit, GCC inlined it whole
+into `DocumentLayout::layoutBlock`. Moving it to a `.cpp` of its own changed
+that, and the change is visible without a clock:
+
+| `layoutBlock`, instructions emitted | |
+|---|---:|
+| `Flow` local to the translation unit | 2,073 |
+| `Flow` in its own translation unit | 919 |
+
+Release carries no LTO, so the difference is real: `emit` runs once per token
+and `placeCluster` once per word, and those became opaque calls.
+
+### What the clock said, and why it could not be believed
+
+Six interleaved runs of the two binaries, alternating the order each round so a
+load trend could not favour either side:
+
+| lane | split `.cpp` vs header-inline | run-to-run spread |
+|---|---:|---:|
+| `type.middle` | +0.0% | 11% of min |
+| `shell.keystroke` | -4.9% | 121% of min |
+| `open.cold_layout` | +3.9% | **49% of min** |
+| `resize.width_step` | +0.3% | 66% of min |
+| `font.open_cold_layout` | -1.0% | — |
+
+Every allocation count was identical, which is the half of the measurement that
+does not move with the machine, so the two shapes provably do the same work.
+The timings are mixed-sign and every one of them is far inside its own lane's
+spread. **This is what an unanswerable question looks like**: not a small
+difference, but a difference smaller than the instrument.
+
+`perf stat` would have answered it in one run. It is refused here --
+`kernel.perf_event_paranoid` disallows CPU event access without root -- and
+`valgrind` is not installed, so there is no simulated-instruction fallback
+either.
+
+### So the answer avoids needing the clock
+
+`Flow` is defined in `doc/Flow.h`, and so is the tokenizer that pairs with it
+(`doc/Tokenize.h`), and so are `DocumentLayout`'s ten trivial accessors -- which
+were two-line bodies in the `.cpp` being called once per block per frame from
+four separate paint loops in `app/PageViewPaint.cpp`. Testability was the point
+of all three extractions, and a header gives that just as well as a `.cpp` does.
+
+The rule this leaves is narrow and worth stating: **a unit that runs per token,
+per block or per frame goes in a header; a unit that runs per update or per
+keystroke can have its own translation unit.** `doc/LayoutUpdate.cpp` is the
+second kind -- one call per keystroke, so one opaque call per keystroke -- and
+it is a `.cpp`.
+
+### LTO was the obvious way out, and it is not one
+
+If Release carried LTO none of the above would matter. Measured the same way,
+`-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON`, comparing only the three quiet rounds
+of six:
+
+| lane | no LTO | LTO | |
+|---|---:|---:|---|
+| `shell.find_scan` | 107 / 106 / 107 us | 96 / 94 / 94 us | ~11% faster |
+| `save.autosave_note` | 3415 / 3413 / 3077 us | 3027 / 3066 / 2625 us | ~12% faster, wall clock |
+| `type.middle` | 14 / 14 / 13 us | 13 / 14 / 13 us | unchanged |
+| `open.cold_layout` | 5768 / 5928 / 5798 us | 6016 / 6565 / 6551 us | **~8% slower** |
+| `fold.toggle_heading` | 114 / 113 / 114 us | 149 / 147 / 139 us | **~25% slower** |
+
+Consistent in *both* directions across the quiet runs with no overlap between
+the sets, so this is not noise: LTO genuinely helps the search scan and
+genuinely hurts fold toggling and cold layout. It also costs 37 s of build time.
+A mixed result is not a win, so it is off -- and it is recorded here so that
+nobody has to spend the afternoon rediscovering that it was inconclusive.
+
+### What the pass added to the instruments
+
+The flow had a timer (`layout.block.flow`) and no counter, which is the gap this
+file keeps finding. `layout.flow_measures` counts the widths it asks the font
+for -- 1,999,003 against 2,525,597 tokens staged on the 200 KB fixture, or 0.79
+per token, under one because a hidden marker measures zero. Two would mean
+something is measuring on both the does-it-fit path and the emit path again,
+which is what held-back spaces used to do. `layout.flow_word_splits` reads 25
+over the whole fixture, so a non-trivial number there is a column computed too
+narrow rather than a slow flow.
+
+Both are tallied in plain members and added once per block. `perf::addCounter`
+is an unconditional relaxed atomic add and this loop runs ~290,000 times for a
+cold 200 KB note, so counting at each site would have been counting most of the
+way to measuring it.

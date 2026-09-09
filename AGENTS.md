@@ -231,6 +231,16 @@ when the counters went in it turned out to be 70% of every frame.
   `docs/library-format.md`, "Changes Made Outside micronotes".
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
   only at a durable polymorphic boundary.
+- **Where a unit goes depends on how often it runs.** Release carries no LTO --
+  which was measured, not assumed, and LTO itself was measured and is a mixed
+  result rather than a win (`docs/performance.md`, "The tenth pass"). So a unit
+  that runs per token, per block or per frame is defined in a *header*
+  (`doc/Flow.h`, `doc/Tokenize.h`, `DocumentLayout`'s accessors), because a
+  two-line body in another translation unit is an opaque call on the hottest
+  path in the app; moving `Flow` out of `Layout.cpp` took `layoutBlock` from
+  2,073 emitted instructions to 919. A unit that runs per update or per
+  keystroke gets its own translation unit (`doc/LayoutUpdate.cpp`). Testability
+  is the reason to separate a unit at all, and a header gives that just as well.
 - Before writing a helper, look for it. `core/util/StringUtil.h` has `trim`,
   the ASCII case fold, `isAsciiSpace`, `splitLines` and `ellipsize`;
   `core/util/TextSearch.h` is the one literal search over a buffer -- every
