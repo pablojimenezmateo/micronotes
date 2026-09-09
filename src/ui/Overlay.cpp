@@ -55,10 +55,6 @@ float rowHeight(const OverlayItem& item) {
   return menuRowHeight(item.separator);
 }
 
-bool usesField(const Overlay& overlay) {
-  return overlay.kind == OverlayKind::TextPrompt || (overlay.kind == OverlayKind::List && overlay.filterable);
-}
-
 // The three faces an overlay sets, named once so the layout reserves room in
 // the same style the draw paints in. They had drifted: the hint's height was
 // reserved in Sans at the `tiny` size and drawn in Mono at 0.85 of `chrome`,
@@ -140,7 +136,7 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
   // large library this is the difference between one vector and a copy of it per
   // frame.
   const std::vector<int>& indices = visibleIndices(overlay);
-  const bool field = usesField(overlay);
+  const bool field = overlay.takesTypedText();
 
   // A titled *band* rather than a line of text with a gap under it, so its
   // height is the band's and not the type's plus a fudge. An anchored context
@@ -176,7 +172,7 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
   // cursor below, once the panel's origin is known.
   RowCursor fit(0.0f, 0.0f, 0.0f);
   fit.stopAt(room);
-  if(overlay.kind == OverlayKind::List) {
+  if(overlay.hasRows()) {
     for(std::size_t i = static_cast<std::size_t>(first);
         i < indices.size() && fit.placed() < static_cast<std::size_t>(cap); ++i) {
       const float step = rowHeight(overlay.items[static_cast<std::size_t>(indices[i])]);
@@ -189,13 +185,13 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
   // Rows the panel actually held, which is what scrolling has to agree with.
   overlay.rows.fitted(fit.placed());
   // The grid's own height, from how many rows the swatches fill.
-  const int swatchRows = isGridOverlay(overlay.kind)
+  const int swatchRows = overlay.isGrid()
                            ? static_cast<int>((indices.size() + kSwatchColumns - 1) / kSwatchColumns)
                            : 0;
   const float gridH = swatchRows > 0
                         ? static_cast<float>(swatchRows) * (kSwatchCell + kSwatchGap) - kSwatchGap
                         : 0.0f;
-  const float confirmH = overlay.kind == OverlayKind::Confirm ? kRowHeight + kPadding : 0.0f;
+  const float confirmH = overlay.hasConfirmButtons() ? kRowHeight + kPadding : 0.0f;
   const float hintH = hintProbe;
 
   // A grid asks for exactly the width its columns need, rather than being
@@ -208,7 +204,7 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
   // edge -- which is what "the cancel goes out of the popup" was.
   const float gridW = static_cast<float>(kSwatchColumns) * (kSwatchCell + kSwatchGap) - kSwatchGap;
   float asked = overlay.width;
-  if(isGridOverlay(overlay.kind)) {
+  if(overlay.isGrid()) {
     const float hintW = overlay.hint.empty()
                           ? 0.0f
                           : static_cast<float>(text.width(overlay.hint, hintFace()));
@@ -246,7 +242,7 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
     layout.field = {x + kPadding, cursorY, width - kPadding * 2.0f, kFieldHeight};
     cursorY += fieldH;
   }
-  if(isGridOverlay(overlay.kind)) {
+  if(overlay.isGrid()) {
     // Centred, because the panel is as wide as the *wider* of the grid and the
     // hint: left-aligned under a hint that outruns it, the grid would sit off
     // to one side of its own panel.
@@ -273,7 +269,7 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
     layout.itemIndices.push_back(indices[i]);
   }
   cursorY = rows.y();
-  if(overlay.kind == OverlayKind::Confirm) {
+  if(overlay.hasConfirmButtons()) {
     // The consequence, then the buttons. It used to be the other way round --
     // the buttons went here and the hint was drawn at the panel's foot -- so
     // "This cannot be undone." sat *below* the Delete button that could not be
@@ -350,7 +346,7 @@ void OverlayStack::ensureHighlightVisible() {
 bool OverlayStack::handleWheel(float dy) {
   Overlay* overlay = top();
   if(!overlay) return false;
-  if(overlay->kind != OverlayKind::List) return true;
+  if(!overlay->hasRows()) return true;
   overlay->rows.scrollBy(-static_cast<int>(dy * 3.0f), visibleIndices(*overlay).size());
   return true;
 }
@@ -365,7 +361,7 @@ std::optional<OverlayResult> OverlayStack::commit() {
   // is the answer", and the only difference between them is how they are laid
   // out. Leaving the picker out of this branch was how it came to have a grid
   // that could be pointed at and no way to choose anything on it.
-  if(overlay->kind == OverlayKind::List || isGridOverlay(overlay->kind)) {
+  if(overlay->choosesAnItem()) {
     const auto indices = visibleIndices(*overlay);
     if(indices.empty()) return std::nullopt;
     int chosen = overlay->highlighted;
@@ -373,7 +369,7 @@ std::optional<OverlayResult> OverlayStack::commit() {
     const auto& item = overlay->items[static_cast<std::size_t>(chosen)];
     if(!selectable(item)) return std::nullopt;
     result.itemId = item.id;
-  } else if(overlay->kind == OverlayKind::Confirm) {
+  } else if(overlay->hasConfirmButtons()) {
     result.itemId = "confirm";
   }
   close();
@@ -407,7 +403,7 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
   if(key == SDLK_RETURN || key == SDLK_KP_ENTER) return commit();
   // In a grid, down is a row and right is a cell. A list has no left and right,
   // and its rows are one cell wide, so both come to the same thing there.
-  const int rowStep = isGridOverlay(overlay->kind) ? kSwatchColumns : 1;
+  const int rowStep = overlay->isGrid() ? kSwatchColumns : 1;
   if(key == SDLK_DOWN) {
     moveHighlight(rowStep);
     return std::nullopt;
@@ -416,7 +412,7 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
     moveHighlight(-rowStep);
     return std::nullopt;
   }
-  if(isGridOverlay(overlay->kind) && (key == SDLK_RIGHT || key == SDLK_LEFT)) {
+  if(overlay->isGrid() && (key == SDLK_RIGHT || key == SDLK_LEFT)) {
     moveHighlight(key == SDLK_RIGHT ? 1 : -1);
     return std::nullopt;
   }
@@ -424,7 +420,7 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
     moveHighlight(shift ? -1 : 1);
     return std::nullopt;
   }
-  if(usesField(*overlay)) {
+  if(overlay->takesTypedText()) {
     // The field owns caret motion, selection, word jumps and undo; only a key
     // it declines falls through to be swallowed below.
     const auto handledBy = editor::applyKeyToField(overlay->value, key, ctrl, shift);
@@ -438,7 +434,7 @@ std::optional<OverlayResult> OverlayStack::handleKey(SDL_Keycode key, bool ctrl,
 bool OverlayStack::handleText(const char* input) {
   Overlay* overlay = top();
   if(!overlay || !input) return false;
-  if(!usesField(*overlay)) return true;
+  if(!overlay->takesTypedText()) return true;
   overlay->value.editor.insert(input);
   resetHighlight();
   return true;
@@ -561,7 +557,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
               titleStyle);
   }
 
-  if(usesField(*overlay)) {
+  if(overlay->takesTypedText()) {
     drawTextFieldFrame(renderer, layout.field, true);
     // `textTop`, like every other centred line in the shell. These four sites
     // each centred by hand and none of them rounded, so the palette's text
@@ -595,7 +591,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     }
   }
 
-  if(isGridOverlay(overlay->kind)) {
+  if(overlay->isGrid()) {
     const bool glyphs = overlay->kind == OverlayKind::GlyphPicker;
     for(std::size_t i = 0; i < layout.itemRects.size(); ++i) {
       const auto rect = layout.itemRects[i];
@@ -677,7 +673,7 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
   // A list taller than the panel says so, or the last visible row would read as
   // the end of the list.
   const auto& filtered = visibleIndices(*overlay);
-  if(overlay->kind == OverlayKind::List && !layout.itemRects.empty() &&
+  if(overlay->hasRows() && !layout.itemRects.empty() &&
      filtered.size() > layout.itemRects.size()) {
     // The shell's scrollbar, not a fifth private one. This drew its own track
     // and thumb at its own inset, its own width and its own minimum height,
@@ -702,13 +698,13 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
     text.draw(overlay->hint, layout.hint.x, layout.hint.y, theme().textMuted, hintStyle);
   }
 
-  if(overlay->kind == OverlayKind::List && filtered.empty()) {
+  if(overlay->hasRows() && filtered.empty()) {
     // Where the first row would have been. It used to be placed a bare 24
     // pixels up from the panel's foot, which is where the hint is drawn -- so a
     // filterable palette with a hint wrote the two over each other the moment
     // the query matched nothing.
     text.draw("No matches", layout.panel.x + kPadding + kSpace1,
-              usesField(*overlay) ? layout.field.y + layout.field.h + kPadding
+              overlay->takesTypedText() ? layout.field.y + layout.field.h + kPadding
                                   : layout.panel.y + kPadding,
               theme().textMuted, bodyStyle);
   }

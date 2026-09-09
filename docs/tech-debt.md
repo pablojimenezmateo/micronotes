@@ -371,33 +371,6 @@ Doing the file split first deliberately took the ceiling pressure off without
 addressing it, which is why this entry stays open rather than closing with the
 split.
 
-## TD-31 — `OverlayKind` is dispatched by `if` at seventeen sites
-
-`src/ui/Overlay.cpp`. Five kinds -- `TextPrompt`, `List`, `Confirm`,
-`GlyphPicker` and the tag grid -- asked about seventeen times: ten
-`kind == OverlayKind::X` comparisons plus seven calls to the `isGridOverlay`
-helper, spread across `layoutFor`, `handleKey`, `handleClick` and `draw`, each
-of which asks more than once.
-
-**What it costs today.** `OverlayStack::draw` is 210 lines and `layoutFor` is
-129, and in both the per-kind arms are interleaved with the parts that are
-common to every kind. A sixth kind means finding all seventeen, and the
-compiler helps with none of them -- these are `if` chains over an enum, not
-switches, so there is no `-Wswitch` to fall back on.
-
-**Why it has not been paid.** The obvious fix -- a `struct OverlayBehaviour`
-per kind, or virtual dispatch -- is more machinery than five kinds justify, and
-`AGENTS.md` is explicit that inheritance is for a durable polymorphic boundary.
-The cheaper and probably better fix is to make the *questions* explicit rather
-than the kinds: `takesTypedText`, `hasRows`, `isGrid`, `hasConfirmButton` are
-what the sites are actually asking, `isGridOverlay` is already one of them --
-and it is
-the seven-call half, which is the evidence that this is the direction that
-works. Four such predicates would turn seventeen enum comparisons into four
-named facts
-about the overlay. That is a naming exercise, and worth doing next time this
-file is opened for another reason.
-
 ## TD-33 — `AppState` is 55 methods, and one of them is the note-writing path
 
 `src/ui/AppState.h`.

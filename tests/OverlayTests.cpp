@@ -123,3 +123,42 @@ MICRONOTES_TEST(escape_closes_an_overlay_and_says_nothing_unless_asked) {
   MICRONOTES_REQUIRE(dismissal->itemId.empty());
   MICRONOTES_REQUIRE(dismissal->value == "Som");
 }
+
+// Every kind answers all five questions, and exactly one kind is neither a list
+// nor a grid nor a confirmation -- the text prompt.
+//
+// The point of this test is what it does to a *sixth* kind: these are `if`
+// chains over an enum rather than switches, so nothing in the compiler would
+// notice one added without an answer here, and the arm it silently fell
+// through would be whichever `else` happened to be last.
+MICRONOTES_TEST(overlay_questions_cover_every_kind) {
+  const OverlayKind kinds[] {OverlayKind::TextPrompt, OverlayKind::List, OverlayKind::Confirm,
+                             OverlayKind::ColorPicker, OverlayKind::GlyphPicker};
+  int shapes = 0;
+  for(const OverlayKind kind : kinds) {
+    Overlay overlay;
+    overlay.kind = kind;
+    // A kind is exactly one shape: a column of rows, a grid of cells, two
+    // buttons, or a field on its own.
+    const int is = static_cast<int>(overlay.hasRows()) + static_cast<int>(overlay.isGrid()) +
+                   static_cast<int>(overlay.hasConfirmButtons());
+    MICRONOTES_REQUIRE(is <= 1);
+    if(is == 1) ++shapes;
+    // Choosing an item is the two that have items to choose.
+    MICRONOTES_REQUIRE(overlay.choosesAnItem() == (overlay.hasRows() || overlay.isGrid()));
+    // And nothing but a prompt takes typing without being asked to filter.
+    MICRONOTES_REQUIRE(overlay.takesTypedText() == (kind == OverlayKind::TextPrompt));
+  }
+  MICRONOTES_REQUIRE(shapes == 4);
+}
+
+// A list only takes typing once it is told to filter -- a context menu is a
+// list, and typing into one would swallow the keystroke rather than run the
+// command whose name was typed.
+MICRONOTES_TEST(overlay_a_list_takes_typing_only_when_it_filters) {
+  Overlay menu;
+  menu.kind = OverlayKind::List;
+  MICRONOTES_REQUIRE(!menu.takesTypedText());
+  menu.filterable = true;
+  MICRONOTES_REQUIRE(menu.takesTypedText());
+}

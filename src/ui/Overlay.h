@@ -30,13 +30,6 @@ enum class OverlayKind {
   GlyphPicker
 };
 
-// Whether an overlay lays its items out as a grid rather than as rows. The two
-// pickers differ only in what they paint into a cell, and every rule about
-// sizing, pointing at and choosing one is shared.
-constexpr bool isGridOverlay(OverlayKind kind) {
-  return kind == OverlayKind::ColorPicker || kind == OverlayKind::GlyphPicker;
-}
-
 struct OverlayItem {
   std::string id;
   std::string label;
@@ -143,6 +136,47 @@ struct Overlay {
   mutable std::vector<int> filterCache;
   mutable std::string filterCacheQuery;
   mutable bool filterCacheValid = false;
+
+  // --- what the layout, the keys, the click and the draw actually ask -------
+  //
+  // Five kinds, asked about seventeen times: ten `kind == OverlayKind::X`
+  // comparisons plus seven calls to an `isGridOverlay` helper, spread across
+  // `layoutFor`, `handleKey`, `handleClick` and `draw`, each of which asked
+  // more than once. They are `if` chains over an enum rather than switches, so
+  // `-Wswitch` covers none of them: a sixth kind meant finding all seventeen by
+  // reading, and the compiler helping with none.
+  //
+  // The questions are named instead, which is a better answer than a behaviour
+  // struct or virtual dispatch for five kinds -- and `isGridOverlay` was
+  // already one of them, and was already the seven-call half, which is the
+  // evidence that this is the direction that works. A new kind answers these
+  // four and the sites do not move; and each one says *why* the arm it guards
+  // exists, which `kind == OverlayKind::List` never did.
+
+  // Lays its items out as a grid rather than as a column. The two pickers
+  // differ only in what they paint into a cell; every rule about sizing,
+  // pointing at and choosing one is shared.
+  bool isGrid() const {
+    return kind == OverlayKind::ColorPicker || kind == OverlayKind::GlyphPicker;
+  }
+
+  // Has a column of rows that can outrun the panel, and therefore scrolls, owns
+  // a scrollbar, and has something to say when the filter empties it.
+  bool hasRows() const { return kind == OverlayKind::List; }
+
+  // Answers with a Cancel and a Confirm along its foot instead of with a list.
+  bool hasConfirmButtons() const { return kind == OverlayKind::Confirm; }
+
+  // The highlighted item is the answer. True of a list and of both pickers --
+  // the only difference between them is how they are laid out, and leaving the
+  // pickers out of this was how the swatch grid came to be a thing you could
+  // point at and not choose from.
+  bool choosesAnItem() const { return hasRows() || isGrid(); }
+
+  // Takes typed text: a prompt always, a list only when it filters.
+  bool takesTypedText() const {
+    return kind == OverlayKind::TextPrompt || (hasRows() && filterable);
+  }
 };
 
 // What the pointer is over in the overlay on top.
