@@ -4,6 +4,7 @@
 #include "app/PageHeader.h"
 #include "app/PageImages.h"
 #include "app/WikiLinks.h"
+#include "ui/ClipGuard.h"
 
 #include <string_view>
 #include <utility>

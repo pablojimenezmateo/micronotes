@@ -1,5 +1,7 @@
 #include "app/Cursor.h"
 
+#include "app/Layout.h"
+
 #include "app/Breadcrumb.h"
 #include "app/MenuBar.h"
 #include "app/RawPane.h"
@@ -11,7 +13,8 @@
 #include "app/SidebarModel.h"
 #include "app/TabStrip.h"
 
-#include "ui/Draw.h"
+#include "ui/Scrollbar.h"
+#include "ui/TextRenderer.h"
 #include "ui/ShellLayout.h"
 
 #include <cmath>
@@ -24,6 +27,24 @@ using ui::ShellLayout;
 using ui::TextRenderer;
 
 namespace {
+
+// How an overlay's answer about the pointer reads as a system cursor.
+//
+// The shell used to answer `Pointer` for the whole window whenever any overlay
+// was open, so the field in a rename box, a tag editor or the command palette
+// never showed a text cursor -- and those are the fields a reader is most
+// likely to be typing into.
+CursorKind cursorForOverlay(ui::OverlayCursor over) {
+  switch(over) {
+    case ui::OverlayCursor::Text: return CursorKind::Text;
+    case ui::OverlayCursor::Pointer: return CursorKind::Pointer;
+    // Over the panel's own ground, or outside it: a click there does nothing
+    // and a click there dismisses, and neither is a control to point at.
+    case ui::OverlayCursor::Panel:
+    case ui::OverlayCursor::Outside: break;
+  }
+  return CursorKind::Default;
+}
 
 // A hidden panel has no edge to grab: its width is zero, so its right edge sits
 // on top of the next panel's left one and dragging there would resize a panel

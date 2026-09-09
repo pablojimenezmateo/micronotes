@@ -1,4 +1,5 @@
 #include "app/PointerRouter.h"
+#include "app/Layout.h"
 
 #include "app/BlockMenus.h"
 #include "app/Breadcrumb.h"
@@ -32,6 +33,7 @@
 #include "ui/Metrics.h"
 #include "library/SearchScope.h"
 #include "ui/ShellLayout.h"
+#include "ui/Scrollbar.h"
 
 #include <algorithm>
 #include <cmath>

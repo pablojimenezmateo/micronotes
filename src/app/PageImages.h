@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/PageView.h"
-#include "ui/Draw.h"
+#include "ui/ImageCache.h"
 
 #include <SDL3/SDL.h>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 
 #include <SDL3/SDL.h>
 

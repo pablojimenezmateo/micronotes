@@ -1,7 +1,7 @@
 #pragma once
 
 #include "doc/Layout.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 #include "ui/ScrollList.h"
 
 #include <SDL3/SDL.h>

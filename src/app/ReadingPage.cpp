@@ -6,6 +6,7 @@
 #include "ui/Actions.h"
 #include "ui/Metrics.h"
 #include "ui/Theme.h"
+#include "ui/Widgets.h"
 
 namespace micronotes::app {
 

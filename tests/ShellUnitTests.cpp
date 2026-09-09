@@ -15,7 +15,8 @@
 #include "app/Notes.h"
 #include "app/SessionState.h"
 #include "app/WikiLinks.h"
-#include "ui/Draw.h"
+#include "ui/ImageCache.h"
+#include "ui/TextRenderer.h"
 
 #include <algorithm>
 #include <chrono>

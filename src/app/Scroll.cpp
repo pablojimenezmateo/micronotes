@@ -1,4 +1,5 @@
 #include "app/Scroll.h"
+#include "app/Layout.h"
 
 #include "app/RawPane.h"
 #include "app/SettingsPane.h"

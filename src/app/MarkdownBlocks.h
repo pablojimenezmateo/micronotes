@@ -3,10 +3,10 @@
 #include "CoreAliases.h"
 
 #include "app/InlineText.h"
-#include "app/Shell.h"
+#include "app/LinkRegion.h"
 #include "core/markdown/MarkdownParser.h"
 #include "doc/BlockScan.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 #include "ui/Rect.h"
 
 #include <SDL3/SDL.h>
@@ -23,6 +23,11 @@
 // calling the same file-local statics, which meant none of the three could move
 // out on its own.
 namespace micronotes::app {
+
+// By reference only, in three signatures. A forward declaration rather than
+// `app/Shell.h`: a drawing helper that takes the runtime to reach one cache on
+// it does not need the whole runtime's definition to say so.
+struct UiRuntime;
 
 // A block's text with its inline syntax resolved: link labels rather than
 // targets, code spans in backticks unless the block is itself code.

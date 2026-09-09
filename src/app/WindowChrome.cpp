@@ -1,4 +1,5 @@
 #include "app/WindowChrome.h"
+#include "app/Layout.h"
 
 #include "app/Shell.h"
 

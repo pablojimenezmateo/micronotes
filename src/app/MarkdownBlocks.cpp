@@ -1,8 +1,10 @@
 #include "app/MarkdownBlocks.h"
+#include "app/Shell.h"
 
 #include "core/perf/PerformanceCounters.h"
 #include "ui/Theme.h"
 #include "core/util/StringUtil.h"
+#include "ui/Painter.h"
 
 #include <algorithm>
 #include <cmath>

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "app/Shell.h"
-#include "ui/Draw.h"
+#include "ui/ImageCache.h"
+#include "ui/TextRenderer.h"
 #include "ui/Rect.h"
 
 #include <SDL3/SDL.h>

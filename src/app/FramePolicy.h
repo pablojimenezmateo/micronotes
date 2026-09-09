@@ -1,13 +1,22 @@
 #pragma once
 
+#include <SDL3/SDL_stdinc.h>
+
 #include <algorithm>
 #include <cstdint>
 
 // How long to sleep, and how much of the event queue to take in one go.
 //
-// Pure functions over plain data, so the loop's timing decisions can be checked
-// in a test rather than by watching a CPU meter.
+// Everything but `frameDeadlines` is a pure function over plain data, so the
+// loop's timing decisions can be checked in a test rather than by watching a
+// CPU meter. `frameDeadlines` is the one that reads the shell, and it is here
+// rather than in the loop because a struct and the single function that fills
+// it in are one thing: `FrameDeadlines` was declared here and populated by a
+// lambda in `Application.cpp`, so adding a deadline meant editing two files and
+// the one that could forget was the filling-in.
 namespace micronotes::app {
+
+struct UiRuntime;
 
 // How busy the shell expects to be.
 enum class IdleHint {
@@ -41,6 +50,10 @@ struct FrameDeadlines {
   int animationMs = -1;
   int notificationMs = -1;
 };
+
+// Everything the loop has to be awake for, as of `nowMs`. Autosave used to be
+// the only one, so it was also the only thing the wait knew about.
+FrameDeadlines frameDeadlines(UiRuntime& ui, Uint64 nowMs);
 
 // The soonest of the deadlines that exist, or -1 when none do.
 inline int soonestDeadline(const FrameDeadlines& deadlines) {

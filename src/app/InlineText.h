@@ -2,9 +2,9 @@
 
 #include "CoreAliases.h"
 
-#include "app/Shell.h"
+#include "app/LinkRegion.h"
 #include "core/markdown/MarkdownParser.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 #include "ui/Theme.h"
 
 #include <SDL3/SDL.h>

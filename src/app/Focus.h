@@ -23,4 +23,21 @@ enum class FocusArea {
   RenameFolder
 };
 
+// Its name, for the input trace. Here rather than in `app/Shell.h`, where it
+// sat: a switch over this enum belongs with the enum, and nothing about it
+// needs a running shell.
+inline const char* focusName(FocusArea focus) {
+  switch(focus) {
+    case FocusArea::Folders: return "Folders";
+    case FocusArea::Editor: return "Editor";
+    case FocusArea::Search: return "Search";
+    case FocusArea::Find: return "Find";
+    case FocusArea::Viewer: return "Viewer";
+    case FocusArea::TagEditor: return "TagEditor";
+    case FocusArea::RenameNote: return "RenameNote";
+    case FocusArea::RenameFolder: return "RenameFolder";
+  }
+  return "Unknown";
+}
+
 }

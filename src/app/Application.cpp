@@ -1,6 +1,8 @@
 #include "CoreAliases.h"
 #include "app/Application.h"
 
+#include "app/Autosave.h"
+#include "app/CaretPolicy.h"
 #include "app/Chrome.h"
 #include "app/Clipboard.h"
 #include "app/Commands.h"
@@ -8,7 +10,9 @@
 #include "app/Frame.h"
 #include "app/FramePolicy.h"
 #include "app/FrameTrace.h"
+#include "app/InputDebug.h"
 #include "app/KeyRouter.h"
+#include "app/Layout.h"
 #include "app/MenuBar.h"
 #include "app/Notes.h"
 #include "app/PointerRouter.h"
@@ -20,7 +24,9 @@
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
 #include "ui/Actions.h"
-#include "ui/Draw.h"
+#include "ui/ImageCache.h"
+#include "ui/Painter.h"
+#include "ui/TextRenderer.h"
 #include "ui/Fonts.h"
 #include "ui/Menus.h"
 #include "ui/Metrics.h"
@@ -135,31 +141,6 @@ int run(ApplicationOptions options) {
     cursors.apply(classifyCursor(text, ui, width, height));
   };
 
-  auto autosaveWaitMs = [&]() -> int {
-    if(!ui.state.hasLibrary() || !ui.editor.dirty() || ui.state.selection().noteId.empty()) return -1;
-    const Uint64 now = SDL_GetTicks();
-    const Uint64 next = std::max(ui.lastEdit + 1201, ui.lastAutosaveAttempt + 1001);
-    if(now >= next) return 0;
-    return std::clamp(static_cast<int>(next - now), 1, 1200);
-  };
-
-  // Everything the loop has to be awake for. Autosave used to be the only one,
-  // so it was also the only thing the wait knew about.
-  auto deadlines = [&]() -> FrameDeadlines {
-    FrameDeadlines out;
-    out.autosaveMs = autosaveWaitMs();
-    // `IdleHint::Blinking` and `caretBlinkMs` were written for this and had no
-    // caller: every caret was drawn solid, so nothing ever needed waking.
-    out.caretBlinkMs = settleCaret(ui);
-    // A drag past the edge of a list has to keep scrolling while the pointer is
-    // perfectly still, which produces no events at all.
-    out.hint = ui.textSelect.active || ui.sidebar.drag.active() || ui.blockDrag.active
-                 ? IdleHint::Busy
-               : out.caretBlinkMs >= 0 ? IdleHint::Blinking
-                                       : IdleHint::Idle;
-    return out;
-  };
-
   applyWindowOptions(ui, options);
 
   if(!options.screenshotPath.empty()) {
@@ -180,7 +161,7 @@ int run(ApplicationOptions options) {
   bool needsDraw = false;
   while(running) {
     SDL_Event event;
-    const WaitDecision wait = chooseWait(deadlines());
+    const WaitDecision wait = chooseWait(frameDeadlines(ui, SDL_GetTicks()));
     const bool hasEvent = wait.mode == WaitMode::Block
       ? SDL_WaitEvent(&event)
       : SDL_WaitEventTimeout(&event, wait.timeoutMs);
@@ -261,8 +242,7 @@ int run(ApplicationOptions options) {
     if(caretPhaseChanged(ui)) needsDraw = true;
 
     const Uint64 now = SDL_GetTicks();
-    if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty() &&
-       now - ui.lastEdit > 1200 && now - ui.lastAutosaveAttempt > 1000) {
+    if(autosaveDue(ui, now)) {
       ui.lastAutosaveAttempt = now;
       (void)saveCurrent(ui, true);
       needsDraw = true;
@@ -278,7 +258,7 @@ int run(ApplicationOptions options) {
     }
   }
 
-  if(ui.state.hasLibrary() && ui.editor.dirty() && !ui.state.selection().noteId.empty()) (void)saveCurrent(ui, true);
+  if(autosavePending(ui)) (void)saveCurrent(ui, true);
   persistLibraryState(ui);
   SDL_StopTextInput(window);
   cursors.destroy();

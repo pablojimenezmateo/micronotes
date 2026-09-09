@@ -167,6 +167,7 @@ set(MICROCORE_SOURCES
 set(MICRONOTES_APP_SOURCES
   src/app/EditCommands.cpp
   src/app/EditorBlocks.cpp
+  src/app/FramePolicy.cpp
   src/app/FrameTrace.cpp
   src/doc/BlockScan.cpp
   src/doc/Edits.cpp
@@ -229,6 +230,8 @@ target_compile_definitions(micronotes_core PUBLIC
 # testable at all.
 set(MICRONOTES_SHELL_SOURCES
   src/app/Application.cpp
+  src/app/Autosave.cpp
+  src/app/CaretPolicy.cpp
   src/app/BlockMenus.cpp
   src/app/Breadcrumb.cpp
   src/app/Chrome.cpp
@@ -243,6 +246,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Frame.cpp
   src/app/InlineText.cpp
   src/app/KeyRouter.cpp
+  src/app/Layout.cpp
   src/app/KeySurfaces.cpp
   src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
@@ -274,11 +278,16 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
   src/app/WindowChrome.cpp
-  src/ui/Draw.cpp
   src/ui/Fonts.cpp
+  src/ui/Glyphs.cpp
+  src/ui/ImageCache.cpp
   src/ui/Overlay.cpp
+  src/ui/Painter.cpp
+  src/ui/Scrollbar.cpp
   src/ui/TextFit.cpp
   src/ui/TextMeasureCache.cpp
+  src/ui/TextRenderer.cpp
+  src/ui/Widgets.cpp
 )
 
 add_library(micronotes_shell STATIC ${MICRONOTES_SHELL_SOURCES})

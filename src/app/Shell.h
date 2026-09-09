@@ -15,6 +15,7 @@
 #include "app/EditingState.h"
 #include "app/Fields.h"
 #include "app/Focus.h"
+#include "app/LinkRegion.h"
 #include "app/RawPaneState.h"
 #include "app/TextFields.h"
 #include "app/SidebarState.h"
@@ -23,7 +24,7 @@
 #include "doc/BlockScan.h"
 #include "library/Library.h"
 #include "ui/AppState.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 #include "ui/NoteProperties.h"
 #include "ui/Outline.h"
 #include "ui/FoldState.h"
@@ -81,96 +82,6 @@ namespace micronotes::app {
 using micronotes::ui::Rect;
 using micronotes::ui::ShellLayout;
 using micronotes::ui::TextRenderer;
-
-enum class CursorKind {
-  Default,
-  Text,
-  Pointer,
-  ResizeHorizontal,
-  ResizeVertical
-};
-
-inline const char* focusName(FocusArea focus) {
-  switch(focus) {
-    case FocusArea::Folders: return "Folders";
-    case FocusArea::Editor: return "Editor";
-    case FocusArea::Search: return "Search";
-    case FocusArea::Find: return "Find";
-    case FocusArea::Viewer: return "Viewer";
-    case FocusArea::TagEditor: return "TagEditor";
-    case FocusArea::RenameNote: return "RenameNote";
-    case FocusArea::RenameFolder: return "RenameFolder";
-  }
-  return "Unknown";
-}
-
-inline bool inputDebugEnabled() {
-  static const bool enabled = [] {
-    const char* value = std::getenv("MICRONOTES_DEBUG_INPUT");
-    return value && *value && std::string_view(value) != "0";
-  }();
-  return enabled;
-}
-
-struct LinkRegion {
-  Rect rect;
-  std::string target;
-  // See PageLink::wiki: a link to a note is followed differently from a link
-  // to a file, and the two are indistinguishable once they are just strings.
-  bool wiki = false;
-};
-
-struct SystemCursors {
-  SDL_Cursor* defaultCursor = nullptr;
-  SDL_Cursor* text = nullptr;
-  SDL_Cursor* pointer = nullptr;
-  SDL_Cursor* resizeHorizontal = nullptr;
-  SDL_Cursor* resizeVertical = nullptr;
-  CursorKind active = CursorKind::Default;
-
-  bool init() {
-    defaultCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
-    text = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
-    pointer = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
-    resizeHorizontal = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
-    resizeVertical = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
-    if(!defaultCursor || !text || !pointer || !resizeHorizontal || !resizeVertical) return false;
-    SDL_SetCursor(defaultCursor);
-    return true;
-  }
-
-  void destroy() {
-    if(defaultCursor) SDL_DestroyCursor(defaultCursor);
-    if(text) SDL_DestroyCursor(text);
-    if(pointer) SDL_DestroyCursor(pointer);
-    if(resizeHorizontal) SDL_DestroyCursor(resizeHorizontal);
-    if(resizeVertical) SDL_DestroyCursor(resizeVertical);
-    defaultCursor = nullptr;
-    text = nullptr;
-    pointer = nullptr;
-    resizeHorizontal = nullptr;
-    resizeVertical = nullptr;
-  }
-
-  SDL_Cursor* cursor(CursorKind kind) const {
-    switch(kind) {
-      case CursorKind::Text: return text;
-      case CursorKind::Pointer: return pointer;
-      case CursorKind::ResizeHorizontal: return resizeHorizontal;
-      case CursorKind::ResizeVertical: return resizeVertical;
-      case CursorKind::Default:
-      default: return defaultCursor;
-    }
-  }
-
-  void apply(CursorKind kind) {
-    if(kind == active) return;
-    if(SDL_Cursor* next = cursor(kind)) {
-      SDL_SetCursor(next);
-      active = kind;
-    }
-  }
-};
 
 struct UiRuntime {
   // ---- the library -------------------------------------------------------
@@ -280,104 +191,5 @@ struct UiRuntime {
     if(!state.saveSelectedNoteRecovery(editor.text())) status = "Recovery save failed";
   }
 };
-
-// What the caret is doing, as one value.
-//
-// Fed to `ui::CaretBlink` once a frame; when it changes, the blink restarts in
-// its on-phase, so a keystroke shows a solid caret where the character landed.
-//
-// A key rather than a `restartBlink()` at every site that could move a caret.
-// There are a dozen of those -- every arrow key, every click into text, every
-// edit, every focus change, the overlay stack's own field -- the list grows,
-// and the one that forgets leaves a caret blinking through a burst of typing.
-// The same discipline the sidebar's row memo and the page header use, and for
-// the same reason: a key cannot be forgotten, only unequal.
-inline std::uint64_t caretStateKey(const UiRuntime& ui) {
-  std::uint64_t key = util::kFnvOffset;
-  key = util::hashValue(key, ui.focus);
-  // The page's caret: where it is, and which revision of the buffer it is in.
-  key = util::hashValue(key, ui.editor.revision());
-  key = util::hashValue(key, ui.editor.cursor());
-  // Whichever single-line field has the keyboard. Its length stands in for its
-  // text: this only has to *change* when the field does, and a field cannot
-  // change its contents without changing its length or its caret.
-  if(const editor::TextField* field = focusedField(ui)) {
-    key = util::hashValue(key, field->text().size());
-    key = util::hashValue(key, field->editor.cursor());
-  }
-  // And the overlay's own field, which is the one the reader is most likely to
-  // be typing into and is not reachable through `ui.focus` at all.
-  if(const ui::Overlay* overlay = ui.overlays.top()) {
-    key = util::hashValue(key, overlay->value.text().size());
-    key = util::hashValue(key, overlay->value.editor.cursor());
-    key = util::hashValue(key, overlay->highlighted);
-  }
-  return key;
-}
-
-// How an overlay's answer about the pointer reads as a system cursor.
-//
-// The shell used to answer `Pointer` for the whole window whenever any overlay
-// was open, so the field in a rename box, a tag editor or the command palette
-// never showed a text cursor -- and those are the fields a reader is most
-// likely to be typing into.
-inline CursorKind cursorForOverlay(ui::OverlayCursor over) {
-  switch(over) {
-    case ui::OverlayCursor::Text: return CursorKind::Text;
-    case ui::OverlayCursor::Pointer: return CursorKind::Pointer;
-    // Over the panel's own ground, or outside it: a click there does nothing
-    // and a click there dismisses, and neither is a control to point at.
-    case ui::OverlayCursor::Panel:
-    case ui::OverlayCursor::Outside: break;
-  }
-  return CursorKind::Default;
-}
-
-// Settles the caret's blink for this frame, and reports how long until the next
-// phase change -- or -1 once it has settled solid and nothing needs waking.
-//
-// Called from both the frame and the wait, and idempotent within a frame:
-// observing the same key twice is a no-op, and both callers want the answer for
-// the clock as it is now. Once rather than at each caret's paint, because two
-// carets are on screen at once in a split view and they must not blink out of
-// step.
-inline int settleCaret(UiRuntime& ui) {
-  // A frozen caret is solid and asks for no wake-ups: a capture wants the same
-  // pixels every time it is taken. See `CaretState::frozen`.
-  if(ui.caret.frozen) {
-    ui.caret.visible = true;
-    return -1;
-  }
-  const Uint64 now = SDL_GetTicks();
-  ui.caret.blink.observe(caretStateKey(ui), now);
-  ui.caret.visible = ui.caret.blink.visible(now);
-  return ui.caret.blink.waitMs(now);
-}
-
-// Whether the caret's blink has flipped since the last frame painted one.
-//
-// The run loop repaints on events, on a window action, on a watched change and
-// on an autosave -- and the caret is behind none of those. So a blink wake
-// arrived, found nothing to do, and counted a skipped repaint: the deadline was
-// honoured and the frame it existed for was never drawn.
-inline bool caretPhaseChanged(UiRuntime& ui) {
-  (void)settleCaret(ui);
-  return ui.caret.visible != ui.caret.painted;
-}
-
-// Every caller goes through here so that the rects a frame is painted with, the
-// rects it is hit-tested against and the rects the tests assert on are the same
-// rects. `ui.layoutMode` is both an input and an output: feeding the last mode
-// back in is what gives the compact breakpoint its hysteresis.
-inline ShellLayout shellLayout(UiRuntime& ui, int width, int height) {
-  auto inputs = ui.state.workspace().layoutInputs(
-    static_cast<float>(width), static_cast<float>(height), ui.layoutMode);
-  // One tab is still a tab: hiding the strip until a second opens would make
-  // the page jump down the moment it did.
-  inputs.tabStripVisible = !ui.state.workspace().tabs.empty();
-  const ShellLayout layout = ui::computeShellLayout(inputs);
-  ui.layoutMode = layout.mode;
-  return layout;
-}
 
 }

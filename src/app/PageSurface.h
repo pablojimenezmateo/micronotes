@@ -4,7 +4,8 @@
 
 #include "app/PageView.h"
 #include "app/Shell.h"
-#include "ui/Draw.h"
+#include "ui/ImageCache.h"
+#include "ui/TextRenderer.h"
 
 #include <SDL3/SDL.h>
 

@@ -17,6 +17,7 @@
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
 #include "ui/Metrics.h"
+#include "ui/Scrollbar.h"
 
 #include <algorithm>
 #include <cstddef>

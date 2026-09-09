@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/Shell.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 
 // Where a wheel event goes.
 //

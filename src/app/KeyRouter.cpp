@@ -1,4 +1,5 @@
 #include "app/KeyRouter.h"
+#include "app/InputDebug.h"
 
 #include "app/KeySurfaces.h"
 

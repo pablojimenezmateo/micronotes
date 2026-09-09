@@ -11,6 +11,8 @@
 #include "ui/ShellLayout.h"
 #include "doc/LinkTarget.h"
 #include "ui/Theme.h"
+#include "ui/Glyphs.h"
+#include "ui/Painter.h"
 
 #include <algorithm>
 #include <cctype>

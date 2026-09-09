@@ -10,6 +10,11 @@
 #include "ui/TagColors.h"
 #include "ui/Theme.h"
 #include "ui/TreeModel.h"
+#include "ui/Glyphs.h"
+#include "ui/Painter.h"
+#include "ui/Scrollbar.h"
+#include "ui/Widgets.h"
+#include "ui/ClipGuard.h"
 
 #include <algorithm>
 #include <string>

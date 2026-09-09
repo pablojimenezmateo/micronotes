@@ -2,6 +2,7 @@
 
 
 #include "doc/WikiLink.h"
+#include "ui/Painter.h"
 
 #include <cctype>
 #include <cmath>

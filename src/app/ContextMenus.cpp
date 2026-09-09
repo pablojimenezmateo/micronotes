@@ -4,7 +4,7 @@
 
 #include "ui/Actions.h"
 #include "ui/Overlay.h"
-#include "ui/Draw.h"
+#include "ui/Glyphs.h"
 #include "ui/TagColors.h"
 
 #include <string>

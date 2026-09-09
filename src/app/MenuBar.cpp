@@ -7,6 +7,9 @@
 #include "ui/Metrics.h"
 
 #include "ui/Theme.h"
+#include "ui/Glyphs.h"
+#include "ui/Painter.h"
+#include "ui/Widgets.h"
 
 #include <algorithm>
 #include <cmath>

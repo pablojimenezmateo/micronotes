@@ -13,7 +13,7 @@
 #include "library/Library.h"
 #include "library/LibraryIndex.h"
 #include "ui/AppState.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 #include "ui/FoldState.h"
 
 #include <algorithm>

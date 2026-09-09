@@ -1,4 +1,5 @@
 #include "app/Desktop.h"
+#include "app/InputDebug.h"
 
 #include "app/Shell.h"
 

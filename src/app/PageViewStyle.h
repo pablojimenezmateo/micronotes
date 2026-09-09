@@ -3,7 +3,7 @@
 #include "app/PageView.h"
 
 #include "doc/Layout.h"
-#include "ui/Draw.h"
+#include "ui/TextRenderer.h"
 #include "ui/Metrics.h"
 
 #include <SDL3/SDL.h>
