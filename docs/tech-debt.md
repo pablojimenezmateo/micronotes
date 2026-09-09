@@ -315,3 +315,52 @@ window every frame, so it would get the flicker fix without the partial-redraw
 half -- but it is still a new stage in the frame, with its own lifetime against
 the renderer, and it belongs in a pass that measures it rather than in one that
 notices it.
+
+## TD-36 — `ui::AppState` is five things behind one door
+
+`src/ui/AppState.h`. Fifty public methods over five fields.
+
+The five are visible in the header's own section comments, which is the tell:
+
+| what it owns | fields | methods |
+|---|---|---:|
+| the library, indexed, and its memos | `library_`, `index_`, `organization_`, `revision_` | 15 |
+| what is selected | `selection_` | 6 |
+| how the window is arranged | `workspace_` | 5 |
+| the open note, as last read from disk | `openNote_` | 5 |
+| writes that reach a file | (all of the above) | 19 |
+
+Only the last group needs more than one of them. `folders()`, `tags()`,
+`allNotes()`, `noteById()`, `trashEntries()`, `revision()`, `refreshLibrary()`
+and `refreshNoteFile()` never touch the selection or the workspace; they are
+"the library, its index and its memos, kept in step", which is a class.
+
+**What it costs today.** The header carries the encapsulation the type cannot:
+`workspace()` and `editWorkspace()` are two accessors that exist only because
+handing out one mutable reference made `AppState`'s interface whatever
+`WorkspaceModel` happened to make public, and the comment on them says so. The
+same pressure produced `findNote` beside `noteById` (a copy and a borrow of one
+lookup) and `readSelectedNote` beside `openNote` (the body and everything but
+the body). Each pair is right; there being four of them is the smell.
+
+It has already cost three bugs of one kind, all now fixed and all the same
+shape: a rule that spans two of the five groups written out at its call sites
+rather than owned by either. A note's id moving in three lists; the favorites
+and recents being functions over `WorkspaceModel` reached through here; the
+three filters' exclusivity, which `renameSelectedFolder` did not know about.
+The fourth is still open as `TD-16` — a header edit reads the body off the disk
+because the write group cannot ask the buffer for it.
+
+**Why it has not been paid.** Because the honest version is not a rename. The
+library group is read straight from surfaces all over the shell -- `openNote`
+26 sites, `revision` 26, `hasLibrary` 24, `libraryRoot` 24, `currentNotes` 16,
+`allNotes` 14 -- so extracting it either changes ~130 call sites to say
+`state.library().x`, or leaves fifty forwarding methods behind and changes
+nothing a reader can see. The first is the real shape and is a day of
+mechanical edits with a green suite throughout; the second is worse than
+leaving it alone.
+
+The decision is which of those, and it is a decision because the forwarding
+version *looks* like progress. If it is taken, take it in the order the groups
+are listed above: the library group is the one with no dependency on the other
+four, so it can move first and on its own.
