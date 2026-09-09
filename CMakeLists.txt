@@ -377,8 +377,18 @@ target_link_libraries(micronotes_tests PRIVATE micronotes_shell)
 add_test(NAME micronotes_tests COMMAND micronotes_tests)
 
 if(MICRONOTES_PERF_HARNESS_BUILD)
-  add_executable(micronotes_perf tools/PerfMain.cpp)
-  target_include_directories(micronotes_perf PRIVATE src)
+  add_executable(micronotes_perf
+    tools/PerfMain.cpp
+    tools/perf/DocumentLanes.cpp
+    tools/perf/FontLane.cpp
+    tools/perf/Harness.cpp
+    tools/perf/InteractionLane.cpp
+    tools/perf/PersistenceLane.cpp
+    tools/perf/SearchLane.cpp
+    tools/perf/ShellLane.cpp
+    tools/perf/UndoLane.cpp
+  )
+  target_include_directories(micronotes_perf PRIVATE src tools)
   target_link_libraries(micronotes_perf PRIVATE micronotes_shell)
 endif()
 
