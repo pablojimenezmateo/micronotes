@@ -50,7 +50,8 @@ struct SystemCursors {
     resizeHorizontal = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE);
     resizeVertical = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE);
     if(!defaultCursor || !text || !pointer || !resizeHorizontal || !resizeVertical) return false;
-    SDL_SetCursor(defaultCursor);
+    if(!SDL_SetCursor(defaultCursor)) return false;
+    active = CursorKind::Default;
     return true;
   }
 
@@ -78,12 +79,39 @@ struct SystemCursors {
     }
   }
 
-  void apply(CursorKind kind) {
-    if(kind == active) return;
-    if(SDL_Cursor* next = cursor(kind)) {
-      SDL_SetCursor(next);
-      active = kind;
+  // Puts `kind` on screen, and records it only if that actually happened.
+  //
+  // Three things here are load-bearing and all three are Wayland, where a
+  // cursor is a client-side surface rather than a server-side shape:
+  //
+  //  * `SDL_SetCursor`'s result is checked. It used to be discarded and
+  //    `active` assigned regardless, so a set that failed was recorded as a
+  //    set that worked -- and because the next call short-circuits on `kind ==
+  //    active`, one failure convinced the shell that shape was already showing
+  //    and it never tried again for the life of the window.
+  //  * the nudge. `SDL_SetCursor` no-ops internally when handed the handle SDL
+  //    already holds, and SDL's Wayland hit-test path can change the
+  //    *displayed* cursor without updating that handle -- which micronotes is
+  //    exposed to because its window is borderless and carries a hit test. The
+  //    displayed shape and SDL's idea of it then disagree, and setting our
+  //    unchanged handle is swallowed. Passing through a different cursor first
+  //    means the real set cannot be. `../microide` found this one; see its
+  //    `dev-docs/platform/wayland-stale-cursor.md`.
+  //  * `reassert`, for the callers that know the compositor may have taken the
+  //    cursor from under us: a resize, a restore, a maximise. Those arrive
+  //    with the pointer possibly stationary, so there is no motion event
+  //    coming to correct it.
+  void apply(CursorKind kind, bool reassert = false) {
+    if(kind == active && !reassert) return;
+    SDL_Cursor* next = cursor(kind);
+    if(!next) return;
+    if(reassert) {
+      if(SDL_Cursor* nudge = next == defaultCursor ? text : defaultCursor;
+         nudge && nudge != next) {
+        SDL_SetCursor(nudge);
+      }
     }
+    if(SDL_SetCursor(next)) active = kind;
   }
 };
 

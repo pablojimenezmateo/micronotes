@@ -7,6 +7,7 @@
 #include "app/Clipboard.h"
 #include "app/Commands.h"
 #include "app/Cursor.h"
+#include "app/EventRouter.h"
 #include "app/Frame.h"
 #include "app/FramePolicy.h"
 #include "app/FrameTrace.h"
@@ -137,10 +138,6 @@ int run(ApplicationOptions options) {
   if(!cursors.init()) {
     std::cerr << "SDL_CreateSystemCursor failed: " << SDL_GetError() << "\n";
   }
-  auto updateCursor = [&](int width, int height) {
-    cursors.apply(classifyCursor(text, ui, width, height));
-  };
-
   applyWindowOptions(ui, options);
 
   if(!options.screenshotPath.empty()) {
@@ -173,62 +170,26 @@ int run(ApplicationOptions options) {
       int drained = 0;
       do {
         ++drained;
-        needsDraw = true;
-      if(event.type == SDL_EVENT_QUIT) {
-        running = false;
-      } else if(event.type == SDL_EVENT_TEXT_INPUT) {
-        perf::addCounter(perf::CounterId::InputTextEvents);
-        handleText(ui, event.text.text);
-      } else if(event.type == SDL_EVENT_KEY_DOWN) {
-        perf::addCounter(perf::CounterId::InputKeyEvents);
-        // An open menu owns the keyboard first: arrows walk it, Enter chooses,
-        // Escape shuts it. Anything else closes it and falls through, so typing
-        // with a menu accidentally open does not silently go nowhere.
+        // Every event repaints, motion included, and that is not laziness.
         //
-        // Here rather than inside handleKey because the walk needs the bar's
-        // geometry and the face it was measured in, and handleKey has neither
-        // -- threading both through it would have every other branch carry them
-        // for the one that uses them.
-        bool menuTook = false;
-        if(ui.chrome.openMenu != ui::MenuId::None) {
-          const ShellLayout layout = shellLayout(ui, width, height);
-          const MenuBarKey menu = handleMenuBarKey(
-            text, ui, layout.menuBar,
-            {0, 0, static_cast<float>(width), static_cast<float>(height)}, event.key.key);
-          if(menu.action) {
-            if(const auto* spec = ui::findAction(*menu.action)) {
-              performCommand(ui, std::string(spec->name));
-            }
-          }
-          menuTook = menu.handled;
-        }
-        if(!menuTook) handleKey(ui, event.key.key, event.key.scancode, event.key.mod);
-      } else if(event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
-        ui.pointer.x = event.button.x;
-        ui.pointer.y = event.button.y;
-        handleMouse(text, ui, event.button.x, event.button.y, event.button.button, width, height);
-        updateCursor(width, height);
-      } else if(event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-        ui.pointer.x = event.button.x;
-        ui.pointer.y = event.button.y;
-        handleMouseUp(ui, event.button.x, event.button.y, event.button.button);
-        updateCursor(width, height);
-      } else if(event.type == SDL_EVENT_MOUSE_MOTION) {
-        ui.pointer.x = event.motion.x;
-        ui.pointer.y = event.motion.y;
-        handleMouseMotion(text, ui, event.motion.x, event.motion.y, width, height);
-        updateCursor(width, height);
-      } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
-        routeWheel(ui, event.wheel.y, width, height);
-      } else if(event.type == SDL_EVENT_DROP_FILE) {
-        if(event.drop.data) attachPathToEditor(ui, event.drop.data);
-      } else if(event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||
-                event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED ||
-                event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-        applyDisplayScale();
-      } else if(event.type == SDL_EVENT_WINDOW_FOCUS_GAINED) {
-        rescanLibraryAfterExternalChange(ui);
-      }
+        // On Wayland a cursor shape rides a hardware overlay plane the
+        // compositor re-latches on a surface commit, not on the
+        // `wl_pointer.set_cursor` request itself -- so a motion that changes
+        // only the cursor and repaints nothing leaves the *old* shape on
+        // screen. `../microide` shipped that bug for its whole life and its
+        // `dev-docs/platform/wayland-stale-cursor.md` is the write-up: the tell
+        // was that it went away while screen-recording, because a recorder
+        // forces continuous recomposition.
+        //
+        // So if this is ever narrowed to "repaint when something visible
+        // changed", the cursor has to ask for a present of its own on a real
+        // shape change. Hovering a link changes no pixels at all.
+        needsDraw = true;
+      const EventOutcome outcome = routeEvent(event, text, ui, cursors, width, height);
+      if(outcome.quit) running = false;
+      // The loop's own business, because it owns the renderer's scale and the
+      // face cache that has to be dropped with it.
+      if(outcome.displayScaleChanged) applyDisplayScale();
         // A held key or a fast trackpad refills the queue as fast as it
         // empties, and draining it whole starves the paint: the window stops
         // updating while input is still arriving. Stop at the budget and let

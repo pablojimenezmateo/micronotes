@@ -232,6 +232,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Application.cpp
   src/app/Autosave.cpp
   src/app/CaretPolicy.cpp
+  src/app/CursorTheme.cpp
   src/app/BlockMenus.cpp
   src/app/Breadcrumb.cpp
   src/app/Chrome.cpp
@@ -243,6 +244,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Dismiss.cpp
   src/app/Fields.cpp
   src/app/Folds.cpp
+  src/app/EventRouter.cpp
   src/app/Frame.cpp
   src/app/InlineText.cpp
   src/app/KeyRouter.cpp
@@ -320,6 +322,7 @@ add_executable(micronotes_tests
   tests/ClipGuardTests.cpp
   tests/CaretBlinkTests.cpp
   tests/ColorMathTests.cpp
+  tests/CursorThemeTests.cpp
   tests/DirectoryWatcherTests.cpp
   tests/DurableFileTests.cpp
   tests/EditorTests.cpp

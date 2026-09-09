@@ -1,4 +1,6 @@
 #include "app/WindowChrome.h"
+
+#include "app/CursorTheme.h"
 #include "app/Layout.h"
 
 #include "app/Shell.h"
@@ -88,6 +90,12 @@ void setInputHints() {
   // and the user had to click twice. "1" is the click-through behaviour every
   // modern editor has: one click both focuses the window and does the thing.
   SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
+  // Before SDL creates a cursor, because SDL reads `XCURSOR_THEME` once and its
+  // Wayland backend loads the shapes out of whatever it names. See
+  // `app/CursorTheme.h`: the theme SDL falls back to on an ordinary desktop can
+  // be one that predates the `pointer` and `text` shape names, and the failure
+  // is silent -- `SDL_SetCursor` succeeds and the shape does not change.
+  ensureCursorTheme();
 }
 
 SDL_Window* createAppWindow(int width, int height) {

@@ -243,7 +243,7 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // Both numbers are ratchets, not targets: a change that moves behaviour into a
 // named unit lowers them in the same commit, and nothing raises them. If either
 // fails, the fix is a named unit under src/ -- not a bigger budget.
-constexpr int kApplicationLineBudget = 271;
+constexpr int kApplicationLineBudget = 232;
 constexpr int kShellFileLineBudget = 1000;
 
 namespace {
