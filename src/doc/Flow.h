@@ -36,6 +36,20 @@ public:
   // given in.
   float bottom() const;
 
+  // What this block's flow cost, for the caller to add to the perf counters in
+  // one go. Tallied in plain members rather than through `perf::addCounter` at
+  // each site on purpose: that call is an unconditional relaxed atomic add, and
+  // this loop runs once per token -- roughly 290,000 times for a cold 200 KB
+  // note -- so counting at the point of the work would be counting most of the
+  // way to measuring it. Every other bulk counter in the layout is reported the
+  // same way; see `layout.tokens_staged`.
+  std::size_t measures() const {
+    return measures_;
+  }
+  std::size_t wordSplits() const {
+    return wordSplits_;
+  }
+
 private:
   void emit(Token& token, float width);
   void flushPending();
@@ -68,6 +82,8 @@ private:
   float clusterWidth_ = 0.0f;
   LineGroup* group_ = nullptr;
   BlockLayout& out_;
+  std::size_t measures_ = 0;
+  std::size_t wordSplits_ = 0;
 };
 
 // --- implementation ---------------------------------------------------------
@@ -124,6 +140,7 @@ inline void Flow::run(std::vector<LineGroup>& groups, std::size_t count) {
         // By index into the group being walked, which is also where it will be
         // emitted from: a held-back space used to be deep-copied -- string and
         // all -- into this queue, for roughly half the tokens in a document.
+        ++measures_;
         pending_.push_back({i, metrics_.measure(token.text, token.style)});
         pendingWidth_ += pending_.back().second;
         // Held rather than taken now. A trailing newline is the block's own
@@ -142,9 +159,11 @@ inline void Flow::run(std::vector<LineGroup>& groups, std::size_t count) {
       // Everything else joins the cluster being built. A hidden marker and an
       // empty run measure zero and still take their place in it, so the
       // offsets they anchor stay with the word they belong to.
-      const float width = token.hidden || token.text.empty()
-                            ? 0.0f
-                            : metrics_.measure(token.text, token.style);
+      float width = 0.0f;
+      if(!token.hidden && !token.text.empty()) {
+        ++measures_;
+        width = metrics_.measure(token.text, token.style);
+      }
       if(cluster_.empty()) clusterBegin_ = i;
       cluster_.push_back(width);
       clusterWidth_ += width;
@@ -204,6 +223,7 @@ inline void Flow::placeCluster() {
       const float width = cluster_[k];
       if(penX_ > textLeft_ && penX_ + width > right_) pushLine();
       if(width > column && penX_ <= textLeft_) {
+        ++wordSplits_;
         splitWord(token);
         continue;
       }
@@ -247,6 +267,7 @@ inline void Flow::splitWord(Token& token) {
     float accumulated = 0.0f;
     while(j < token.text.size()) {
       const std::size_t next = util::nextBoundary(token.text, j);
+      ++measures_;
       const float width =
         metrics_.measure(std::string_view(token.text).substr(j, next - j), token.style);
       if(j > i && penX_ + accumulated + width > right_) break;

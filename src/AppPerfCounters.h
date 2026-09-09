@@ -348,6 +348,20 @@
   /* once, in order, by one consumer, so this is the size of the buffer a        */    \
   /* streaming tokenizer would not build.                                        */    \
   X(LayoutTokensStaged, "layout.tokens_staged")                                        \
+  /* What the line breaker itself does, which nothing counted -- it is the      */     \
+  /* innermost loop of laying a document out and the only instrument on it was  */     \
+  /* a timer. `flow_measures` is how many times it asked the font for a width,  */     \
+  /* which is where a flow change's cost actually lands: shaping dominates, so   */    \
+  /* measuring the same run twice is the regression this catches and a count is  */    \
+  /* the only thing that shows it. Roughly one per token emitted; if it climbs   */    \
+  /* toward two, something is measuring on both the fits-it and the emits-it     */    \
+  /* path again, which is exactly what held-back spaces used to do.              */     \
+  X(LayoutFlowMeasures, "layout.flow_measures")                                        \
+  /* Words broken mid-word, because even one token did not fit the column. Very */     \
+  /* nearly zero on prose -- a URL in a narrow pane is the honest case -- so a   */    \
+  /* non-trivial number here is a column being computed too narrow somewhere,    */    \
+  /* which otherwise shows up only as text that looks subtly wrong.              */     \
+  X(LayoutFlowWordSplits, "layout.flow_word_splits")                                    \
   /* Inline markup work inside a relaid block: spans the inline scanner found,  */     \
   /* and content bytes given a per-byte attribute slot to hold their formatting. */    \
   /* attr_bytes is the one to watch -- it is a heap allocation and a zero fill    */   \

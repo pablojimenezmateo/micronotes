@@ -336,6 +336,7 @@ add_executable(micronotes_tests
   tests/EditsTests.cpp
   tests/FlowTests.cpp
   tests/FoldTests.cpp
+  tests/TokenizeTests.cpp
   tests/FramePolicyTests.cpp
   tests/FrameTraceTests.cpp
   tests/FuzzyTests.cpp

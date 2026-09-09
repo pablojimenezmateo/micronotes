@@ -253,7 +253,7 @@ constexpr int kShellFileLineBudget = 1000;
 // green the whole way. Sizes rather than one number because these are ratchets
 // at what the tree measures today, not targets: a change that moves behaviour
 // into a named unit lowers them in the same commit, and nothing raises them.
-constexpr int kTreeFileLineBudget = 1012;
+constexpr int kTreeFileLineBudget = 904;
 
 namespace {
 
