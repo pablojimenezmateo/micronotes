@@ -152,11 +152,15 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
   // two lower points were swallowed and what the favourite mark actually drew
   // was a lump. Sorting the crossings is the whole difference, and a row of a
   // five-pointed star has at most six of them.
-  SDL_FRect spans[192];
+  // Three spans a row at the star's waist, over at most the star's own height:
+  // a named ceiling rather than the same `192` written at three of the four
+  // places that had to agree about it.
+  constexpr int kMaxSpans = 192;
+  SDL_FRect spans[kMaxSpans];
   int count = 0;
   const int top = static_cast<int>(std::floor(cy - r));
   const int bottom = static_cast<int>(std::ceil(cy + r));
-  for(int y = top; y <= bottom && count + 3 < 192; ++y) {
+  for(int y = top; y <= bottom && count + 3 < kMaxSpans; ++y) {
     const float row = static_cast<float>(y) + 0.5f;
     float crossings[kPoints];
     int found = 0;
@@ -168,8 +172,25 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
       crossings[found++] = a.x + (b.x - a.x) * t;
     }
     if(found < 2) continue;
-    std::sort(crossings, crossings + found);
-    for(int i = 0; i + 1 < found && count < 192; i += 2) {
+    // Insertion sort, not `std::sort`, and the reason is a warning rather than
+    // a measurement. `found` is at most six -- the comment above says so -- and
+    // libstdc++'s sort has an insertion-sort arm indexed at `first + 16`,
+    // guarded by a length test the optimiser cannot fold away against a bound
+    // it does not know. So every build reported `array subscript 16 is outside
+    // array bounds of float [10]` here: a false positive, on the one path in
+    // this file that draws per frame, sitting where a real out-of-bounds
+    // warning would have gone unnoticed among it. Six elements do not need a
+    // partition either.
+    for(int i = 1; i < found; ++i) {
+      const float value = crossings[i];
+      int j = i - 1;
+      while(j >= 0 && crossings[j] > value) {
+        crossings[j + 1] = crossings[j];
+        --j;
+      }
+      crossings[j + 1] = value;
+    }
+    for(int i = 0; i + 1 < found && count < kMaxSpans; i += 2) {
       const float left = crossings[i];
       const float right = crossings[i + 1];
       // A span covering less than half a pixel is dropped rather than rounded
