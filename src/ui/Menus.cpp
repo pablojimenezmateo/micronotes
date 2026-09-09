@@ -281,21 +281,29 @@ Rect menuPopupRect(Rect anchor, std::span<const MenuItemSpec> items, Rect bounds
   return {std::round(x), std::round(y), width, height};
 }
 
+RowCursor menuPopupRows(Rect popup) {
+  return RowCursor(popup.x, popup.w, popup.y + kMenuPopupPadY);
+}
+
 Rect menuPopupItemRect(Rect popup, std::span<const MenuItemSpec> items, std::size_t index) {
   if(index >= items.size()) return {};
-  float y = popup.y + kMenuPopupPadY;
-  for(std::size_t i = 0; i < index; ++i) {
-    y += menuRowHeight(items[i].separator);
-  }
-  return {popup.x, y, popup.w, menuRowHeight(items[index].separator)};
+  RowCursor rows = menuPopupRows(popup);
+  Rect row {};
+  for(std::size_t i = 0; i <= index; ++i) row = rows.place(menuRowHeight(items[i].separator));
+  return row;
 }
 
 std::optional<std::size_t> menuPopupItemAt(Rect popup, std::span<const MenuItemSpec> items,
                                            float x, float y) {
   if(!contains(popup, x, y)) return std::nullopt;
+  // One walk. This used to call `menuPopupItemRect` per item, each of which
+  // re-stacked the popup from the top -- quadratic, on a path that runs for
+  // every pointer motion event over an open menu.
+  RowCursor rows = menuPopupRows(popup);
   for(std::size_t i = 0; i < items.size(); ++i) {
+    const Rect row = rows.place(menuRowHeight(items[i].separator));
     if(items[i].separator) continue;
-    if(contains(menuPopupItemRect(popup, items, i), x, y)) return i;
+    if(contains(row, x, y)) return i;
   }
   return std::nullopt;
 }

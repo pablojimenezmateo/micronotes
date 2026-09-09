@@ -236,6 +236,27 @@ MICRONOTES_TEST(menu_popup_hit_test_steps_over_separators) {
   MICRONOTES_REQUIRE(!menuPopupItemAt(popup, file->items, popup.x - 4.0f, popup.y + 8.0f));
 }
 
+// The paint's walk and the hit test's are the same walk.
+//
+// This is the property the shared cursor exists for. The two used to be two
+// pieces of stacking arithmetic -- one in `drawOpenMenu`, one behind
+// `menuPopupItemRect` -- and a disagreement between them is not a wrong pixel,
+// it is a click running the command on the row above.
+MICRONOTES_TEST(menu_popup_paint_and_hit_test_stack_the_same_rows) {
+  for(const auto& menu : menuSpecs()) {
+    const Rect popup = menuPopupRect({8.0f, 3.0f, 60.0f, 19.0f}, menu.items, window(), measure);
+    auto rows = micronotes::ui::menuPopupRows(popup);
+    for(std::size_t i = 0; i < menu.items.size(); ++i) {
+      const Rect painted = rows.place(micronotes::ui::menuRowHeight(menu.items[i].separator));
+      const Rect tested = menuPopupItemRect(popup, menu.items, i);
+      MICRONOTES_REQUIRE(painted.x == tested.x);
+      MICRONOTES_REQUIRE(painted.y == tested.y);
+      MICRONOTES_REQUIRE(painted.w == tested.w);
+      MICRONOTES_REQUIRE(painted.h == tested.h);
+    }
+  }
+}
+
 // The load-bearing one. The bar is one of four views of the action registry,
 // and the whole point of it is that it is the *readable* one: an action the
 // palette offers but no menu lists is one a user can only reach by already

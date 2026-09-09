@@ -226,25 +226,30 @@ void drawOpenMenu(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
   fill(renderer, open.popup, theme().overlayBackground);
   stroke(renderer, open.popup, theme().border);
 
+  // One cursor for the whole popup, which is the same one `menuPopupItemAt`
+  // walks: where a row is has to be one answer, because the paint and the hit
+  // test disagreeing is a wrong command run.
+  ui::RowCursor rows = ui::menuPopupRows(open.popup);
   for(std::size_t i = 0; i < open.items.size(); ++i) {
     const MenuItemSpec& spec = open.items[i];
-    const Rect row = ui::menuPopupItemRect(open.popup, open.items, i);
+    const Rect row = rows.place(ui::menuRowHeight(spec.separator));
     if(spec.separator) {
-      // A rule inset from both edges, down the middle of the gap it owns. Full
-      // width would cut the popup into unrelated cards.
-      ui::hLine(renderer, row.x + ui::kSpace2, row.x + row.w - ui::kSpace2,
-                std::round(row.y + row.h / 2.0f), theme().border);
+      ui::drawMenuSeparator(renderer, row);
       continue;
     }
-    const bool enabled = menuItemEnabled(ui, spec.action);
-    const bool hot = ui.pointer.over(row) || i == ui.chrome.menuHighlight;
+    const std::string accelerator = ui::menuItemAccelerator(spec);
+    ui::MenuRow item;
+    item.label = ui::menuItemLabel(spec);
+    item.accelerator = accelerator;
+    item.enabled = menuItemEnabled(ui, spec.action);
+    item.highlighted = ui.pointer.over(row) || i == ui.chrome.menuHighlight;
+    item.checked = spec.checkable && menuItemChecked(ui, spec.action);
     // Destructive items read as destructive wherever they are offered, which is
     // the same rule the confirm overlays and the context menus follow.
-    const bool destructive = spec.action == ui::ActionId::DeleteNote ||
-                             spec.action == ui::ActionId::DeleteFolder ||
-                             spec.action == ui::ActionId::DeleteBlock;
-    drawMenuRow(renderer, text, row, ui::menuItemLabel(spec), ui::menuItemAccelerator(spec),
-                enabled, hot, spec.checkable && menuItemChecked(ui, spec.action), destructive);
+    item.destructive = spec.action == ui::ActionId::DeleteNote ||
+                       spec.action == ui::ActionId::DeleteFolder ||
+                       spec.action == ui::ActionId::DeleteBlock;
+    drawMenuRow(renderer, text, row, item);
   }
 }
 

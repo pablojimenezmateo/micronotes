@@ -22,10 +22,10 @@ namespace {
 constexpr float kRowHeight = kMenuPopupItemHeight;
 constexpr float kFieldHeight = 26.0f;
 constexpr float kPadding = 10.0f;
-// Inside a row, and between the two trailing pieces of one: the shortcut and
-// the detail. Written out as 10, 20 and 12 at seven sites.
+// Inside a row. Written out as 10 and 20 at seven sites; the gap between a
+// row's two trailing pieces went with them into `ui::drawMenuRow`, which is now
+// the one place a popup row is painted.
 constexpr float kRowPadX = kPadding;
-constexpr float kRowGap = kSpace3;
 // A Confirm's two buttons. Equal width, because they are two answers to one
 // question and the wider of two buttons reads as the recommended one -- which
 // on a deletion is the wrong recommendation to make by accident.
@@ -657,56 +657,21 @@ void OverlayStack::draw(SDL_Renderer* renderer, TextRenderer& text, int windowWi
 
     const auto& item = overlay->items[static_cast<std::size_t>(index)];
     if(item.separator) {
-      // A rule inset from both edges, down the middle of the row it owns --
-      // the same shape the menu bar's own popups draw, so a context menu and a
-      // menu-bar menu divide their groups identically. Full width would cut the
-      // popup into unrelated cards.
-      hLine(renderer, rect.x + kSpace2, rect.x + rect.w - kSpace2,
-            std::round(rect.y + rect.h / 2.0f), theme().border);
+      drawMenuSeparator(renderer, rect);
       continue;
     }
-    const bool selected = index == overlay->highlighted;
-    if(selected) {
-      fill(renderer, rect, theme().rowHighlight);
-    } else if(contains(rect, mouseX_, mouseY_) && item.enabled) {
-      fill(renderer, rect, theme().rowHighlight);
-    }
-    // The tick, in the column every row already reserves for it. Drawn from two
-    // lines rather than typeset: the vendored UI face has no check glyph, which
-    // is why this used to be the word "current" in the accelerator column.
-    if(item.checked) {
-      drawCheckGlyph(renderer, {rect.x + kSpace2, rect.y + 3.0f, 10.0f, std::max(0.0f, rect.h - 6.0f)},
-                     item.enabled ? theme().accent : theme().textDisabled);
-    }
-    const SDL_Color label = !item.enabled ? theme().textDisabled
-                          : item.destructive ? theme().warn
-                          : selected ? theme().textPrimary
-                                     : theme().textSecondary;
-    const float labelY = textTop(rect, text, bodyStyle);
-    // The label starts where a menu row's does, so a palette row and a menu row
-    // for the same command put their text in the same column.
-    const float labelX = rect.x + kMenuPopupLabelInset;
-    int available = static_cast<int>(rect.w - kMenuPopupLabelInset - kMenuPopupAcceleratorInset);
-    // Both trailing pieces are laid out right to left against a running edge:
-    // a fixed gap between them only works while the shortcut is short, and a
-    // deletion timestamp is not.
-    float right = rect.x + rect.w - kMenuPopupAcceleratorInset;
-    const float hintY = textTop(rect, text, hintStyle);
-    if(!item.shortcut.empty()) {
-      const int shortcutW = text.width(item.shortcut, hintStyle);
-      text.draw(item.shortcut, right - static_cast<float>(shortcutW), hintY,
-                item.enabled ? theme().textMuted : theme().textDisabled, hintStyle);
-      right -= static_cast<float>(shortcutW) + kRowGap;
-      available -= shortcutW + static_cast<int>(kRowGap);
-    }
-    if(!item.detail.empty()) {
-      const auto detail = ellipsizeToWidth(text, item.detail, available / 2, hintStyle);
-      const int detailW = text.width(detail, hintStyle);
-      text.draw(detail, right - static_cast<float>(detailW), hintY, theme().textMuted, hintStyle);
-      right -= static_cast<float>(detailW) + kRowGap;
-      available -= detailW + static_cast<int>(kRowGap);
-    }
-    text.draw(ellipsizeToWidth(text, item.label, available, bodyStyle), labelX, labelY, label, bodyStyle);
+    // The same row a menu-bar popup draws. A palette row, a context-menu row
+    // and a menu-bar row are the same object reached through two item tables,
+    // and this is where the second one projects into it.
+    MenuRow row;
+    row.label = item.label;
+    row.accelerator = item.shortcut;
+    row.detail = item.detail;
+    row.enabled = item.enabled;
+    row.highlighted = index == overlay->highlighted || contains(rect, mouseX_, mouseY_);
+    row.checked = item.checked;
+    row.destructive = item.destructive;
+    drawMenuRow(renderer, text, rect, row);
   }
 
   // A list taller than the panel says so, or the last visible row would read as

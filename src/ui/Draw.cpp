@@ -711,31 +711,49 @@ void drawButton(SDL_Renderer* renderer, TextRenderer& text, Rect box, std::strin
   text.draw(label, std::round(box.x + (box.w - width) / 2.0f), textTop(box, text, style), ink, style);
 }
 
-void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, std::string_view label,
-                 std::string_view accelerator, bool enabled, bool hovered, bool checked,
-                 bool destructive) {
-  if(hovered && enabled) fill(renderer, row, theme().rowHighlight);
+void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, const MenuRow& item) {
+  if(item.highlighted && item.enabled) fill(renderer, row, theme().rowHighlight);
   const TextStyle style = chromeStyle();
-  const SDL_Color ink = !enabled ? theme().textDisabled
-                       : destructive ? theme().warn
-                       : hovered ? theme().textPrimary
-                                 : theme().textSecondary;
-  if(checked) {
-    drawCheckGlyph(renderer, {row.x + kSpace2, row.y, 12.0f, row.h},
-                   enabled ? theme().accent : theme().textDisabled);
+  const TextStyle small = chromeSmallStyle();
+  const SDL_Color ink = !item.enabled ? theme().textDisabled
+                      : item.destructive ? theme().warn
+                      : item.highlighted ? theme().textPrimary
+                                         : theme().textSecondary;
+  const SDL_Color trailing = item.enabled ? theme().textMuted : theme().textDisabled;
+  if(item.checked) {
+    drawCheckGlyph(renderer, {row.x + kSpace2, row.y + 3.0f, 10.0f, std::max(0.0f, row.h - 6.0f)},
+                   item.enabled ? theme().accent : theme().textDisabled);
   }
   const float baseline = textTop(row, text, style);
-  const float acceleratorWidth =
-    accelerator.empty() ? 0.0f : static_cast<float>(text.width(accelerator, style));
-  const float labelRoom = row.w - kMenuPopupLabelInset - kMenuPopupAcceleratorInset -
-                          acceleratorWidth - kSpace2;
-  text.draw(ellipsizeToWidth(text, std::string(label), static_cast<int>(labelRoom), style),
+
+  // Both trailing pieces are placed right to left against a running edge. A
+  // fixed gap between them only works while the accelerator is short, and a
+  // deletion timestamp is not.
+  float right = row.x + row.w - kMenuPopupAcceleratorInset;
+  float labelRoom = row.w - kMenuPopupLabelInset - kMenuPopupAcceleratorInset - kSpace2;
+  if(!item.accelerator.empty()) {
+    const auto width = static_cast<float>(text.width(item.accelerator, style));
+    text.draw(item.accelerator, right - width, baseline, trailing, style);
+    right -= width + kSpace3;
+    labelRoom -= width;
+  }
+  if(!item.detail.empty()) {
+    // Cut to half the room rather than to all of it: a detail that crowded the
+    // label out would hide the thing being chosen in favour of a note about it.
+    const float detailBaseline = textTop(row, text, small);
+    const auto detail = ellipsizeToWidth(text, std::string(item.detail),
+                                         static_cast<int>(labelRoom / 2.0f), small);
+    const auto width = static_cast<float>(text.width(detail, small));
+    text.draw(detail, right - width, detailBaseline, theme().textMuted, small);
+    labelRoom -= width + kSpace3;
+  }
+  text.draw(ellipsizeToWidth(text, std::string(item.label), static_cast<int>(labelRoom), style),
             row.x + kMenuPopupLabelInset, baseline, ink, style);
-  if(accelerator.empty()) return;
-  // The accelerator is never ellipsized: a chord with its tail cut off is worse
-  // than no chord at all, and the popup's width was measured to hold it.
-  text.draw(accelerator, row.x + row.w - acceleratorWidth - kMenuPopupAcceleratorInset, baseline,
-            enabled ? theme().textMuted : theme().textDisabled, style);
+}
+
+void drawMenuSeparator(SDL_Renderer* renderer, Rect row) {
+  hLine(renderer, row.x + kSpace2, row.x + row.w - kSpace2, std::round(row.y + row.h / 2.0f),
+        theme().border);
 }
 
 StripTabColors stripTabColors() {

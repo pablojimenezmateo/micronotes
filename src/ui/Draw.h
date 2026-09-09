@@ -471,16 +471,46 @@ std::string ellipsizeToWidth(TextRenderer& text, std::string value, int maxWidth
 void drawButton(SDL_Renderer* renderer, TextRenderer& text, Rect box, std::string_view label,
                 bool enabled, bool hovered, ButtonTone tone = ButtonTone::Neutral);
 
-// One row of a menu: the tick slot, the label, and the accelerator right up
-// against the trailing edge.
+// One row of a popup menu: the tick slot, the label, and up to two pieces of
+// trailing text against the far edge.
 //
-// Shared by the menu bar's popups, the context menus and the command palette,
-// because all three are the same object. They used to be two: an `Overlay`
-// list row and, in microide, a `DrawMenuRow` -- with different heights, so a
-// context menu and the palette that can run the same command looked unrelated.
-void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, std::string_view label,
-                 std::string_view accelerator, bool enabled, bool hovered, bool checked,
-                 bool destructive = false);
+// A menu-bar popup, a context menu and the command palette are one object -- a
+// card holding a list of commands, each with an accelerator, a tick column and
+// a disabled state -- reached through two different item tables. This is what
+// the two project into, so the tables stay what they are (one `constexpr`
+// static, one runtime vector) and the *row* is one thing.
+//
+// It was not, and the drift was legible: the tick sat one pixel further right
+// in a menu-bar popup than in the palette, and the accelerator was set a whole
+// size smaller in the palette than in the menu offering the same command. Both
+// are one spelling now, and both follow ../microide's `DrawMenuRow`.
+struct MenuRow {
+  std::string_view label;
+  // The chord. Set in the row's own face, right-aligned, and never ellipsized:
+  // a chord with its tail cut off is worse than no chord at all, and the popup
+  // was measured to hold it.
+  std::string_view accelerator;
+  // A second trailing piece, set smaller because it is context rather than a
+  // control: the folder a note is in, the moment a deletion happened. Only the
+  // overlay's items carry one.
+  std::string_view detail;
+  bool enabled = true;
+  // The pointer is on this row, or the keyboard is. One flag rather than two,
+  // because they paint identically and no row is ever both to different effect.
+  bool highlighted = false;
+  bool checked = false;
+  bool destructive = false;
+};
+
+void drawMenuRow(SDL_Renderer* renderer, TextRenderer& text, Rect row, const MenuRow& item);
+
+// The rule a separator owns, inset from both edges and down the middle of its
+// own (shorter) row. Full width would cut the popup into unrelated cards.
+//
+// A separator has a row so that the popup's height stays the sum of its rows
+// and one walk covers them all -- which is what lets an index into the item
+// table and an index into the rows be the same number.
+void drawMenuSeparator(SDL_Renderer* renderer, Rect row);
 
 // One tab in a strip: a flat fill, a 2px accent lid when it is the active one,
 // the title, and the room its close cross needs kept clear.

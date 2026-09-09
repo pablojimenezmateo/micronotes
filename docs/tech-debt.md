@@ -424,39 +424,3 @@ one revision counter, and pulling them apart would put the revision in two
 places. What the remaining cost wants is an ordering and a boundary inside the
 header -- the writes that go to disk, named as such and grouped -- rather than
 a new type.
-
-## TD-34 — one popup shape, laid out by two engines
-
-`src/ui/Menus.cpp` (`menuPopupRect`, `menuPopupItemRect`, `menuPopupItemAt`,
-over `MenuItemSpec`) and `src/ui/Overlay.cpp` (`OverlayStack::layout`, over
-`OverlayItem`).
-
-**What it costs today.** A menu-bar popup, a context menu and the command
-palette are one object -- a card holding a list of commands, each with an
-accelerator, a tick column, a disabled state and rules between the groups --
-and two independent pieces of code decide where its rows go and which row a
-click landed on. The two item structs have converged field by field:
-`MenuItemSpec` has `label`, `separator` and `checkable`, `OverlayItem` has
-`label`, `shortcut`, `separator`, `checked`, `enabled` and `destructive`, and
-the accelerator is spelled `menuItemAccelerator(spec)` on one side and carried
-in the struct on the other.
-
-They already share what was cheapest to share: `ui::drawMenuRow` paints a row
-for both, and `ui::menuRowHeight` and the `kMenuPopup*` constants are now read
-by both. What is still written twice is the stacking -- walk the items, add each
-one's height, and hand back a rect per index -- and the hit test over it, which
-is the part where a discrepancy is a wrong command run rather than a wrong
-pixel.
-
-**Why it has not been paid.** The two are not the same function with two
-callers; the overlay's layout also places a filter field, a swatch grid, two
-confirm buttons and a hint, and it scrolls, while a menu-bar popup is capped to
-the window and deliberately never scrolls. So the merge is not "delete one" but
-"extract the row band both build" -- a `rowBand(items, top, width)` over a span
-of something both item types can present as, plus the hit test on it. That is a
-real interface decision -- which type the band walks, and whether
-`MenuItemSpec` becomes a projection into `OverlayItem` rather than a second item
-struct -- and it is worth making deliberately, in a commit of its own, with the
-hit test moved under `MenusTests` and `OverlayTests` together. Taken as a rider
-on a feature, the two would end up with a shared helper each.
-

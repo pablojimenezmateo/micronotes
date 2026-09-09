@@ -2,6 +2,7 @@
 
 #include "ui/Actions.h"
 #include "ui/Rect.h"
+#include "ui/RowCursor.h"
 
 #include <array>
 #include <cstddef>
@@ -104,6 +105,15 @@ MenuBarLayout menuBarLayout(Rect menuBar, MenuId openMenu, bool customChrome,
 // window needs and costs nothing here.
 Rect menuPopupRect(Rect anchor, std::span<const MenuItemSpec> items, Rect bounds,
                    const MenuMeasureFn& measure);
+
+// The cursor a popup's rows are placed with: the card's own column, starting
+// under its top padding, advancing by `menuRowHeight` per item.
+//
+// The paint, the hit test and `menuPopupItemRect` all take one of these, and
+// that is the point. Where a popup's rows go was arithmetic written out at each
+// of the three, and a disagreement between the paint and the hit test is a
+// *wrong command run*, not a wrong pixel.
+RowCursor menuPopupRows(Rect popup);
 
 // The row `index` occupies inside that popup. Separators have a row too -- a
 // short one -- so the index into this and the index into `items` are the same
