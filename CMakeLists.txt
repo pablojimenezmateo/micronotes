@@ -293,6 +293,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/ui/Glyphs.cpp
   src/ui/ImageCache.cpp
   src/ui/Overlay.cpp
+  src/ui/OverlayPaint.cpp
   src/ui/Painter.cpp
   src/ui/Scrollbar.cpp
   src/ui/TextFit.cpp
