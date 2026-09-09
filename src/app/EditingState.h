@@ -81,6 +81,13 @@ struct CaretState {
   // the text around it. See `ui::CaretBlink`; `caretStateKey` is what it is fed.
   ui::CaretBlink blink;
   bool visible = true;
+  // Held solid, whatever the clock says. One caller: `--screenshot`, which
+  // paints for about half a second before it reads the window back, and the
+  // blink's half-period is 530 ms -- so which phase the capture landed in
+  // depended on how long startup took. `tools/session-compare.sh` compares two
+  // builds by `cmp` of their screenshots, and a coin-flip on two pixel columns
+  // made the instrument report a difference roughly one run in six.
+  bool frozen = false;
   // What the last painted frame actually drew. The blink is the only thing in
   // the shell that changes with no event behind it, so it is the only thing
   // whose "is a repaint due" question cannot be answered by the event queue --

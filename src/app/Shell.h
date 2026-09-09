@@ -342,6 +342,12 @@ inline CursorKind cursorForOverlay(ui::OverlayCursor over) {
 // carets are on screen at once in a split view and they must not blink out of
 // step.
 inline int settleCaret(UiRuntime& ui) {
+  // A frozen caret is solid and asks for no wake-ups: a capture wants the same
+  // pixels every time it is taken. See `CaretState::frozen`.
+  if(ui.caret.frozen) {
+    ui.caret.visible = true;
+    return -1;
+  }
   const Uint64 now = SDL_GetTicks();
   ui.caret.blink.observe(caretStateKey(ui), now);
   ui.caret.visible = ui.caret.blink.visible(now);
