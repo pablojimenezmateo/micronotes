@@ -102,19 +102,41 @@ Rect editorWritingRect(Rect editorRect) {
   return ui::pageRectIn(editorRect);
 }
 
-void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui, const std::string& line, Rect writing, float y) {
-  const std::string& needle = ui.fields.find.text();
-  if(needle.empty()) return;
-  std::size_t pos = line.find(needle);
-  while(pos != std::string::npos) {
-    const auto prefix = std::string_view(line.data(), pos);
+// The find matches that fall on one wrapped row, banded to it.
+//
+// The pane used to run `line.find(needle)` over every visible row on every
+// frame -- so an open find bar cost a scan of the window at frame rate, and the
+// answer was its own, unrelated to the one the page and the status line were
+// each computing separately. It draws the shell's one match list now (see
+// `app/FindState.h`), which is also how it came to honour "match case".
+void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui,
+                        const editor::SoftWrapRow& row, Rect writing, float y) {
+  const auto& matches = ui.find.matches;
+  if(matches.empty()) return;
+  // The first match that could reach this row: matches do not overlap and none
+  // spans a line break, so it is the first one starting at or after the row's
+  // own start.
+  const auto begin = std::lower_bound(matches.begin(), matches.end(), row.start,
+                                      [](const util::TextMatch& match, std::size_t offset) {
+                                        return match.start < offset;
+                                      });
+  const std::string& line = row.text;
+  const float lineHeight = static_cast<float>(text.lineHeight());
+  const float right = writing.x + writing.w - 8.0f;
+  for(auto it = begin; it != matches.end() && it->start < row.end; ++it) {
+    const std::size_t from = it->start - row.start;
+    const std::size_t to = std::min(it->end, row.end) - row.start;
+    if(from >= line.size()) continue;
+    const auto prefix = std::string_view(line.data(), from);
+    const auto matched = std::string_view(line.data() + from, std::min(to, line.size()) - from);
     const float x = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
-    const float w = static_cast<float>(std::max(6, text.width(needle, false, true)));
-    if(x < writing.x + writing.w - 8) {
-      fill(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().searchMatch);
-      stroke(renderer, {x, y - 2, std::min(w, writing.x + writing.w - 8 - x), static_cast<float>(text.lineHeight())}, theme().searchMatchActive);
-    }
-    pos = line.find(needle, pos + std::max<std::size_t>(1, needle.size()));
+    if(x >= right) continue;
+    const float w = std::min(static_cast<float>(std::max(6, text.width(matched, false, true))), right - x);
+    const Rect band {x, y - 2, w, lineHeight};
+    const bool active = ui.find.activeIndex() != FindState::kNoMatch &&
+                        &matches[ui.find.activeIndex()] == &*it;
+    fill(renderer, band, theme().searchMatch);
+    stroke(renderer, band, active ? theme().searchMatchActive : theme().border);
   }
 }
 
@@ -166,7 +188,7 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
           fill(renderer, {sx, y - 2, std::min(sw, writing.x + writing.w - 8 - sx), static_cast<float>(lineHeight)}, theme().selectionFill);
         }
       }
-      drawFindHighlights(renderer, text, ui, line, writing, y);
+      drawFindHighlights(renderer, text, ui, row, writing, y);
       text.draw(line.empty() ? " " : line, writing.x + 12, y, theme().textPrimary, false, true);
       y += lineHeight;
     }

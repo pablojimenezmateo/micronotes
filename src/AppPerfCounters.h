@@ -384,12 +384,20 @@
   X(PageDecorationBlocksVisited, "page.decoration_blocks_visited")                     \
   X(PageCodeChromeBlocksVisited, "page.code_chrome_blocks_visited")                    \
   X(PageFoldControlBlocksVisited, "page.fold_control_blocks_visited")                  \
-  /* Bytes the find highlighter scans, and matches it draws. The scan used to run  */  \
-  /* over the whole note on every frame a query was open -- document size times    */  \
-  /* frame rate -- and then built selection rects for every match in the file,     */  \
-  /* including the ones nowhere near the window. Now the match list is found once  */  \
-  /* per (query, revision) and only the matches inside the visible band are drawn, */  \
-  /* so scan_bytes counts one pass per edit and highlights_drawn counts the window */  \
-  /* rather than the note. Both are zero when nothing is being searched.           */  \
-  X(PageFindScanBytes, "page.find_scan_bytes")                                         \
-  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")
+  /* Find matches the page builds a selection rect for. The highlighter used to    */  \
+  /* build one for every match in the file, however far off screen, on top of a     */  \
+  /* `std::string::find` pass over the whole note per frame -- so an open find bar   */  \
+  /* cost document size times frame rate. The scan is gone from here entirely (the  */  \
+  /* shell owns one match list, see `search.text_scans`) and only the matches       */  \
+  /* inside the visible band get a rect, so this counts the window rather than the  */  \
+  /* note. Zero when nothing is being searched.                                     */  \
+  X(PageFindHighlightsDrawn, "page.find_highlights_drawn")                             \
+  /* --- the status bar ------------------------------------------------------- */    \
+  /* Passes over the note the bar's two derived readouts cost: the caret's line   */   \
+  /* and column, and the size of a selection. Both are memoised on the buffer's   */   \
+  /* revision and the offsets, so scans should track caret moves rather than      */   \
+  /* frames -- the bar is repainted by a scroll, a hover and the caret's own      */   \
+  /* blink, and none of those move either answer. A regression to per-frame shows */   \
+  /* up here as scans climbing with time rather than with typing.                 */   \
+  X(StatusTextScans, "status.text_scans")                                              \
+  X(StatusTextScanBytes, "status.text_scan_bytes")

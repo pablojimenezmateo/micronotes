@@ -5,6 +5,7 @@
 #include "app/ContextMenus.h"
 #include "app/EditCommands.h"
 #include "app/Fields.h"
+#include "app/FindBar.h"
 #include "app/Folds.h"
 #include "app/Notes.h"
 #include "app/Prompts.h"
@@ -159,7 +160,11 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "pane-reading") setPaneMode(ui, ui::PaneMode::Viewer);
   else if(id == "pane-split") setPaneMode(ui, ui::PaneMode::Split);
   else if(id == "cycle-pane") cyclePaneMode(ui);
-  else if(id == "find") focusFindInNote(ui);
+  else if(id == "find") openFindInNote(ui);
+  else if(id == "find-next") moveFindMatch(ui, 1);
+  else if(id == "find-previous") moveFindMatch(ui, -1);
+  else if(id == "find-match-case") toggleFindOption(ui, FindToggle::MatchCase);
+  else if(id == "find-whole-word") toggleFindOption(ui, FindToggle::WholeWord);
   else if(id == "search") focusSearchAllNotes(ui);
   else if(id == "toggle-sidebar") togglePanel(ui, &ui::WorkspaceModel::sidebarVisible, "Sidebar");
   else if(id == "toggle-right") togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");

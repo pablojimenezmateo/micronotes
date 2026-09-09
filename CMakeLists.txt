@@ -159,6 +159,7 @@ set(MICROCORE_SOURCES
   src/core/platform/PathUtils.cpp
   src/core/util/Fuzzy.cpp
   src/core/util/StringUtil.cpp
+  src/core/util/TextSearch.cpp
   src/core/util/Utf8.cpp
 )
 
@@ -245,6 +246,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Desktop.cpp
   src/app/Dismiss.cpp
   src/app/Fields.cpp
+  src/app/FindBar.cpp
   src/app/Folds.cpp
   src/app/EventRouter.cpp
   src/app/Frame.cpp
@@ -280,6 +282,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Sidebar.cpp
   src/app/SidebarModel.cpp
   src/app/Startup.cpp
+  src/app/StatusBar.cpp
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
   src/app/WindowChrome.cpp
@@ -345,6 +348,9 @@ add_executable(micronotes_tests
   tests/PerfTraceTests.cpp
   tests/MenusTests.cpp
   tests/SearchTests.cpp
+  tests/TextSearchTests.cpp
+  tests/FindBarTests.cpp
+  tests/StatusBarTests.cpp
   tests/SettingsTests.cpp
   tests/SettingsSurfaceTests.cpp
   tests/ShellLayoutTests.cpp

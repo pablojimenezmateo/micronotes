@@ -1,5 +1,8 @@
 #include "app/Cursor.h"
 
+#include "app/FindBar.h"
+#include "app/StatusBar.h"
+
 #include "app/Layout.h"
 
 #include "app/Breadcrumb.h"
@@ -105,6 +108,20 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
     }
     if(sidebarRowAt(ui, x, y)) return CursorKind::Pointer;
     return CursorKind::Default;
+  }
+
+  // The find bar floats over the page, so it answers before the page does --
+  // in the same order the press router asks, which is what keeps the shape the
+  // pointer takes and the thing a click lands on the same thing.
+  if(const auto find = findBarLayout(ui, layout.content, text); !ui::empty(find.bar) &&
+     contains(find.bar, x, y)) {
+    return contains(find.field, x, y) ? CursorKind::Text : CursorKind::Pointer;
+  }
+
+  // The two segments of the status bar that run something.
+  if(contains(layout.status, x, y)) {
+    return statusBarHasControlAt(text, ui, layout.status, x, y) ? CursorKind::Pointer
+                                                                : CursorKind::Default;
   }
 
   if(!contains(layout.content, x, y)) return CursorKind::Default;

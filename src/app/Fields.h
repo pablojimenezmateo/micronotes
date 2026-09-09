@@ -6,8 +6,14 @@
 #include "app/TextFields.h"
 
 #include "core/editor/TextField.h"
+#include "ui/Rect.h"
+#include "ui/TextRenderer.h"
 
+#include <SDL3/SDL.h>
+
+#include <cstddef>
 #include <span>
+#include <string_view>
 
 // The five one-line text fields the shell keeps -- search, find, tag, rename,
 // folder rename -- as one thing rather than five.
@@ -18,10 +24,11 @@
 // route a keystroke to a field; the clipboard paths, which are otherwise
 // nothing to do with focus, had to live there for the same reason.
 //
-// The two "focus a search box" verbs are here as well, because focusing one of
-// these fields is never only a focus change: the find box recounts its matches
-// and the search box hands its query to the library, and a caller that sets
-// `ui.focus` by hand gets neither.
+// Focusing one of these fields is never only a focus change -- the search box
+// has to hand its query to the library, and a caller that sets `ui.focus` by
+// hand gets a box that looks live and filters nothing -- so the verb for it is
+// here beside the table. The find box's is `openFindInNote` in
+// `app/FindBar.h`, with the rest of that surface.
 namespace micronotes::app {
 
 struct UiRuntime;
@@ -59,17 +66,31 @@ const editor::TextField* focusedField(const UiRuntime& ui);
 void (*fieldCommit(FocusArea focus))(UiRuntime&);
 
 // What the shell owes the field after its text changed. The search box drives
-// the library query and the note cursor; the find box recounts its matches.
-// Called by every path that edits a field, which is what keeps the two in step.
+// the library query and the note cursor; the find box re-runs its search over
+// the note. Called by every path that edits a field, which is what keeps the
+// two in step.
 void syncFocusedInput(UiRuntime& ui);
-
-// How many times the find box's needle occurs in the open note, as the status
-// line says it.
-void updateFindStatus(UiRuntime& ui);
 
 // Focusing a search field is an action like any other, so the key and the
 // palette row run the same code rather than two copies that drift.
-void focusFindInNote(UiRuntime& ui);
 void focusSearchAllNotes(UiRuntime& ui);
+
+// Paints a single-line field: the selection band, then the text scrolled so
+// the caret is visible, then the caret. The fields this replaced drew only the
+// string, which is why they had no visible insertion point, no selection, and
+// no way to reach text past the right edge.
+//
+// Here rather than in `app/Sidebar.h`, where it was written for the search box
+// and then stayed. It is not a thing about the sidebar: it is how *any* of the
+// five fields in this file is drawn, and the find bar reaching for it would
+// otherwise have had to include the sidebar to paint its own query box.
+void drawTextField(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
+                   editor::TextField& field, ui::Rect box, bool focused,
+                   std::string_view placeholder);
+
+// Byte offset in `field` under a pointer at window x, for a field drawn in
+// `box`. Always a code point boundary.
+std::size_t fieldOffsetAtX(const ui::TextRenderer& text, const editor::TextField& field,
+                           ui::Rect box, float x);
 
 }

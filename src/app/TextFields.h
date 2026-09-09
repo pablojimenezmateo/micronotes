@@ -4,6 +4,7 @@
 
 #include "core/editor/TextField.h"
 #include "library/SearchScope.h"
+#include "ui/Rect.h"
 
 // The five one-line text fields the shell keeps.
 //
@@ -24,6 +25,18 @@ struct TextFields {
   editor::TextField tag;
   editor::TextField rename;
   editor::TextField folderRename;
+
+  // Where the live one was drawn this frame, recorded by the draw for the same
+  // reason the menu bar's targets are: the answer needs a measured string and
+  // the pointer's motion arrives with no renderer in scope.
+  //
+  // It is what makes a *drag* across one of these fields select text. The
+  // anchor was already being recorded on press -- `ui.fieldSelect` -- and
+  // nothing ever extended it, because nothing outside the drawing code knew
+  // where the field's text had ended up. So a press set an anchor, the drag did
+  // nothing, and the mouse-up published a selection that was never made.
+  // Empty when no field has the keyboard, which is what the motion arm checks.
+  ui::Rect drawnRect;
 };
 
 }

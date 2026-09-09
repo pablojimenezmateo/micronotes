@@ -1,5 +1,7 @@
 #include "app/Startup.h"
 
+#include "app/FindBar.h"
+
 #include "app/BlockMenus.h"
 #include "app/Commands.h"
 #include "app/ContextMenus.h"
@@ -83,6 +85,13 @@ void applyWindowOptions(UiRuntime& ui, const ApplicationOptions& options) {
     ui.fields.search.beginWith(options.searchQuery, false);
     ui.state.setSearch(options.searchQuery, ui.fields.searchScope);
     ui.focus = FocusArea::Search;
+  }
+  if(!options.findQuery.empty()) {
+    // Through the bar's own verb, so a capture goes through the same path a
+    // Ctrl+F does -- including the reveal, which is what puts the first match
+    // on screen rather than leaving the capture at the top of the note.
+    ui.fields.find.beginWith(options.findQuery, false);
+    openFindInNote(ui);
   }
   if(options.openOverlay.empty()) return;
   const auto& which = options.openOverlay;

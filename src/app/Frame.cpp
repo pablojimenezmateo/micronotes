@@ -2,6 +2,7 @@
 
 #include "app/Breadcrumb.h"
 #include "app/Chrome.h"
+#include "app/FindBar.h"
 #include "app/FrameTrace.h"
 #include "app/LivePage.h"
 #include "app/MenuBar.h"
@@ -10,6 +11,7 @@
 #include "app/RightPanel.h"
 #include "app/Screenshot.h"
 #include "app/Shell.h"
+#include "app/StatusBar.h"
 #include "app/SettingsPane.h"
 #include "app/Sidebar.h"
 #include "app/TabStrip.h"
@@ -75,6 +77,12 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
     const perf::ScopeTimer timer("shell.breadcrumb");
     drawBreadcrumb(renderer, text, ui, layout.breadcrumb);
   }
+  // Before any surface draws. Three of them paint the find matches and the bar
+  // prints how many there were, so a list a frame behind the buffer highlights
+  // bytes the reader has already typed over. Cheap when nothing moved: it
+  // compares its memo key and returns.
+  refreshFindMatches(ui);
+
   if(!ui.state.catalog().isOpen()) {
     fill(renderer, layout.content, theme().editorBackground);
     // The one screen someone can arrive at knowing nothing, so it says what
@@ -104,6 +112,10 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
       fill(renderer, {content.x + split, content.y, 1, content.h}, theme().border);
       drawReading(renderer, text, images, ui, {content.x + split, content.y, content.w - split, content.h});
     }
+    // Over the panes, after all of them: the bar floats above the note it is
+    // searching, and in split view it belongs to the content column rather than
+    // to either half of it.
+    drawFindBar(renderer, text, ui, content);
   }
   // After the content: its outline borrows the partition the live page splices.
   if(!ui::empty(layout.rightPanel)) {

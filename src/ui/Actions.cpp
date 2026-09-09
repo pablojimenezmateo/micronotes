@@ -20,6 +20,20 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::GoToNote,        "jump",           "Go to note...",                   "Ctrl+P",       "",              S::Navigation, false, true, "Ctrl+O", true},
   {ActionId::CommandPalette,  "command-palette","Commands...",                     "Ctrl+Shift+P", "",              S::Navigation, false, false, "", true},
   {ActionId::FindInNote,      "find",           "Find in this note",               "Ctrl+F",       "",              S::Navigation, true,  true, "", true},
+  // F3 and Shift+F3 step whatever the find bar is holding, from anywhere --
+  // including from inside the field, which is why they are bindings rather than
+  // branches in the bar's own key handler. With the bar shut they do nothing,
+  // and they are listed rather than hidden for the reason `needsNote` gives.
+  {ActionId::FindNext,        "find-next",      "Next match",                      "F3",           "",              S::Navigation, true,  true, "", true},
+  {ActionId::FindPrevious,    "find-previous",  "Previous match",                  "Shift+F3",     "",              S::Navigation, true,  true, "", true},
+  // The find bar's two toggles. They are in the registry so that the chord is
+  // spelled once -- the bar's own tooltips and the shortcut list both read it
+  // from here -- and out of the palette because a toggle whose state you cannot
+  // see is a row that tells you nothing: they belong to the bar, beside the
+  // button that shows whether they are on. `keyRunsIt` is false for the same
+  // reason `Ctrl+B` is: Alt+C means this only while the bar has the keyboard.
+  {ActionId::FindMatchCase,   "find-match-case", "Find: match case",               "Alt+C",        "",              S::Navigation, true,  false, "", false},
+  {ActionId::FindWholeWord,   "find-whole-word", "Find: whole word",               "Alt+W",        "",              S::Navigation, true,  false, "", false},
   {ActionId::SearchAllNotes,  "search",         "Search every note",               "Ctrl+Shift+F", "",              S::Navigation, false, true, "", true},
   {ActionId::Shortcuts,       "shortcuts",      "Keyboard shortcuts...",           "F1",           "",              S::Navigation, false, true, "", true},
   {ActionId::Settings,        "settings",       "Settings...",                     "Ctrl+,",       "",              S::Navigation, false, true, "", true},
@@ -106,6 +120,7 @@ constexpr NamedKey kNamedKeys[] = {
   {"PageDown", SDLK_PAGEDOWN},
   {"F1", SDLK_F1},
   {"F2", SDLK_F2},
+  {"F3", SDLK_F3},
 };
 
 
@@ -174,6 +189,7 @@ std::string formatKeyChord(const KeyChord& chord) {
 
 constexpr HelpRow kHelpRows[] = {
   {"Ctrl+O", "Go to note, the other way round", S::Navigation},
+  {"Enter, Shift+Enter", "Step through find matches, in the find bar", S::Navigation},
   {"Up, Down", "Walk the sidebar", S::Navigation},
   {"Right, Left", "Open or close a notebook", S::Navigation},
   {"Esc", "Close a dialog, or clear the search", S::Navigation},

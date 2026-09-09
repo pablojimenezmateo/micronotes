@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/util/TextSearch.h"
 #include "doc/Layout.h"
 #include "ui/TextRenderer.h"
 #include "ui/ScrollList.h"
@@ -10,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -183,6 +185,14 @@ struct PageFrame {
   // Suppresses the toolbar while a click is still being dragged into a
   // selection, so it cannot land under the pointer mid-drag.
   bool selecting = false;
+  // Whether a selection is worth offering the formatting toolbar over at all.
+  //
+  // Not every selection is one the reader made in order to do something to it.
+  // Stepping through find matches selects each one in turn, and the toolbar
+  // that followed landed over the paragraph being read and across the route
+  // back to the bar's Next button -- offering to bold a word whose only crime
+  // was matching the query.
+  bool offerToolbar = true;
   bool caretVisible = true;
 };
 
@@ -214,8 +224,19 @@ public:
   // Lays the note out for this frame. `rect` is the whole content pane.
   void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
 
+  // `findMatches` is the shell's match list, ascending and addressed in buffer
+  // bytes -- see `app/FindState.h`. `activeMatch` indexes it, or is
+  // `kNoActiveMatch` when there is none to pick out.
+  //
+  // A list handed in, rather than a query string the page searches for itself,
+  // which is what this took. Three surfaces each ran their own scan and so gave
+  // three answers to one question: the page cached its matches and the raw pane
+  // re-scanned every visible line every frame, and neither could be told to
+  // match case because the toggle lived in neither of them.
+  static constexpr std::size_t kNoActiveMatch = static_cast<std::size_t>(-1);
   void draw(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t caret, const PageSelection& selection,
-            bool focused, std::string_view findQuery);
+            bool focused, std::span<const microcore::util::TextMatch> findMatches = {},
+            std::size_t activeMatch = kNoActiveMatch);
 
   std::size_t offsetAt(float x, float y) const;
   std::optional<std::size_t> blockAt(float x, float y) const;
@@ -294,12 +315,13 @@ private:
   std::pair<std::size_t, std::size_t> visibleBlocks() const;
   // Backgrounds and rules, drawn under the text of every visible block.
   void drawBlockDecorations(SDL_Renderer* renderer, ui::TextRenderer& text);
-  // The find query's matches, banded to the blocks on screen. Kept out of
-  // `draw` because the interesting part is what it does *not* do: it does not
-  // search the note unless the note or the query moved, and it does not build a
-  // rect for a match the window cannot show.
-  void drawFindHighlights(SDL_Renderer* renderer, std::string_view findQuery, std::size_t firstBlock,
-                          std::size_t lastBlock, float ox, float oy);
+  // The find matches, banded to the blocks on screen. Kept out of `draw`
+  // because the interesting part is what it does *not* do: it builds a rect
+  // only for the matches inside the window, which is a pair of binary searches
+  // over a list that is already sorted.
+  void drawFindHighlights(SDL_Renderer* renderer, std::span<const microcore::util::TextMatch> matches,
+                          std::size_t activeMatch, std::size_t firstBlock, std::size_t lastBlock,
+                          float ox, float oy);
   // The language label and copy button, drawn over a code block's first line.
   void drawCodeChrome(SDL_Renderer* renderer, ui::TextRenderer& text);
   void drawFoldControls(SDL_Renderer* renderer);
@@ -340,11 +362,6 @@ private:
   std::uint64_t sourceRevision_ = 0;
   std::uint64_t foldRevision_ = 0;
   editor::TextEdit editedSpan_;
-  // Where the find query matches, found once and kept until the query or the
-  // buffer moves. Recomputing it per frame made an open find bar cost a pass
-  // over the note at frame rate; drawing all of it made the highlight cost the
-  // document rather than the window.
-  std::vector<std::size_t> findMatches_;
   // The note's anchors, keyed by slug. `mutable` because resolving one is
   // logically a query; rebuilt when the buffer's stamp moves, and every frame
   // for a caller that offers no stamp -- the same contract the find cache has.
@@ -356,14 +373,12 @@ private:
   // free on every one of them -- for the find highlighter, one per match on
   // screen.
   mutable std::vector<doc::Rect> selectionRects_;
-  std::string findMatchQuery_;
-  std::uint64_t findMatchRevision_ = 0;
-  bool findMatchesValid_ = false;
   PageBlockSelection blockSelection_;
   std::optional<std::size_t> dropOffset_;
   float pointerX_ = -1.0f;
   float pointerY_ = -1.0f;
   bool selecting_ = false;
+  bool offerToolbar_ = true;
 };
 
 }

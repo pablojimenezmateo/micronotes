@@ -233,6 +233,10 @@ when the counters went in it turned out to be 70% of every frame.
   only at a durable polymorphic boundary.
 - Before writing a helper, look for it. `core/util/StringUtil.h` has `trim`,
   the ASCII case fold, `isAsciiSpace`, `splitLines` and `ellipsize`;
+  `core/util/TextSearch.h` is the one literal search over a buffer -- every
+  match, the whole-word predicate and the three "which match comes next" walks
+  -- and it exists because the find bar, the live page and the raw pane each had
+  a scan of their own and so gave three answers to one question;
   `core/util/Utf8.h` has the
   boundary walks; `core/util/Hash.h` is the one FNV; `core/platform/PathUtils.h`
   has `uniquePath`, `sanitizeFileStem` and `displayPath`; `ui/Memo.h` is how a
@@ -299,7 +303,8 @@ when the counters went in it turned out to be 70% of every frame.
   the focus, the status line -- and each surface's state is a named type in its
   own header (`app/SidebarState.h`, `app/PanelState.h`, `app/ChromeState.h`,
   `app/EditingState.h`, `app/PointerState.h`, `app/RawPaneState.h`,
-  `app/TextFields.h`). It is that composition and nothing else: the cursor's
+  `app/TextFields.h`, `app/FindState.h`, `app/StatusBar.h`'s `StatusBarState`).
+  It is that composition and nothing else: the cursor's
   types are `app/Cursor.h`, the caret's frame policy `app/CaretPolicy.h`, the
   layout pass `app/Layout.h`, and a drawn link's rect `app/LinkRegion.h` --
   which is what lets a drawing helper stop including the whole runtime to name
@@ -307,6 +312,22 @@ when the counters went in it turned out to be 70% of every frame.
   works on rather than the whole shell. And a rule about one surface's state
   belongs as a *method* on that surface's type, not as arithmetic repeated at
   each call site -- that is where this codebase's quieter bugs have come from.
+- **A floating surface's geometry is one function, shared by the paint and the
+  hit test.** `app/FindBar.h`'s `findBarLayout` and `app/StatusBar.h`'s
+  placement are both written that way, and `../microide` says why in the same
+  words: two copies of a button's rect is a button that moves out from under the
+  pointer. Nothing about either is recorded as it is drawn, so a press works on
+  a frame the surface has not been painted on yet -- which is the opposite rule
+  from `app/ChromeState.h`, and that header explains the one constraint that
+  forces the exception.
+- **The status bar reports state; it does not echo actions.** Its segments are
+  values (`app::statusSegments`), pure over the shell so the test reads the
+  strings without a window, and each carries its own tone and the command a
+  click runs rather than having either derived from its label at paint time. A
+  message set through `ui.status` is *transient* -- see `app/StatusLine.h`,
+  which is a struct with an assignment operator precisely so that the hundred
+  and forty existing `ui.status = "..."` sites keep working and none of them can
+  forget to stamp the clock.
 - A memoised value is `ui::Memo<Value, Key>`, not a value plus a `valid` flag
   plus the key spelled out field by field. The failure that shape has is
   specific: the comparison and the assignment are two lists, they drift, and

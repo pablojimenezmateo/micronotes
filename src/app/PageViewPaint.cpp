@@ -54,7 +54,8 @@ using pageview::toTextStyle;
 }
 
 void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t caret, const PageSelection& selection,
-                    bool focused, std::string_view findQuery) {
+                    bool focused, std::span<const util::TextMatch> findMatches,
+                    std::size_t activeMatch) {
   const perf::ScopeTimer timer("page.draw");
   perf::addCounter(perf::CounterId::PageDrawCalls);
   links_.clear();
@@ -109,11 +110,9 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   // to keep saying so.
   const auto [firstBlock, lastBlock] = visibleBlocks();
 
-  if(!findQuery.empty()) {
+  if(!findMatches.empty()) {
     const perf::ScopeTimer findTimer("page.draw.find_highlight");
-    drawFindHighlights(renderer, findQuery, firstBlock, lastBlock, ox, oy);
-  } else {
-    findMatchesValid_ = false;
+    drawFindHighlights(renderer, findMatches, activeMatch, firstBlock, lastBlock, ox, oy);
   }
 
   drawBlockDecorations(renderer, text);
@@ -283,7 +282,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   // second renderer for the same Markdown.
   if(!readOnly_) {
     drawGutter(renderer, text);
-    drawToolbar(renderer, text, selection);
+    if(offerToolbar_) drawToolbar(renderer, text, selection);
   }
   ui::drawVerticalScrollbar(renderer, page_, scroll_.scroll(), scroll_.maxScroll());
 }
@@ -294,49 +293,42 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
 // however far off screen it was. On a 235 KB note with a common word in it that
 // is the whole frame.
 //
-// Both are bounded here. The match list is a function of the buffer and the
-// query, so it is found once and stands until one of them moves; and only the
-// matches inside the band of blocks the window is showing get a rect built for
-// them, which is a pair of binary searches over a sorted list.
-void PageView::drawFindHighlights(SDL_Renderer* renderer, std::string_view findQuery,
-                                  std::size_t firstBlock, std::size_t lastBlock, float ox, float oy) {
-  const std::string& source = document_.source();
-  const std::size_t step = std::max<std::size_t>(1, findQuery.size());
-  // A caller with no revision to offer -- a test, or a surface that does not
-  // stamp its buffer -- gets the search every frame, exactly as `update` does.
-  const bool cached = findMatchesValid_ && sourceRevision_ != 0 &&
-                      findMatchRevision_ == sourceRevision_ && findMatchQuery_ == findQuery;
-  if(!cached) {
-    perf::addCounter(perf::CounterId::PageFindScanBytes, source.size());
-    findMatches_.clear();
-    for(std::size_t at = source.find(findQuery); at != std::string::npos;
-        at = source.find(findQuery, at + step)) {
-      findMatches_.push_back(at);
-    }
-    findMatchQuery_ = findQuery;
-    findMatchRevision_ = sourceRevision_;
-    findMatchesValid_ = true;
-  }
-  if(findMatches_.empty()) return;
-
+// Both are gone. The search itself is not here at all any more: the shell owns
+// one match list per (buffer, needle, options) and hands it to whichever
+// surfaces are drawing, which is also what stopped the page, the raw pane and
+// the match count being three separate answers. What is left is the second
+// half -- only the matches inside the band of blocks the window is showing get
+// a rect built for them, which is a pair of binary searches over a sorted list.
+void PageView::drawFindHighlights(SDL_Renderer* renderer, std::span<const util::TextMatch> matches,
+                                  std::size_t activeMatch, std::size_t firstBlock,
+                                  std::size_t lastBlock, float ox, float oy) {
   const auto& blocks = document_.blocks();
   if(firstBlock >= lastBlock || blocks.empty()) return;
   // A match starting just before the first visible block can still reach into
   // it, so the band opens one block early. It cannot reach further than that:
-  // a block boundary is a line boundary and a match is one line of source.
+  // a block boundary is a line boundary, and a needle carrying a newline is one
+  // the find bar's single-line field cannot hold.
   const std::size_t from = blocks[firstBlock > 0 ? firstBlock - 1 : 0].start;
   const std::size_t to = blocks[std::min(lastBlock, blocks.size()) - 1].end();
-  const auto begin = std::lower_bound(findMatches_.begin(), findMatches_.end(), from);
-  const auto end = std::lower_bound(findMatches_.begin(), findMatches_.end(), to);
+  const auto byStart = [](const util::TextMatch& match, std::size_t offset) {
+    return match.start < offset;
+  };
+  const auto begin = std::lower_bound(matches.begin(), matches.end(), from, byStart);
+  const auto end = std::lower_bound(matches.begin(), matches.end(), to, byStart);
   perf::addCounter(perf::CounterId::PageFindHighlightsDrawn,
                    static_cast<std::uint64_t>(end - begin));
   const float bandTop = page_.y - oy;
   for(auto it = begin; it != end; ++it) {
-    document_.selectionRectsInto(*it, *it + findQuery.size(), bandTop, bandTop + page_.h,
-                                 &selectionRects_);
+    // The one the reader is on takes the stronger of the two match colours and
+    // the rest the resting one, with the same outline over both. The outline
+    // alone was the distinction first, and at a glance over a paragraph of hits
+    // it was no distinction at all -- a one-pixel edge in a colour a pixel away
+    // from the fill beside it.
+    const bool active = static_cast<std::size_t>(it - matches.begin()) == activeMatch;
+    document_.selectionRectsInto(it->start, it->end, bandTop, bandTop + page_.h, &selectionRects_);
     for(const auto& rect : selectionRects_) {
       const Rect hit = toRect(rect, ox, oy);
-      fill(renderer, hit, theme().searchMatch);
+      fill(renderer, hit, active ? theme().searchMatchActive : theme().searchMatch);
       stroke(renderer, hit, theme().searchMatchActive);
     }
   }

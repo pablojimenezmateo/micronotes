@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ui/TextRenderer.h"
 #include "ui/Rect.h"
 #include "ui/WorkspaceModel.h"
 
@@ -8,17 +7,15 @@
 
 #include <SDL3/SDL.h>
 
-namespace micronotes::app {
-
-struct UiRuntime;
-
-// The line along the bottom of the window: whether the note is saved, what just
-// happened, which view you are in, and how much you have written.
+// What is left of the window's furniture once the strips have been given their
+// own homes.
 //
-// The strip that used to be its counterpart along the top is two things now: a
-// menu bar (`app/MenuBar.h`), and the breadcrumb band over the page
-// (`app/Breadcrumb.h`) that carries the trail down to the open note.
-void drawStatus(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect);
+// It was the status bar plus these two, and the bar has gone to
+// `app/StatusBar.h` -- what remains is a glyph three surfaces draw and the one
+// word each of them uses for the pane mode. The strip along the top is two
+// things: a menu bar (`app/MenuBar.h`) and the breadcrumb band over the page
+// (`app/Breadcrumb.h`).
+namespace micronotes::app {
 
 // A note's icon, or the page mark a note with no icon wears. Shared with the
 // sidebar and the note list, which name notes the same way the trail does.

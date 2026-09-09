@@ -11,6 +11,7 @@
 #include "app/EditCommands.h"
 #include "app/EditorBlocks.h"
 #include "app/Fields.h"
+#include "app/FindBar.h"
 #include "app/Folds.h"
 #include "app/MenuBar.h"
 #include "app/Notes.h"
@@ -244,6 +245,9 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     // field keeps the typing and the list keeps the selection. A single-line
     // field has nothing else to do with Up and Down.
     moveTreeCursor(ui, key == SDLK_DOWN ? 1 : -1);
+  } else if(ui.focus == FocusArea::Find && handleFindBarKey(ui, key, shift, alt)) {
+    // Taken by the bar: Enter steps to the next match rather than leaving the
+    // field, and the option chords flip a toggle rather than typing a letter.
   } else if(auto* field = focusedField(ui)) {
     handleFieldKey(ui, *field, key, ctrl, shift);
   } else if(ui.focus == FocusArea::Editor && ui.blockSelection.active) {

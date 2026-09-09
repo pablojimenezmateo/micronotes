@@ -45,13 +45,6 @@ constexpr float kSearchGlyphSize = 12.0f;
 // folder name is ellipsized before it reaches the number rather than over it.
 constexpr float kCountColumnWidth = 26.0f;
 
-// Core measures text through a callback so it stays free of any font
-// dependency; this binds it to the renderer actually drawing the field.
-editor::TextWidthFn fieldMeasure(const TextRenderer& text) {
-  const ui::TextStyle style = ui::chromeStyle();
-  return [&text, style](std::string_view run) { return text.width(run, style); };
-}
-
 // The search field on top of the navigation it filters.
 static void drawSidebarSearch(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   const Rect search = searchBoxRect(rect);
@@ -144,42 +137,6 @@ Rect searchTextRect(Rect sidebar, const TextRenderer& text) {
 Rect sidebarListRect(Rect sidebar) {
   const float top = sidebar.y + ui::kSidebarSearchBand;
   return {sidebar.x, top, sidebar.w, std::max(0.0f, sidebar.y + sidebar.h - top)};
-}
-
-// Paints a single-line field: selection band, then the text scrolled so the
-// caret is visible, then the caret. The fields this replaces drew only the
-// string, which is why they had no visible insertion point, no selection, and
-// no way to reach text past the right edge.
-void drawTextField(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui,
-                          editor::TextField& field, Rect box, bool focused,
-                          std::string_view placeholder) {
-  ui::TextFieldPaint paint;
-  paint.box = box;
-  paint.textY = box.y;
-  // Negative: this box *is* the text line, so the caret and the band have to
-  // grow past it rather than sit inside it.
-  paint.insetY = -2.0f;
-  paint.placeholder = placeholder;
-  paint.focused = focused;
-  // Painted only on the blink's on-phase. See `ui::CaretBlink`: a solid bar in
-  // a mono face reads as a pipe character rather than as an insertion point, so
-  // the caret used to say "your typing goes here" in exactly the same voice as
-  // the text beside it.
-  paint.caretVisible = ui.caret.visible;
-  const Rect caret = ui::drawTextFieldText(renderer, text, ui::chromeStyle(), field, paint);
-  if(ui::empty(caret)) return;
-  // Give the IME a candidate rectangle here too. Without it a dead-key or
-  // composition popup opened while typing in a field lands at the window origin
-  // instead of next to the text being composed.
-  ui.caret.reported = true;
-  ui.caret.rect = SDL_Rect {static_cast<int>(caret.x), static_cast<int>(caret.y), 2,
-                            static_cast<int>(caret.h)};
-}
-
-// Byte offset in `field` under a pointer at window x, for a field drawn in
-// `box`. Always a code point boundary.
-std::size_t fieldOffsetAtX(const TextRenderer& text, const editor::TextField& field, Rect box, float x) {
-  return editor::offsetAtX(field.text(), x - box.x + field.scrollX, fieldMeasure(text));
 }
 
 void drawSidebar(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {

@@ -59,6 +59,18 @@ namespace microcore::perf {
   X(EditorSingleLineMeasures, "editor.single_line_measures")                            \
   X(EditorWrapLines, "editor.wrap_lines")                                                \
   X(EditorWrapMeasures, "editor.wrap_measures")                                          \
+  /* --- literal text search ------------------------------------------------ */      \
+  /* One scan of a buffer for a needle. `scans` is what says the memo above it  */     \
+  /* is working: the find bar re-asks on every keystroke and every frame, and    */     \
+  /* the answer only has to be recomputed when the buffer or the query moves --   */    \
+  /* so scans should track keystrokes-in-the-find-box, not frames. `scan_bytes`  */    \
+  /* is what one costs. Before the memo the same question was answered three     */    \
+  /* separate times per frame, by three scans that did not agree.                */    \
+  X(TextSearchScans, "search.text_scans")                                              \
+  X(TextSearchScanBytes, "search.text_scan_bytes")                                     \
+  /* Scans that hit the retained-match cap, so a count shown to the reader is a  */    \
+  /* floor rather than a total. Should be zero in any ordinary session.          */    \
+  X(TextSearchTruncated, "search.text_truncated")                                      \
   /* --- persistence ------------------------------------------------------ */        \
   X(SqliteConnectionOpens, "sqlite.connection_opens")                                  \
   X(SqliteStatementsPrepared, "sqlite.statements_prepared")                            \

@@ -4,10 +4,12 @@
 #include "core/perf/TraceChannel.h"
 #include "core/platform/DurableFile.h"
 
+#include "app/FindBar.h"
 #include "app/PageView.h"
 #include "app/RawPane.h"
 #include "app/RightPanel.h"
 #include "app/Shell.h"
+#include "app/StatusBar.h"
 #include "doc/Edits.h"
 #include "doc/Fold.h"
 #include "doc/Layout.h"
@@ -1000,7 +1002,20 @@ static volatile std::size_t sink = 0;
 // `shell.keystroke` is their sum: the number a person typing actually pays.
 static constexpr std::uint64_t kShellEditBudgetMicros = 200;
 static constexpr std::uint64_t kShellOutlineBudgetMicros = 400;
-static constexpr std::uint64_t kShellStatusBudgetMicros = 50;
+// The status bar. It was 50 when the bar's whole job was a word count the
+// editor already carried; the segments added one derived readout that is a pass
+// over the note -- the caret's line and column -- memoised on the buffer's
+// revision and the caret, which means a keystroke pays for it exactly once. On
+// a 200 KB note that pass is tens of microseconds, so the budget moves to cover
+// it and no further: a regression to per-frame, or to a second uncached walk,
+// shows up here rather than in the total.
+static constexpr std::uint64_t kShellStatusBudgetMicros = 250;
+// The find bar's scan, which runs once per (buffer, needle, options) -- so
+// once per keystroke while the bar is open, over the whole note. Its own
+// scenario because it is the one surface whose cost the reader opts into, and
+// because there was no lane for it at all when it was three separate scans: the
+// page's, the raw pane's and the status line's, none of which the harness saw.
+static constexpr std::uint64_t kShellFindBudgetMicros = 2000;
 // The live page over a real face, which is the one part of a keystroke that
 // shapes glyphs. Loose for the reason the font lane is loose: shaping is the
 // scenario whose cost moves most with what else the machine is doing.
@@ -1060,7 +1075,13 @@ static bool shellBudgets(const std::filesystem::path& root, const std::string& b
     ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), page);
   };
   const auto askOutline = [&] { sink += micronotes::app::outlineFor(ui).size(); };
-  const auto askStatus = [&] { sink += ui.editor.wordCount() + ui.editor.text().size(); };
+  // Through the bar's own model rather than the two counts it used to be: the
+  // segments are where the work is now, and a lane that measures the inputs
+  // instead of the answer is a lane that cannot see a readout being added.
+  const auto askStatus = [&] {
+    for(const auto& segment : micronotes::app::statusSegments(ui)) sink += segment.text.size();
+  };
+  const auto askFind = [&] { micronotes::app::refreshFindMatches(ui); };
   const auto askRawPane = [&] { sink += micronotes::app::rawPaneRows(text, ui, page).size(); };
 
   bool ok = true;
@@ -1096,12 +1117,30 @@ static bool shellBudgets(const std::filesystem::path& root, const std::string& b
                                                 }),
        kShellOutlineBudgetMicros + kShellPageBudgetMicros + kShellEditBudgetMicros);
 
+  // In the raw pane, deliberately: the bar's one expensive readout -- the
+  // caret's line and column -- is shown where the note's *source* is on screen,
+  // so measuring the bar in the default pane would measure the cheap half and
+  // call it the bar. `shell.keystroke` below stays in the live pane, which is
+  // the honest answer to what a keystroke costs *there*.
+  ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Editor);
   gate("shell.status_bar", measureIterations("shell.status_bar", 24,
                                              [&](int) {
                                                type();
                                                askStatus();
                                              }),
        kShellStatusBudgetMicros + kShellEditBudgetMicros);
+  ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Live);
+
+  ui.fields.find.beginWith("paragraph");
+  ui.find.open = true;
+  gate("shell.find_scan", measureIterations("shell.find_scan", 24,
+                                            [&](int) {
+                                              type();
+                                              askFind();
+                                            }),
+       kShellFindBudgetMicros + kShellEditBudgetMicros);
+  micronotes::app::closeFindInNote(ui);
+  ui.focus = micronotes::app::FocusArea::Editor;
 
   gate("shell.raw_pane_rewrap", measureIterations("shell.raw_pane_rewrap", 8,
                                                   [&](int) {

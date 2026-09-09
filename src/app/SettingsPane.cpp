@@ -480,13 +480,13 @@ void drawValueRows(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui
           ui::drawSurface(renderer, boxes.previous,
                           ui.pointer.over(boxes.previous) ? ui::theme().rowHighlight : ui::theme().surfaceRaised,
                           ui::theme().border);
-          ui::drawArrowGlyph(renderer, boxes.previous, false, ui::theme().textSecondary);
+          ui::drawArrowGlyph(renderer, boxes.previous, ui::ArrowDirection::Left, ui::theme().textSecondary);
           ui::drawButton(renderer, text, boxes.value, row.value, true,
                          ui.pointer.over(boxes.value), ui::ButtonTone::Neutral);
           ui::drawSurface(renderer, boxes.next,
                           ui.pointer.over(boxes.next) ? ui::theme().rowHighlight : ui::theme().surfaceRaised,
                           ui::theme().border);
-          ui::drawArrowGlyph(renderer, boxes.next, true, ui::theme().textSecondary);
+          ui::drawArrowGlyph(renderer, boxes.next, ui::ArrowDirection::Right, ui::theme().textSecondary);
           break;
         case SettingControl::None:
           break;

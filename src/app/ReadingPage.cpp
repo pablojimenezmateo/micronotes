@@ -35,8 +35,16 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
     selection.start = ui.editor.selectionStart();
     selection.end = ui.editor.selectionEnd();
   }
+  if(ui.revealViewerSelection) {
+    // The reading pane has no caret, so nothing else ever scrolls it to a
+    // position in the buffer. Stepping through find matches does, and without
+    // this the match the reader was walked to could be a page off screen while
+    // the live pane beside it had already scrolled.
+    ui.readingPage.revealCaret(selection.start);
+    ui.revealViewerSelection = false;
+  }
   ui.readingPage.draw(renderer, text, 0, selection, ui.focus == FocusArea::Viewer,
-                      ui.fields.find.text());
+                      ui.find.matches, ui.find.activeIndex());
   publishPageChrome(renderer, text, ui, ui.readingPage);
 
   if(ui.editor.text().empty()) {

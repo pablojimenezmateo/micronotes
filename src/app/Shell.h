@@ -14,12 +14,15 @@
 #include "app/ChromeState.h"
 #include "app/EditingState.h"
 #include "app/Fields.h"
+#include "app/FindState.h"
 #include "app/Focus.h"
 #include "app/LinkRegion.h"
 #include "app/RawPaneState.h"
 #include "app/ResizePacing.h"
 #include "app/TextFields.h"
 #include "app/SidebarState.h"
+#include "app/StatusBar.h"
+#include "app/StatusLine.h"
 #include "app/TabStrip.h"
 #include "app/Wheel.h"
 #include "doc/BlockScan.h"
@@ -154,13 +157,21 @@ struct UiRuntime {
   // The mode the last computed layout settled in. Fed back into the next one so
   // the compact breakpoint has hysteresis rather than flipping mid-drag.
   ui::LayoutMode layoutMode = ui::LayoutMode::Regular;
-  std::string status;
+  // What the shell has just been told to say, with the moment it was told. The
+  // status bar shows it for a few seconds and then goes back to reporting what
+  // is true; see `app/StatusLine.h` for why it is a type rather than a string.
+  StatusLine status;
+  // The two memos the bar's readouts stand on. See `app/StatusBar.h`.
+  StatusBarState statusBar;
 
   // ---- where the reader is -----------------------------------------------
   FocusArea focus = FocusArea::Editor;
   // The five one-line fields; which one is live is a function of `focus`. See
   // `app/TextFields.h` and `app/Fields.h`.
   TextFields fields;
+  // The find bar over the page: what it found and which match you are on. See
+  // `app/FindState.h`; the needle itself is `fields.find`.
+  FindState find;
   PointerState pointer;
 
   // ---- what the reader is doing to the note ------------------------------
@@ -181,6 +192,12 @@ struct UiRuntime {
   // scrolls on purpose -- a wheel over the page must not be undone by the caret
   // it left behind.
   bool revealEditorCursor = true;
+  // The same for the reading pane, which needs its own flag because it has no
+  // caret: nothing about it moves when the buffer's cursor does, so the pane it
+  // shares a window with in split view consumes `revealEditorCursor` first and
+  // the reading side never hears about it. Set only by things that move the
+  // *selection* on purpose -- stepping through find matches is the one so far.
+  bool revealViewerSelection = false;
 
   // ---- when it was last touched ------------------------------------------
   Uint64 lastEdit = 0;

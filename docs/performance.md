@@ -2877,6 +2877,91 @@ loosely because shaping moves with the machine), and it is the number `TD-14`'s
 decision should be taken against.
 
 
+### A segmented status bar, and the readout that paid for it
+
+The status bar stopped echoing the last action and became a row of segments, and
+one of them -- the caret's line and column -- is a pass over the note. That is
+the shape this file has twice recorded as the largest single thing a keystroke
+did (the word count at 247 us, the outline's block partition at 240 us), so it
+was measured before it shipped rather than after.
+
+Three things came out of the measurement, in the order they were found.
+
+**The lane was measuring the inputs, not the answer.** `shell.status_bar` asked
+for `wordCount()` and `text().size()` -- the two numbers the old bar printed --
+so a bar that grew a third readout would have cost whatever it liked and the
+lane would still have reported 1 us. It goes through `app::statusSegments` now,
+which is the whole model: every segment's text, tone and command. A lane that
+measures a surface's inputs cannot see a surface gaining work.
+
+**A byte loop is not a scan.** Counting the newlines before the caret with
+`for(i < at) if(text[i] == '\n')` measured **63 us** on a 200 KB note -- three
+times the live page's entire layout, and larger than anything else a keystroke
+did. The same count through `memchr` is **28 us**, which is the note's size
+divided by what memory delivers, and is as fast as counting them can be.
+
+**The cheapest pass is the one that is not shown.** 28 us is affordable and
+still the wrong trade in the pane it was being paid in. A line and a column are
+coordinates in the note's *Markdown*; in the live surface the reader is looking
+at rendered text, so "Ln 42" names a line of a file that is not on screen and
+moves for reasons that are not either. The readout is shown in the raw pane and
+the split -- where the source *is* on screen -- and in the live pane, which is
+the default, the segment does not exist and the pass is not made.
+
+| 200 KB note, per keystroke | median |
+|---|---:|
+| `shell.status_bar`, the old counts-only bar | 1 us |
+| the segments, with the caret counted byte at a time | 63 us |
+| the segments, with the caret counted by `memchr` | 28 us |
+| the segments in the live pane, where the caret readout is not shown | ~2 us |
+
+`shell.status_bar` runs in the raw pane deliberately, so what it reports is the
+expensive half. `shell.keystroke` stays in the live pane, which is the honest
+answer to what typing there costs.
+
+### In-file find: three scans became one, and got a lane
+
+Find-in-note was a text field in the status line, and the query it held was
+searched for **three separate times per frame** by three pieces of code that had
+never been introduced:
+
+- `PageView::drawFindHighlights` scanned the note with `std::string::find` and
+  cached the result on the buffer's revision;
+- the raw pane ran `line.find(needle)` over **every visible row, every frame**,
+  with no cache at all;
+- `updateFindStatus` counted the matches with a third loop on every keystroke in
+  the field.
+
+None of them could be told to match case or to stop mid-word, because the
+toggle would have had to be added to all three; and being three answers, they
+were free to disagree. The harness saw none of it: there was no find lane, and
+the two page-side costs were charged to `page.draw`.
+
+There is one match list now (`app/FindState.h`), found once per
+(buffer, needle, options) and handed to whichever surfaces are drawing. The
+`shell.find_scan` lane measures exactly that -- a keystroke in the find box over
+a 200 KB note -- and `search.text_scans` counts the scans, which is what says
+the memo is working: it should track keystrokes in the box, not frames.
+
+| 200 KB note, find bar open | median |
+|---|---:|
+| `shell.find_scan` -- edit, then the whole-note scan | 116 us |
+| the same, per painted frame | 0 (the memo answers) |
+
+The scan is a case-folded byte walk, so it is the note's size at memory speed
+and there is nothing clever left to do to it. What there *was* to do was stop
+doing it three times, and stop doing it per frame.
+
+**There is deliberately no incremental refine**, though the sibling
+`../microide` has one and this engine is otherwise its port. Its refinement
+rescans whole *lines* that held a hit; the offset-addressed shortcut -- treat
+the previous match starts as the candidate set for the longer needle -- is
+unsound, because the previous scan de-overlapped: `aa` in `aaab` matches only at
+0, so 1 is never a candidate, and yet `aab` matches at 1. It drops matches only
+for needles whose own prefix overlaps themselves, which is exactly the case
+nobody finds by hand. The note is in `core/util/TextSearch.h` so the next person
+to have the idea finds the counterexample instead of the bug.
+
 ### Resolved: the index carried a second copy of every note
 
 `notes.body` and `notes_fts.body` both held the whole text of every note, so the

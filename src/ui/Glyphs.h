@@ -31,9 +31,20 @@ void drawCheckGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 // of a square with an arrowhead where the fourth would close it. Drawn open, so
 // it does not read as the checkbox two rows up.
 void drawResetGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
-// A single-headed arrow pointing left or right, for the tab strip's overflow
-// buttons and anything else that scrolls a strip.
-void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color);
+// Which way a single-headed arrow points. An enum rather than the `pointRight`
+// bool this was: the find bar's step buttons want up and down, and a second
+// spelling for the other axis is how a shell ends up with two arrow glyphs that
+// do not match.
+enum class ArrowDirection {
+  Up,
+  Down,
+  Left,
+  Right
+};
+
+// A single-headed arrow, for the tab strip's overflow buttons, the find bar's
+// step buttons and anything else that moves along a run.
+void drawArrowGlyph(SDL_Renderer* renderer, Rect box, ArrowDirection direction, SDL_Color color);
 
 // The mark at the end of a line the column broke: a shaft turning back on
 // itself, which is what a continuation is shown as everywhere it is shown.

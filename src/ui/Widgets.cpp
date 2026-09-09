@@ -278,7 +278,8 @@ void drawStripOverflowButton(SDL_Renderer* renderer, TextRenderer& text, Rect bo
   const SDL_Color ink = hovered ? theme().textPrimary : theme().chromeTextSecondary;
   fill(renderer, box, background);
   stroke(renderer, box, theme().border);
-  drawArrowGlyph(renderer, {box.x, box.y, 16.0f, box.h}, pointRight, ink);
+  drawArrowGlyph(renderer, {box.x, box.y, 16.0f, box.h},
+                 pointRight ? ArrowDirection::Right : ArrowDirection::Left, ink);
 
   const TextStyle style = chromeSmallStyle();
   const std::string count = std::to_string(hidden);

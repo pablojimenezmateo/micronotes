@@ -254,4 +254,24 @@ inline constexpr float kPageColumnPad = 28.0f;
 // it and lets it use the gutter's room instead.
 inline constexpr float kPageMinColumn = 120.0f;
 
+// The find bar: a card floating at the top-right corner of the page, over the
+// note it is searching. The sibling ../microide's find widget, whose numbers
+// these are.
+//
+// The row *height* is not here, because the row holds a text field and text
+// grows with the reader's size setting -- `findBarLayout` takes this as a floor
+// and gives the line whatever more it asks for. Everything a control can be
+// nailed to is here.
+inline constexpr float kFindBarMargin = kSpace2;
+inline constexpr float kFindBarPad = kSpace2;
+inline constexpr float kFindBarRowHeight = 24.0f;
+inline constexpr float kFindBarButton = 24.0f;
+inline constexpr float kFindBarButtonGap = kSpace1;
+inline constexpr float kFindBarMinWidth = 260.0f;
+inline constexpr float kFindBarMaxWidth = 460.0f;
+// The narrowest the query box may be squeezed to before the bar stops giving
+// room to the controls beside it. A field too narrow to show a word is a field
+// that cannot be read back, which is worse than a bar that overhangs its page.
+inline constexpr float kFindBarMinField = 72.0f;
+
 }

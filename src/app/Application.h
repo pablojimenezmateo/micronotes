@@ -29,6 +29,10 @@ struct ApplicationOptions {
   // Seeds the sidebar's search field, so a capture can pin the searching state
   // the same way --select pins an open note.
   std::string searchQuery;
+  // Opens the find bar over the note with this needle in it, for the same
+  // reason: the bar is a floating surface with a match count and a highlight
+  // state, and none of that is reachable from a capture otherwise.
+  std::string findQuery;
   std::string openOverlay;
   // Which panels a captured frame should show, so a screenshot can pin an
   // arrangement the persisted state does not happen to be in.

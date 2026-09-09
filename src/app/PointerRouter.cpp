@@ -10,6 +10,7 @@
 #include "app/EditCommands.h"
 #include "app/EditorBlocks.h"
 #include "app/Fields.h"
+#include "app/FindBar.h"
 #include "app/Folds.h"
 #include "app/LivePage.h"
 #include "app/MenuBar.h"
@@ -23,6 +24,7 @@
 #include "app/Scroll.h"
 #include "app/SettingsPane.h"
 #include "app/Shell.h"
+#include "app/StatusBar.h"
 #include "library/Library.h"
 #include "app/Sidebar.h"
 #include "app/SidebarModel.h"
@@ -146,6 +148,12 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
     return;
   }
 
+  // The find bar floats over the page, so it is pressed before anything the
+  // page owns -- the scrollbar it is inset clear of, the text under it, and the
+  // middle-click paste that would otherwise drop the primary selection into the
+  // note the bar is covering.
+  if(pressFindBar(text, ui, layout.content, x, y, button)) return;
+
   if(pastePrimaryWherePointed(text, ui, layout, x, y, button)) return;
 
   // The panes' scrollbars, before the text under them: a thumb overlaps the
@@ -160,6 +168,9 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
     return;
   }
   if(handleBreadcrumbClick(ui, layout.breadcrumb, x, y)) return;
+  // The bar owns its whole strip: two of its segments are controls, and a press
+  // between them must not fall through to whatever the layout put behind it.
+  if(pressStatusBar(text, ui, layout.status, x, y, button)) return;
   if(contains(layout.content, x, y)) {
     pressPage(text, ui, layout.content, x, y, button);
     return;
@@ -278,6 +289,16 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
         ui.revealEditorCursor = true;
         break;
       }
+    }
+    return;
+  }
+  if(ui.fieldSelect.active) {
+    // Against the rect the field was last drawn in, which the draw records --
+    // the press recorded an anchor and nothing ever extended it, so dragging
+    // across a one-line field selected nothing at all.
+    if(auto* field = focusedField(ui); field && !ui::empty(ui.fields.drawnRect)) {
+      field->editor.selectRange(ui.fieldSelect.anchor,
+                                fieldOffsetAtX(text, *field, ui.fields.drawnRect, x));
     }
     return;
   }

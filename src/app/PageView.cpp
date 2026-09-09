@@ -93,6 +93,7 @@ void PageView::beginFrame(const PageFrame& frame) {
   blockSelection_ = frame.blockSelection;
   dropOffset_ = frame.dropOffset;
   selecting_ = frame.selecting;
+  offerToolbar_ = frame.offerToolbar;
   caretVisible_ = frame.caretVisible;
 }
 

@@ -102,12 +102,25 @@ void drawResetGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   SDL_RenderLine(renderer, cx - 3.0f, cy - 3.0f, cx, cy - 1.0f);
 }
 
-void drawArrowGlyph(SDL_Renderer* renderer, Rect box, bool pointRight, SDL_Color color) {
+void drawArrowGlyph(SDL_Renderer* renderer, Rect box, ArrowDirection direction, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   const float cx = std::round(box.x + box.w / 2.0f);
   const float cy = std::round(box.y + box.h / 2.0f);
-  const float arm = std::max(3.0f, box.h * 0.22f);
-  const float dx = pointRight ? arm * 0.5f : -arm * 0.5f;
+  const bool vertical = direction == ArrowDirection::Up || direction == ArrowDirection::Down;
+  // The arm is measured across the axis the arrow spans, so a wide short button
+  // and a tall narrow one both get a head that fits inside them.
+  const float arm = std::max(3.0f, (vertical ? box.w : box.h) * 0.22f);
+  // Half the arm along the pointing axis: the head is a chevron a third as deep
+  // as it is wide, which is the proportion the chevron and the close cross are
+  // drawn at too.
+  const float tip = arm * 0.5f;
+  if(vertical) {
+    const float dy = direction == ArrowDirection::Down ? tip : -tip;
+    SDL_RenderLine(renderer, cx - arm, cy - dy, cx, cy + dy);
+    SDL_RenderLine(renderer, cx, cy + dy, cx + arm, cy - dy);
+    return;
+  }
+  const float dx = direction == ArrowDirection::Right ? tip : -tip;
   SDL_RenderLine(renderer, cx - dx, cy - arm, cx + dx, cy);
   SDL_RenderLine(renderer, cx + dx, cy, cx - dx, cy + arm);
 }

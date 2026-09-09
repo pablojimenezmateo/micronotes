@@ -40,16 +40,6 @@ ui::Rect searchTextRect(ui::Rect sidebar, const ui::TextRenderer& text);
 // thing buildSidebarRows() and sidebarRowAt() ever measure against.
 ui::Rect sidebarListRect(ui::Rect sidebar);
 
-// Paints a single-line field: selection band, then the text scrolled so the
-// caret is visible, then the caret.
-void drawTextField(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
-                   editor::TextField& field, ui::Rect box, bool focused,
-                   std::string_view placeholder);
-// Byte offset in `field` under a pointer at window x, for a field drawn in
-// `box`. Always a code point boundary.
-std::size_t fieldOffsetAtX(const ui::TextRenderer& text, const editor::TextField& field,
-                           ui::Rect box, float x);
-
 // A press anywhere in the panel, including the run of empty list below the last
 // row: the panel owns its whole band, so a click in it never falls through to
 // the page behind.

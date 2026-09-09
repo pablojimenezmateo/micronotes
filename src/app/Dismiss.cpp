@@ -1,5 +1,6 @@
 #include "app/Dismiss.h"
 
+#include "app/FindBar.h"
 #include "app/Notes.h"
 
 namespace micronotes::app {
@@ -15,8 +16,12 @@ Dismissed dismissOne(UiRuntime& ui) {
     ui.state.setSearch("", ui.fields.searchScope);
     return Dismissed::Search;
   }
-  if(!ui.fields.find.empty()) {
-    ui.fields.find.reset();
+  // The bar rather than the field: a reader who clicked into the note to look
+  // at a match still has the bar open over it with the highlights showing, and
+  // Esc there means "put the search away". Asking the field would have found it
+  // non-empty and cleared the text while leaving the bar on screen.
+  if(ui.find.open) {
+    closeFindInNote(ui);
     return Dismissed::Find;
   }
   if(ui.sidebar.creatingFolder) {

@@ -373,7 +373,7 @@ MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
   // A clean buffer took the new text, without waiting for a focus change.
   MICRONOTES_REQUIRE(ui.editor.text() == "from another program\n");
   MICRONOTES_REQUIRE(!ui.editor.dirty());
-  MICRONOTES_REQUIRE(ui.status.find("Reloaded") != std::string::npos);
+  MICRONOTES_REQUIRE(ui.status.text.find("Reloaded") != std::string::npos);
   // And the index followed, so search and the sidebar agree with the page.
   ui.state.setSearch("another program");
   MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
@@ -411,7 +411,7 @@ MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
   // Saving keeps both: the buffer lands in the note, their text becomes a note
   // of its own, and the status line names it so it can be found.
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui, /*quiet=*/true));
-  MICRONOTES_REQUIRE(ui.status.find("was kept as") != std::string::npos);
+  MICRONOTES_REQUIRE(ui.status.text.find("was kept as") != std::string::npos);
   MICRONOTES_REQUIRE(ui.state.catalog().notes().size() == 2);
   ui.state.setSearch("theirs");
   MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
@@ -802,7 +802,11 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
   // Stack all four up, outermost first, in the order a reader would reach them.
   micronotes::app::selectTag(ui, "work");
   ui.sidebar.creatingFolder = true;
+  // The find bar being *open* is the narrowing, not the field having text in
+  // it: a reader who clicked back into the note still has the bar and its
+  // highlights over the page.
   ui.fields.find.beginWith("body");
+  ui.find.open = true;
   ui.fields.search.beginWith("Findable");
   ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);
   MICRONOTES_REQUIRE(!ui.state.currentSearchResults().empty());
@@ -812,11 +816,12 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
   // pile of `if`s did not have.
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Search);
   MICRONOTES_REQUIRE(ui.fields.search.empty());
-  MICRONOTES_REQUIRE(!ui.fields.find.empty());
+  MICRONOTES_REQUIRE(ui.find.open);
   MICRONOTES_REQUIRE(ui.sidebar.creatingFolder);
   MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
 
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Find);
+  MICRONOTES_REQUIRE(!ui.find.open);
   MICRONOTES_REQUIRE(ui.fields.find.empty());
   MICRONOTES_REQUIRE(ui.sidebar.creatingFolder);
   MICRONOTES_REQUIRE(ui.state.selection().tag == "work");
@@ -924,7 +929,7 @@ MICRONOTES_TEST(shell_a_cross_note_anchor_waits_for_the_layout) {
   // touch the status line.
   ui.status = "untouched";
   micronotes::app::applyQueuedAnchorJump(ui);
-  MICRONOTES_REQUIRE(ui.status == "untouched");
+  MICRONOTES_REQUIRE(ui.status.text == "untouched");
 
   micronotes::app::queueAnchorJump(ui, "a-section");
   MICRONOTES_REQUIRE(ui.pendingAnchor == "a-section");
@@ -935,11 +940,11 @@ MICRONOTES_TEST(shell_a_cross_note_anchor_waits_for_the_layout) {
   MICRONOTES_REQUIRE(ui.pendingAnchor.empty());
   // And a broken anchor is reported rather than passed over: the note opening
   // at the top with no explanation looks like the anchor was ignored.
-  MICRONOTES_REQUIRE(ui.status == "Anchor not found: a-section");
+  MICRONOTES_REQUIRE(ui.status.text == "Anchor not found: a-section");
 
   ui.status = "untouched";
   micronotes::app::applyQueuedAnchorJump(ui);
-  MICRONOTES_REQUIRE(ui.status == "untouched");
+  MICRONOTES_REQUIRE(ui.status.text == "untouched");
 }
 
 // The sidebar's four groups are bands that can be shut, and a shut band emits
@@ -1300,7 +1305,7 @@ MICRONOTES_TEST(shell_a_note_reports_both_spellings_of_its_path) {
   MICRONOTES_REQUIRE(!micronotes::app::handleNotePathCommand(ui, "", {}));
   // A note nothing names is reported rather than passed over.
   MICRONOTES_REQUIRE(micronotes::app::handleNotePathCommand(ui, "copy-absolute-path", "no-such"));
-  MICRONOTES_REQUIRE(ui.status == "No note to locate");
+  MICRONOTES_REQUIRE(ui.status.text == "No note to locate");
 
   std::filesystem::remove_all(root);
 }
@@ -1406,7 +1411,7 @@ MICRONOTES_TEST(shell_a_companion_opens_on_a_click_and_never_on_the_cursor) {
   micronotes::app::activateSidebarRow(ui, fileRow, micronotes::app::RowActivation::Click);
   MICRONOTES_REQUIRE(launched == 1);
   MICRONOTES_REQUIRE(last == root / "work" / "files" / "diagram.png");
-  MICRONOTES_REQUIRE(ui.status == "Opened diagram.png");
+  MICRONOTES_REQUIRE(ui.status.text == "Opened diagram.png");
   MICRONOTES_REQUIRE(ui.state.selection().noteId.empty());
   MICRONOTES_REQUIRE(ui.state.selection().folder.empty());
 

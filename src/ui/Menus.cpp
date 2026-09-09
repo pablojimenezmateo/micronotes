@@ -55,6 +55,8 @@ constexpr MenuItemSpec kEditItems[] {
   item(ActionId::DeleteBlock, "Delete block"),
   sep(),
   item(ActionId::FindInNote, "Find..."),
+  item(ActionId::FindNext, "Find next"),
+  item(ActionId::FindPrevious, "Find previous"),
   item(ActionId::SearchAllNotes, "Search all notes..."),
 };
 

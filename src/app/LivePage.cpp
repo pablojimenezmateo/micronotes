@@ -42,6 +42,9 @@ PageFrame liveFrame(TextRenderer& text, ui::ImageCache& images, UiRuntime& ui) {
   frame.blockSelection = {ui.blockSelection.active, ui.blockSelection.anchor, ui.blockSelection.focus};
   frame.dropOffset = ui.blockDrag.active ? ui.blockDrag.dropOffset : std::nullopt;
   frame.selecting = ui.textSelect.active;
+  // While the find bar is up, every selection on the page is one the search
+  // made rather than one the reader did.
+  frame.offerToolbar = !ui.find.open;
   frame.caretVisible = ui.caret.visible;
   return frame;
 }
@@ -83,7 +86,7 @@ void drawLive(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& images
     selection.end = ui.editor.selectionEnd();
   }
   ui.livePage.draw(renderer, text, ui.editor.cursor(), selection, ui.focus == FocusArea::Editor,
-                   ui.fields.find.text());
+                   ui.find.matches, ui.find.activeIndex());
   publishPageChrome(renderer, text, ui, ui.livePage);
 
   if(ui.editor.text().empty()) {

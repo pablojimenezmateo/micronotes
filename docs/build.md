@@ -236,10 +236,16 @@ Useful runtime controls:
   list, including the ones with no shortcut: set a note icon, move a note or a
   block selection to another note, restore from trash, toggle a favorite,
   settings.
+- `Ctrl+F`: find in this note. A bar floats at the top right of the page with
+  the query, two toggles - `Aa` for match case and `ab` for whole word, or
+  `Alt+C` and `Alt+W` - and how many matches there are. Every match is
+  highlighted in whichever panes are showing; the one you are on is picked out
+  and selected, so closing the bar leaves it there to copy. `Enter` and
+  `Shift+Enter` step through them from the field, `F3` and `Shift+F3` from
+  anywhere, and both wrap. With text selected, `Ctrl+F` searches for it rather
+  than making you type it again. `Esc` puts the bar away.
 - `F1`: every keyboard shortcut in one list, filterable by what it does or by
-  the keys themselves - typing `alt` finds `Alt+Up`. The status bar names three
-  ways in and then points here rather than listing a dozen keys it has no room
-  for.
+  the keys themselves - typing `alt` finds `Alt+Up`.
 - `Ctrl+,`: settings. Theme, text size, page width, and the library folder. Each
   row opens the list of its own values and the settings list comes back with the
   new one on it, so changing two things does not mean opening the dialog twice.
@@ -453,6 +459,7 @@ These exist to make UI work reproducible and are not part of normal use:
 --pane live|editor|viewer|split
 --select <title>       # open the first note whose title contains this
 --search <query>       # seed the sidebar's search field, to capture it searching
+--find <query>         # open the find bar over the note with this needle in it
 --panels sidebar,right # which side panels to show, rather than whatever was stored
 --right-panel outline|backlinks|links|tags   # "links" is the tab's own label
 --open rename|tags|new-folder|note-menu|folder-menu|delete-note|settings|shortcuts|command-palette

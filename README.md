@@ -48,11 +48,17 @@ keystroke away.
   maximize / close at its right, and dragging its empty part moves the window.
   If the platform will not take a hit test, the decorations come back. Under the
   tab strip sits the breadcrumb down to the open note and the star that pins it;
-  the bar at the foot carries the word and character count.
+  the bar at the foot is a row of segments -- whether the note is saved, where
+  the caret is, what is selected, how much you have written, which view you are
+  in -- each of which says what it means when hovered, and two of which run
+  something when clicked.
 - Chrome in one monospaced face at one size -- the menu bar, the tree, the tabs,
   the panels, the status bar -- and the note itself in a proportional one with a
   heading scale. The split is the design: a tree of proportional labels has no
   vertical rhythm, and prose set in a programming face is not prose.
+- `Ctrl+F` finds in the note: a floating bar with a match count, match-case and
+  whole-word toggles, every hit highlighted in whichever panes are showing, and
+  `Enter` / `F3` stepping through them. `Ctrl+Shift+F` searches every note.
 - `Ctrl+P` or `Ctrl+O` jumps to any note; `Ctrl+Shift+P` is every command; `F1`
   is every shortcut; `Ctrl+,` is theme, text size, page width and which folder
   to open.

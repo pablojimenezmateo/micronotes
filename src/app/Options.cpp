@@ -58,6 +58,8 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       options.selectTitle = argv[++i];
     } else if(arg == "--search" && i + 1 < argc) {
       options.searchQuery = argv[++i];
+    } else if(arg == "--find" && i + 1 < argc) {
+      options.findQuery = argv[++i];
     } else if(arg == "--open" && i + 1 < argc) {
       options.openOverlay = argv[++i];
     }
