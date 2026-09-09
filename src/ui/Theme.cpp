@@ -6,7 +6,6 @@
 
 #include "core/render/ColorMath.h"
 
-#include <cctype>
 #include <string>
 
 namespace micronotes::ui {
@@ -229,8 +228,7 @@ CalloutStyle calloutStyle(std::string_view rawKind) {
   const bool light = activeMode() == ThemeMode::Light;
   // The live surface reads the tag as written and the reading view lowercases
   // it on the way through md4c; both must land on the same colour.
-  std::string kind;
-  for(char c : rawKind) kind.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+  const std::string kind = util::toUpperAscii(rawKind);
   // GitHub's five alert kinds, which is what `> [!NOTE]` already means
   // everywhere else these files are read. The hues are pulled toward the
   // palette's own blue-slate family rather than Obsidian's: note takes the
@@ -288,7 +286,7 @@ std::string calloutLabel(std::string_view kind) {
   // read as "note" and `[!NOTE]` as "Note" in the same pane, in the same note.
   if(kind.empty()) return "Note";
   std::string name(kind);
-  name[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[0])));
+  name[0] = util::toUpperAscii(name[0]);
   for(std::size_t i = 1; i < name.size(); ++i) {
     name[i] = util::toLowerAscii(name[i]);
   }

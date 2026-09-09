@@ -466,6 +466,59 @@ MICRONOTES_TEST(architecture_the_tab_strip_is_laid_out_once) {
       "built rather than on the one that was painted. Read ui.tabStrip instead.");
 }
 
+// The ASCII case fold lives in exactly one place, and `<cctype>` is not it.
+//
+// `core/util/StringUtil.h` exists because the fold had been written out at
+// eight sites and the copies had drifted; its own comment says so. That held
+// for a while and then stopped: `ui/Menus.cpp` grew a fourth `lowerAscii`, and
+// three sites reached for `std::toupper` because the header had a lower fold
+// and no upper one -- so the drift came back through the half that was missing.
+//
+// Both halves of that are worth failing on, and the `std::toupper` half is a
+// correctness bug rather than a tidiness one. `std::toupper` is
+// locale-dependent, and every caller here folds a *machine* string: a callout
+// kind matched against "TIP", a key chord printed on a shortcut row, a theme
+// name. Under a Turkish locale `toupper('i')` is not 'I', so `> [!tip]` stops
+// finding its colour -- on the user's machine, in a build that passed every
+// test on ours.
+//
+// Comments are exempt: this header's own preamble discusses the dance it
+// replaced, and so does this test.
+MICRONOTES_TEST(architecture_the_ascii_case_fold_lives_in_one_place) {
+  // A hand-rolled fold, and the locale-dependent library one. Not `<cctype>`
+  // itself: a dozen files include it for `isalnum`, `ispunct` and `isdigit`,
+  // which is a different question from case and one they all guard correctly by
+  // casting to `unsigned char` first.
+  const std::vector<std::string> banned {
+    "- 'A' + 'a'", "- 'a' + 'A'", "std::tolower", "std::toupper", "tolower(", "toupper(",
+  };
+  std::vector<std::string> offenders;
+  for(const auto& file : sourceFiles(repoRoot() / "src")) {
+    // Where the fold is defined, and where its history is written down.
+    if(file.filename() == "StringUtil.h" || file.filename() == "StringUtil.cpp") continue;
+    std::istringstream lines(readText(file));
+    std::string line;
+    int number = 0;
+    while(std::getline(lines, line)) {
+      ++number;
+      const auto code = line.substr(0, line.find("//"));
+      for(const auto& needle : banned) {
+        if(code.find(needle) == std::string::npos) continue;
+        offenders.push_back(file.filename().string() + ":" + std::to_string(number) + ": " + needle);
+        break;
+      }
+    }
+  }
+  std::string message =
+    "the ASCII case fold is spelled out by hand, or taken from the locale, instead of coming "
+    "from core/util/StringUtil.h:\n";
+  for(const auto& hit : offenders) message += "  " + hit + "\n";
+  message +=
+    "use util::toLowerAscii / util::toUpperAscii. std::tolower and std::toupper are "
+    "locale-dependent, and every fold in this tree is over a machine string.";
+  micronotes::tests::require(offenders.empty(), message);
+}
+
 // The tree is layered, and the layers only point one way.
 //
 // `core` knows about nothing; `doc` is the Markdown document; `library` is the

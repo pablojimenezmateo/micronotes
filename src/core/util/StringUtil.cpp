@@ -15,6 +15,17 @@ void toLowerAsciiInPlace(std::string& value) {
                  [](char c) { return toLowerAscii(c); });
 }
 
+std::string toUpperAscii(std::string_view value) {
+  std::string out(value);
+  toUpperAsciiInPlace(out);
+  return out;
+}
+
+void toUpperAsciiInPlace(std::string& value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](char c) { return toUpperAscii(c); });
+}
+
 bool equalsIgnoringAsciiCase(std::string_view a, std::string_view b) {
   return a.size() == b.size() &&
          std::equal(a.begin(), a.end(), b.begin(),

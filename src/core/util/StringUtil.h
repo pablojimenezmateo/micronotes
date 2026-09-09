@@ -38,8 +38,16 @@ inline constexpr bool isAsciiUpper(char c) {
   return c >= 'A' && c <= 'Z';
 }
 
+inline constexpr bool isAsciiLower(char c) {
+  return c >= 'a' && c <= 'z';
+}
+
 inline constexpr char toLowerAscii(char c) {
   return isAsciiUpper(c) ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+inline constexpr char toUpperAscii(char c) {
+  return isAsciiLower(c) ? static_cast<char>(c - 'a' + 'A') : c;
 }
 
 // Whitespace off both ends, as a view: the callers that want to own the result
@@ -53,6 +61,8 @@ inline constexpr char toLowerAscii(char c) {
 
 [[nodiscard]] std::string toLowerAscii(std::string_view value);
 void toLowerAsciiInPlace(std::string& value);
+[[nodiscard]] std::string toUpperAscii(std::string_view value);
+void toUpperAsciiInPlace(std::string& value);
 
 // The text split on newlines, with the trailing piece kept even when empty --
 // so a buffer ending in a newline yields one more line than it has newlines,

@@ -5,7 +5,6 @@
 #include "core/util/StringUtil.h"
 
 #include <array>
-#include <cctype>
 
 namespace micronotes::ui {
 namespace {
@@ -183,7 +182,7 @@ std::string formatKeyChord(const KeyChord& chord) {
   }
   // Printed uppercase because that is how a keyboard is labelled, even though
   // the keycode is the lowercase character.
-  out += static_cast<char>(std::toupper(static_cast<unsigned char>(static_cast<int>(chord.key))));
+  out += util::toUpperAscii(static_cast<char>(chord.key));
   return out;
 }
 

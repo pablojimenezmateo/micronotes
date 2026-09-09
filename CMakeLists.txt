@@ -353,6 +353,7 @@ add_executable(micronotes_tests
   tests/TextSearchTests.cpp
   tests/FindBarTests.cpp
   tests/StatusBarTests.cpp
+  tests/StringUtilTests.cpp
   tests/SettingsTests.cpp
   tests/SettingsSurfaceTests.cpp
   tests/ShellLayoutTests.cpp

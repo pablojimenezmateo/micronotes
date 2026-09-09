@@ -3,6 +3,7 @@
 #include "AppPerfCounters.h"
 #include "CoreAliases.h"
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/StringUtil.h"
 #include "ui/Metrics.h"
 
 #include <algorithm>
@@ -131,11 +132,6 @@ constexpr MenuSpec kMenus[] {
   {MenuId::Help, "Help", 'H', kHelpItems},
 };
 
-// ASCII only, which is what the labels and the keycodes both are.
-constexpr char lowerAscii(char c) {
-  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
 // The width a menu's own label asks for on the bar.
 //
 // Memoized, because the bar is laid out by the paint, by the hit test and by
@@ -176,18 +172,18 @@ std::span<const MenuSpec> menuSpecs() {
 
 std::size_t menuMnemonicIndex(const MenuSpec& menu) {
   if(menu.mnemonic == 0) return std::string_view::npos;
-  const char wanted = lowerAscii(menu.mnemonic);
+  const char wanted = util::toLowerAscii(menu.mnemonic);
   for(std::size_t i = 0; i < menu.label.size(); ++i) {
-    if(lowerAscii(menu.label[i]) == wanted) return i;
+    if(util::toLowerAscii(menu.label[i]) == wanted) return i;
   }
   return std::string_view::npos;
 }
 
 MenuId menuForMnemonic(char letter) {
   if(letter == 0) return MenuId::None;
-  const char wanted = lowerAscii(letter);
+  const char wanted = util::toLowerAscii(letter);
   for(const auto& menu : kMenus) {
-    if(menu.mnemonic != 0 && lowerAscii(menu.mnemonic) == wanted) return menu.id;
+    if(menu.mnemonic != 0 && util::toLowerAscii(menu.mnemonic) == wanted) return menu.id;
   }
   return MenuId::None;
 }
