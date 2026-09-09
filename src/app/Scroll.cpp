@@ -39,7 +39,7 @@ ContentPanes contentPanes(const UiRuntime& ui, Rect content) {
   return panes;
 }
 
-void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width, int height) {
+void routeWheel(UiRuntime& ui, float notches, int width, int height) {
   perf::addCounter(perf::CounterId::InputWheelEvents);
 
   // An open overlay owns the wheel outright, and so does the Settings card:

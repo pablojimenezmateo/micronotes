@@ -26,8 +26,7 @@ struct UiRuntime;
 // A press on one of the three panes' scrollbar thumbs. True when a thumb was
 // grabbed, in which case the drag is now live and nothing else may claim the
 // press.
-bool pressPaneScrollbar(ui::TextRenderer& text, UiRuntime& ui, ui::Rect content, float x, float y,
-                        Uint8 button);
+bool pressPaneScrollbar(UiRuntime& ui, ui::Rect content, float x, float y, Uint8 button);
 
 // A press inside the content column. Always claims it: a click on the page is
 // the page's, even where it lands on nothing in particular -- that is what puts

@@ -238,7 +238,7 @@ int run(ApplicationOptions options) {
         handleMouseMotion(text, ui, event.motion.x, event.motion.y, width, height);
         updateCursor(width, height);
       } else if(event.type == SDL_EVENT_MOUSE_WHEEL) {
-        routeWheel(text, ui, event.wheel.y, width, height);
+        routeWheel(ui, event.wheel.y, width, height);
       } else if(event.type == SDL_EVENT_DROP_FILE) {
         if(event.drop.data) attachPathToEditor(ui, event.drop.data);
       } else if(event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED ||

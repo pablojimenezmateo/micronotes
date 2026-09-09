@@ -56,8 +56,7 @@ void beginTextSelection(UiRuntime& ui) {
 
 }
 
-bool pressPaneScrollbar(TextRenderer& text, UiRuntime& ui, Rect content, float x, float y,
-                        Uint8 button) {
+bool pressPaneScrollbar(UiRuntime& ui, Rect content, float x, float y, Uint8 button) {
   if(button != SDL_BUTTON_LEFT || !contains(content, x, y)) return false;
 
   // Grabbing a thumb, and the three panes that have one. The live surface

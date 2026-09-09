@@ -148,7 +148,7 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
   // The panes' scrollbars, before the text under them: a thumb overlaps the
   // trailing edge of every line it covers, and a press on a handle has to move
   // the handle.
-  if(pressPaneScrollbar(text, ui, layout.content, x, y, button)) return;
+  if(pressPaneScrollbar(ui, layout.content, x, y, button)) return;
 
   if(pressSidebar(text, ui, layout.sidebar, x, y, button)) return;
 

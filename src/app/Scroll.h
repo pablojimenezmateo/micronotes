@@ -33,6 +33,6 @@ ContentPanes contentPanes(const UiRuntime& ui, ui::Rect content);
 
 // Applies one wheel event. `notches` is SDL's `wheel.y`, positive when the
 // content should move down.
-void routeWheel(ui::TextRenderer& text, UiRuntime& ui, float notches, int width, int height);
+void routeWheel(UiRuntime& ui, float notches, int width, int height);
 
 }
