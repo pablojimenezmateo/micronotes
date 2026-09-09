@@ -92,6 +92,12 @@ starts with a header naming the commit it came from.
 The sanitizers are slow. Run them **once**, after a change is complete, not per
 edit. `tests` is the inner loop.
 
+**Do not take a timing measurement while one is running.** A sanitizer build
+saturates every core, and a `--screenshot` run or a harness pass taken beside
+one reads two to three times its real cost -- consistently enough to look like a
+result. The counters are unaffected, because they are deterministic; the clock
+is not. Check `uptime` before believing a number.
+
 Extra CMake arguments (a hand-pointed SQLite, for instance) go through
 `CMAKE_EXTRA_ARGS` and apply to every configure the script performs.
 
