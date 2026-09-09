@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include "TempDir.h"
+
 #include "AppPerfCounters.h"
 #include "app/Notes.h"
 #include "app/Shell.h"
@@ -39,9 +41,9 @@ const Rect kPanel {0.0f, 0.0f, 320.0f, 900.0f};
 // A library with rows in it. The counters below tally `rows.size()`, so an
 // empty library reports zero whether it rebuilt or not -- which is how the
 // first version of these tests passed against a memo that was reusing wrongly.
-void openFixture(UiRuntime& ui, const char* name) {
-  const auto root = std::filesystem::temp_directory_path() / name;
-  std::filesystem::remove_all(root);
+micronotes::tests::TempDir openFixture(UiRuntime& ui, const char* name) {
+  micronotes::tests::TempDir dir(name);
+  const auto& root = dir.path();
   std::filesystem::create_directories(root / "work");
   const auto note = [&](const std::filesystem::path& relative, const char* id, const char* title) {
     std::ofstream out(root / relative, std::ios::binary | std::ios::trunc);
@@ -53,6 +55,7 @@ void openFixture(UiRuntime& ui, const char* name) {
                              "the fixture library did not open");
   ui.sidebar.tree.setExpanded({}, true);
   ui.sidebar.tree.setExpanded(std::filesystem::path("work"), true);
+  return dir;
 }
 
 // A row list as comparable text, so two lists can be diffed in a message.
@@ -95,7 +98,7 @@ std::uint64_t builtDelta(std::uint64_t& mark) {
 // The whole point of the memo: an unchanged panel does not rebuild.
 MICRONOTES_TEST(sidebar_rows_are_reused_when_nothing_changed) {
   UiRuntime ui;
-  openFixture(ui, "micronotes-rows-memo-reuse");
+  const auto fixture_ui = openFixture(ui, "micronotes-rows-memo-reuse");
   build(ui);
   MICRONOTES_REQUIRE(!ui.sidebar.rows.empty());
   std::uint64_t mark = readCounter(CounterId::SidebarRowsBuilt);
@@ -134,7 +137,7 @@ MICRONOTES_TEST(sidebar_rows_key_never_describes_a_world_it_was_not_built_for) {
 
   for(const auto& change : changes) {
     UiRuntime ui;
-    openFixture(ui, "micronotes-rows-memo-shape");
+    const auto fixture_ui = openFixture(ui, "micronotes-rows-memo-shape");
     Rect rect = kPanel;
     build(ui, rect);
     change.apply(ui, rect);
@@ -151,7 +154,7 @@ MICRONOTES_TEST(sidebar_rows_key_never_describes_a_world_it_was_not_built_for) {
 // rebuild. Counted here, where the fixture does produce rows.
 MICRONOTES_TEST(sidebar_rows_rebuild_when_a_shape_input_changes) {
   UiRuntime ui;
-  openFixture(ui, "micronotes-rows-memo-rebuild");
+  const auto fixture_ui = openFixture(ui, "micronotes-rows-memo-rebuild");
   Rect rect = kPanel;
   build(ui, rect);
   MICRONOTES_REQUIRE(!ui.sidebar.rows.empty());
@@ -169,7 +172,7 @@ MICRONOTES_TEST(sidebar_rows_rebuild_when_a_shape_input_changes) {
 // laid out at the old rhythm.
 MICRONOTES_TEST(sidebar_rows_rebuild_when_the_text_rhythm_changes) {
   UiRuntime ui;
-  openFixture(ui, "micronotes-rows-memo-rhythm");
+  const auto fixture_ui = openFixture(ui, "micronotes-rows-memo-rhythm");
   buildSidebarRows(ui, kPanel, sidebarMetrics(16, 12));
   MICRONOTES_REQUIRE(!ui.sidebar.rows.empty());
   std::uint64_t mark = readCounter(CounterId::SidebarRowsBuilt);
@@ -184,7 +187,7 @@ MICRONOTES_TEST(sidebar_rows_rebuild_when_the_text_rhythm_changes) {
 // they used to be.
 MICRONOTES_TEST(sidebar_rows_shift_rather_than_rebuild_when_the_panel_moves) {
   UiRuntime ui;
-  openFixture(ui, "micronotes-rows-memo-shift");
+  const auto fixture_ui = openFixture(ui, "micronotes-rows-memo-shift");
   Rect rect = kPanel;
   build(ui, rect);
   MICRONOTES_REQUIRE(!ui.sidebar.rows.empty());
@@ -270,7 +273,7 @@ MICRONOTES_TEST(sidebar_rows_reused_list_matches_a_freshly_built_one) {
 
   for(const auto& change : changes) {
     UiRuntime memoized;
-    openFixture(memoized, "micronotes-rows-memo-diff-a");
+    const auto fixture_memoized = openFixture(memoized, "micronotes-rows-memo-diff-a");
     Rect rect = kPanel;
     build(memoized, rect);
     change.apply(memoized, rect);
@@ -278,7 +281,7 @@ MICRONOTES_TEST(sidebar_rows_reused_list_matches_a_freshly_built_one) {
     const std::string viaMemo = describe(memoized);
 
     UiRuntime fresh;
-    openFixture(fresh, "micronotes-rows-memo-diff-b");
+    const auto fixture_fresh = openFixture(fresh, "micronotes-rows-memo-diff-b");
     Rect freshRect = kPanel;
     build(fresh, freshRect);
     change.apply(fresh, freshRect);

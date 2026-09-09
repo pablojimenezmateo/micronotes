@@ -1,5 +1,6 @@
 #include "CoreAliases.h"
 #include "TestSupport.h"
+#include "TempDir.h"
 
 #include "core/platform/PathUtils.h"
 
@@ -39,8 +40,8 @@ bool refuses(const microcore::platform::SafeRoot& root, const std::filesystem::p
 // which is a poor state for the one function here whose failure is a security
 // failure rather than a wrong pixel.
 MICRONOTES_TEST(safe_root_accepts_paths_inside_the_root_and_refuses_the_rest) {
-  const auto base = std::filesystem::temp_directory_path() / "micronotes-safe-root-test";
-  std::filesystem::remove_all(base);
+  const micronotes::tests::TempDir baseDir("micronotes-safe-root-test");
+  const auto& base = baseDir.path();
   std::filesystem::create_directories(base / "library" / "work");
   std::filesystem::create_directories(base / "elsewhere");
   const microcore::platform::SafeRoot root(base / "library");
@@ -63,14 +64,13 @@ MICRONOTES_TEST(safe_root_accepts_paths_inside_the_root_and_refuses_the_rest) {
   std::filesystem::create_directories(base / "library-backup");
   MICRONOTES_REQUIRE(refuses(root, base / "library-backup" / "note.md"));
 
-  std::filesystem::remove_all(base);
 }
 
 // The free function is the same check for a caller with nowhere to keep a
 // SafeRoot, and it has to stay the same check.
 MICRONOTES_TEST(normalize_inside_root_agrees_with_a_safe_root_built_from_the_same_path) {
-  const auto base = std::filesystem::temp_directory_path() / "micronotes-safe-root-free";
-  std::filesystem::remove_all(base);
+  const micronotes::tests::TempDir baseDir("micronotes-safe-root-free");
+  const auto& base = baseDir.path();
   std::filesystem::create_directories(base / "library");
   const microcore::platform::SafeRoot root(base / "library");
   const auto candidate = base / "library" / "note.md";
@@ -83,5 +83,4 @@ MICRONOTES_TEST(normalize_inside_root_agrees_with_a_safe_root_built_from_the_sam
     threw = true;
   }
   MICRONOTES_REQUIRE(threw);
-  std::filesystem::remove_all(base);
 }

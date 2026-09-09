@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "TempDir.h"
 
 #include "ui/AppState.h"
 #include "ui/Settings.h"
@@ -36,10 +37,9 @@ struct ScopedAppearance {
   micronotes::ui::ThemeMode mode;
 };
 
-std::filesystem::path scratchDir(const std::string& name) {
-  auto dir = std::filesystem::temp_directory_path() / ("micronotes-settings-" + name);
-  std::filesystem::remove_all(dir);
-  std::filesystem::create_directories(dir);
+micronotes::tests::TempDir scratchDir(const std::string& name) {
+  micronotes::tests::TempDir dir("micronotes-settings-" + name);
+  std::filesystem::create_directories(dir.path());
   return dir;
 }
 

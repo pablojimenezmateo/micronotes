@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "TempDir.h"
 
 #include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
@@ -327,8 +328,8 @@ MICRONOTES_TEST(shell_an_image_that_cannot_decode_never_moves_the_generation) {
 // over the top; there was no watcher, and the focus-gained refresh updated the
 // index and never the buffer.
 MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-watch";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-watch");
+  const auto& root = rootDir.path();
 
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
@@ -378,14 +379,13 @@ MICRONOTES_TEST(shell_reloads_a_watched_note_that_changed_outside_the_app) {
   ui.state.setSearch("another program");
   MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
 
-  std::filesystem::remove_all(root);
 }
 
 // The other half of the rule: unsaved work is never replaced by what is on
 // disk. The save path is what resolves it, and it keeps both versions.
 MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-watch-dirty";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-watch-dirty");
+  const auto& root = rootDir.path();
 
   micronotes::app::UiRuntime ui;
   MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
@@ -418,7 +418,6 @@ MICRONOTES_TEST(shell_keeps_a_dirty_buffer_when_the_file_changes_outside) {
   ui.state.setSearch("my unsaved draft");
   MICRONOTES_REQUIRE(ui.state.currentNotes().size() == 1);
 
-  std::filesystem::remove_all(root);
 }
 
 // The outline panel rebuilds on every keystroke -- it is keyed on the editor's
@@ -514,8 +513,8 @@ MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_splice
 //
 // `showFolder` is the pair, and this is the property it exists for.
 MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-showfolder";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-showfolder");
+  const auto& root = rootDir.path();
   // A space in the name, because that is what a real notebook is called and it
   // is the shape a path used as a map key gets wrong.
   const std::filesystem::path folder = "General information";
@@ -561,7 +560,6 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
   }
   MICRONOTES_REQUIRE(folderRow);
   MICRONOTES_REQUIRE(noteUnderIt);
-  std::filesystem::remove_all(root);
 }
 
 // Nothing in the app could open a note in a second tab.
@@ -576,8 +574,8 @@ MICRONOTES_TEST(shell_opening_a_note_opens_the_tree_onto_its_folder) {
 // So the model was right, the model's test was right, and the behaviour was
 // missing anyway: **a flag nothing sets is a feature nothing has.**
 MICRONOTES_TEST(shell_opening_a_note_opens_a_tab_on_it) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-newtab";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-newtab");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root);
   for(const char* name : {"Alpha", "Beta", "Gamma"}) {
     std::ofstream note(root / (std::string(name) + ".md"));
@@ -614,7 +612,6 @@ MICRONOTES_TEST(shell_opening_a_note_opens_a_tab_on_it) {
   // the sidebar from opening a tab per note in the library.
   micronotes::app::selectNoteById(ui, "nt-Alpha", micronotes::ui::TabPolicy::Reuse);
   MICRONOTES_REQUIRE(tabs.size() == 3);
-  std::filesystem::remove_all(root);
 }
 
 // The same through a sidebar row, and the distinction that matters most: a
@@ -622,8 +619,8 @@ MICRONOTES_TEST(shell_opening_a_note_opens_a_tab_on_it) {
 // not. `moveTreeCursor` activates every row it steps onto, so without this
 // holding Down in a thousand-note library would open a thousand tabs.
 MICRONOTES_TEST(shell_a_sidebar_click_opens_a_tab_and_the_cursor_does_not) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-rownewtab";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-rownewtab");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "Notebook");
   for(const char* name : {"One", "Two"}) {
     std::ofstream note(root / "Notebook" / (std::string(name) + ".md"));
@@ -661,15 +658,14 @@ MICRONOTES_TEST(shell_a_sidebar_click_opens_a_tab_and_the_cursor_does_not) {
   micronotes::app::activateSidebarRow(ui, noteRow("rn-One"), RowActivation::Cursor);
   micronotes::app::activateSidebarRow(ui, noteRow("rn-Two"), RowActivation::Cursor);
   MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == before);
-  std::filesystem::remove_all(root);
 }
 
 // Following a `[[wikilink]]` is the other way into a note, and it took the same
 // route through selectNoteById -- so following a link replaced the note the
 // link was written in, losing the very context you followed it from.
 MICRONOTES_TEST(shell_a_wiki_link_opens_a_tab_and_keeps_its_source) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-wikitab";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-wikitab");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root);
   {
     std::ofstream from(root / "From.md");
@@ -696,7 +692,6 @@ MICRONOTES_TEST(shell_a_wiki_link_opens_a_tab_and_keeps_its_source) {
   micronotes::app::openWikiLink(ui, "Brand New");
   MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 3);
   MICRONOTES_REQUIRE(ui.state.workspace().findTab("wt-from") != std::string::npos);
-  std::filesystem::remove_all(root);
 }
 
 // What the middle-click handler asks before deciding what the click meant.
@@ -730,8 +725,8 @@ MICRONOTES_TEST(shell_a_link_region_is_found_under_the_pointer) {
 // the filter had just taken away. Both ways out are checked here: Esc's, and a
 // second choice of the tag already in force.
 MICRONOTES_TEST(shell_a_tag_filter_has_a_way_back_to_the_tree) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-tag-filter";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-tag-filter");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work");
   {
     std::ofstream out(root / "work" / "plan.md", std::ios::binary | std::ios::trunc);
@@ -773,7 +768,6 @@ MICRONOTES_TEST(shell_a_tag_filter_has_a_way_back_to_the_tree) {
   micronotes::app::selectTag(ui, "work");
   MICRONOTES_REQUIRE(ui.state.selection().tag.empty());
 
-  std::filesystem::remove_all(root);
 }
 
 // One press of Escape undoes one narrowing, innermost first.
@@ -784,8 +778,8 @@ MICRONOTES_TEST(shell_a_tag_filter_has_a_way_back_to_the_tree) {
 // else could undo, was not in the pile at all.
 MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
   using micronotes::app::Dismissed;
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-dismiss";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-dismiss");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root);
   {
     std::ofstream out(root / "plan.md", std::ios::binary | std::ios::trunc);
@@ -842,7 +836,6 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
   MICRONOTES_REQUIRE(!ui.blockSelection.active);
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
 
-  std::filesystem::remove_all(root);
 }
 
 // `[the plan](work/project-plan.md)` is how one note links to another in plain
@@ -853,8 +846,8 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
 // already reading. `[[wikilinks]]` navigated and these did not, which is what
 // made the viewer's links look inert.
 MICRONOTES_TEST(shell_a_markdown_link_resolves_to_the_note_it_names) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-note-links";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-note-links");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work" / "deep");
   std::filesystem::create_directories(root / "personal");
   const auto note = [&](const std::filesystem::path& relative, const char* id, const char* title) {
@@ -914,7 +907,6 @@ MICRONOTES_TEST(shell_a_markdown_link_resolves_to_the_note_it_names) {
   MICRONOTES_REQUIRE(resolves("../../../../../../etc/passwd") == "<none>");
   MICRONOTES_REQUIRE(resolves("../hub.md/../../hub.md") == "<none>");
 
-  std::filesystem::remove_all(root);
 }
 
 // A link that crosses notes names both a note and a place in it, and the two
@@ -958,8 +950,8 @@ MICRONOTES_TEST(shell_a_cross_note_anchor_waits_for_the_layout) {
 // rather than a treatment.
 MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   using micronotes::ui::SidebarSection;
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-sections";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-sections");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work");
   const auto note = [&](const std::filesystem::path& relative, const char* id, const char* title,
                         const char* tags) {
@@ -1069,7 +1061,6 @@ MICRONOTES_TEST(shell_sidebar_sections_are_bands_that_shut) {
   }
   MICRONOTES_REQUIRE(sawCaption);
 
-  std::filesystem::remove_all(root);
 }
 
 // The dots at a note row's trailing edge, which are what join the row to the
@@ -1125,8 +1116,8 @@ MICRONOTES_TEST(shell_tag_dots_are_laid_out_once_for_the_draw_and_the_hit_test) 
 // And the dot answers a click, which is the half that makes it a control rather
 // than decoration.
 MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-tag-dots";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-tag-dots");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root);
   {
     std::ofstream out(root / "hub.md", std::ios::binary | std::ios::trunc);
@@ -1172,7 +1163,6 @@ MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
   MICRONOTES_REQUIRE(!micronotes::app::sidebarTagDotAt(ui, *noteRow, noteRow->rect.x + 40.0f,
                                                        noteRow->rect.y + 10.0f));
 
-  std::filesystem::remove_all(root);
 }
 
 // The bands are reachable from the keyboard, which is the half that was missing
@@ -1180,8 +1170,8 @@ MICRONOTES_TEST(shell_a_tag_dot_names_the_tag_under_the_pointer) {
 // label, so nothing but a pointer could shut one.
 MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
   using micronotes::ui::SidebarSection;
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-band-keys";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-band-keys");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root);
   {
     std::ofstream out(root / "hub.md", std::ios::binary | std::ios::trunc);
@@ -1237,7 +1227,6 @@ MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
         " band shut it");
   }
 
-  std::filesystem::remove_all(root);
 }
 
 // "Copy relative path" / "Copy absolute path" / "Show on disk", ported from the
@@ -1248,8 +1237,8 @@ MICRONOTES_TEST(shell_the_keyboard_reaches_the_sidebar_bands) {
 // same library, so it has to be relative to the library root and it has to
 // refuse rather than quietly hand back an absolute path when it cannot be.
 MICRONOTES_TEST(shell_a_note_reports_both_spellings_of_its_path) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-note-paths";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-note-paths");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work" / "deep");
   const auto note = [&](const std::filesystem::path& relative, const char* id) {
     std::ofstream out(root / relative, std::ios::binary | std::ios::trunc);
@@ -1307,7 +1296,6 @@ MICRONOTES_TEST(shell_a_note_reports_both_spellings_of_its_path) {
   MICRONOTES_REQUIRE(micronotes::app::handleNotePathCommand(ui, "copy-absolute-path", "no-such"));
   MICRONOTES_REQUIRE(ui.status.text == "No note to locate");
 
-  std::filesystem::remove_all(root);
 }
 
 // --- the field table ---------------------------------------------------
@@ -1379,8 +1367,8 @@ const SidebarRow* findTreeRow(const micronotes::app::UiRuntime& ui, micronotes::
 // Enter -- and never when the keyboard cursor merely passes over it. Neither
 // touches the selection: a file has no page, so the note on screen stays.
 MICRONOTES_TEST(shell_a_companion_opens_on_a_click_and_never_on_the_cursor) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-companion-open";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-companion-open");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work" / "files");
   { std::ofstream note(root / "work" / "Alpha.md"); note << "---\nid: c-alpha\ntitle: Alpha\n---\n\nBody.\n"; }
   { std::ofstream pdf(root / "work" / "files" / "diagram.png"); pdf << "png"; }
@@ -1441,14 +1429,13 @@ MICRONOTES_TEST(shell_a_companion_opens_on_a_click_and_never_on_the_cursor) {
   const auto [nx, ny] = centre(*note);
   const auto onNote = micronotes::app::sidebarDropTargetAt(ui, nx, ny);
   MICRONOTES_REQUIRE(onNote.valid && onNote.folder == std::filesystem::path("work") && onNote.filesDir.empty());
-  std::filesystem::remove_all(root);
 }
 
 // A query lists the files whose *name* matched under a caption of their own,
 // and only when there are any.
 MICRONOTES_TEST(shell_search_lists_matching_file_names_under_their_own_caption) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-companion-search";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-companion-search");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work" / "files");
   { std::ofstream note(root / "work" / "Alpha.md"); note << "---\nid: s-alpha\ntitle: Alpha\n---\n\ndiagram in the body\n"; }
   { std::ofstream pdf(root / "work" / "files" / "diagram.png"); pdf << "png"; }
@@ -1480,15 +1467,14 @@ MICRONOTES_TEST(shell_search_lists_matching_file_names_under_their_own_caption) 
     MICRONOTES_REQUIRE(!(row.kind == SidebarRow::Kind::SectionLabel && row.label.ends_with(" file")));
     MICRONOTES_REQUIRE(!(row.kind == SidebarRow::Kind::Tree && row.tree.kind == micronotes::ui::TreeRowKind::File));
   }
-  std::filesystem::remove_all(root);
 }
 
 // A file copied into a `files/` directory from outside appears in the tree
 // through one walk of that directory -- not through the library refresh a
 // folder operation costs.
 MICRONOTES_TEST(shell_a_file_dropped_into_files_refreshes_only_that_directory) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-shell-companion-watch";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-shell-companion-watch");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work" / "files");
   { std::ofstream note(root / "work" / "Alpha.md"); note << "---\nid: w-alpha\ntitle: Alpha\n---\n\nBody.\n"; }
 
@@ -1513,5 +1499,4 @@ MICRONOTES_TEST(shell_a_file_dropped_into_files_refreshes_only_that_directory) {
   using microcore::perf::CounterId;
   MICRONOTES_REQUIRE(microcore::perf::readCounter(CounterId::LibraryFilesDirRefreshes) >= 1);
   MICRONOTES_REQUIRE(microcore::perf::readCounter(CounterId::LibraryIndexRefreshCalls) == 0);
-  std::filesystem::remove_all(root);
 }

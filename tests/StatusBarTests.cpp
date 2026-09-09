@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "ShellFixture.h"
 
 #include "app/Notes.h"
 #include "app/SessionState.h"
@@ -29,14 +30,6 @@ const micronotes::app::StatusSegmentValue& segment(const micronotes::app::Status
   return all[static_cast<std::size_t>(which)];
 }
 
-void openScratchNote(UiRuntime& ui, const char* name, const std::string& body) {
-  const auto root = std::filesystem::temp_directory_path() / name;
-  std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root);
-  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
-  micronotes::app::createNote(ui, "Note");
-  ui.editor.setText(body);
-}
 
 }
 
@@ -70,7 +63,7 @@ MICRONOTES_TEST(status_bar_columns_count_characters_not_bytes) {
 
 MICRONOTES_TEST(status_bar_says_whether_the_note_is_saved) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-status-save", "hello there\n");
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-status-save", "hello there\n");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
 
   auto clean = statusSegments(ui);
@@ -89,7 +82,7 @@ MICRONOTES_TEST(status_bar_says_whether_the_note_is_saved) {
 
 MICRONOTES_TEST(status_bar_reports_the_caret_and_the_selection) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-status-caret", "one\ntwo three\n");
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-status-caret", "one\ntwo three\n");
   ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Editor);
   ui.editor.moveCursor(8);  // line 2, after "two t"
 
@@ -115,7 +108,7 @@ MICRONOTES_TEST(status_bar_reports_the_caret_and_the_selection) {
 // reader cannot see.
 MICRONOTES_TEST(status_bar_reports_the_caret_where_the_source_is_on_screen) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-status-reading", "one\ntwo\n");
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-status-reading", "one\ntwo\n");
   const auto positionShows = [&](micronotes::ui::PaneMode mode) {
     ui.state.editWorkspace().setPaneMode(mode);
     return segment(statusSegments(ui), StatusSegment::Position).visible;
@@ -128,7 +121,7 @@ MICRONOTES_TEST(status_bar_reports_the_caret_where_the_source_is_on_screen) {
 
 MICRONOTES_TEST(status_bar_names_the_view_and_offers_to_cycle_it) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-status-pane", "a word or two here\n");
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-status-pane", "a word or two here\n");
   const auto segments = statusSegments(ui);
   MICRONOTES_REQUIRE(segment(segments, StatusSegment::PaneMode).text == std::string("Live"));
   MICRONOTES_REQUIRE(segment(segments, StatusSegment::PaneMode).command == "cycle-pane");

@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "ShellFixture.h"
 
 #include "app/FindBar.h"
 #include "app/Dismiss.h"
@@ -32,20 +33,6 @@ namespace {
 // of the three), and "PLAN" at 22.
 constexpr const char* kBody = "plan and Plan planner PLAN";
 
-std::filesystem::path scratchRoot(const char* name) {
-  const auto root = std::filesystem::temp_directory_path() / name;
-  std::filesystem::remove_all(root);
-  std::filesystem::create_directories(root);
-  return root;
-}
-
-// A shell with one note open and a known body in the buffer.
-void openScratchNote(UiRuntime& ui, const char* name, const std::string& body) {
-  const auto root = scratchRoot(name);
-  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
-  micronotes::app::createNote(ui, "Note");
-  ui.editor.setText(body);
-}
 
 std::size_t activeStart(const UiRuntime& ui) {
   MICRONOTES_REQUIRE(ui.find.hasMatches());
@@ -56,7 +43,7 @@ std::size_t activeStart(const UiRuntime& ui) {
 
 MICRONOTES_TEST(find_bar_finds_every_match_and_starts_on_the_first) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-basic", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-basic", kBody);
 
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
@@ -74,7 +61,7 @@ MICRONOTES_TEST(find_bar_finds_every_match_and_starts_on_the_first) {
 
 MICRONOTES_TEST(find_bar_steps_through_matches_and_wraps_both_ways) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-step", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-step", kBody);
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
 
@@ -98,7 +85,7 @@ MICRONOTES_TEST(find_bar_steps_through_matches_and_wraps_both_ways) {
 // from wherever the last press left it, which may be a long way behind.
 MICRONOTES_TEST(find_bar_steps_from_the_caret_not_from_the_last_step) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-caret", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-caret", kBody);
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
   MICRONOTES_REQUIRE(activeStart(ui) == 0);
@@ -115,7 +102,7 @@ MICRONOTES_TEST(find_bar_steps_from_the_caret_not_from_the_last_step) {
 
 MICRONOTES_TEST(find_bar_toggles_change_what_counts_as_a_match) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-toggles", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-toggles", kBody);
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
   MICRONOTES_REQUIRE(ui.find.matches.size() == 4);
@@ -134,7 +121,7 @@ MICRONOTES_TEST(find_bar_toggles_change_what_counts_as_a_match) {
 
 MICRONOTES_TEST(find_bar_says_when_there_is_nothing_to_find) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-empty", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-empty", kBody);
   ui.fields.find.beginWith("zebra");
   openFindInNote(ui);
   MICRONOTES_REQUIRE(!ui.find.hasMatches());
@@ -155,7 +142,7 @@ MICRONOTES_TEST(find_bar_says_when_there_is_nothing_to_find) {
 // it. The memo is keyed on the revision, which is what makes that automatic.
 MICRONOTES_TEST(find_bar_follows_the_buffer_when_the_note_is_edited) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-edit", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-edit", kBody);
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
   MICRONOTES_REQUIRE(ui.find.matches.size() == 4);
@@ -171,7 +158,7 @@ MICRONOTES_TEST(find_bar_follows_the_buffer_when_the_note_is_edited) {
 // meant, so it is left alone.
 MICRONOTES_TEST(find_bar_opens_on_the_selection) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-seed", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-seed", kBody);
   ui.editor.selectRange(14, 21);  // "planner"
   openFindInNote(ui);
   MICRONOTES_REQUIRE(ui.fields.find.text() == "planner");
@@ -179,7 +166,7 @@ MICRONOTES_TEST(find_bar_opens_on_the_selection) {
 
   closeFindInNote(ui);
   UiRuntime multi;
-  openScratchNote(multi, "micronotes-find-seed2", "first line\nsecond line\n");
+  const micronotes::tests::ScratchNote scratch_multi(multi, "micronotes-find-seed2", "first line\nsecond line\n");
   multi.editor.selectRange(0, 17);
   openFindInNote(multi);
   MICRONOTES_REQUIRE(multi.fields.find.text().empty());
@@ -187,7 +174,7 @@ MICRONOTES_TEST(find_bar_opens_on_the_selection) {
 
 MICRONOTES_TEST(find_bar_closing_puts_the_search_away) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-close", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-close", kBody);
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
   MICRONOTES_REQUIRE(ui.find.hasMatches());
@@ -243,7 +230,7 @@ MICRONOTES_TEST(find_bar_layout_keeps_its_controls_inside_the_card) {
 // match still has the highlights over the page.
 MICRONOTES_TEST(find_bar_is_what_escape_closes) {
   UiRuntime ui;
-  openScratchNote(ui, "micronotes-find-escape", kBody);
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-escape", kBody);
   ui.fields.find.beginWith("plan");
   openFindInNote(ui);
   ui.focus = micronotes::app::FocusArea::Editor;

@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "TempDir.h"
 
 #include <sqlite3.h>
 
@@ -44,8 +45,8 @@ private:
 
 
 MICRONOTES_TEST(library_index_searches_file_backed_rows) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-file-backed-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-file-backed-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "today-note";
@@ -58,12 +59,11 @@ MICRONOTES_TEST(library_index_searches_file_backed_rows) {
   const auto results = index.search("Today");
   MICRONOTES_REQUIRE(results.size() == 1);
   MICRONOTES_REQUIRE(results[0].id == "today-note");
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_index_rebuilds_sqlite_cache_from_files) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "note-search";
@@ -95,12 +95,11 @@ MICRONOTES_TEST(library_index_rebuilds_sqlite_cache_from_files) {
   MICRONOTES_REQUIRE(index.search("needle", micronotes::library::SearchScope::Title).empty());
   MICRONOTES_REQUIRE(index.search("needle", micronotes::library::SearchScope::Content).size() == 1);
   MICRONOTES_REQUIRE(std::filesystem::exists(root / ".micronotes" / "index.sqlite"));
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_index_refresh_preserves_search_after_note_move) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-move-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-move-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "note-move";
@@ -117,12 +116,11 @@ MICRONOTES_TEST(library_index_refresh_preserves_search_after_note_move) {
   MICRONOTES_REQUIRE(results.size() == 1);
   MICRONOTES_REQUIRE(results[0].id == "note-move");
   MICRONOTES_REQUIRE(results[0].path == moved);
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_index_refresh_removes_trashed_note_from_sqlite) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-delete-note-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-delete-note-test");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -139,12 +137,11 @@ MICRONOTES_TEST(library_index_refresh_removes_trashed_note_from_sqlite) {
   MICRONOTES_REQUIRE(index.search("searchable").empty());
   MICRONOTES_REQUIRE(index.size() == 0);
 
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_index_refresh_removes_trashed_folder_notes_from_sqlite) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-delete-folder-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-delete-folder-test");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata first;
@@ -167,12 +164,11 @@ MICRONOTES_TEST(library_index_refresh_removes_trashed_folder_notes_from_sqlite) 
   MICRONOTES_REQUIRE(index.search("searchable").empty());
   MICRONOTES_REQUIRE(index.size() == 0);
 
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(organization_lists_folders_tags_and_notes) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-org-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-org-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata work;
   work.id = "work-note";
@@ -207,7 +203,6 @@ MICRONOTES_TEST(organization_lists_folders_tags_and_notes) {
   MICRONOTES_REQUIRE(alpha->tags.size() == 2);
   MICRONOTES_REQUIRE(alpha->folder == "work");
   MICRONOTES_REQUIRE(alpha->path == root / "work" / alpha->path.filename());
-  std::filesystem::remove_all(root);
 }
 
 // The note list is a `SELECT` over the index. It used to be a second recursive
@@ -216,8 +211,8 @@ MICRONOTES_TEST(organization_lists_folders_tags_and_notes) {
 // Both walks had counters, which is what makes the fix checkable rather than
 // plausible.
 MICRONOTES_TEST(organization_reads_the_note_list_out_of_the_index) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-org-from-index";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-org-from-index");
+  const auto& root = rootDir.path();
   ScopedXdgDataHome xdg(root / "xdg");
 
   micronotes::library::Library library(root);
@@ -256,15 +251,14 @@ MICRONOTES_TEST(organization_reads_the_note_list_out_of_the_index) {
     if(folder.path == "empty-folder") sawEmpty = true;
   }
   MICRONOTES_REQUIRE(sawEmpty);
-  std::filesystem::remove_all(root);
 }
 
 // A library whose index will not open still lists its notes. The fallback is a
 // walk and a front-matter parse per note -- what every list used to cost -- and
 // it is the reason the index is not load-bearing for reading a library.
 MICRONOTES_TEST(organization_falls_back_to_the_tree_without_an_index) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-org-no-index";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-org-no-index");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -278,7 +272,6 @@ MICRONOTES_TEST(organization_falls_back_to_the_tree_without_an_index) {
   MICRONOTES_REQUIRE(org.notes().size() == 1);
   MICRONOTES_REQUIRE(org.notes().front().title == "Only");
   MICRONOTES_REQUIRE(org.tags().size() == 1);
-  std::filesystem::remove_all(root);
 }
 
 // --- refresh cost ------------------------------------------------------------
@@ -290,8 +283,8 @@ MICRONOTES_TEST(organization_falls_back_to_the_tree_without_an_index) {
 // UI, which is exactly why it needs a test.
 
 MICRONOTES_TEST(library_index_uses_one_connection_for_its_lifetime) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-conn";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-conn");
+  const auto& root = rootDir.path();
   ScopedXdgDataHome xdg(root / "xdg");
 
   micronotes::library::Library library(root);
@@ -309,12 +302,11 @@ MICRONOTES_TEST(library_index_uses_one_connection_for_its_lifetime) {
 
   MICRONOTES_REQUIRE(
     microcore::perf::readCounter(microcore::perf::CounterId::SqliteConnectionOpens) == 1);
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_index_refresh_writes_nothing_when_nothing_changed) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-noop";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-noop");
+  const auto& root = rootDir.path();
   ScopedXdgDataHome xdg(root / "xdg");
 
   micronotes::library::Library library(root);
@@ -349,15 +341,14 @@ MICRONOTES_TEST(library_index_refresh_writes_nothing_when_nothing_changed) {
   MICRONOTES_REQUIRE(index.refreshChangedFiles());
   MICRONOTES_REQUIRE(microcore::perf::readCounter(microcore::perf::CounterId::LibraryIndexFilesReread) == rereadBefore + 1);
   MICRONOTES_REQUIRE(index.size() == 6);
-  std::filesystem::remove_all(root);
 }
 
 // The walk used to descend into the state directory -- the sqlite index, its
 // WAL, and every attachment -- and then discard the results by comparing path
 // prefixes, rebuilding the prefix string for every entry in the tree.
 MICRONOTES_TEST(library_index_scan_does_not_descend_into_the_state_directory) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-statedir";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-statedir");
+  const auto& root = rootDir.path();
   ScopedXdgDataHome xdg(root / "xdg");
 
   micronotes::library::Library library(root);
@@ -383,7 +374,6 @@ MICRONOTES_TEST(library_index_scan_does_not_descend_into_the_state_directory) {
   MICRONOTES_REQUIRE(index.size() == 1);
   const auto visited = microcore::perf::readCounter(microcore::perf::CounterId::LibraryDirectoryEntriesVisited);
   MICRONOTES_REQUIRE(visited < 25);
-  std::filesystem::remove_all(root);
 }
 
 
@@ -503,8 +493,8 @@ MICRONOTES_TEST(index_backlinks_skip_a_link_inside_a_code_span) {
 // lowercased copy of it, so a query in the other case still points at the
 // right bytes.
 MICRONOTES_TEST(library_index_locates_a_match_regardless_of_case) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-match-case";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-match-case");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "cased";
@@ -520,15 +510,14 @@ MICRONOTES_TEST(library_index_locates_a_match_regardless_of_case) {
   const auto& snippet = results[0].snippets.front();
   MICRONOTES_REQUIRE(snippet.matchStart == 4);
   MICRONOTES_REQUIRE(snippet.matchLine.substr(snippet.matchStart, snippet.matchLength) == "Needle");
-  std::filesystem::remove_all(root);
 }
 
 // A query matching hundreds of lines of one note used to build a snippet per
 // line, three strings each, and throw all but three away -- per note, on every
 // keystroke of the query.
 MICRONOTES_TEST(library_index_keeps_only_the_snippets_anything_will_draw) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-snippet-cap";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-snippet-cap");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "many";
@@ -546,7 +535,6 @@ MICRONOTES_TEST(library_index_keeps_only_the_snippets_anything_will_draw) {
   // Still the first three lines, in order, rather than an arbitrary three.
   MICRONOTES_REQUIRE(results[0].snippets[0].matchLine == "a needle on line 0");
   MICRONOTES_REQUIRE(results[0].snippets[2].matchLine == "a needle on line 2");
-  std::filesystem::remove_all(root);
 }
 
 // The fts row for a note is filed under the note row's own rowid, which is what
@@ -555,8 +543,8 @@ MICRONOTES_TEST(library_index_keeps_only_the_snippets_anything_will_draw) {
 // the index, so a word the writer deleted keeps returning the note for as long
 // as the library exists.
 MICRONOTES_TEST(library_index_replaces_a_note_rather_than_adding_a_second_copy) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-reindex";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-reindex");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "reindexed";
@@ -588,14 +576,13 @@ MICRONOTES_TEST(library_index_replaces_a_note_rather_than_adding_a_second_copy) 
   MICRONOTES_REQUIRE(index.refreshChangedFiles());
   MICRONOTES_REQUIRE(index.search("blorple").empty());
   MICRONOTES_REQUIRE(index.search("unrelated").size() == 1);
-  std::filesystem::remove_all(root);
 }
 
 // An index built by an earlier run is reopened, not rebuilt, so whatever
 // `migrate` decided about it has to leave the standing rows searchable.
 MICRONOTES_TEST(library_index_reopens_an_existing_index_and_still_finds_its_notes) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-reopen";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-reopen");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "kept";
@@ -613,7 +600,6 @@ MICRONOTES_TEST(library_index_reopens_an_existing_index_and_still_finds_its_note
   // And a refresh over an unchanged tree neither loses nor duplicates it.
   MICRONOTES_REQUIRE(reopened.refreshChangedFiles());
   MICRONOTES_REQUIRE(reopened.search("plugh").size() == 1);
-  std::filesystem::remove_all(root);
 }
 
 // A snippet is a three-line window, and which three lines it is is the part a
@@ -622,8 +608,8 @@ MICRONOTES_TEST(library_index_reopens_an_existing_index_and_still_finds_its_note
 // turn after. The first and last lines of a note have no neighbour on one side,
 // which is where an off-by-one shows up as somebody else's text.
 MICRONOTES_TEST(library_index_snippets_carry_the_lines_around_the_match) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-snippet-window";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-snippet-window");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "window";
@@ -651,7 +637,6 @@ MICRONOTES_TEST(library_index_snippets_carry_the_lines_around_the_match) {
   // The result's own fields mirror the first snippet.
   MICRONOTES_REQUIRE(results[0].beforeLine == snippets[0].beforeLine);
   MICRONOTES_REQUIRE(results[0].afterLine == snippets[0].afterLine);
-  std::filesystem::remove_all(root);
 }
 
 // `%` and `_` are SQL LIKE's own wildcards. A query carrying one used to match
@@ -659,8 +644,8 @@ MICRONOTES_TEST(library_index_snippets_carry_the_lines_around_the_match) {
 // title with nothing under it -- the snippet under a result is found by a
 // literal search of the body, and there was nothing literal there to find.
 MICRONOTES_TEST(library_index_treats_sql_wildcards_as_ordinary_characters) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-wildcards";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-wildcards");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "w";
@@ -682,15 +667,14 @@ MICRONOTES_TEST(library_index_treats_sql_wildcards_as_ordinary_characters) {
   // closing wildcard and match nothing at all by accident.
   MICRONOTES_REQUIRE(index.search("percent\\").empty());
   MICRONOTES_REQUIRE(index.search("percent").size() == 1);
-  std::filesystem::remove_all(root);
 }
 
 // The refresh a save takes: one named file, no walk of the tree and no read of
 // every row in the table. `refreshChangedFiles` exists to *discover* what
 // changed and pays for the discovery; a save already knows.
 MICRONOTES_TEST(library_index_refreshes_one_named_file_without_walking_the_tree) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-one-file";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-one-file");
+  const auto& root = rootDir.path();
   ScopedXdgDataHome xdg(root / "xdg");
 
   micronotes::library::Library library(root);
@@ -745,14 +729,13 @@ MICRONOTES_TEST(library_index_refreshes_one_named_file_without_walking_the_tree)
   MICRONOTES_REQUIRE(index.size() == 19);
   MICRONOTES_REQUIRE(index.search("body 3").empty());
 
-  std::filesystem::remove_all(root);
 }
 
 // The form a save takes: the caller has just written the file, so it hands over
 // the front matter and body instead of making the index read them back.
 MICRONOTES_TEST(library_index_indexes_a_written_file_without_reading_it_back) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-written";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-written");
+  const auto& root = rootDir.path();
   ScopedXdgDataHome xdg(root / "xdg");
 
   micronotes::library::Library library(root);
@@ -787,7 +770,6 @@ MICRONOTES_TEST(library_index_indexes_a_written_file_without_reading_it_back) {
   MICRONOTES_REQUIRE(!index.refreshFile(path).listFieldsChanged);
   MICRONOTES_REQUIRE(index.search("needle").size() == 1);
 
-  std::filesystem::remove_all(root);
 }
 
 // The index used to carry a second copy of every note: `notes.body` and
@@ -803,8 +785,8 @@ MICRONOTES_TEST(library_index_indexes_a_written_file_without_reading_it_back) {
 // than a second mode -- so the assertions below are about *search*, and the
 // shape is only read to say which one they were checked against.
 MICRONOTES_TEST(library_index_stores_the_terms_rather_than_the_text) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-index-contentless";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-index-contentless");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "terms";
@@ -839,14 +821,13 @@ MICRONOTES_TEST(library_index_stores_the_terms_rather_than_the_text) {
   MICRONOTES_REQUIRE(index.rebuild());
   MICRONOTES_REQUIRE(index.search("blorple").size() == 1);
   MICRONOTES_REQUIRE(index.search("zarquon").empty());
-  std::filesystem::remove_all(root);
 }
 
 // A companion file is found by its name and by nothing else: its contents are
 // not micronotes' to read, so a search scoped to content finds none.
 MICRONOTES_TEST(library_finds_companion_files_by_name_only) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-companion-search-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-companion-search-test");
+  const auto& root = rootDir.path();
   const auto touch = [&](const std::filesystem::path& relative, const char* text) {
     std::filesystem::create_directories((root / relative).parent_path());
     std::ofstream out(root / relative);
@@ -878,5 +859,4 @@ MICRONOTES_TEST(library_finds_companion_files_by_name_only) {
   MICRONOTES_REQUIRE(catalog.searchCompanions("pdf", micronotes::library::SearchScope::Content).empty());
   // The note search is untouched by the files beside it.
   MICRONOTES_REQUIRE(catalog.search("report", micronotes::library::SearchScope::All).size() == 1);
-  std::filesystem::remove_all(root);
 }

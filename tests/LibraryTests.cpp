@@ -1,4 +1,5 @@
 #include "TestSupport.h"
+#include "TempDir.h"
 
 #include "library/Library.h"
 #include "library/Metadata.h"
@@ -31,8 +32,8 @@ MICRONOTES_TEST(metadata_header_contains_stable_id) {
 }
 
 MICRONOTES_TEST(library_creates_reads_and_renames_note_without_losing_id) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-library-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-library-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "stable-id";
@@ -46,12 +47,11 @@ MICRONOTES_TEST(library_creates_reads_and_renames_note_without_losing_id) {
   const auto moved = library.moveNote(renamed, "folder");
   MICRONOTES_REQUIRE(std::filesystem::exists(moved));
   MICRONOTES_REQUIRE(library.loadNoteMetadata(moved).id == "stable-id");
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_loads_metadata_and_body_in_one_read) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-library-load-note-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-library-load-note-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "combined";
@@ -64,12 +64,11 @@ MICRONOTES_TEST(library_loads_metadata_and_body_in_one_read) {
   MICRONOTES_REQUIRE(note.metadata.title == "Combined Read");
   MICRONOTES_REQUIRE(note.metadata.tags.size() == 2);
   MICRONOTES_REQUIRE(note.body == "# Heading\n\nbody");
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_reads_metadata_from_header_without_body_scan) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-library-header-only-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-library-header-only-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "header-only";
@@ -81,12 +80,11 @@ MICRONOTES_TEST(library_reads_metadata_from_header_without_body_scan) {
   MICRONOTES_REQUIRE(loadedMetadata.id == "header-only");
   MICRONOTES_REQUIRE(loadedMetadata.title == "Header Only");
   MICRONOTES_REQUIRE(library.loadNote(path).body == body);
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_never_overwrites_notes_on_path_collisions) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-collision-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-collision-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
 
   micronotes::library::NoteMetadata first;
@@ -124,12 +122,11 @@ MICRONOTES_TEST(library_never_overwrites_notes_on_path_collisions) {
   MICRONOTES_REQUIRE(library.loadNoteMetadata(movedFirst).id == "first");
   MICRONOTES_REQUIRE(library.loadNoteMetadata(movedSecond).id == "move-source");
 
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_rejects_paths_outside_root) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-boundary-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-boundary-test");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root);
   micronotes::library::Library library(root);
   bool rejected = false;
@@ -139,7 +136,6 @@ MICRONOTES_TEST(library_rejects_paths_outside_root) {
     rejected = true;
   }
   MICRONOTES_REQUIRE(rejected);
-  std::filesystem::remove_all(root);
 }
 
 // Tags round-trip through the front matter, and through the one write that
@@ -147,8 +143,8 @@ MICRONOTES_TEST(library_rejects_paths_outside_root) {
 // `Library::updateTags`, which nothing in the app called: `AppState` writes the
 // header itself, so the test was the only user of a second way to do it.
 MICRONOTES_TEST(library_persists_tag_updates) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-tags-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-tags-test");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "tag-note";
@@ -164,12 +160,11 @@ MICRONOTES_TEST(library_persists_tag_updates) {
   MICRONOTES_REQUIRE(updated.tags.size() == 1);
   MICRONOTES_REQUIRE(updated.tags[0] == "local");
   MICRONOTES_REQUIRE(library.loadNote(path).body == "body");
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_delete_note_moves_note_and_attachments_to_trash) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-note-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-trash-note-test");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -205,12 +200,11 @@ MICRONOTES_TEST(library_delete_note_moves_note_and_attachments_to_trash) {
   MICRONOTES_REQUIRE(library.trashEntries().empty());
   MICRONOTES_REQUIRE(trashFileCount(root) == 0);
 
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_restore_does_not_overwrite_what_took_the_name_back) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-collide-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-trash-collide-test");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -229,12 +223,11 @@ MICRONOTES_TEST(library_restore_does_not_overwrite_what_took_the_name_back) {
   MICRONOTES_REQUIRE(library.loadNoteMetadata(path).id == "second");
   MICRONOTES_REQUIRE(library.noteFiles().size() == 2);
 
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_delete_folder_moves_folder_notes_and_attachments_to_trash) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-folder-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-trash-folder-test");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata first;
@@ -271,7 +264,6 @@ MICRONOTES_TEST(library_delete_folder_moves_folder_notes_and_attachments_to_tras
   MICRONOTES_REQUIRE(std::filesystem::exists(attachmentTwo));
   MICRONOTES_REQUIRE(library.trashEntries().empty());
 
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(metadata_keeps_front_matter_it_does_not_understand) {
@@ -332,8 +324,8 @@ MICRONOTES_TEST(metadata_writes_tags_back_in_the_form_it_read_them) {
 }
 
 MICRONOTES_TEST(library_restores_a_folder_without_giving_it_a_file_extension) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-folder-collide";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-trash-folder-collide");
+  const auto& root = rootDir.path();
 
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
@@ -348,7 +340,6 @@ MICRONOTES_TEST(library_restores_a_folder_without_giving_it_a_file_extension) {
   MICRONOTES_REQUIRE(std::filesystem::is_directory(root / "work-2"));
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "work-2" / "Inside.md"));
 
-  std::filesystem::remove_all(root);
 }
 
 // --- the note's own name, in the body -----------------------------------
@@ -380,8 +371,8 @@ std::string readNote(const std::filesystem::path& path) {
 }
 
 MICRONOTES_TEST(library_reads_a_leading_title_heading_as_the_note_header) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-title-heading");
+  const auto& root = rootDir.path();
   const micronotes::library::Library library(root);
 
   const auto path = writeNote(root, "Welcome.md",
@@ -395,29 +386,27 @@ MICRONOTES_TEST(library_reads_a_leading_title_heading_as_the_note_header) {
   MICRONOTES_REQUIRE(library.saveNote(path, note.metadata, note.body));
   MICRONOTES_REQUIRE(readNote(path) ==
     "---\nid: welcome\ntitle: Welcome\n---\n\n# Welcome\n\nThe first paragraph.\n");
-  std::filesystem::remove_all(root);
 }
 
 // No front matter at all: the name is the file's stem, and a heading repeating
 // it is still the note's own name.
 MICRONOTES_TEST(library_reads_a_title_heading_against_the_file_stem) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-stem";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-title-heading-stem");
+  const auto& root = rootDir.path();
   const micronotes::library::Library library(root);
 
   const auto path = writeNote(root, "Shopping List.md", "# Shopping List\n\nMilk.\n");
   const auto note = library.loadNote(path);
   MICRONOTES_REQUIRE(note.metadata.titleHeading);
   MICRONOTES_REQUIRE(note.body == "Milk.\n");
-  std::filesystem::remove_all(root);
 }
 
 // A heading that says something the name does not is body text, and stays put.
 // This is the case that must not be swallowed: getting it wrong hides a line
 // the reader wrote.
 MICRONOTES_TEST(library_leaves_a_heading_that_is_not_the_notes_name_alone) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-other";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-title-heading-other");
+  const auto& root = rootDir.path();
   const micronotes::library::Library library(root);
 
   const auto differs = library.loadNote(writeNote(root, "Notes.md",
@@ -436,15 +425,14 @@ MICRONOTES_TEST(library_leaves_a_heading_that_is_not_the_notes_name_alone) {
     "---\nid: c\ntitle: Cased\n---\n\n# cased\n\nBody.\n"));
   MICRONOTES_REQUIRE(!cased.metadata.titleHeading);
   MICRONOTES_REQUIRE(cased.body == "# cased\n\nBody.\n");
-  std::filesystem::remove_all(root);
 }
 
 // Renaming a note that carries its name as a heading moves the heading with it.
 // Leaving it behind is what used to happen, and left the file naming the note
 // by a title it no longer had.
 MICRONOTES_TEST(library_rename_carries_the_title_heading_with_it) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-rename";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-title-heading-rename");
+  const auto& root = rootDir.path();
   const micronotes::library::Library library(root);
 
   const auto path = writeNote(root, "Before.md",
@@ -455,15 +443,14 @@ MICRONOTES_TEST(library_rename_carries_the_title_heading_with_it) {
   MICRONOTES_REQUIRE(note.metadata.titleHeading);
   MICRONOTES_REQUIRE(note.body == "Body.\n");
   MICRONOTES_REQUIRE(readNote(renamed).find("# After\n") != std::string::npos);
-  std::filesystem::remove_all(root);
 }
 
 // A note micronotes creates has no such heading, and must not grow one: the
 // name is drawn from the library, and writing it into the Markdown as well is
 // the duplication this whole split exists to undo.
 MICRONOTES_TEST(library_creates_a_note_without_a_title_heading) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-title-heading-new";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-title-heading-new");
+  const auto& root = rootDir.path();
   const micronotes::library::Library library(root);
 
   micronotes::library::NoteMetadata metadata;
@@ -472,7 +459,6 @@ MICRONOTES_TEST(library_creates_a_note_without_a_title_heading) {
   const auto path = library.createNote(metadata, "");
   MICRONOTES_REQUIRE(readNote(path).find("# Fresh") == std::string::npos);
   MICRONOTES_REQUIRE(library.loadNote(path).body.empty());
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(metadata_title_heading_length_measures_only_what_it_claims) {
@@ -504,8 +490,8 @@ MICRONOTES_TEST(metadata_title_heading_length_measures_only_what_it_claims) {
 // nothing naming it, so `trashEntries()` could not list it and the person who
 // deleted it had no way back to it from inside the app.
 MICRONOTES_TEST(library_writes_the_trash_index_before_it_moves_anything) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-order";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-trash-order");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   micronotes::library::NoteMetadata metadata;
   metadata.id = "ordered";
@@ -526,7 +512,6 @@ MICRONOTES_TEST(library_writes_the_trash_index_before_it_moves_anything) {
   MICRONOTES_REQUIRE(library.trashEntries().empty());
   MICRONOTES_REQUIRE(!library.restoreFromTrash(entries.front().name));
 
-  std::filesystem::remove_all(root);
 }
 
 // A folder delete files the folder and one entry per attachment directory under
@@ -534,8 +519,8 @@ MICRONOTES_TEST(library_writes_the_trash_index_before_it_moves_anything) {
 // moved yet when the names are handed out, so the filesystem check alone cannot
 // tell that a name is already spoken for.
 MICRONOTES_TEST(library_reserves_distinct_trash_names_within_one_folder_delete) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-trash-batch";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-trash-batch");
+  const auto& root = rootDir.path();
   micronotes::library::Library library(root);
   library.createFolder("work");
 
@@ -569,15 +554,14 @@ MICRONOTES_TEST(library_reserves_distinct_trash_names_within_one_folder_delete) 
     MICRONOTES_REQUIRE(std::filesystem::exists(root / ".micronotes" / "attachments" / id / "file.png"));
   }
 
-  std::filesystem::remove_all(root);
 }
 
 // A directory named `files` inside a notebook holds companion files, and the
 // walk reports everything under it as such -- never as a note, whatever its
 // extension, and never as a notebook. See `library::kFilesDirName`.
 MICRONOTES_TEST(library_walk_files_directory_contents_are_companions_not_notes) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-companions-walk-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-companions-walk-test");
+  const auto& root = rootDir.path();
   const auto touch = [&](const std::filesystem::path& relative) {
     std::filesystem::create_directories((root / relative).parent_path());
     std::ofstream out(root / relative);
@@ -654,12 +638,11 @@ MICRONOTES_TEST(library_walk_files_directory_contents_are_companions_not_notes) 
     "work/files/notes.md", "work/files/sub/", "work/files/sub/clip.mp4"}));
   MICRONOTES_REQUIRE(library.walkFilesDir("work").empty());
   MICRONOTES_REQUIRE(library.walkFilesDir("ideas/files").empty());
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_companion_goes_to_the_trash_and_comes_back_with_its_extension) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-companions-trash-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-companions-trash-test");
+  const auto& root = rootDir.path();
   std::filesystem::create_directories(root / "work" / "files");
   { std::ofstream out(root / "work" / "files" / "diagram.png"); out << "png"; }
   micronotes::library::Library library(root);
@@ -684,12 +667,11 @@ MICRONOTES_TEST(library_companion_goes_to_the_trash_and_comes_back_with_its_exte
   MICRONOTES_REQUIRE(after.size() == 1);
   MICRONOTES_REQUIRE(library.restoreFromTrash(after[0].name));
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "work" / "files" / "diagram.png"));
-  std::filesystem::remove_all(root);
 }
 
 MICRONOTES_TEST(library_companion_move_refuses_the_anchor_and_a_move_into_itself) {
-  const auto root = std::filesystem::temp_directory_path() / "micronotes-companions-move-test";
-  std::filesystem::remove_all(root);
+  const micronotes::tests::TempDir rootDir("micronotes-companions-move-test");
+  const auto& root = rootDir.path();
   const auto touch = [&](const std::filesystem::path& relative) {
     std::filesystem::create_directories((root / relative).parent_path());
     std::ofstream out(root / relative);
@@ -726,5 +708,4 @@ MICRONOTES_TEST(library_companion_move_refuses_the_anchor_and_a_move_into_itself
   MICRONOTES_REQUIRE(std::filesystem::exists(root / "files" / "b.pdf"));
   // And a rename to the name it already has is a no-op, not a `-2`.
   MICRONOTES_REQUIRE(library.moveCompanion("files/b.pdf", "files/b.pdf") == root / "files" / "b.pdf");
-  std::filesystem::remove_all(root);
 }
