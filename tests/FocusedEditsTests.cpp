@@ -5,6 +5,7 @@
 #include "app/Fields.h"
 #include "app/FocusedEdits.h"
 #include "app/Shell.h"
+#include "app/SettingsPane.h"
 #include "ui/Actions.h"
 
 #include <string>
@@ -129,34 +130,46 @@ MICRONOTES_TEST(block_kind_chords_are_unique_and_resolve_to_a_shape) {
   MICRONOTES_REQUIRE(bound > 0);
 }
 
-// And what the shortcut list advertises is what the table binds. This is the
-// check that was missing: the hint said "Ctrl+Shift+1-9" while 4, 5 and 6
-// reached no branch at all, so three advertised shortcuts did nothing -- the
-// same failure `F2` and `Ctrl+Q` had before the action registry was one table.
-MICRONOTES_TEST(block_kind_chord_hint_advertises_only_digits_that_work) {
-  const auto* spec = micronotes::ui::findAction("turn-into");
-  MICRONOTES_REQUIRE(spec != nullptr);
-  const std::string hint(spec->keyHint);
-  MICRONOTES_REQUIRE(!hint.empty());
+// And what the shortcut list shows is exactly what the table binds.
+//
+// This reads `aboutRows()` -- the real F1 list -- rather than a hint string,
+// because the artefact the reader sees is what was wrong. It used to carry
+// three rows for this one family, from two hand-written tables, and no two of
+// them agreed: `turn-into`'s hint claimed "Ctrl+Shift+1-9" while 4, 5 and 6
+// were bound to nothing, and two `helpRows` entries spelled the same digits
+// two more ways.
+MICRONOTES_TEST(block_kind_chords_appear_in_the_shortcut_list_exactly_when_they_work) {
+  const auto rows = micronotes::app::aboutRows();
+  std::string listed;
+  for(const auto& row : rows) listed += row.label + " | " + row.detail + "\n";
 
   for(char digit = '0'; digit <= '9'; ++digit) {
-    // Present in the hint either as a listed digit or inside a "a-b" range.
-    bool advertised = false;
-    for(std::size_t i = 0; i < hint.size(); ++i) {
-      if(hint[i] < '0' || hint[i] > '9') continue;
-      if(i + 2 < hint.size() && hint[i + 1] == '-' && hint[i + 2] >= '0' && hint[i + 2] <= '9') {
-        if(digit >= hint[i] && digit <= hint[i + 2]) advertised = true;
-      } else if(hint[i] == digit) {
-        advertised = true;
-      }
-    }
+    micronotes::ui::KeyChord chord;
+    chord.ctrl = true;
+    chord.shift = true;
+    chord.key = static_cast<SDL_Keycode>(digit);
+    const std::string keys = micronotes::ui::formatKeyChord(chord);
+    const bool shown = listed.find(" | " + keys + "\n") != std::string::npos;
     const bool works = micronotes::app::blockKindForChordDigit(digit) != nullptr;
     micronotes::tests::require(
-      advertised == works,
-      std::string("Ctrl+Shift+") + digit + (advertised ? " is advertised in the shortcut list but "
-                                                         "no block kind claims it"
-                                                       : " turns a block into something but the "
-                                                         "shortcut list does not mention it") +
-        " -- hint is \"" + hint + "\"");
+      shown == works,
+      keys + (shown ? " is in the shortcut list but no block kind claims it"
+                    : " turns a block into something but the shortcut list does not show it") +
+        "\n--- list ---\n" + listed);
+  }
+}
+
+// One row per shape, naming the shape -- the point of deriving it. A reader
+// asking "how do I make a heading 2" gets an answer instead of a digit range.
+MICRONOTES_TEST(block_kind_shortcut_rows_name_the_shape_they_make) {
+  const auto rows = micronotes::app::aboutRows();
+  for(const auto& entry : micronotes::app::blockKinds()) {
+    if(entry.chordDigit == 0) continue;
+    bool found = false;
+    for(const auto& row : rows) {
+      if(row.label.find(entry.label) != std::string::npos) found = true;
+    }
+    micronotes::tests::require(found, std::string("no shortcut row names the shape \"") +
+                                        entry.label + "\" that a digit is bound to");
   }
 }

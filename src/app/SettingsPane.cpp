@@ -1,5 +1,7 @@
 #include "app/SettingsPane.h"
 
+#include "app/EditCommands.h"
+
 #include "app/Prompts.h"
 #include "app/Shell.h"
 
@@ -286,6 +288,26 @@ std::vector<ui::AboutRow> aboutRows() {
     for(const auto& row : ui::helpRows()) {
       if(row.section != section) continue;
       group.push_back({std::string(row.what), std::string(row.keys)});
+    }
+    // The block shapes a digit produces, one row each, read from the table that
+    // actually binds them.
+    //
+    // These were three rows in two hand-written tables and they disagreed:
+    // `turn-into`'s hint said "Ctrl+Shift+1-9" while 4, 5 and 6 were bound to
+    // nothing, and two `helpRows` entries described the same digits again in
+    // two more spellings -- so the shortcut list showed this one family three
+    // times and no two of them agreed. Derived, it says which digit makes which
+    // shape, which is what a reader wanted from it, and it cannot drift from
+    // the keyboard because it is the same table the keyboard reads.
+    if(section == ui::ActionSection::Blocks) {
+      for(const auto& entry : blockKinds()) {
+        if(entry.chordDigit == 0) continue;
+        ui::KeyChord chord;
+        chord.ctrl = true;
+        chord.shift = true;
+        chord.key = static_cast<SDL_Keycode>(entry.chordDigit);
+        group.push_back({std::string("Turn into ") + entry.label, ui::formatKeyChord(chord)});
+      }
     }
     if(group.empty()) continue;
     rows.push_back({std::string(ui::sectionLabel(section)), {}});

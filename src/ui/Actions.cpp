@@ -76,7 +76,7 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::MoveBlockUp,     "move-block-up",  "Move the block up",               "Alt+Up",       "",              S::Blocks, true, false, "", false},
   {ActionId::MoveBlockDown,   "move-block-down","Move the block down",             "Alt+Down",     "",              S::Blocks, true, false, "", false},
   {ActionId::InsertBlock,     "insert-block",   "Insert a block",                  "",             "/",             S::Blocks, true, false, "", false},
-  {ActionId::TurnInto,        "turn-into",      "Turn the block into...",          "",             "Ctrl+Shift+0-3,7-9",S::Blocks, true, false, "", false},
+  {ActionId::TurnInto,        "turn-into",      "Turn the block into...",          "",             "",S::Blocks, true, false, "", false},
   {ActionId::Fold,            "fold",           "Fold or unfold section",          "Ctrl+.",       "",              S::Blocks, true, true, "", false},
 
   {ActionId::PaneLive,        "pane-live",      "View: live",                      "Ctrl+1",       "",              S::View, false, true, "", true},
@@ -204,8 +204,6 @@ constexpr HelpRow kHelpRows[] = {
 
   {"Esc", "Select the block, again to go back", S::Blocks},
   {"Shift+Up, Shift+Down", "Extend the block selection", S::Blocks},
-  {"Ctrl+Shift+0..3", "Turn into text or a heading", S::Blocks},
-  {"Ctrl+Shift+7, 8, 9", "Turn into a numbered item, bullet, task", S::Blocks},
 };
 
 std::span<const HelpRow> helpRows() {
