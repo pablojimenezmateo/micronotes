@@ -1884,7 +1884,9 @@ callout label's case -- each of which is a scroll extent or a box that does not
 match the text in it. Two parallel walks of the same blocks is a shape that
 cannot be checked; one walk cannot drift from itself.
 
-The pane became `src/app/ReadingPane.cpp`, 247 lines out of `Application.cpp`.
+The pane became a file of its own, 247 lines out of `Application.cpp`. It was
+called `ReadingPane.cpp` then and is `src/app/ReadingPage.cpp` now; the passages
+below were written against the old name, and that is the file they mean.
 What was *not* resolved was that it was still a second renderer for the same
 Markdown; the seventh pass below is the merge into `PageView`, and the file is
 gone.
@@ -2186,7 +2188,7 @@ below is TD-9.
 ### Why the harness could not have found this
 
 Every number above came from a real headless session and a counter. The perf
-harness never touches `ReadingPane.cpp` -- it stops at `doc::` and `library::`,
+harness never touches the reading pane -- it stops at `doc::` and `library::`,
 as this file says of the fifth pass -- and no *timer* would have made the case
 either: 0.265 ms a frame is inside every budget in the file. What said "this is
 wrong" was two counters that should have been the same order of magnitude and
@@ -2205,7 +2207,7 @@ saying "the fix is TD-9, not a second cache". This is TD-9.
 
 ### Resolved: the reading pane was a second renderer for the same Markdown
 
-`src/app/ReadingPane.cpp` parsed the open note through md4c a second time and
+The reading pane parsed the open note through md4c a second time and
 drew it with its own geometry: its own indent step, its own quote gutter, its
 own callout box, its own task checkbox, its own code block, its own table, its
 own image scaling. Every typographic decision had to be made twice, and a
