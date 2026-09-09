@@ -43,6 +43,22 @@ struct TreeRow {
   int noteCount = 0;    // folder rows: notes directly inside
   bool expandable = false;
   bool expanded = false;
+
+  // A row standing for something in a notebook's `files` directory rather than
+  // for a note or a notebook.
+  bool isCompanion() const {
+    return kind == TreeRowKind::File || kind == TreeRowKind::FilesFolder;
+  }
+
+  // The path this row's disclosure is keyed by: a notebook's own folder, or a
+  // files directory's own path. The two live in different fields because for a
+  // notebook row `folder` *is* the row, while for a companion row it is the
+  // parent -- see `file` above. Asking the row rather than working it out at
+  // the call site, because the sidebar's model and its input both need the
+  // answer and had a copy each.
+  const std::filesystem::path& path() const {
+    return isCompanion() ? file : folder;
+  }
 };
 
 // Which folders the sidebar has open. Kept apart from the library itself: a

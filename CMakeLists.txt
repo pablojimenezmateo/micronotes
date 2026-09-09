@@ -283,6 +283,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/SettingsInput.cpp
   src/app/SettingsPane.cpp
   src/app/Sidebar.cpp
+  src/app/SidebarInput.cpp
   src/app/SidebarModel.cpp
   src/app/Startup.cpp
   src/app/StatusBar.cpp
