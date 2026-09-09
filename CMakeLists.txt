@@ -181,6 +181,7 @@ set(MICRONOTES_APP_SOURCES
   src/doc/LayoutQueries.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
+  src/library/LibraryIndexSearch.cpp
   src/library/Metadata.cpp
   src/library/NoteCatalog.cpp
   src/library/Organization.cpp

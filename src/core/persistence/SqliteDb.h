@@ -6,6 +6,8 @@
 #include <string_view>
 #include <unordered_map>
 
+#include <sqlite3.h>
+
 struct sqlite3;
 struct sqlite3_stmt;
 
@@ -110,5 +112,50 @@ private:
   sqlite3* db_ = nullptr;
   std::unordered_map<std::string, Statement::Slot, SqlHash, std::equal_to<>> cache_;
 };
+
+// --- statement values -------------------------------------------------------
+//
+// Binding a parameter and reading a column back. They belong beside the
+// statement rather than in whichever file happens to run the query: the two
+// notes below are both sqlite traps rather than preferences, and a caller
+// writing `sqlite3_bind_text` by hand has to know them already to get them
+// right.
+
+inline void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
+  sqlite3_bind_text(stmt, index, value.c_str(), static_cast<int>(value.size()), SQLITE_TRANSIENT);
+}
+
+// Binds without handing sqlite a copy to keep. The caller guarantees the bytes
+// outlive the step, which for a note's body is worth the obligation: it is the
+// largest thing in the row by three orders of magnitude, and SQLITE_TRANSIENT
+// meant sqlite copied the whole note -- twice, once for the row and once for
+// the fts entry -- on every save.
+inline void bindTextBorrowed(sqlite3_stmt* stmt, int index, std::string_view value) {
+  // An empty view's `data()` may be null, and sqlite reads a null pointer as
+  // SQL NULL rather than as an empty string -- which a NOT NULL column then
+  // rejects. An empty value is not a missing one.
+  sqlite3_bind_text(stmt, index, value.empty() ? "" : value.data(),
+                    static_cast<int>(value.size()), SQLITE_STATIC);
+}
+
+inline std::string columnText(sqlite3_stmt* stmt, int index) {
+  const auto* text = sqlite3_column_text(stmt, index);
+  return text ? reinterpret_cast<const char*>(text) : std::string();
+}
+
+// The same column as a view of sqlite's own buffer, which stays valid until the
+// next step or reset of this statement. For a column the caller only reads:
+// copying 200 note bodies out to look at three lines of one is the whole cost
+// of a search.
+//
+// `sqlite3_column_bytes` must be called after `_text`, not before: it reports
+// the length of the representation the last accessor produced, so asking it
+// first can convert the value and give the length of the wrong encoding.
+inline std::string_view columnView(sqlite3_stmt* stmt, int index) {
+  const auto* text = sqlite3_column_text(stmt, index);
+  if(!text) return {};
+  const auto size = static_cast<std::size_t>(sqlite3_column_bytes(stmt, index));
+  return std::string_view(reinterpret_cast<const char*>(text), size);
+}
 
 }

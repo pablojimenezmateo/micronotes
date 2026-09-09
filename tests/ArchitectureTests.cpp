@@ -253,7 +253,7 @@ constexpr int kShellFileLineBudget = 1000;
 // green the whole way. Sizes rather than one number because these are ratchets
 // at what the tree measures today, not targets: a change that moves behaviour
 // into a named unit lowers them in the same commit, and nothing raises them.
-constexpr int kTreeFileLineBudget = 904;
+constexpr int kTreeFileLineBudget = 885;
 
 namespace {
 
@@ -317,7 +317,9 @@ MICRONOTES_TEST(architecture_no_source_in_the_tree_is_a_catch_all) {
     for(const auto& path : sourceFiles(repoRoot() / root)) {
       const int lines = lineCount(path);
       if(lines <= kTreeFileLineBudget) continue;
-      offenders.push_back({std::string(root) + "/" + path.filename().string(), lines});
+      // The path relative to the repo, not just the filename: two directories
+      // hold a `Layout.cpp` and the message has to say which one.
+      offenders.push_back({std::filesystem::relative(path, repoRoot()).string(), lines});
     }
   }
   std::sort(offenders.begin(), offenders.end(),
