@@ -344,7 +344,9 @@ add_executable(micronotes_tests
   tests/FrameTraceTests.cpp
   tests/FuzzyTests.cpp
   tests/InlineScanTests.cpp
-  tests/LayoutTests.cpp
+  tests/LayoutBlockTests.cpp
+  tests/LayoutQueryTests.cpp
+  tests/LayoutUpdateTests.cpp
   tests/LibraryTests.cpp
   tests/MarkdownParserTests.cpp
   tests/NotePropertiesTests.cpp
@@ -361,7 +363,10 @@ add_executable(micronotes_tests
   tests/SettingsTests.cpp
   tests/SettingsSurfaceTests.cpp
   tests/ShellLayoutTests.cpp
-  tests/ShellUnitTests.cpp
+  tests/ShellLinkTests.cpp
+  tests/ShellPageTests.cpp
+  tests/ShellSessionTests.cpp
+  tests/ShellSidebarTests.cpp
   tests/SidebarRowsMemoTests.cpp
   tests/SidebarRowsTests.cpp
   tests/SingleLineEditorTests.cpp
