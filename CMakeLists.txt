@@ -336,7 +336,9 @@ add_executable(micronotes_tests
   tests/CursorThemeTests.cpp
   tests/DirectoryWatcherTests.cpp
   tests/DurableFileTests.cpp
+  tests/EditorSoftWrapTests.cpp
   tests/EditorTests.cpp
+  tests/EditorUndoTests.cpp
   tests/EditsTests.cpp
   tests/FlowTests.cpp
   tests/FocusedEditsTests.cpp
