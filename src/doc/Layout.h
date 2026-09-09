@@ -366,7 +366,14 @@ public:
   // in the editor's text, which never is.
   void update(std::string_view source, const LayoutOptions& options);
 
-  const std::vector<SourceBlock>& blocks() const;
+  // Trivial by design, and defined here rather than in the .cpp for the same
+  // reason `doc/Flow.h` is a header: `layout(i)` and `blockTop(i)` are called
+  // once per block per frame from four separate paint loops in
+  // `app/PageViewPaint.cpp`, and with no LTO in Release a two-line body in
+  // another translation unit is an opaque call for every one of them.
+  const std::vector<SourceBlock>& blocks() const {
+    return blocks_;
+  }
   // The blocks, but only when they still partition the buffer stamped
   // `sourceRevision`; an empty span otherwise.
   //
@@ -382,15 +389,35 @@ public:
   // only party that knows, that these blocks are its buffer's. A caller whose
   // buffer has moved since the last update gets nothing and scans, which is
   // what an unstamped caller gets too.
-  BlockSpan blocksAt(std::uint64_t sourceRevision) const;
-  std::size_t blockCount() const;
-  const BlockLayout& layout(std::size_t index) const;
+  BlockSpan blocksAt(std::uint64_t sourceRevision) const {
+    if(!built_ || sourceRevision == 0 || sourceRevision != sourceRevision_) return {};
+    return blocks_;
+  }
+  std::size_t blockCount() const {
+    return blocks_.size();
+  }
+  const BlockLayout& layout(std::size_t index) const {
+    static const BlockLayout empty;
+    if(index >= placed_.size() || !placed_[index].layout) return empty;
+    return *placed_[index].layout;
+  }
   // True when the block sits inside a collapsed toggle.
-  bool blockHidden(std::size_t index) const;
-  float blockTop(std::size_t index) const;
-  float totalHeight() const;
-  const LayoutOptions& options() const;
-  const std::string& source() const;
+  bool blockHidden(std::size_t index) const {
+    return index < hidden_.size() && hidden_[index];
+  }
+  float blockTop(std::size_t index) const {
+    if(index >= placed_.size()) return totalHeight_;
+    return placed_[index].top;
+  }
+  float totalHeight() const {
+    return totalHeight_;
+  }
+  const LayoutOptions& options() const {
+    return options_;
+  }
+  const std::string& source() const {
+    return source_;
+  }
 
   Rect caretRect(std::size_t offset) const;
   std::size_t offsetAt(float x, float y) const;
@@ -429,7 +456,9 @@ public:
   std::size_t rowsPerHeight(float height) const;
 
   // Diagnostics for the perf harness.
-  std::size_t lastRelaidBlocks() const;
+  std::size_t lastRelaidBlocks() const {
+    return lastRelaid_;
+  }
 
 private:
   // One call of `update`, with its five phases as methods. Defined in

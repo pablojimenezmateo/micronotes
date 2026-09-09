@@ -245,6 +245,15 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // fails, the fix is a named unit under src/ -- not a bigger budget.
 constexpr int kApplicationLineBudget = 232;
 constexpr int kShellFileLineBudget = 1000;
+// And the same rule again, over every source in the tree rather than the shell
+// alone -- because the shell ceiling did not stop a catch-all either, it only
+// stopped the ones in `src/app/`. While it was the only one, `doc/Layout.cpp`
+// reached 1,732 lines and `tools/PerfMain.cpp` 1,553, which are the two largest
+// files this project has ever had, and both grew to that size with the ceiling
+// green the whole way. Sizes rather than one number because these are ratchets
+// at what the tree measures today, not targets: a change that moves behaviour
+// into a named unit lowers them in the same commit, and nothing raises them.
+constexpr int kTreeFileLineBudget = 1012;
 
 namespace {
 
@@ -285,6 +294,44 @@ MICRONOTES_TEST(architecture_no_shell_source_is_a_catch_all) {
       "-line ceiling: " + offenders +
       " -- a file this size is doing more than one thing; split the thing that has the fewest "
       "callers into a named unit of its own");
+}
+
+// The ceiling, over the whole tree.
+//
+// `architecture_no_shell_source_is_a_catch_all` above draws exactly this lesson
+// about `Application.cpp` -- "a budget on one file by name does not stop a
+// catch-all, it only stops that one" -- and then stops at `src/app/`. So the
+// next two catch-alls formed in the two places it does not reach.
+// `doc/Layout.cpp` held the line breaker, the incremental pass and the
+// per-block work in 1,732 lines; `tools/PerfMain.cpp` held ten independent
+// lanes and the instrument they measure through in 1,553. Neither was ever
+// flagged, by this file or by anything else.
+//
+// `tools/` counts. It is not shipped code, which is exactly the reasoning that
+// let the harness grow -- and the harness is the instrument every performance
+// claim in `docs/performance.md` rests on, so a reader who cannot find a lane
+// in it is the reader who does not add one.
+MICRONOTES_TEST(architecture_no_source_in_the_tree_is_a_catch_all) {
+  std::vector<std::pair<std::string, int>> offenders;
+  for(const auto& root : {"src", "tools"}) {
+    for(const auto& path : sourceFiles(repoRoot() / root)) {
+      const int lines = lineCount(path);
+      if(lines <= kTreeFileLineBudget) continue;
+      offenders.push_back({std::string(root) + "/" + path.filename().string(), lines});
+    }
+  }
+  std::sort(offenders.begin(), offenders.end(),
+            [](const auto& a, const auto& b) { return a.second > b.second; });
+  std::string message = "these sources are over the " + std::to_string(kTreeFileLineBudget) +
+                        "-line tree ceiling:\n";
+  for(const auto& [name, lines] : offenders) {
+    message += "  " + name + " (" + std::to_string(lines) + ")\n";
+  }
+  message +=
+    "This is a ratchet at what the tree measured when it was written, not a target: it goes down "
+    "when behaviour moves into a named unit, and nothing raises it. Split the thing that has the "
+    "fewest callers into a unit of its own and lower the number in the same commit.";
+  micronotes::tests::require(offenders.empty(), message);
 }
 
 // The right panel is drawn after the content, and that is a performance

@@ -191,50 +191,6 @@ void DocumentLayout::setMetrics(Metrics metrics) {
   totalHeight_ = 0.0f;
 }
 
-const std::vector<SourceBlock>& DocumentLayout::blocks() const {
-  return blocks_;
-}
-
-BlockSpan DocumentLayout::blocksAt(std::uint64_t sourceRevision) const {
-  if(!built_ || sourceRevision == 0 || sourceRevision != sourceRevision_) return {};
-  return blocks_;
-}
-
-std::size_t DocumentLayout::blockCount() const {
-  return blocks_.size();
-}
-
-const BlockLayout& DocumentLayout::layout(std::size_t index) const {
-  static const BlockLayout empty;
-  if(index >= placed_.size() || !placed_[index].layout) return empty;
-  return *placed_[index].layout;
-}
-
-bool DocumentLayout::blockHidden(std::size_t index) const {
-  return index < hidden_.size() && hidden_[index];
-}
-
-float DocumentLayout::blockTop(std::size_t index) const {
-  if(index >= placed_.size()) return totalHeight_;
-  return placed_[index].top;
-}
-
-float DocumentLayout::totalHeight() const {
-  return totalHeight_;
-}
-
-const LayoutOptions& DocumentLayout::options() const {
-  return options_;
-}
-
-const std::string& DocumentLayout::source() const {
-  return source_;
-}
-
-std::size_t DocumentLayout::lastRelaidBlocks() const {
-  return lastRelaid_;
-}
-
 // The fold walk itself: from `from` onward, mark every block that a collapsed
 // head hides, and report whether it hid any.
 //
