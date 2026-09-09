@@ -43,6 +43,15 @@ App-only code stays outside, in the layer that owns the concept:
 - `src/ui/` -- what draws and what models a surface. Everything in here either
   paints, measures, or is state a surface keeps. A helper that only counts
   bytes belongs in `core/util/`; one that takes a `measure` belongs here.
+  The drawing itself is a stack of six, each depending only on what is below
+  it: `ui/Painter.h` (fill, stroke, rule, surface, row, focus ring),
+  `ui/Glyphs.h` (every mark drawn rather than typeset), `ui/TextRenderer.h`
+  (typesetting and its two caches), `ui/ImageCache.h` (decoded pictures),
+  `ui/Scrollbar.h` (the geometry four askers share, plus `scrollbarReserve` --
+  what a list must keep clear at its trailing edge) and `ui/Widgets.h` (the
+  compounds a surface assembles itself from). They were one `ui/Draw.h`, which
+  meant a file that only measured a string included the picture decoder.
+  Include the layer you draw with, not the stack.
 - `src/app/` -- the surfaces themselves, the routers and the loop.
 
 That list is not a description, it is where things go. `src/ui/` had become a
@@ -208,10 +217,14 @@ when the counters went in it turned out to be 70% of every frame.
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
   only at a durable polymorphic boundary.
 - Before writing a helper, look for it. `core/util/StringUtil.h` has `trim`,
-  the ASCII case fold, `splitLines` and `ellipsize`; `core/util/Utf8.h` has the
+  the ASCII case fold, `isAsciiSpace`, `splitLines` and `ellipsize`;
+  `core/util/Utf8.h` has the
   boundary walks; `core/util/Hash.h` is the one FNV; `core/platform/PathUtils.h`
   has `uniquePath`, `sanitizeFileStem` and `displayPath`; `ui/Memo.h` is how a
-  memoised value is spelled; `ui/TextFit.h` is the measured text helpers. Every
+  memoised value is spelled; `ui/TextFit.h` is the measured text helpers;
+  `library/Metadata.h` has the two front-matter shape rules
+  (`continuesFrontMatterValue`, `frontMatterSequenceItem`), which anything
+  reading `NoteMetadata::extra` back has to split those lines on. Every
   one of those exists because the same thing had been written two or three
   times, and in most cases the copies had drifted -- three different `trim`s,
   two spellings of FNV, four `nextBoundary`s, three `uniquePath`s.
@@ -241,13 +254,28 @@ when the counters went in it turned out to be 70% of every frame.
   `app/PagePress.h` / `Sidebar::pressSidebar` / the panels, and
   `app/KeyRouter.h` into `app/KeySurfaces.h`. Put new behaviour in the surface,
   not in the router. `../microide` is the reference for both shapes.
+- **Read `../microide`'s `dev-docs/` before debugging anything the window system
+  owns.** `dev-docs/platform/wayland-stale-cursor.md` is a cursor bug that
+  survived years there, and two of its three findings applied here unchanged:
+  `SDL_SetCursor`'s result has to be checked before recording the shape as
+  applied, or one failure convinces the shell that shape is already showing
+  forever; and SDL's Wayland hit-test path can change the *displayed* cursor
+  without updating the handle SDL holds, so a re-assert has to pass through a
+  different cursor first. The third -- a dropped present leaving the new shape
+  queued -- does not apply only because this loop repaints on every event. If
+  that is ever narrowed to "repaint when something visible changed", the cursor
+  needs a present of its own: hovering a link changes no pixels at all. See
+  `app/Cursor.h`, and `app/CursorTheme.h` for why SDL may not have a hand to
+  show in the first place.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
-- `src/app/Application.cpp` is the window, the renderer and the event loop, and
-  nothing else. It was a 2,700-line catch-all; the input routing is
-  `app/KeyRouter.h` and `app/PointerRouter.h`, the frame is `app/Frame.h`, the
-  command chain is `app/Commands.h`, and what the command line asked for is
-  `app/Startup.h`. `ArchitectureTests` holds that file to a line budget that only
+- `src/app/Application.cpp` is the window, the renderer and the wait, and
+  nothing else. It was a 2,700-line catch-all; the dispatch over event *kinds*
+  is `app/EventRouter.h` and the routing of a press or a keystroke once it is
+  known to be one is `app/PointerRouter.h` and `app/KeyRouter.h`; the frame is
+  `app/Frame.h`, when to sleep and what to be awake for is `app/FramePolicy.h`,
+  when the buffer is written back is `app/Autosave.h`, the command chain is
+  `app/Commands.h`, and what the command line asked for is `app/Startup.h`. `ArchitectureTests` holds that file to a line budget that only
   ever goes down, **and every other `src/app/` source to a 1,000-line ceiling** --
   because a budget on one file by name does not stop a catch-all, it only stops
   that one. New behaviour wants a named unit, not another function in an old file.
@@ -256,7 +284,11 @@ when the counters went in it turned out to be 70% of every frame.
   the focus, the status line -- and each surface's state is a named type in its
   own header (`app/SidebarState.h`, `app/PanelState.h`, `app/ChromeState.h`,
   `app/EditingState.h`, `app/PointerState.h`, `app/RawPaneState.h`,
-  `app/TextFields.h`). Two things follow. A function should take the part it
+  `app/TextFields.h`). It is that composition and nothing else: the cursor's
+  types are `app/Cursor.h`, the caret's frame policy `app/CaretPolicy.h`, the
+  layout pass `app/Layout.h`, and a drawn link's rect `app/LinkRegion.h` --
+  which is what lets a drawing helper stop including the whole runtime to name
+  one parameter. Two things follow. A function should take the part it
   works on rather than the whole shell. And a rule about one surface's state
   belongs as a *method* on that surface's type, not as arithmetic repeated at
   each call site -- that is where this codebase's quieter bugs have come from.
