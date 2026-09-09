@@ -16,6 +16,12 @@ using micronotes::ui::Rect;
 
 // The Settings surface, and About in the same card.
 //
+// Two sources behind this one header, because the file was doing three jobs at
+// 818 lines: `SettingsPane.cpp` builds the rows and draws them,
+// `SettingsInput.cpp` answers a press and a keystroke on them. The two share no
+// helper -- the paint's are all about measuring text into a column, the input's
+// all about stepping a value -- so the seam was already there.
+//
 // It replaces the five-row overlay that drilled into a list per setting. That
 // shape cost two trips through a modal to change two things and had nowhere to
 // say what any setting did, so "Page width: Medium" had to explain itself and
