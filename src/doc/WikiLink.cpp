@@ -7,12 +7,8 @@
 #include "doc/BlockScan.h"
 #include "doc/InlineScan.h"
 
-#include <limits>
-
 namespace micronotes::doc {
 namespace {
-
-constexpr std::size_t kNone = std::numeric_limits<std::size_t>::max();
 
 // Visits every `[[wikilink]]` span in `source`, in document order.
 //
