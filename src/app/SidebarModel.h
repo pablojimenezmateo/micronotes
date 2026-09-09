@@ -220,6 +220,15 @@ struct SidebarDropTarget {
   std::filesystem::path folder;
   // Set instead of `folder` when the row is inside a files area.
   std::filesystem::path filesDir;
+
+  // Named rather than positional, because `folder` and `filesDir` are both
+  // optional paths of the same type and only one is ever set: a positional
+  // `{true, row, {}, path}` does not say which of the two it is filling in,
+  // and the two mean different destinations on disk. Getting it wrong drops a
+  // dragged note into the wrong directory, which is a data move rather than a
+  // misdraw.
+  static SidebarDropTarget intoFolder(std::size_t row, std::filesystem::path folder);
+  static SidebarDropTarget intoFilesDir(std::size_t row, std::filesystem::path filesDir);
 };
 
 SidebarDropTarget sidebarDropTargetAt(const UiRuntime& ui, float x, float y);

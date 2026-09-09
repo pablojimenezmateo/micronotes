@@ -18,6 +18,22 @@
 #include <vector>
 
 namespace micronotes::app {
+
+SidebarDropTarget SidebarDropTarget::intoFolder(std::size_t row, std::filesystem::path folder) {
+  SidebarDropTarget target;
+  target.valid = true;
+  target.row = row;
+  target.folder = std::move(folder);
+  return target;
+}
+
+SidebarDropTarget SidebarDropTarget::intoFilesDir(std::size_t row, std::filesystem::path filesDir) {
+  SidebarDropTarget target;
+  target.valid = true;
+  target.row = row;
+  target.filesDir = std::move(filesDir);
+  return target;
+}
 using ui::Rect;
 using ui::contains;
 
@@ -775,18 +791,18 @@ SidebarDropTarget sidebarDropTargetAt(const UiRuntime& ui, float x, float y) {
   // A row in a files area stands for a directory in it: the one a folder row
   // is, or the one a file sits in.
   if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::FilesFolder) {
-    return {true, *index, {}, row.tree.file};
+    return SidebarDropTarget::intoFilesDir(*index, row.tree.file);
   }
   if(row.kind == SidebarRow::Kind::Tree && row.tree.kind == ui::TreeRowKind::File) {
-    return {true, *index, {}, row.tree.folder};
+    return SidebarDropTarget::intoFilesDir(*index, row.tree.folder);
   }
   // A note row stands for the folder holding it, so dropping between two notes
   // does the obvious thing rather than nothing.
-  if(row.kind == SidebarRow::Kind::Tree) return {true, *index, row.tree.folder};
+  if(row.kind == SidebarRow::Kind::Tree) return SidebarDropTarget::intoFolder(*index, row.tree.folder);
   // And the band that names the root's contents stands for the root.
   if(row.kind == SidebarRow::Kind::SectionLabel && row.section &&
      *row.section == ui::SidebarSection::Notebooks) {
-    return {true, *index, {}};
+    return SidebarDropTarget::intoFolder(*index, {});
   }
   return {};
 }
