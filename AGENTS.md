@@ -41,6 +41,10 @@ App-only code stays outside, in the layer that owns the concept:
 
 - `src/doc/` -- the Markdown *document*: the block and inline scanners, the
   incremental layout, the edits, `[[wikilink]]` syntax, what a link target means.
+  Laying a block out is three units and they compose in that order:
+  `doc/Tokenize.h` turns source bytes into tokens, `doc/Flow.h` turns tokens
+  into visual lines, and `doc/LayoutUpdate.cpp` decides which blocks need either.
+  `doc/Layout.cpp` is what is left -- styling, staging, placement.
 - `src/library/` -- the *folder of notes*: the index, front matter, search
   scope, trash, and which note a `[[target]]` resolves to. `NoteCatalog` is the
   library, its index and the memos over both kept in step -- every write to a
@@ -162,7 +166,12 @@ before touching the code, is what made that pass arithmetic rather than opinion.
 The persistence lane is wall-clock, deliberately: a durable write is two `fsync`
 barriers, and on process CPU time an 18 ms save reads as 60 us of work.
 
-The **shell lane** is the one to add to when the work is above `doc::Layout`. It
+The harness is `tools/PerfMain.cpp` -- the fixture library and the list of lanes
+-- over `tools/perf/`, which is one file per lane plus `perf/Harness.h`, the
+clocks and the allocation counter every lane measures through.
+
+The **shell lane** (`tools/perf/ShellLane.cpp`) is the one to add to when the
+work is above `doc::Layout`. It
 drives a real `UiRuntime` through a keystroke -- the editor, the live page, the
 outline panel, the status bar, the raw pane -- over the real faces and stops
 short of the paint. Anything memoised on `ui.editor.revision()` is by
@@ -241,6 +250,14 @@ when the counters went in it turned out to be 70% of every frame.
   2,073 emitted instructions to 919. A unit that runs per update or per
   keystroke gets its own translation unit (`doc/LayoutUpdate.cpp`). Testability
   is the reason to separate a unit at all, and a header gives that just as well.
+- **Before writing a test fixture, look for it too.** `tests/TempDir.h` is an
+  RAII directory under the system temp root -- every disk test used to open with
+  the same two lines and half of them ended with a third that a failed assertion
+  never reached, so the suite leaked a tree per failure. `tests/ShellFixture.h`
+  is a shell with a library and one note open, `tests/LayoutFixture.h` the stub
+  face and the fixture note every `doc::Layout` test measures against, and
+  `tests/EditorFixture.h` the word count spelled deliberately unlike the
+  editor's own.
 - Before writing a helper, look for it. `core/util/StringUtil.h` has `trim`,
   the ASCII case fold, `isAsciiSpace`, `splitLines` and `ellipsize`;
   `core/util/TextSearch.h` is the one literal search over a buffer -- every

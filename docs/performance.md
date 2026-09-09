@@ -2826,6 +2826,9 @@ loop.**
 
 ### The shell lane, and the first thing it found
 
+(It is `tools/perf/ShellLane.cpp` now; the harness was one 1,553-line file when
+this was written and is one file per lane today.)
+
 `TD-19` said the harness had no lane for a keystroke through the *shell*: every
 edit lane drove `doc::Layout` directly, so anything memoised on
 `ui.editor.revision()` — which is by construction recomputed on every keystroke,
