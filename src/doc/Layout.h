@@ -383,6 +383,12 @@ public:
   std::size_t lastRelaidBlocks() const;
 
 private:
+  // One call of `update`, with its five phases as methods. Defined in
+  // `Layout.cpp`: it is the algorithm, not part of the interface, and nothing
+  // outside that file can name it. See the comment on the definition for why
+  // the phases needed a carrier and what it is not allowed to own.
+  class UpdatePass;
+
   // Where a block sits, and the layout it resolved to. There was a
   // `blockIndex` field here as well; nothing ever read it, because it was
   // always the array index. Caching the layout's height and row count here too
