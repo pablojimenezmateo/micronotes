@@ -109,6 +109,12 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     else if(result.itemId == "rename") beginFolderRename(ui);
     else if(result.itemId == "delete") openDeleteFolderConfirm(ui);
     else if(handleFolderPathCommand(ui, result.itemId, ui.state.selection().folder)) {}
+    // And the rest are the palette's, which is the rule the note menu above
+    // follows: a row whose id is an action name needs no arm here, and cannot
+    // drift from the menu bar's row for the same command. Ending the chain on
+    // the path commands instead is how "Export as PDF" on a notebook came to
+    // do nothing the moment its id stopped being spelled out here.
+    else performCommand(ui, result.itemId);
   }
 }
 

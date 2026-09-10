@@ -369,6 +369,7 @@ add_executable(micronotes_tests
   tests/ClipGuardTests.cpp
   tests/CaretBlinkTests.cpp
   tests/ColorMathTests.cpp
+  tests/ContextMenuTests.cpp
   tests/CursorThemeTests.cpp
   tests/DirectoryWatcherTests.cpp
   tests/DurableFileTests.cpp
