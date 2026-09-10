@@ -473,4 +473,20 @@ void OverlayStack::handleMotion(float x, float y) {
 }
 
 
+Overlay anchoredMenu(std::string id, float x, float y, float width) {
+  Overlay overlay;
+  overlay.kind = OverlayKind::List;
+  overlay.id = std::move(id);
+  overlay.anchored = true;
+  overlay.anchorX = x;
+  overlay.anchorY = y;
+  overlay.width = width;
+  return overlay;
+}
+
+void openMenu(OverlayStack& overlays, Overlay overlay) {
+  overlay.maxRows = static_cast<int>(overlay.items.size());
+  overlays.open(std::move(overlay));
+}
+
 }

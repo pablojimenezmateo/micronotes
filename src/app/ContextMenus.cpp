@@ -9,17 +9,27 @@
 #include "ui/TagColors.h"
 
 #include <string>
+#include <vector>
 
 namespace micronotes::app {
+namespace {
+
+// "Where is this on disk, and what do I call it elsewhere" -- the three rows
+// five of these menus offer about the file, folder or note they are about.
+//
+// One group because they are one group: written out five times they had drifted
+// into being gated four different ways, and a reader comparing two menus could
+// not tell whether that was a decision.
+void appendPathRows(std::vector<ui::OverlayItem>& items, bool enabled) {
+  items.push_back(ui::menuItem("show-on-disk", "Show on disk").enabledIf(enabled));
+  items.push_back(ui::menuItem("copy-relative-path", "Copy relative path").enabledIf(enabled));
+  items.push_back(ui::menuItem("copy-absolute-path", "Copy absolute path").enabledIf(enabled));
+}
+
+}
 
 void openNoteMenu(UiRuntime& ui, float x, float y) {
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "note-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 220.0f;
+  ui::Overlay overlay = ui::anchoredMenu("note-menu", x, y, 220.0f);
   const auto noteId = ui.state.selection().noteId;
   const bool hasNote = !noteId.empty();
   // Four groups, ruled off from each other: what makes a note, what changes the
@@ -50,35 +60,21 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
       .ticked(hasNote && ui.state.workspace().isPinned(noteId)),
     ui::menuItem("move-note", "Move to notebook").enabledIf(hasNote),
     ui::menuSeparator(),
-    // A note is a file, and these are the questions a reader asks about one.
-    ui::menuItem("show-on-disk", "Show on disk").enabledIf(hasNote),
-    ui::menuItem("copy-relative-path", "Copy relative path").enabledIf(hasNote),
-    ui::menuItem("copy-absolute-path", "Copy absolute path").enabledIf(hasNote),
-    // With the file rows rather than in a group of its own: an export is a
-    // question about the note as a document, which is what the three above it
-    // are too. Ends in an ellipsis because it asks where to put it.
-    ui::menuItem("export-note-pdf", "Export as PDF...").enabledIf(hasNote),
-    ui::menuSeparator(),
-    ui::menuItem("delete-note", "Delete").enabledIf(hasNote).destroys(),
   };
-  // A context menu shows all of itself. The default row cap is a palette's --
-  // twelve, with the rest scrolled -- and once the rules above were added the
-  // note menu ran to thirteen rows, which put Delete below the fold behind a
-  // scrollbar nobody expects on a menu. The window-height clamp still applies,
-  // so this cannot run a menu off the screen.
-  overlay.maxRows = static_cast<int>(overlay.items.size());
-  ui.overlays.open(std::move(overlay));
+  // A note is a file, and these are the questions a reader asks about one.
+  appendPathRows(overlay.items, hasNote);
+  // With the file rows rather than in a group of its own: an export is a
+  // question about the note as a document, which is what the three above it
+  // are too. Ends in an ellipsis because it asks where to put it.
+  overlay.items.push_back(ui::menuItem("export-note-pdf", "Export as PDF...").enabledIf(hasNote));
+  overlay.items.push_back(ui::menuSeparator());
+  overlay.items.push_back(ui::menuItem("delete-note", "Delete").enabledIf(hasNote).destroys());
+  ui::openMenu(ui.overlays, std::move(overlay));
 }
 
 void openFileMenu(UiRuntime& ui, float x, float y) {
   if(ui.sidebar.companionTarget.empty()) return;
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "file-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 220.0f;
+  ui::Overlay overlay = ui::anchoredMenu("file-menu", x, y, 220.0f);
   // The same four groups the note menu has, minus what only a note can do:
   // there is no icon, no tags and no pin for a file, because micronotes
   // holds nothing about a file but where it is.
@@ -94,25 +90,16 @@ void openFileMenu(UiRuntime& ui, float x, float y) {
     ui::menuItem("rename-file", "Rename"),
     ui::menuItem("move-file", "Move to notebook"),
     ui::menuSeparator(),
-    ui::menuItem("show-on-disk", "Show on disk"),
-    ui::menuItem("copy-relative-path", "Copy relative path"),
-    ui::menuItem("copy-absolute-path", "Copy absolute path"),
-    ui::menuSeparator(),
-    ui::menuItem("delete-file", "Delete").destroys(),
   };
-  overlay.maxRows = static_cast<int>(overlay.items.size());
-  ui.overlays.open(std::move(overlay));
+  appendPathRows(overlay.items, true);
+  overlay.items.push_back(ui::menuSeparator());
+  overlay.items.push_back(ui::menuItem("delete-file", "Delete").destroys());
+  ui::openMenu(ui.overlays, std::move(overlay));
 }
 
 void openFilesFolderMenu(UiRuntime& ui, float x, float y) {
   if(ui.sidebar.companionTarget.empty()) return;
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "files-folder-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 220.0f;
+  ui::Overlay overlay = ui::anchoredMenu("files-folder-menu", x, y, 220.0f);
   // The `files` directory itself keeps its name -- it is the name that makes
   // the convention -- so its menu offers no rename. Deleting it is allowed: that
   // is a decision about the files, not about the rule.
@@ -122,26 +109,17 @@ void openFilesFolderMenu(UiRuntime& ui, float x, float y) {
     ui::menuSeparator(),
     ui::menuItem("rename-file", "Rename").enabledIf(!anchor),
     ui::menuSeparator(),
-    ui::menuItem("show-on-disk", "Show on disk"),
-    ui::menuItem("copy-relative-path", "Copy relative path"),
-    ui::menuItem("copy-absolute-path", "Copy absolute path"),
-    ui::menuSeparator(),
-    ui::menuItem("delete-file", "Delete").destroys(),
   };
-  overlay.maxRows = static_cast<int>(overlay.items.size());
-  ui.overlays.open(std::move(overlay));
+  appendPathRows(overlay.items, true);
+  overlay.items.push_back(ui::menuSeparator());
+  overlay.items.push_back(ui::menuItem("delete-file", "Delete").destroys());
+  ui::openMenu(ui.overlays, std::move(overlay));
 }
 
 void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
   if(noteId.empty()) return;
   const auto* note = ui.state.catalog().noteById(noteId);
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "tab-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 240.0f;
+  ui::Overlay overlay = ui::anchoredMenu("tab-menu", x, y, 240.0f);
   // The tab's own note names the menu, because the menu is about that tab and
   // not about whichever one is showing.
   overlay.title = note ? note->title : std::string("Missing note");
@@ -188,23 +166,14 @@ void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
     // find out which way the toggle is set.
     ui::menuItem("pin", "Pinned").ticked(pinned),
     ui::menuSeparator(),
-    ui::menuItem("show-on-disk", "Show on disk").enabledIf(note != nullptr),
-    ui::menuItem("copy-relative-path", "Copy relative path").enabledIf(note != nullptr),
-    ui::menuItem("copy-absolute-path", "Copy absolute path").enabledIf(note != nullptr),
   };
-  overlay.maxRows = static_cast<int>(overlay.items.size());
-  ui.overlays.open(std::move(overlay));
+  appendPathRows(overlay.items, note != nullptr);
+  ui::openMenu(ui.overlays, std::move(overlay));
 }
 
 void openTagMenu(UiRuntime& ui, std::string_view tag, float x, float y) {
   if(tag.empty()) return;
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "tag-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 240.0f;
+  ui::Overlay overlay = ui::anchoredMenu("tag-menu", x, y, 240.0f);
   // The tag itself is the title. A menu of three items about "this tag" needs
   // to say which tag, and it was reached from a 7px dot -- so this is often the
   // first place its name is written out at all.
@@ -226,7 +195,7 @@ void openTagMenu(UiRuntime& ui, std::string_view tag, float x, float y) {
     // its front matter by hand.
     ui::menuItem("delete", "Delete tag...").destroys(),
   };
-  ui.overlays.open(std::move(overlay));
+  ui::openMenu(ui.overlays, std::move(overlay));
 }
 
 void openTagColorPicker(UiRuntime& ui, std::string tag) {
@@ -293,13 +262,7 @@ void openIconPicker(UiRuntime& ui) {
 }
 
 void openFolderMenu(UiRuntime& ui, float x, float y) {
-  ui::Overlay overlay;
-  overlay.kind = ui::OverlayKind::List;
-  overlay.id = "folder-menu";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
-  overlay.width = 220.0f;
+  ui::Overlay overlay = ui::anchoredMenu("folder-menu", x, y, 220.0f);
   const bool hasFolder = !ui.state.selection().folder.empty();
   overlay.items = {
     ui::menuItem("new-folder", "New notebook").withKeys(ui::keysFor(ui::ActionId::NewFolder)),
@@ -307,21 +270,18 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
     ui::menuSeparator(),
     ui::menuItem("rename-folder", "Rename").enabledIf(hasFolder),
     ui::menuSeparator(),
-    // A notebook is a directory, and the same three questions are worth asking
-    // about it as about a note. The note menu has had them since they were
-    // written; the tree's did not, so the path of a folder was the one thing in
-    // the library a reader had to leave the app to find out.
-    ui::menuItem("show-on-disk", "Show on disk"),
-    ui::menuItem("copy-relative-path", "Copy relative path"),
-    ui::menuItem("copy-absolute-path", "Copy absolute path"),
-    // The whole notebook, its sub-notebooks included, bound into one file.
-    // Offered even on the root, where it means the library.
-    ui::menuItem("export-folder-pdf", "Export as PDF..."),
-    ui::menuSeparator(),
-    ui::menuItem("delete-folder", "Delete").enabledIf(hasFolder).destroys(),
   };
-  overlay.maxRows = static_cast<int>(overlay.items.size());
-  ui.overlays.open(std::move(overlay));
+  // A notebook is a directory, and the same three questions are worth asking
+  // about it as about a note. The note menu has had them since they were
+  // written; the tree's did not, so the path of a folder was the one thing in
+  // the library a reader had to leave the app to find out.
+  appendPathRows(overlay.items, true);
+  // The whole notebook, its sub-notebooks included, bound into one file.
+  // Offered even on the root, where it means the library.
+  overlay.items.push_back(ui::menuItem("export-folder-pdf", "Export as PDF..."));
+  overlay.items.push_back(ui::menuSeparator());
+  overlay.items.push_back(ui::menuItem("delete-folder", "Delete").enabledIf(hasFolder).destroys());
+  ui::openMenu(ui.overlays, std::move(overlay));
 }
 
 

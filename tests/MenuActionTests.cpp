@@ -282,3 +282,42 @@ MICRONOTES_TEST(menu_bar_every_row_does_something) {
       " -- the bar is the shell's readable surface, and a row that does nothing "
       "when chosen teaches the reader the menu is decorative");
 }
+
+// Every context menu shows all of itself.
+//
+// The row cap on an `Overlay` defaults to a *palette's* -- twelve, with the
+// rest scrolled -- and a menu that scrolls hides its last row, which by
+// convention here is the destructive one, behind a scrollbar nobody expects on
+// a menu. Each of these used to set the cap from its own row count on the line
+// before opening, and the tag menu did not; it has five rows, so nothing
+// noticed. `ui::openMenu` sets it where the rows are known, and this is what
+// says every menu goes through it.
+MICRONOTES_TEST(context_menus_show_every_row_they_offer) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch(ui, "menu-rows", "# Note\n\nBody\n");
+  const auto noteId = ui.state.selection().noteId;
+  ui.sidebar.companionTarget = "files/a.txt";
+
+  const auto showsEveryRow = [&](const char* what) {
+    const auto* overlay = ui.overlays.top();
+    micronotes::tests::require(overlay != nullptr, std::string(what) + " did not open");
+    micronotes::tests::require(
+      overlay->maxRows >= static_cast<int>(overlay->items.size()),
+      std::string(what) + " would scroll: " + std::to_string(overlay->items.size()) +
+        " rows against a cap of " + std::to_string(overlay->maxRows));
+    while(ui.overlays.active()) ui.overlays.close();
+  };
+
+  micronotes::app::openNoteMenu(ui, 100.0f, 100.0f);
+  showsEveryRow("the note menu");
+  micronotes::app::openFolderMenu(ui, 100.0f, 100.0f);
+  showsEveryRow("the notebook menu");
+  micronotes::app::openTabMenu(ui, noteId, 100.0f, 100.0f);
+  showsEveryRow("the tab menu");
+  micronotes::app::openTagMenu(ui, "work", 100.0f, 100.0f);
+  showsEveryRow("the tag menu");
+  micronotes::app::openFileMenu(ui, 100.0f, 100.0f);
+  showsEveryRow("the file menu");
+  micronotes::app::openFilesFolderMenu(ui, 100.0f, 100.0f);
+  showsEveryRow("the files folder menu");
+}

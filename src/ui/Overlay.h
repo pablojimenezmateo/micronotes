@@ -350,4 +350,20 @@ private:
   bool caretVisible_ = true;
 };
 
+// A context menu, ready for its rows: anchored where the press was, with the
+// six fields every one of them sets written once instead of six times.
+//
+// Paired with `openMenu` below, and the pairing is the point. A context menu
+// shows all of itself -- the `maxRows` default is a *palette's*, twelve with
+// the rest scrolled behind a scrollbar nobody expects on a menu -- so every
+// menu set it from its own row count on the line before opening. Every menu
+// but one: the tag menu never did, and nothing noticed because it has five
+// rows. Setting it where the rows are known rather than at each call site is
+// the difference between a rule and a habit.
+Overlay anchoredMenu(std::string id, float x, float y, float width);
+
+// Opens a menu built by `anchoredMenu`, showing all of its rows. See above for
+// why the row cap is set here rather than by the caller.
+void openMenu(OverlayStack& overlays, Overlay overlay);
+
 }
