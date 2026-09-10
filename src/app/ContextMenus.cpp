@@ -80,17 +80,23 @@ void openFileMenu(UiRuntime& ui, float x, float y) {
   // The same four groups the note menu has, minus what only a note can do:
   // there is no icon, no tags and no pin for a file, because micronotes
   // holds nothing about a file but where it is.
+  //
+  // The ids say `-file` where the note menu's say `-note`. These three verbs
+  // are about `ui.sidebar.companionTarget` rather than about the selection, so
+  // they are genuinely different commands -- and calling them `rename` and
+  // `delete`, which mean a *note* everywhere else in the shell, left a menu
+  // one `performCommand` fallback away from deleting the wrong thing.
   overlay.items = {
-    ui::menuItem("open", "Open"),
+    ui::menuItem("open-file", "Open"),
     ui::menuSeparator(),
-    ui::menuItem("rename", "Rename"),
-    ui::menuItem("move", "Move to notebook"),
+    ui::menuItem("rename-file", "Rename"),
+    ui::menuItem("move-file", "Move to notebook"),
     ui::menuSeparator(),
     ui::menuItem("show-on-disk", "Show on disk"),
     ui::menuItem("copy-relative-path", "Copy relative path"),
     ui::menuItem("copy-absolute-path", "Copy absolute path"),
     ui::menuSeparator(),
-    ui::menuItem("delete", "Delete").destroys(),
+    ui::menuItem("delete-file", "Delete").destroys(),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
@@ -110,15 +116,15 @@ void openFilesFolderMenu(UiRuntime& ui, float x, float y) {
   // is a decision about the files, not about the rule.
   const bool anchor = library::isFilesDir(ui.sidebar.companionTarget);
   overlay.items = {
-    ui::menuItem("new-folder", "New folder"),
+    ui::menuItem("new-file-folder", "New folder"),
     ui::menuSeparator(),
-    ui::menuItem("rename", "Rename").enabledIf(!anchor),
+    ui::menuItem("rename-file", "Rename").enabledIf(!anchor),
     ui::menuSeparator(),
     ui::menuItem("show-on-disk", "Show on disk"),
     ui::menuItem("copy-relative-path", "Copy relative path"),
     ui::menuItem("copy-absolute-path", "Copy absolute path"),
     ui::menuSeparator(),
-    ui::menuItem("delete", "Delete").destroys(),
+    ui::menuItem("delete-file", "Delete").destroys(),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));

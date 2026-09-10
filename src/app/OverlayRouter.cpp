@@ -93,15 +93,15 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     const std::filesystem::path folder = result.itemId == "/" ? std::filesystem::path {} : std::filesystem::path {result.itemId};
     moveCompanionToNotebook(ui, folder);
   } else if(result.overlayId == "file-menu") {
-    if(result.itemId == "open") openCompanion(ui, ui.sidebar.companionTarget);
-    else if(result.itemId == "rename") beginCompanionRename(ui);
-    else if(result.itemId == "move") openCompanionMovePalette(ui);
-    else if(result.itemId == "delete") openDeleteCompanionConfirm(ui);
+    if(result.itemId == "open-file") openCompanion(ui, ui.sidebar.companionTarget);
+    else if(result.itemId == "rename-file") beginCompanionRename(ui);
+    else if(result.itemId == "move-file") openCompanionMovePalette(ui);
+    else if(result.itemId == "delete-file") openDeleteCompanionConfirm(ui);
     else if(handleCompanionPathCommand(ui, result.itemId, ui.sidebar.companionTarget)) {}
   } else if(result.overlayId == "files-folder-menu") {
-    if(result.itemId == "new-folder") beginCompanionFolderCreate(ui);
-    else if(result.itemId == "rename") beginCompanionRename(ui);
-    else if(result.itemId == "delete") openDeleteCompanionConfirm(ui);
+    if(result.itemId == "new-file-folder") beginCompanionFolderCreate(ui);
+    else if(result.itemId == "rename-file") beginCompanionRename(ui);
+    else if(result.itemId == "delete-file") openDeleteCompanionConfirm(ui);
     else if(handleCompanionPathCommand(ui, result.itemId, ui.sidebar.companionTarget)) {}
   } else if(result.overlayId == "folder-menu") {
     // "New note here" is the one row that is not the action of the same name:
