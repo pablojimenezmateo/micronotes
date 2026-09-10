@@ -78,7 +78,7 @@ void syncFocusedInput(UiRuntime& ui) {
 }
 
 void focusSearchAllNotes(UiRuntime& ui) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  if(!leaveOpenNote(ui)) return;
   ui.focus = FocusArea::Search;
   ui.fields.search.editor.selectAll();
   ui.state.setSearch(ui.fields.search.text(), ui.fields.searchScope);

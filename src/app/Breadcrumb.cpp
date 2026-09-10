@@ -180,7 +180,7 @@ bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {
   }
   for(const auto& [crumb, folder] : ui.chrome.crumbs) {
     if(!ui::contains(crumb, x, y)) continue;
-    if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return true;
+    if(!leaveOpenNote(ui)) return true;
     showFolder(ui, folder);
     ui.fields.search.reset();
     selectNoteAt(ui, 0);

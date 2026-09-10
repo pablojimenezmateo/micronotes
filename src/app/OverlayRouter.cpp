@@ -58,7 +58,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   } else if(result.overlayId == "command-palette") {
     performCommand(ui, result.itemId);
   } else if(result.overlayId == "jump-note-new") {
-    if(saveCurrent(ui, true)) {
+    if(leaveOpenNote(ui, true)) {
       ui.state.selectNote(result.itemId);
       loadSelectedIntoEditor(ui);
     }

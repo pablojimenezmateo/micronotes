@@ -282,7 +282,7 @@ void activateSidebarRow(UiRuntime& ui, const SidebarRow& row, RowActivation how)
   }
   // A notebook has no note to open in a tab of its own; it opens the first note
   // in it, which is a move of the selection rather than opening anything new.
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  if(!leaveOpenNote(ui)) return;
   ui.state.selectFolder(row.tree.folder);
   if(how == RowActivation::Click) ui.sidebar.tree.setExpanded(row.tree.folder, true);
   selectNoteAt(ui, 0);

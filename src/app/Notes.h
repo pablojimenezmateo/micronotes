@@ -221,4 +221,21 @@ void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder);
 // line, for saves the user did not ask for rather than ones they did.
 bool saveCurrent(UiRuntime& ui, bool quiet = false);
 
+// Putting the open note away before leaving it, and whether leaving is allowed.
+//
+// Every surface that moves the reader off the note showing has to ask this
+// first, and every one of them spelled the same three-part condition out by
+// hand -- except the tab strip and the two paths beside it (a wikilink that
+// creates its target, "Open in a new tab"), which called `saveCurrent` flat.
+// The difference does not show until a save *cannot* succeed, and then it is
+// the whole strip: a note deleted out from under the app cannot be written
+// anywhere, so every switch, every close, every middle click and both keyboard
+// steps refused, quietly, for as long as that tab was the active one. A note
+// with nothing to save must not be able to trap anyone in it.
+//
+// False means stay where you are: there was unsaved text and it could not be
+// written. A clean buffer always lets go, and so does one with no note behind
+// it at all.
+bool leaveOpenNote(UiRuntime& ui, bool quiet = false);
+
 }

@@ -188,7 +188,7 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
     if(!slot.visible || !ui::contains(slot.rect, x, y)) continue;
     // Middle click closes, as it does in every tab strip; so does the cross.
     if(button == SDL_BUTTON_MIDDLE || ui::contains(ui::tabCloseHitRect(slot), x, y)) {
-      if(!saveCurrent(ui, true)) return true;
+      if(!leaveOpenNote(ui, true)) return true;
       ui.state.closeTab(slot.index);
       loadSelectedIntoEditor(ui);
       return true;
@@ -225,7 +225,7 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
       .dropSlot = slot.index,
     };
     if(slot.index == ui.state.workspace().activeTab) return true;
-    if(!saveCurrent(ui, true)) return true;
+    if(!leaveOpenNote(ui, true)) return true;
     ui.state.editWorkspace().activeTab = slot.index;
     ui.state.selectNote(ui.state.workspace().tabs[slot.index].noteId);
     loadSelectedIntoEditor(ui);
@@ -282,7 +282,7 @@ bool handleTabMenuResult(UiRuntime& ui, const ui::OverlayResult& result) {
   const auto index = workspace.findTab(result.value);
   if(result.itemId == "close") {
     if(index == std::string::npos) return true;
-    if(!saveCurrent(ui, true)) return true;
+    if(!leaveOpenNote(ui, true)) return true;
     ui.state.closeTab(index);
     loadSelectedIntoEditor(ui);
     return true;
@@ -311,11 +311,13 @@ bool handleTabMenuResult(UiRuntime& ui, const ui::OverlayResult& result) {
   return handleNotePathCommand(ui, result.itemId, result.value);
 }
 
-// Moving between tabs and closing them. Both write the note that is open
-// first, so switching can never lose an edit.
+// Moving between tabs and closing them. Both put the note that is open away
+// first, so switching can never lose an edit -- and only when there is
+// something to put away, so a note whose file has gone is not a tab you are
+// stuck in. See `leaveOpenNote`.
 void stepTab(UiRuntime& ui, int delta) {
   if(ui.state.workspace().tabs.size() < 2) return;
-  if(!saveCurrent(ui, true)) return;
+  if(!leaveOpenNote(ui, true)) return;
   ui.state.stepTab(delta);
   loadSelectedIntoEditor(ui);
 }
@@ -323,7 +325,7 @@ void stepTab(UiRuntime& ui, int delta) {
 void closeActiveTab(UiRuntime& ui) {
   const auto& workspace = ui.state.workspace();
   if(workspace.tabs.empty()) return;
-  if(!saveCurrent(ui, true)) return;
+  if(!leaveOpenNote(ui, true)) return;
   ui.state.closeTab(workspace.activeTab);
   loadSelectedIntoEditor(ui);
 }
@@ -349,7 +351,7 @@ std::size_t closeTabs(UiRuntime& ui, std::size_t index, TabCloseScope scope) {
     ui.status = "No tabs to close";
     return 0;
   }
-  if(!saveCurrent(ui, true)) return 0;
+  if(!leaveOpenNote(ui, true)) return 0;
   // Highest index first. Closing a tab renumbers every tab after it, so a
   // forward walk closes the wrong note from its second step on -- and the last
   // steps run off the end of a strip that has since shrunk.

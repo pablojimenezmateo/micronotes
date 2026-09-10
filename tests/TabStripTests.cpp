@@ -24,6 +24,7 @@
 using micronotes::app::TabCloseScope;
 using micronotes::app::UiRuntime;
 using micronotes::app::closeTabs;
+using micronotes::app::stepTab;
 
 namespace {
 
@@ -222,4 +223,82 @@ MICRONOTES_TEST(tab_strip_a_first_save_keeps_the_loaded_note_findable) {
   // Which is what lets the place it was left be put away when it is left.
   micronotes::app::createNote(ui, "Somewhere else");
   MICRONOTES_REQUIRE(ui.state.workspace().tabs[index].readingScroll == 300);
+}
+
+// --- a tab whose note is gone --------------------------------------------
+//
+// A note deleted from outside the app keeps its tab and says "Missing note" on
+// it, which is deliberate. What that tab did to the strip was not: every one of
+// the strip's six actions asked for a save first, flat, where every other
+// surface in the shell asks only when there is something to save. Two things
+// came of it, and this is both of them.
+
+namespace {
+
+// The path of the note a tab names, while it still has one.
+std::filesystem::path pathOfTab(const UiRuntime& ui, std::size_t tab) {
+  const auto& tabs = ui.state.workspace().tabs;
+  micronotes::tests::require(tab < tabs.size(), "no such tab");
+  const auto note = ui.state.catalog().findNote(tabs[tab].noteId);
+  micronotes::tests::require(note.has_value(), "the tab's note was not in the catalog");
+  return note->path;
+}
+
+}
+
+// One: a save nobody asked for, of a note nobody has edited, writes a deleted
+// file back. Closing the tab of a note the reader had just deleted put the
+// note back on disk.
+MICRONOTES_TEST(tab_strip_closing_a_tab_does_not_write_a_deleted_note_back) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "micronotes-tab-vanished-close", 3);
+  const auto path = pathOfTab(ui, ui.state.workspace().activeTab);
+  MICRONOTES_REQUIRE(std::filesystem::remove(path));
+  MICRONOTES_REQUIRE(!ui.editor.dirty());
+
+  micronotes::app::closeActiveTab(ui);
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 2);
+  MICRONOTES_REQUIRE(!std::filesystem::exists(path));
+}
+
+// Two, and the one that was reported: the reader clicks the tab that has
+// become "Missing note". Landing on it is allowed -- the note being left saved
+// fine -- and from there the buffer belongs to a note the catalog no longer
+// has, so the save every strip action demanded could never succeed again. The
+// whole strip went dead, and said so only as "Autosave failed" in the status
+// line.
+MICRONOTES_TEST(tab_strip_a_missing_tab_stepped_onto_is_not_a_tab_you_are_stuck_in) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "micronotes-tab-vanished-arrived", 3);
+  // Deleted behind the reader's back rather than under their cursor, which is
+  // what an external delete looks like.
+  micronotes::app::stepTab(ui, 1);
+  const std::size_t landing = ui.state.workspace().activeTab;
+  const auto path = pathOfTab(ui, landing);
+  micronotes::app::stepTab(ui, 1);
+  MICRONOTES_REQUIRE(ui.state.workspace().activeTab != landing);
+  MICRONOTES_REQUIRE(std::filesystem::remove(path));
+  micronotes::app::rescanLibraryAfterExternalChange(ui);
+  MICRONOTES_REQUIRE(!ui.state.catalog().findNote(
+      ui.state.workspace().tabs[landing].noteId).has_value());
+
+  // Onto the missing tab, which has always worked.
+  while(ui.state.workspace().activeTab != landing) micronotes::app::stepTab(ui, 1);
+
+  // And off it again, which did not.
+  micronotes::app::stepTab(ui, 1);
+  MICRONOTES_REQUIRE(ui.state.workspace().activeTab != landing);
+}
+
+// The bulk closes go through the same gate, so they were stuck the same way.
+MICRONOTES_TEST(tab_strip_a_bulk_close_still_runs_from_a_tab_whose_note_is_gone) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "micronotes-tab-vanished-bulk", 3);
+  const std::size_t active = ui.state.workspace().activeTab;
+  const auto path = pathOfTab(ui, active);
+  MICRONOTES_REQUIRE(std::filesystem::remove(path));
+
+  MICRONOTES_REQUIRE(closeTabs(ui, active, TabCloseScope::Others) == 2);
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 1);
+  MICRONOTES_REQUIRE(!std::filesystem::exists(path));
 }

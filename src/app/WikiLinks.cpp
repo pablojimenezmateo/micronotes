@@ -57,7 +57,7 @@ void openWikiLink(UiRuntime& ui, std::string_view target) {
   if(const auto current = ui.state.catalog().findNote(ui.state.selection().noteId)) {
     folder = current->folder;
   }
-  if(!saveCurrent(ui, true)) return;
+  if(!leaveOpenNote(ui, true)) return;
   const auto created = ui.state.createNote(split.note, folder);
   if(!created) {
     ui.status = "Could not create " + split.note;

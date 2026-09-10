@@ -119,14 +119,14 @@ void loadSelectedBuffer(UiRuntime& ui) {
 void selectNoteAt(UiRuntime& ui, int index) {
   auto notes = ui.state.currentNotes();
   if(notes.empty()) return;
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  if(!leaveOpenNote(ui)) return;
   index = std::clamp(index, 0, static_cast<int>(notes.size()) - 1);
   ui.state.selectNote(notes[static_cast<std::size_t>(index)].id);
   loadSelectedBuffer(ui);
 }
 
 void selectTag(UiRuntime& ui, const std::string& tag) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  if(!leaveOpenNote(ui)) return;
   // Choosing the tag already in force clears it, which is the affordance the
   // empty state has been promising ("click the tag again to clear the filter")
   // since before there was anything to click: a tag row and a note row look and
@@ -347,7 +347,7 @@ void showFolder(UiRuntime& ui, const std::filesystem::path& folder) {
 }
 
 void selectNoteById(UiRuntime& ui, const std::string& noteId, ui::TabPolicy policy) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  if(!leaveOpenNote(ui)) return;
   ui.state.selectNote(noteId, policy);
   loadSelectedBuffer(ui);
 }
@@ -524,13 +524,18 @@ bool createNote(UiRuntime& ui, const std::string& title) {
 }
 
 void createNoteInFolder(UiRuntime& ui, const std::filesystem::path& folder) {
-  if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
+  if(!leaveOpenNote(ui)) return;
   // The folder is chosen *before* the name is asked for, so the prompt's answer
   // needs nothing carried with it. Escaping the prompt leaves the sidebar
   // showing the notebook that was right-clicked, which is where the reader was
   // pointing when they asked.
   ui.state.selectFolder(folder);
   beginNoteCreate(ui);
+}
+
+bool leaveOpenNote(UiRuntime& ui, bool quiet) {
+  if(!ui.editor.dirty() || ui.state.selection().noteId.empty()) return true;
+  return saveCurrent(ui, quiet);
 }
 
 bool saveCurrent(UiRuntime& ui, bool quiet) {

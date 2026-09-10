@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-44 have been used. Closing an entry means deleting it and saying so in the
+TD-45 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -81,3 +81,31 @@ a CFF writer, and the place for it is `core/pdf/CffSubset.cpp`, which is the
 only thing that reads the table. The cost the debt named was file size and
 three quarters of it is paid; what is left is worth a CFF writer only when
 somebody minds the last 50 KB.
+
+---
+
+## TD-45 — The wheel does nothing over the tab strip
+
+A strip with more tabs than fit scrolls, and the only way to scroll it is the
+overflow chevrons at either end — each of which steps the *active tab* one
+along, because the strip has no scroll of its own to set: the window it shows
+is derived from which tab is active (`ui::layoutTabs`). `routeWheel` in
+`app/Scroll.cpp` routes the wheel to the sidebar, the right panel and the two
+panes by where the pointer is, and the strip is not among them, so a wheel over
+the tabs has never done anything at all.
+
+**What it costs.** The one gesture everybody tries on a row of tabs is dead,
+and dead silently — there is no feedback that says the chevrons are the way.
+Reported as part of "I cannot use the tab strip anymore": the strip really was
+broken at the time for an unrelated reason, and the wheel was assumed to be the
+same breakage rather than the thing it is, which is a gesture that was never
+wired.
+
+**Why it has not been paid.** Not because it is hard but because it is not
+clear what it should do. Scrolling the strip means changing the active tab,
+which means a wheel over the tabs switches the note being read — surprising in
+a way the chevrons are not, since those were pressed on purpose. Doing it
+without that means giving the strip a scroll offset of its own and deriving the
+visible window from two things instead of one, which is the layout's whole
+simplification undone for a gesture. Worth doing when somebody decides which of
+those two a wheel over the tabs should mean.
