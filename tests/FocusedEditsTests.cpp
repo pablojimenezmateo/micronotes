@@ -261,3 +261,85 @@ MICRONOTES_TEST(focused_edits_copy_never_changes_the_note) {
   MICRONOTES_REQUIRE(ui.editor.text() == before);
   MICRONOTES_REQUIRE(!ui.status.text.empty());
 }
+
+// --- block commands over a plain text selection -----------------------------
+
+// There are two ways to have several blocks in hand -- Escape into the block
+// selection, or just drag across them -- and the block commands only heard the
+// first. With three list items selected by dragging or by Shift+Down, Alt+Up
+// moved the one item the caret happened to be in and left the rest of the
+// selection where it was.
+//
+// The bodies below are lists, because a block is not a line: "one\ntwo" is one
+// paragraph and moving it moves both lines together, which is correct and not
+// what anybody was complaining about.
+
+namespace {
+
+// `UiRuntime` holds a database handle and a directory watcher, so it neither
+// copies nor moves: it is filled in place.
+void putInEditor(UiRuntime& ui, std::string_view body) {
+  ui.focus = FocusArea::Editor;
+  ui.editor.setText(std::string(body));
+}
+
+}
+
+MICRONOTES_TEST(block_commands_read_a_text_selection_as_the_blocks_it_covers) {
+  UiRuntime ui;
+  putInEditor(ui, "- one\n- two\n- three\n- four\n");
+  // "- two\n- three" -- from the start of the second item to the end of the
+  // third, which is the shape a drag across two items leaves.
+  ui.editor.selectRange(6, 20);
+  const auto [from, to] = micronotes::app::blockSelectionCarets(ui);
+  MICRONOTES_REQUIRE(from == 6);
+  // One byte inside the last block, not the boundary after it.
+  MICRONOTES_REQUIRE(to == 19);
+}
+
+MICRONOTES_TEST(block_commands_move_every_selected_line_not_just_the_first) {
+  UiRuntime ui;
+  putInEditor(ui, "- one\n- two\n- three\n- four\n");
+  ui.editor.selectRange(6, 20);  // "- two\n- three"
+  MICRONOTES_REQUIRE(micronotes::app::moveSelectedBlocks(ui, -1));
+  MICRONOTES_REQUIRE(ui.editor.text() == "- two\n- three\n- one\n- four\n");
+  // And back down again, from the selection the move left behind, so a run of
+  // Alt+Down carries the same items rather than shedding them one per press.
+  MICRONOTES_REQUIRE(micronotes::app::moveSelectedBlocks(ui, 1));
+  MICRONOTES_REQUIRE(ui.editor.text() == "- one\n- two\n- three\n- four\n");
+}
+
+// The end of a Shift+Down selection sits on the *next* block's first byte, so a
+// range taken at face value would carry that block along for the ride.
+MICRONOTES_TEST(block_commands_do_not_reach_past_a_selection_that_ends_on_a_boundary) {
+  UiRuntime ui;
+  putInEditor(ui, "- one\n- two\n- three\n");
+  // "- one\n" -- everything up to the start of "- two".
+  ui.editor.selectRange(0, 6);
+  MICRONOTES_REQUIRE(micronotes::app::moveSelectedBlocks(ui, 1));
+  MICRONOTES_REQUIRE(ui.editor.text() == "- two\n- one\n- three\n");
+}
+
+MICRONOTES_TEST(block_commands_duplicate_and_delete_the_whole_text_selection) {
+  UiRuntime ui;
+  putInEditor(ui, "- one\n- two\n- three\n");
+  ui.editor.selectRange(0, 12);  // "- one\n- two\n"
+  micronotes::app::performBlockCommand(ui, "duplicate");
+  MICRONOTES_REQUIRE(ui.editor.text() == "- one\n- two\n- one\n- two\n- three\n");
+
+  UiRuntime other;
+  putInEditor(other, "- one\n- two\n- three\n");
+  other.editor.selectRange(0, 12);
+  micronotes::app::performBlockCommand(other, "delete");
+  MICRONOTES_REQUIRE(other.editor.text() == "- three\n");
+}
+
+// With no selection at all it is still the block holding the caret, which is
+// what a bare Alt+Up has always meant.
+MICRONOTES_TEST(block_commands_with_no_selection_are_about_the_block_at_the_caret) {
+  UiRuntime ui;
+  putInEditor(ui, "- one\n- two\n- three\n");
+  ui.editor.moveCursor(8);
+  MICRONOTES_REQUIRE(micronotes::app::moveSelectedBlocks(ui, -1));
+  MICRONOTES_REQUIRE(ui.editor.text() == "- two\n- one\n- three\n");
+}

@@ -33,12 +33,32 @@ void linkEditorSelection(UiRuntime& ui) {
   if(applyEdit(ui, doc::makeLink(ui.editor.text(), start, end))) ui.status = "Link: type the destination";
 }
 
-// The blocks a command applies to: the block selection when there is one,
-// otherwise the block holding the caret. Both ends are carets, not indices.
+// The blocks a command applies to: the block selection when there is one, the
+// blocks a *text* selection covers when there is one of those, and otherwise
+// the block holding the caret. Both ends are carets, not indices.
+//
+// The middle case is the one that was missing, and every block command shared
+// the omission: with three lines selected by dragging or by Shift+Down, this
+// answered with the bare caret, so Alt+Up moved the one block the caret
+// happened to be in and left the rest of the selection where it was. There are
+// two ways to select several blocks -- Escape into the block selection, or just
+// drag across them -- and only one of them was being heard.
 std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui) {
-  if(!ui.blockSelection.active) return {ui.editor.cursor(), ui.editor.cursor()};
-  return {std::min(ui.blockSelection.anchor, ui.blockSelection.focus),
-          std::max(ui.blockSelection.anchor, ui.blockSelection.focus)};
+  if(ui.blockSelection.active) {
+    return {std::min(ui.blockSelection.anchor, ui.blockSelection.focus),
+            std::max(ui.blockSelection.anchor, ui.blockSelection.focus)};
+  }
+  if(ui.editor.hasSelection()) {
+    const std::size_t start = ui.editor.selectionStart();
+    const std::size_t end = ui.editor.selectionEnd();
+    // One byte inside the last block selected, not the boundary after it: a
+    // selection that stops exactly at a block's end -- which is what
+    // Shift+Down onto the next line gives -- would otherwise reach into the
+    // block that follows and take it along. The same convention
+    // `syncBlockSelectionToEdit` uses, and for the same reason.
+    return {start, end > start ? end - 1 : start};
+  }
+  return {ui.editor.cursor(), ui.editor.cursor()};
 }
 
 void selectBlockAtCursor(UiRuntime& ui) {
