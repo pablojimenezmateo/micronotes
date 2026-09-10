@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include "app/Commands.h"
+
 #include "core/perf/PerformanceCounters.h"
 #include "core/render/FontResolver.h"
 #include "core/render/TextTextureCache.h"
@@ -431,18 +433,26 @@ MICRONOTES_TEST(architecture_key_names_are_formatted_not_typed) {
 // they have in common is the comparison, so that is what this looks for -- and
 // a menu table's `{"name", "Label", ...}` entry deliberately does not match it,
 // because being *offered* is the thing whose dispatch is in question.
+// Every action a surface offers reaches a command, and every command is an
+// action a surface could offer.
+//
+// This used to read `src/app/*.cpp` as text and look for the literal
+// `== "name"`, because the dispatch was a ninety-branch `if`/`else if` chain
+// and a source grep was the only way to see into it. That check could not tell
+// whether the branch it found was *reachable* -- one nested inside another
+// id's `if`, or one after an arm that already matched, passed it -- and it had
+// to assert `performCommand`'s own signature line still existed so it would
+// not silently scan for a spelling nothing used any more. See TD-46, which
+// this closes.
+//
+// `commandSpecs()` is a table now, so both directions are a set comparison.
+// They are different failures and both are silent:
+//
+//   * an action with no command is a menu row or a shortcut that does nothing
+//     when used -- which `F2`, `Ctrl+Q` and `Ctrl+O` all once were;
+//   * a command with no action is a command no surface can reach, which is
+//     dead code that looks live.
 MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
-  std::string dispatch;
-  for(const auto& entry : std::filesystem::directory_iterator(repoRoot() / "src" / "app")) {
-    if(entry.path().extension() != ".cpp") continue;
-    dispatch += readText(entry.path());
-  }
-  // Anchor on the chain itself. Were performCommand rewritten into a table,
-  // this test would otherwise scan for a spelling nothing uses any more and
-  // pass forever.
-  MICRONOTES_REQUIRE(dispatch.find("void performCommand(UiRuntime& ui, const std::string& id) {") !=
-                     std::string::npos);
-
   std::set<std::string> offered;
   for(const auto& spec : micronotes::ui::actionSpecs()) {
     // Everything the command palette lists.
@@ -451,8 +461,7 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
     // list: the editing verbs act on a selection the palette has just taken
     // the focus away from, so they carry `inPalette = false` and were checked
     // by nothing. `keyRunsIt` means `handleKey` hands the name straight to
-    // performCommand, so a name with no branch there is a dead shortcut --
-    // which is exactly what `F2` and `Ctrl+Q` were.
+    // performCommand, so a name with no command is a dead shortcut.
     if(spec.keyRunsIt && !spec.chord.empty()) offered.insert(std::string(spec.name));
   }
   // Everything the menu bar can be clicked on. Read from the menus' own tables
@@ -469,16 +478,45 @@ MICRONOTES_TEST(architecture_every_offered_action_is_dispatched) {
   }
   MICRONOTES_REQUIRE(!offered.empty());
 
+  std::set<std::string> dispatched;
+  for(const auto& command : micronotes::app::commandSpecs()) {
+    dispatched.insert(std::string(command.name));
+  }
+
   std::string missing;
   for(const auto& name : offered) {
-    if(dispatch.find("== \"" + name + "\"") != std::string::npos) continue;
+    if(dispatched.count(name) != 0) continue;
     if(!missing.empty()) missing += ", ";
     missing += name;
   }
   micronotes::tests::require(
     missing.empty(),
-    "actions the palette or the menu bar offer but nothing under src/app/ dispatches: " + missing +
+    "actions the palette or the menu bar offer but `commandSpecs()` does not carry: " + missing +
     " -- clicking one of these does nothing at all, and nothing else notices");
+}
+
+// The other direction, and the row's own shape.
+//
+// A command's name is an action's name: that is what makes the two tables
+// comparable at all, and it is what catches the three path rows -- which pass
+// their own id on to `handleNotePathCommand` -- coming to disagree with the
+// key they are filed under. And a duplicate name is a row that can never run,
+// which the chain hid just as well as a table does: the second `== "save"`
+// was as unreachable as the second `{"save", ...}` is.
+MICRONOTES_TEST(architecture_every_command_is_an_action_and_is_named_once) {
+  std::set<std::string> seen;
+  for(const auto& command : micronotes::app::commandSpecs()) {
+    const std::string name(command.name);
+    micronotes::tests::require(!name.empty(), "a command row has no name");
+    micronotes::tests::require(command.run != nullptr, "command '" + name + "' does nothing");
+    micronotes::tests::require(micronotes::ui::findAction(command.name) != nullptr,
+                               "command '" + name +
+                                 "' is not an action, so no surface can reach it");
+    micronotes::tests::require(seen.insert(name).second,
+                               "two command rows are named '" + name +
+                                 "', and the second can never run");
+  }
+  MICRONOTES_REQUIRE(seen.size() == micronotes::ui::actionSpecs().size());
 }
 
 // The tab strip lays itself out exactly once, in the draw.

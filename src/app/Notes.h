@@ -5,6 +5,7 @@
 #include "ui/Tabs.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -116,6 +117,20 @@ LibraryPaths folderPathsFor(const UiRuntime& ui, const std::filesystem::path& fo
 // message to a colleague. It is refused rather than silently falling back to
 // the absolute one when the thing somehow sits outside the library, because a
 // "relative path" that is absolute is the wrong answer given confidently.
+// Which of the three. A type rather than the id repeated, because the three
+// commands are told apart *by the string they are handed* -- so a caller that
+// passed a neighbour's spelling ran a neighbour's command, and both spellings
+// being real ids meant nothing structural could see it. `commandSpecs()`'s
+// three rows are keyed on the id and act on this, so the two cannot be the
+// same mistake.
+enum class PathCommand { ShowOnDisk, CopyRelative, CopyAbsolute };
+
+// The path command `id` names, or nothing. For the routers, which are handed
+// an overlay item id and have to find out whether it is one of these at all --
+// the one place a string genuinely arrives from outside.
+std::optional<PathCommand> pathCommandFor(std::string_view id);
+
+bool handleNotePathCommand(UiRuntime& ui, PathCommand command, std::string_view noteId);
 bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId);
 bool handleFolderPathCommand(UiRuntime& ui, std::string_view command,
                              const std::filesystem::path& folder);

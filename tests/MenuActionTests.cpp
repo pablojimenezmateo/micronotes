@@ -321,3 +321,51 @@ MICRONOTES_TEST(context_menus_show_every_row_they_offer) {
   micronotes::app::openFilesFolderMenu(ui, 100.0f, 100.0f);
   showsEveryRow("the files folder menu");
 }
+
+// The three path commands, and the `PathCommand` that keeps them apart.
+//
+// They were the one place in `commandSpecs()` where a row could be wrong
+// without being unreachable: all three went through `handleNotePathCommand`,
+// which told them apart by the id it was *handed* rather than by the id the
+// row is keyed on. A row passing its neighbour's spelling dispatched, did
+// something, and did the wrong thing -- and both spellings being real ids
+// meant nothing structural saw it, while a test with no clipboard cannot tell
+// two copies apart by their effect either.
+//
+// So the string is gone from the rows and the enum decides. What is left to
+// check is the parse the routers still need, and that each value reaches a
+// different arm.
+MICRONOTES_TEST(the_three_path_commands_are_told_apart_by_type_not_by_spelling) {
+  using micronotes::app::PathCommand;
+  MICRONOTES_REQUIRE(micronotes::app::pathCommandFor("show-on-disk") == PathCommand::ShowOnDisk);
+  MICRONOTES_REQUIRE(micronotes::app::pathCommandFor("copy-relative-path") ==
+                     PathCommand::CopyRelative);
+  MICRONOTES_REQUIRE(micronotes::app::pathCommandFor("copy-absolute-path") ==
+                     PathCommand::CopyAbsolute);
+  // Everything else is not one, which is what lets a router hand it any
+  // overlay item id and use the answer to decide whether it handled it.
+  MICRONOTES_REQUIRE(!micronotes::app::pathCommandFor("save").has_value());
+  MICRONOTES_REQUIRE(!micronotes::app::pathCommandFor("").has_value());
+  MICRONOTES_REQUIRE(!micronotes::app::pathCommandFor("show-on-disk ").has_value());
+
+  // And the three do different things. Only `show-on-disk` is distinguishable
+  // from the other two without a clipboard -- which is the whole reason the
+  // enum exists rather than a test standing in for it.
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch(ui, "menu-paths", "# Note\n\nBody\n");
+  MICRONOTES_REQUIRE(!ui.state.selection().noteId.empty());
+  const auto say = [&](const char* command) {
+    ui.status = std::string();
+    micronotes::app::performCommand(ui, command);
+    return std::string(ui.status.text);
+  };
+  const std::string shown = say("show-on-disk");
+  const std::string copied = say("copy-absolute-path");
+  micronotes::tests::require(!shown.empty() && !copied.empty(),
+                             "a path command said nothing at all");
+  micronotes::tests::require(shown != copied,
+                             "show-on-disk and copy-absolute-path said the same thing: '" + shown +
+                               "' -- one of them is running the other");
+  micronotes::tests::require(shown.rfind("Copied", 0) != 0,
+                             "show-on-disk copied something: '" + shown + "'");
+}

@@ -8,10 +8,9 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Six entries are open: one about selecting inside a block the live scanner
+  Five entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
   writing a CFF writer, one about the wheel over the tab strip, one about
-  the command chain being checked by grepping its own source, one about
   the find bar rescanning the whole note per keystroke, and one about autosave
   re-tokenising the whole note into the search index once a second. So
   something that looks unaccounted for elsewhere
@@ -513,6 +512,16 @@ when the counters went in it turned out to be 70% of every frame.
   depends on the focus gets a hand-written branch. The chain used to be a second
   copy of the table, and three bindings -- `F2`, `Ctrl+Q`, `Ctrl+O` -- were
   advertised in the palette and the shortcut list while doing nothing at all.
+- **And what a name does lives once, in `app::commandSpecs()`.** It was a
+  ninety-branch `if`/`else if`, which could only be checked by grepping
+  `src/app/*.cpp` for the literal `== "name"` -- a test that cannot see whether
+  the branch it found is reachable, and that had to assert `performCommand`'s
+  own signature line still existed so it would not scan forever for a spelling
+  nothing uses. The two registries are compared directly now, both ways: an
+  action with no command is a dead menu row, a command with no action is a
+  command nothing can reach, and a name appearing twice is a row that can
+  never run. Every row is a captureless lambda, because nothing a command does
+  closes over anything -- the state it needs is `ui`.
 - Debt goes in `docs/tech-debt.md` as a numbered `TD-n`, with what it costs
   today and why it has not been paid. There are no `TODO` comments in this tree
   and it should stay that way -- a TODO is invisible to everyone who is not

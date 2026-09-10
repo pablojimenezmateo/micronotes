@@ -219,43 +219,57 @@ namespace {
 // say when there is nothing to name, and `outside` when the thing is real and
 // sits outside the library -- the two sentences are the only part of this that
 // differs between a note and a notebook.
-bool carryOutPathCommand(UiRuntime& ui, std::string_view command, const LibraryPaths& paths,
+void carryOutPathCommand(UiRuntime& ui, PathCommand command, const LibraryPaths& paths,
                          const char* missing, const char* outside) {
-  const bool onDisk = command == "show-on-disk";
-  const bool relative = command == "copy-relative-path";
-  const bool absolute = command == "copy-absolute-path";
-  if(!onDisk && !relative && !absolute) return false;
+  const bool onDisk = command == PathCommand::ShowOnDisk;
+  const bool relative = command == PathCommand::CopyRelative;
 
   if(paths.absolute.empty()) {
     ui.status = missing;
-    return true;
+    return;
   }
   const std::filesystem::path path = paths.absolute;
   if(onDisk) {
     ui.status = revealInFileManager(path) ? "Showing " + path.filename().string() + " on disk"
                                           : "Could not open the file manager";
-    return true;
+    return;
   }
   if(relative && paths.relative.empty()) {
     ui.status = outside;
-    return true;
+    return;
   }
   const std::string& text = relative ? paths.relative : paths.absolute;
   ui.status = setClipboardText(text) ? "Copied " + text : "Clipboard unavailable";
+}
+
+}
+
+std::optional<PathCommand> pathCommandFor(std::string_view id) {
+  if(id == "show-on-disk") return PathCommand::ShowOnDisk;
+  if(id == "copy-relative-path") return PathCommand::CopyRelative;
+  if(id == "copy-absolute-path") return PathCommand::CopyAbsolute;
+  return std::nullopt;
+}
+
+bool handleNotePathCommand(UiRuntime& ui, PathCommand command, std::string_view noteId) {
+  carryOutPathCommand(ui, command, notePathsFor(ui, noteId), "No note to locate",
+                      "That note is not inside the library");
   return true;
 }
 
-}
-
 bool handleNotePathCommand(UiRuntime& ui, std::string_view command, std::string_view noteId) {
-  return carryOutPathCommand(ui, command, notePathsFor(ui, noteId), "No note to locate",
-                             "That note is not inside the library");
+  const auto which = pathCommandFor(command);
+  if(!which) return false;
+  return handleNotePathCommand(ui, *which, noteId);
 }
 
 bool handleFolderPathCommand(UiRuntime& ui, std::string_view command,
                              const std::filesystem::path& folder) {
-  return carryOutPathCommand(ui, command, folderPathsFor(ui, folder), "No notebook to locate",
-                             "That notebook is not inside the library");
+  const auto which = pathCommandFor(command);
+  if(!which) return false;
+  carryOutPathCommand(ui, *which, folderPathsFor(ui, folder), "No notebook to locate",
+                      "That notebook is not inside the library");
+  return true;
 }
 
 LibraryPaths companionPathsFor(const UiRuntime& ui, const std::filesystem::path& relative) {
@@ -265,8 +279,11 @@ LibraryPaths companionPathsFor(const UiRuntime& ui, const std::filesystem::path&
 
 bool handleCompanionPathCommand(UiRuntime& ui, std::string_view command,
                                 const std::filesystem::path& relative) {
-  return carryOutPathCommand(ui, command, companionPathsFor(ui, relative), "No file to locate",
-                             "That file is not inside the library");
+  const auto which = pathCommandFor(command);
+  if(!which) return false;
+  carryOutPathCommand(ui, *which, companionPathsFor(ui, relative), "No file to locate",
+                      "That file is not inside the library");
+  return true;
 }
 
 bool openCompanion(UiRuntime& ui, const std::filesystem::path& relative) {
