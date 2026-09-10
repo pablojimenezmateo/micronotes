@@ -246,7 +246,11 @@ Useful runtime controls:
   and selected, so closing the bar leaves it there to copy. `Enter` and
   `Shift+Enter` step through them from the field, `F3` and `Shift+F3` from
   anywhere, and both wrap. With text selected, `Ctrl+F` searches for it rather
-  than making you type it again. `Esc` puts the bar away.
+  than making you type it again, and opening a note from a "Search all notes"
+  result brings that query into the bar with it -- reaching a note through a
+  search and then retyping what you searched for is the step the bar exists to
+  remove. It stays shut for a result whose *body* does not hold the query,
+  which a title match can produce. `Esc` puts the bar away.
 - `F1`: every keyboard shortcut in one list, filterable by what it does or by
   the keys themselves - typing `alt` finds `Alt+Up`.
 - `Ctrl+,`: settings. Theme, text size, page width, and the library folder. Each

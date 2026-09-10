@@ -277,6 +277,30 @@ void openFindInNote(UiRuntime& ui) {
   revealFindMatch(ui);
 }
 
+bool openFindFromSearch(UiRuntime& ui) {
+  if(ui.state.selection().noteId.empty()) return false;
+  const std::string query = ui.fields.search.text();
+  if(query.empty()) return false;
+  // Only when the note's *text* actually holds the query. A library search runs
+  // over titles as well -- and under the Title scope over nothing else -- so a
+  // result can be a note whose name matched and whose body never mentions the
+  // word. Handing that reader a focused find bar reading "No results" puts a
+  // card over the note they asked to read and swallows the next thing they
+  // type. ../microide has no such case: a grep result is a line in the file.
+  const std::string_view body = ui.editor.text();
+  if(util::findFrom(body, query, 0, ui.find.options) >= body.size()) return false;
+
+  ui.fields.find.beginWith(query);
+  ui.find.open = true;
+  ui.focus = FocusArea::Find;
+  // No `forget` first: the buffer was just replaced, so the memo key's revision
+  // has moved and the refresh below rescans rather than trusting the offsets
+  // the previous note left behind.
+  refreshFindMatches(ui);
+  revealFindMatch(ui);
+  return true;
+}
+
 void closeFindInNote(UiRuntime& ui) {
   ui.find.open = false;
   ui.find.forget();

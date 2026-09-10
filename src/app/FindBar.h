@@ -71,6 +71,17 @@ bool pressFindBar(ui::TextRenderer& text, UiRuntime& ui, ui::Rect content, float
 // selection becomes the query: looking for "the thing I just highlighted" is
 // what the key is reached for after, and re-typing it is the step nobody wants.
 void openFindInNote(UiRuntime& ui);
+// Opens the bar on the note just opened from a library search result, carrying
+// the search box's query into it, exactly as ../microide's
+// `OpenBufferSearchFromProjectSearchResult` carries a project-search term into
+// the in-file find. Reaching a note through a search and then having to retype
+// what you searched for to walk its matches is the step the port removes.
+//
+// Returns whether the bar was opened: it declines a note whose *body* does not
+// hold the query, which a library search can produce and a grep cannot -- see
+// the definition. The answer is what tells the caller where the keyboard went.
+bool openFindFromSearch(UiRuntime& ui);
+
 // Closes it, drops the highlights, and hands the keyboard back to the note.
 void closeFindInNote(UiRuntime& ui);
 

@@ -6,6 +6,7 @@
 #include "app/Notes.h"
 #include "app/SessionState.h"
 #include "app/Shell.h"
+#include "app/SidebarModel.h"
 #include "ui/TextRenderer.h"
 
 #include <filesystem>
@@ -23,7 +24,10 @@ using micronotes::app::closeFindInNote;
 using micronotes::app::findBarLayout;
 using micronotes::app::findMatchCountText;
 using micronotes::app::moveFindMatch;
+using micronotes::app::activateSidebarRow;
+using micronotes::app::openFindFromSearch;
 using micronotes::app::openFindInNote;
+using micronotes::app::pressSidebarRow;
 using micronotes::app::refreshFindMatches;
 using micronotes::app::toggleFindOption;
 
@@ -238,4 +242,93 @@ MICRONOTES_TEST(find_bar_is_what_escape_closes) {
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == micronotes::app::Dismissed::Find);
   MICRONOTES_REQUIRE(!ui.find.open);
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) != micronotes::app::Dismissed::Find);
+}
+
+// --- carrying a library search into the note ------------------------------
+//
+// Reaching a note through "Search all notes" and then having to retype the
+// query to walk its matches is the step ../microide removed with
+// `OpenBufferSearchFromProjectSearchResult`. These are that port.
+
+MICRONOTES_TEST(find_bar_opens_from_a_search_result_carrying_the_query) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-from-search", kBody);
+  ui.fields.search.beginWith("plan");
+  ui.focus = micronotes::app::FocusArea::Search;
+
+  MICRONOTES_REQUIRE(openFindFromSearch(ui));
+  MICRONOTES_REQUIRE(ui.find.open);
+  // The query, not a fresh empty field: that is the whole point of the port.
+  MICRONOTES_REQUIRE(ui.fields.find.text() == "plan");
+  MICRONOTES_REQUIRE(ui.find.matches.size() == 4);
+  MICRONOTES_REQUIRE(activeStart(ui) == 0);
+  // The keyboard follows the query in, so Enter steps to the next match rather
+  // than doing whatever it would have done in the sidebar.
+  MICRONOTES_REQUIRE(ui.focus == micronotes::app::FocusArea::Find);
+  // Revealed, so the first hit is selected on the page and not merely counted.
+  MICRONOTES_REQUIRE(ui.editor.hasSelection());
+  MICRONOTES_REQUIRE(ui.editor.selectionStart() == 0);
+}
+
+// A library search matches titles too, so a result can be a note whose body
+// never mentions the query -- something a grep over files cannot produce, and
+// so a case ../microide never had to answer. A focused bar reading "No results"
+// over a note the reader asked to read would swallow the next thing they type.
+MICRONOTES_TEST(find_bar_declines_a_search_result_whose_body_lacks_the_query) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-title-only", kBody);
+  ui.fields.search.beginWith("roadmap");
+  ui.focus = micronotes::app::FocusArea::Folders;
+
+  MICRONOTES_REQUIRE(!openFindFromSearch(ui));
+  MICRONOTES_REQUIRE(!ui.find.open);
+  MICRONOTES_REQUIRE(ui.fields.find.empty());
+  // Nothing moved, so the caller's own answer about where the keyboard goes
+  // still stands.
+  MICRONOTES_REQUIRE(ui.focus == micronotes::app::FocusArea::Folders);
+}
+
+// An empty search box cannot seed anything, which is the state the bar is in
+// whenever a result row is reached from somewhere other than a live query.
+MICRONOTES_TEST(find_bar_declines_a_search_result_with_no_query) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-no-query", kBody);
+  MICRONOTES_REQUIRE(!openFindFromSearch(ui));
+  MICRONOTES_REQUIRE(!ui.find.open);
+}
+
+// Asked for, not passed over. Arrowing down the result list previews each note,
+// and moving the keyboard into the find bar on the way would take the arrows
+// doing the walking -- the same distinction `RowActivation` already draws for
+// tabs and for unfolding notebooks.
+MICRONOTES_TEST(a_search_result_carries_its_query_only_when_it_is_asked_for) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-find-activation", kBody);
+  // Through the disk, because activating a row reloads the note from it.
+  ui.editor.markDirty();
+  MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui, true));
+  ui.fields.search.beginWith("plan");
+
+  micronotes::app::SidebarRow result;
+  result.kind = micronotes::app::SidebarRow::Kind::SearchResult;
+  result.noteId = ui.state.selection().noteId;
+  MICRONOTES_REQUIRE(!result.noteId.empty());
+
+  // Arrowed onto: the note is previewed and the sidebar keeps the keyboard.
+  activateSidebarRow(ui, result, micronotes::app::RowActivation::Cursor);
+  MICRONOTES_REQUIRE(!ui.find.open);
+
+  // Right-clicked: the row is activated the same way -- so the menu that
+  // follows acts on this note -- but asking what a result is is not asking to
+  // read it, and a find bar must not appear under the menu.
+  pressSidebarRow(ui, result, 5.0f, 5.0f, SDL_BUTTON_RIGHT);
+  MICRONOTES_REQUIRE(!ui.find.open);
+  ui.overlays.close();  // the menu the right click opened
+
+  // Clicked: the query comes with.
+  pressSidebarRow(ui, result, 5.0f, 5.0f, SDL_BUTTON_LEFT);
+  MICRONOTES_REQUIRE(ui.find.open);
+  MICRONOTES_REQUIRE(ui.fields.find.text() == "plan");
+  MICRONOTES_REQUIRE(ui.find.matches.size() == 4);
+  MICRONOTES_REQUIRE(ui.focus == micronotes::app::FocusArea::Find);
 }

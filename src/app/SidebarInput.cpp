@@ -3,6 +3,7 @@
 #include "AppPerfCounters.h"
 #include "CoreAliases.h"
 #include "app/ContextMenus.h"
+#include "app/FindBar.h"
 #include "app/Notes.h"
 #include "app/Shell.h"
 #include "app/WikiLinks.h"
@@ -115,6 +116,24 @@ void expandTreeCursor(UiRuntime& ui, bool open) {
   ui.sidebar.tree.setExpanded(row.tree.path(), open);
 }
 
+// Carrying the sidebar's query into the note a search result just opened, the
+// way ../microide carries a project-search term into the in-file find.
+//
+// Here rather than in `activateSidebarRow`, which is where the rest of "did the
+// reader ask for this note" lives, because a *right* click is a third thing
+// that enum does not model: it activates the row as a `Click` -- deliberately,
+// so the menu that follows acts on the note it names -- but asking what a
+// result is is not asking to read it, and it must not put a find bar over the
+// note or take the keyboard while a menu is open. So the seeding sits on the
+// two paths where the ask is unambiguous: Enter, and a left click.
+namespace {
+
+bool seedFindFromSearchResult(UiRuntime& ui, const SidebarRow& row) {
+  return row.kind == SidebarRow::Kind::SearchResult && openFindFromSearch(ui);
+}
+
+}
+
 FocusArea chooseSidebarCursorRow(UiRuntime& ui) {
   if(ui.sidebar.cursor < 0 || ui.sidebar.cursor >= static_cast<int>(ui.sidebar.rows.size())) {
     return FocusArea::Editor;
@@ -131,7 +150,13 @@ FocusArea chooseSidebarCursorRow(UiRuntime& ui) {
                               (row.kind == SidebarRow::Kind::Tree &&
                                (row.tree.kind == ui::TreeRowKind::File ||
                                 row.tree.kind == ui::TreeRowKind::FilesFolder));
-  return changedTheList ? FocusArea::Folders : FocusArea::Editor;
+  if(changedTheList) return FocusArea::Folders;
+  // Enter on a result is the reader asking for that note, so the query follows
+  // them into it -- see `seedFindFromSearchResult`. It moves the keyboard, and
+  // this return value is assigned over `ui.focus`, so the answer has to be the
+  // bar rather than the note or the two open paths would disagree.
+  if(seedFindFromSearchResult(ui, row)) return FocusArea::Find;
+  return FocusArea::Editor;
 }
 
 void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uint8 button) {
@@ -185,6 +210,7 @@ void pressSidebarRow(UiRuntime& ui, const SidebarRow& row, float x, float y, Uin
     else if(row.kind == SidebarRow::Kind::Tree) openFolderMenu(ui, x, y);
     return;
   }
+  if(button == SDL_BUTTON_LEFT) seedFindFromSearchResult(ui, row);
   // A left press on a tree row may turn into a drag, which is decided by
   // whether the pointer moves before it is let go.
   if(button == SDL_BUTTON_LEFT && row.kind == SidebarRow::Kind::Tree) {
