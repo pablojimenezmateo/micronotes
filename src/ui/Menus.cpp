@@ -110,10 +110,15 @@ constexpr MenuItemSpec kNoteItems[] {
   item(ActionId::ShowOnDisk, "Show on disk"),
   item(ActionId::CopyRelativePath, "Copy relative path"),
   item(ActionId::CopyAbsolutePath, "Copy absolute path"),
+  // With the file rows rather than in a group of its own, which is where the
+  // note's own context menu puts it and for the same reason: an export is a
+  // question about the note as a document, and so are the three above it.
+  item(ActionId::ExportNotePdf, "Export as PDF..."),
   sep(),
   item(ActionId::DeleteNote, "Delete note..."),
   sep(),
   item(ActionId::RenameFolder, "Rename notebook..."),
+  item(ActionId::ExportFolderPdf, "Export notebook as PDF..."),
   item(ActionId::DeleteFolder, "Delete notebook..."),
 };
 

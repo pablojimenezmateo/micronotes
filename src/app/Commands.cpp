@@ -4,6 +4,7 @@
 #include "app/Chrome.h"
 #include "app/ContextMenus.h"
 #include "app/EditCommands.h"
+#include "app/ExportPdf.h"
 #include "app/FocusedEdits.h"
 #include "app/Fields.h"
 #include "app/FindBar.h"
@@ -102,6 +103,8 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "move-note") openFolderPalette(ui);
   else if(id == "move-blocks") openNotePalette(ui, "move-blocks-target", "Move blocks to");
   else if(id == "delete-note") openDeleteNoteConfirm(ui);
+  else if(id == "export-note-pdf") exportNoteToPdf(ui, ui.state.selection().noteId);
+  else if(id == "export-folder-pdf") exportFolderToPdf(ui, ui.state.selection().folder);
   else if(id == "rename-folder") beginFolderRename(ui);
   else if(id == "delete-folder") openDeleteFolderConfirm(ui);
   else if(id == "restore") openTrashPalette(ui);

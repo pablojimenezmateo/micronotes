@@ -7,12 +7,17 @@ namespace micronotes::app {
 
 struct UiRuntime;
 
-// "Export as PDF" -- the tree's two context menus, and the write that follows
-// the file chooser.
+// "Export as PDF" -- the Note menu, the palette, the tree's two context menus,
+// and the write that follows the file chooser.
 //
-// Only the tree opens one. There is no palette action and no menu bar row: an
-// export is about a *thing in the library* rather than about whatever happens
-// to be showing, and the two rows below are on the two things it can be about.
+// It used to be the context menus alone, on the reasoning that an export is
+// about a *thing in the library* rather than about whatever happens to be
+// showing. The bar's Note menu is about a thing in the library too -- the
+// selected note, which is the same note the context menu's row exports -- so
+// the rule ruled nothing out and only made this a command you had to already
+// know to right-click for. `ui::ActionId::ExportNotePdf` and
+// `ExportFolderPdf` are the two things it can be about, and every surface that
+// offers either names them.
 //
 // Neither of these writes anything by itself. Both put the desktop's own save
 // dialog up and return; the loop finishes the job when an answer comes back,

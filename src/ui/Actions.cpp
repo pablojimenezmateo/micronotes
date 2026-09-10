@@ -55,6 +55,20 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::CopyRelativePath, "copy-relative-path", "Copy relative path",         "",             "",              S::Notes, true,  true, "", true},
   {ActionId::CopyAbsolutePath, "copy-absolute-path", "Copy absolute path",         "",             "",              S::Notes, true,  true, "", true},
   {ActionId::MoveBlocks,      "move-blocks",    "Move blocks to another note...",  "",             "",              S::Notes, true,  true, "", true},
+  // Both exports. They were reachable from the tree's two context menus and
+  // nowhere else, on the reasoning that an export is about a thing in the
+  // library rather than about whatever is showing -- but the Note menu is
+  // *entirely* about the note in the library that is selected, which is the
+  // same note the context menu's row exports, and it already carries "Show on
+  // disk" and the two copy-path rows on exactly that basis. So the rule was
+  // not the one the bar follows, and the only thing it bought was a command
+  // you had to already know to right-click for.
+  //
+  // The notebook one needs no note and no folder: with nothing selected the
+  // root is the folder, which means the library, and that is what the tree's
+  // own row does on the root.
+  {ActionId::ExportNotePdf,   "export-note-pdf", "Export note as PDF...",          "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::ExportFolderPdf, "export-folder-pdf", "Export notebook as PDF...",    "",             "",              S::Notes, false, true, "", true},
   {ActionId::DeleteNote,      "delete-note",    "Delete note...",                  "",             "",              S::Notes, true,  true, "", true},
   {ActionId::RenameFolder,    "rename-folder",  "Rename notebook...",              "",             "",              S::Notes, false, true, "", true},
   {ActionId::DeleteFolder,    "delete-folder",  "Delete notebook...",              "",             "",              S::Notes, false, true, "", true},

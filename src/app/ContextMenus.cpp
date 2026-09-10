@@ -49,7 +49,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     // With the file rows rather than in a group of its own: an export is a
     // question about the note as a document, which is what the three above it
     // are too. Ends in an ellipsis because it asks where to put it.
-    {"export-pdf", "Export as PDF...", "", "", hasNote, false, false, false},
+    {"export-note-pdf", "Export as PDF...", "", "", hasNote, false, false, false},
     {"", "", "", "", false, false, false, true},
     {"delete", "Delete", "", "", hasNote, true, false, false},
   };
@@ -300,7 +300,7 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
     {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
     // The whole notebook, its sub-notebooks included, bound into one file.
     // Offered even on the root, where it means the library.
-    {"export-pdf", "Export as PDF...", "", "", true, false, false, false},
+    {"export-folder-pdf", "Export as PDF...", "", "", true, false, false, false},
     {"", "", "", "", false, false, false, true},
     {"delete", "Delete", "", "", hasFolder, true, false, false},
   };

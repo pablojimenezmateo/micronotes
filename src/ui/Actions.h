@@ -40,6 +40,8 @@ enum class ActionId {
   MoveNote,
   MoveBlocks,
   DeleteNote,
+  ExportNotePdf,
+  ExportFolderPdf,
   ShowOnDisk,
   CopyRelativePath,
   CopyAbsolutePath,
