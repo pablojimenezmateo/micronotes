@@ -164,7 +164,9 @@ float drawEmptyMessage(TextRenderer& text, std::string_view title, std::string_v
   const float bodyStep = static_cast<float>(text.lineHeight(bodyStyle));
   for(std::size_t i = 0; i < rows.size() && i < kMaxLines; ++i) {
     const bool last = i + 1 == kMaxLines && rows.size() > kMaxLines;
-    text.draw(last ? ellipsizeToWidth(text, rows[i].text + "...", room, bodyStyle) : rows[i].text,
+    const std::string_view line = editor::textIn(detail, rows[i]);
+    text.draw(last ? ellipsizeToWidth(text, std::string(line) + "...", room, bodyStyle)
+                   : std::string(line),
               x + 18.0f, y, theme().textSecondary, bodyStyle);
     y += bodyStep;
   }

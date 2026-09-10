@@ -3249,3 +3249,53 @@ reading the three rows *against each other*. An absolute number gets compared
 to a budget and passes. A number that is larger than the number above it when
 it should be smaller is an inconsistency, and an inconsistency is a question
 with an answer at the end of it.
+
+### Resolved: a soft-wrapped row carried a copy of its own text
+
+`shell.raw_pane_rewrap` was the largest single thing a keystroke could cost --
+704 us against a 2 us edit -- and the file that owns it says why and says it is
+accepted: `editor::softWrap` has no incremental form, so the raw pane rewraps
+the whole note whenever the editor's revision moves, which a keystroke does.
+
+That reading was right about the *timer* and had never looked at the row beside
+it:
+
+```
+shell.raw_pane_rewrap    704 us median    3197 allocs    1504.0 KB    901.2 KB max
+```
+
+3,197 allocations and 1.5 MB, per keystroke, for a 200 KB note. `SoftWrapRow`
+carried `std::size_t start`, `std::size_t end` **and** a `std::string text` --
+a copy of the row's own bytes, out of a buffer the wrap had been handed and
+every reader of the rows already had in scope. So the wrap of a note cost a
+copy of the note, and the largest single allocation in the lane was the row
+vector, at 48 bytes a row.
+
+The row is its two offsets now, and the buffer is a parameter at the two places
+that want bytes: `editor::textIn(buffer, row)` and `offsetForRowX(buffer, row,
+...)`.
+
+```
+                       before         after
+allocations             3,197             2
+allocated             1504.0 KB      450.6 KB
+largest allocation     901.2 KB      300.4 KB
+median                   704 us        504 us
+```
+
+The allocation counts are deterministic, so those three rows are proof; the
+timing was taken back to back on the same build settings and is consistent with
+them, which is as much as this machine's clock will say. Pixels are
+byte-identical (`cmp` of a `--pane raw --screenshot` capture either side).
+
+What was tempting and is deliberately not what happened is a `string_view` in
+the row. That would have removed the same copy while making the row *look*
+self-contained: the rows are memoised on the editor's revision, and the next
+edit reallocates the buffer they would be pointing into. Naming the buffer at
+each call site is the lifetime stated rather than assumed, and it is the reason
+this is safe to leave in a memo.
+
+The whole-note rewrap itself is still a whole-note rewrap. What this pass says
+is that "there is a known reason this lane is slow" stopped anyone reading the
+three numbers printed next to it, two of which had nothing to do with that
+reason.

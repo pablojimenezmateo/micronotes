@@ -112,7 +112,8 @@ Rect editorWritingRect(Rect editorRect) {
 // each computing separately. It draws the shell's one match list now (see
 // `app/FindState.h`), which is also how it came to honour "match case".
 void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRuntime& ui,
-                        const editor::SoftWrapRow& row, Rect writing, float y) {
+                        const editor::SoftWrapRow& row, std::string_view line, Rect writing,
+                        float y) {
   const auto& matches = ui.find.matches;
   if(matches.empty()) return;
   // The first match that could reach this row: matches do not overlap and none
@@ -122,7 +123,6 @@ void drawFindHighlights(SDL_Renderer* renderer, TextRenderer& text, const UiRunt
                                       [](const util::TextMatch& match, std::size_t offset) {
                                         return match.start < offset;
                                       });
-  const std::string& line = row.text;
   const float lineHeight = static_cast<float>(text.lineHeight());
   const float right = writing.x + writing.w - 8.0f;
   for(auto it = begin; it != matches.end() && it->start < row.end; ++it) {
@@ -148,7 +148,8 @@ std::size_t editorIndexAtPoint(TextRenderer& text, UiRuntime& ui, Rect rect, flo
   const Rect writing = editorWritingRect(rect);
   const int visibleLine = std::max(0, static_cast<int>((y - (writing.y + 12)) / static_cast<float>(lineHeight)));
   const int rowIndex = std::clamp(ui.raw.list.scroll() + visibleLine, 0, std::max(0, static_cast<int>(rows.size()) - 1));
-  return editor::offsetForRowX(rows[static_cast<std::size_t>(rowIndex)], x - (writing.x + 12), editorMeasure(text));
+  return editor::offsetForRowX(ui.editor.text(), rows[static_cast<std::size_t>(rowIndex)],
+                               x - (writing.x + 12), editorMeasure(text));
 }
 
 void placeEditorCursor(TextRenderer& text, UiRuntime& ui, Rect rect, float x, float y) {
@@ -164,6 +165,9 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
   drawSurface(renderer, writing, theme().editorBackground, ui.focus == FocusArea::Editor ? theme().accent : theme().border);
   const int lineHeight = text.lineHeight();
   const auto& rows = rawPaneRows(text, ui, rect);
+  // The buffer the rows were wrapped from, named once for the paint. A row is a
+  // span of it and carries no bytes of its own -- see `editor::SoftWrapRow`.
+  const std::string_view source = ui.editor.text();
   const int maxLines = std::max(1, static_cast<int>((writing.h - 22) / lineHeight));
   const int cursorRow = editor::rowForOffset(rows, ui.editor.cursor());
   if(ui.revealEditorCursor) {
@@ -178,7 +182,7 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
     float y = writing.y + 12;
     for(int i = ui.raw.list.scroll(); i < static_cast<int>(rows.size()) && y < writing.y + writing.h - 12; ++i) {
       const auto& row = rows[static_cast<std::size_t>(i)];
-      const auto& line = row.text;
+      const std::string_view line = editor::textIn(source, row);
       if(ui.editor.hasSelection()) {
         const auto selStart = std::max(ui.editor.selectionStart(), row.start);
         const auto selEnd = std::min(ui.editor.selectionEnd(), row.end);
@@ -190,7 +194,7 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
           fill(renderer, {sx, y - 2, std::min(sw, writing.x + writing.w - 8 - sx), static_cast<float>(lineHeight)}, theme().selectionFill);
         }
       }
-      drawFindHighlights(renderer, text, ui, row, writing, y);
+      drawFindHighlights(renderer, text, ui, row, line, writing, y);
       text.draw(line.empty() ? " " : line, writing.x + 12, y, theme().textPrimary, false, true);
       y += lineHeight;
     }
@@ -198,8 +202,10 @@ void drawEditor(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect 
       std::string prefix;
       if(cursorRow >= 0 && cursorRow < static_cast<int>(rows.size())) {
         const auto& row = rows[static_cast<std::size_t>(cursorRow)];
-        const auto cursorInRow = ui.editor.cursor() <= row.end ? ui.editor.cursor() - row.start : row.text.size();
-        prefix = row.text.substr(0, std::min<std::size_t>(row.text.size(), cursorInRow));
+        const std::string_view line = editor::textIn(source, row);
+        const auto cursorInRow =
+          ui.editor.cursor() <= row.end ? ui.editor.cursor() - row.start : line.size();
+        prefix = line.substr(0, std::min<std::size_t>(line.size(), cursorInRow));
       }
       const float cursorX = writing.x + 12 + static_cast<float>(text.width(prefix, false, true));
       const float cursorY = writing.y + 12 + static_cast<float>((cursorRow - ui.raw.list.scroll()) * lineHeight);

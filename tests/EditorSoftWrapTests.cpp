@@ -15,10 +15,10 @@ MICRONOTES_TEST(editor_soft_wraps_by_words_without_changing_source_offsets) {
     return static_cast<int>(value.size());
   });
   MICRONOTES_REQUIRE(rows.size() == 2);
-  MICRONOTES_REQUIRE(rows[0].text == "alpha beta ");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[0]) == "alpha beta ");
   MICRONOTES_REQUIRE(rows[0].start == 0);
   MICRONOTES_REQUIRE(rows[0].end == 11);
-  MICRONOTES_REQUIRE(rows[1].text == "gamma");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[1]) == "gamma");
   MICRONOTES_REQUIRE(rows[1].start == 11);
   MICRONOTES_REQUIRE(rows[1].end == source.size());
 }
@@ -29,10 +29,10 @@ MICRONOTES_TEST(editor_soft_wrap_keeps_remaining_words_together_when_they_fit) {
     return static_cast<int>(value.size());
   });
   MICRONOTES_REQUIRE(rows.size() == 2);
-  MICRONOTES_REQUIRE(rows[0].text == "alpha beta ");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[0]) == "alpha beta ");
   MICRONOTES_REQUIRE(rows[0].start == 0);
   MICRONOTES_REQUIRE(rows[0].end == 11);
-  MICRONOTES_REQUIRE(rows[1].text == "gamma delta");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[1]) == "gamma delta");
   MICRONOTES_REQUIRE(rows[1].start == 11);
   MICRONOTES_REQUIRE(rows[1].end == source.size());
 }
@@ -43,10 +43,10 @@ MICRONOTES_TEST(editor_soft_wrap_preserves_hard_newlines) {
     return static_cast<int>(value.size());
   });
   MICRONOTES_REQUIRE(rows.size() == 2);
-  MICRONOTES_REQUIRE(rows[0].text == "one two");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[0]) == "one two");
   MICRONOTES_REQUIRE(rows[0].start == 0);
   MICRONOTES_REQUIRE(rows[0].end == 7);
-  MICRONOTES_REQUIRE(rows[1].text == "three");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[1]) == "three");
   MICRONOTES_REQUIRE(rows[1].start == 8);
   MICRONOTES_REQUIRE(rows[1].end == source.size());
 }
@@ -57,9 +57,9 @@ MICRONOTES_TEST(editor_soft_wrap_splits_oversized_words) {
     return static_cast<int>(value.size());
   });
   MICRONOTES_REQUIRE(rows.size() == 3);
-  MICRONOTES_REQUIRE(rows[0].text == "abc");
-  MICRONOTES_REQUIRE(rows[1].text == "def");
-  MICRONOTES_REQUIRE(rows[2].text == "gh");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[0]) == "abc");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[1]) == "def");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[2]) == "gh");
 }
 
 MICRONOTES_TEST(editor_soft_wrap_keeps_utf8_codepoints_intact) {
@@ -68,9 +68,9 @@ MICRONOTES_TEST(editor_soft_wrap_keeps_utf8_codepoints_intact) {
     return static_cast<int>(value.size());
   });
   MICRONOTES_REQUIRE(rows.size() == 3);
-  MICRONOTES_REQUIRE(rows[0].text == "a");
-  MICRONOTES_REQUIRE(rows[1].text == "\xC3\xA9");
-  MICRONOTES_REQUIRE(rows[2].text == "\xC3\xA9");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[0]) == "a");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[1]) == "\xC3\xA9");
+  MICRONOTES_REQUIRE(micronotes::editor::textIn(source, rows[2]) == "\xC3\xA9");
 }
 
 MICRONOTES_TEST(editor_soft_wrap_maps_offsets_and_hit_testing) {
@@ -81,5 +81,5 @@ MICRONOTES_TEST(editor_soft_wrap_maps_offsets_and_hit_testing) {
   const auto rows = micronotes::editor::softWrap(source, 11, measure);
   MICRONOTES_REQUIRE(micronotes::editor::rowForOffset(rows, 0) == 0);
   MICRONOTES_REQUIRE(micronotes::editor::rowForOffset(rows, 12) == 1);
-  MICRONOTES_REQUIRE(micronotes::editor::offsetForRowX(rows[1], 2.0f, measure) == 13);
+  MICRONOTES_REQUIRE(micronotes::editor::offsetForRowX(source, rows[1], 2.0f, measure) == 13);
 }

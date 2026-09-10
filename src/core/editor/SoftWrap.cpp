@@ -30,24 +30,24 @@ int measuredWidth(std::string_view value, const MeasureText& measure) {
   return measure ? measure(value) : static_cast<int>(value.size());
 }
 
-void pushRow(std::vector<SoftWrapRow>& rows, std::string_view text, std::size_t start, std::size_t end) {
-  rows.push_back({start, end, std::string(text.substr(start, end - start))});
+void pushRow(std::vector<SoftWrapRow>& rows, std::size_t start, std::size_t end) {
+  rows.push_back({start, end});
 }
 
 void wrapLogicalLine(std::vector<SoftWrapRow>& rows, std::string_view text, std::size_t start, std::size_t end, int width, const MeasureText& measure) {
   if(start == end) {
-    pushRow(rows, text, start, end);
+    pushRow(rows, start, end);
     return;
   }
   if(width <= 0 || measuredWidth(text.substr(start, end - start), measure) <= width) {
-    pushRow(rows, text, start, end);
+    pushRow(rows, start, end);
     return;
   }
 
   std::size_t pos = start;
   while(pos < end) {
     if(measuredWidth(text.substr(pos, end - pos), measure) <= width) {
-      pushRow(rows, text, pos, end);
+      pushRow(rows, pos, end);
       break;
     }
 
@@ -77,7 +77,7 @@ void wrapLogicalLine(std::vector<SoftWrapRow>& rows, std::string_view text, std:
     if(breakAfter != std::numeric_limits<std::size_t>::max() && breakAfter > pos) rowEnd = breakAfter;
     if(rowEnd <= pos) rowEnd = std::min(pos + 1, end);
     rowEnd = snapToCodepoint(text, rowEnd, pos, end);
-    pushRow(rows, text, pos, rowEnd);
+    pushRow(rows, pos, rowEnd);
     pos = rowEnd;
   }
 }
@@ -95,7 +95,7 @@ std::vector<SoftWrapRow> softWrap(std::string_view text, int width, const Measur
     }
   }
   wrapLogicalLine(rows, text, lineStart, text.size(), width, measure);
-  if(rows.empty()) rows.push_back({0, 0, ""});
+  if(rows.empty()) rows.push_back({0, 0});
   return rows;
 }
 
@@ -108,15 +108,17 @@ int rowForOffset(const std::vector<SoftWrapRow>& rows, std::size_t offset) {
   return static_cast<int>(std::distance(rows.begin(), found));
 }
 
-std::size_t offsetForRowX(const SoftWrapRow& row, float x, const MeasureText& measure) {
+std::size_t offsetForRowX(std::string_view buffer, const SoftWrapRow& row, float x,
+                          const MeasureText& measure) {
   if(x <= 0.0f) return row.start;
-  if(row.text.empty()) return row.start;
+  const std::string_view line = textIn(buffer, row);
+  if(line.empty()) return row.start;
 
   std::size_t low = 0;
-  std::size_t high = row.text.size();
+  std::size_t high = line.size();
   while(low < high) {
     const std::size_t mid = low + (high - low) / 2;
-    const float w = static_cast<float>(measuredWidth(std::string_view(row.text.data(), mid), measure));
+    const float w = static_cast<float>(measuredWidth(line.substr(0, mid), measure));
     if(w < x) {
       low = mid + 1;
     } else {
@@ -124,11 +126,12 @@ std::size_t offsetForRowX(const SoftWrapRow& row, float x, const MeasureText& me
     }
   }
 
-  const std::size_t after = std::min(low, row.text.size());
+  const std::size_t after = std::min(low, line.size());
   const std::size_t before = after == 0 ? 0 : after - 1;
-  const float beforeW = static_cast<float>(measuredWidth(std::string_view(row.text.data(), before), measure));
-  const float afterW = static_cast<float>(measuredWidth(std::string_view(row.text.data(), after), measure));
-  const std::size_t best = util::boundaryAtOrBefore(row.text, std::abs(afterW - x) <= std::abs(beforeW - x) ? after : before);
+  const float beforeW = static_cast<float>(measuredWidth(line.substr(0, before), measure));
+  const float afterW = static_cast<float>(measuredWidth(line.substr(0, after), measure));
+  const std::size_t best =
+    util::boundaryAtOrBefore(line, std::abs(afterW - x) <= std::abs(beforeW - x) ? after : before);
   return std::min(row.start + best, row.end);
 }
 

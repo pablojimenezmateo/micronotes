@@ -99,7 +99,7 @@ std::vector<std::string> wrapHelp(ui::TextRenderer& text, std::string_view help,
   const auto style = helpStyle();
   for(const auto& row : editor::softWrap(help, static_cast<int>(width),
                                          [&](std::string_view value) { return text.width(value, style); })) {
-    lines.push_back(row.text);
+    lines.emplace_back(editor::textIn(help, row));
   }
   return lines;
 }
