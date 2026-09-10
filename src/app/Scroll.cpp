@@ -49,6 +49,11 @@ void routeWheel(UiRuntime& ui, float notches, int width, int height) {
     return;
   }
   if(handleSettingsWheel(ui, notches)) return;
+  // And an open menu, which owns the pointer the same way with nothing of its
+  // own to scroll: the popups here are short enough to draw whole. Swallowed
+  // rather than passed on, because the panel the wheel would reach is the one
+  // the menu is covering.
+  if(ui.chrome.openMenu != ui::MenuId::None) return;
 
   const ShellLayout layout = shellLayout(ui, width, height);
 

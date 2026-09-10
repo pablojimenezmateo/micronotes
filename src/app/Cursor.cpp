@@ -78,6 +78,31 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
   const float x = ui.pointer.x;
   const float y = ui.pointer.y;
   const ShellLayout layout = shellLayout(ui, width, height);
+
+  // Whatever is on top answers first, and answers for the whole window. A hand
+  // over a tab that a palette is going to swallow the click on is a promise
+  // the window cannot keep: the shape the pointer takes has to agree with what
+  // a press would actually reach, and under any of these three that is the
+  // surface on top. The same order the press router and the frame's capture
+  // ladder use, and the same line ../microide draws with
+  // `MenuSurfaceCapturingMouse`.
+  //
+  // Which part of the overlay, rather than one answer for the whole window.
+  if(ui.overlays.active()) return cursorForOverlay(ui.overlays.cursorAt(x, y));
+  // The card covers the panes below, so the pointer resting on one of its rows
+  // is not resting on the note underneath.
+  if(ui.settings.visible) {
+    return contains(ui.settings.filter, x, y) ? CursorKind::Text : CursorKind::Pointer;
+  }
+  // An open menu covers the panels but not the bar it hangs from: sliding
+  // along the bar switches menus, so the bar keeps saying it can be clicked.
+  // Everywhere else the shape is the default one -- over the popup because
+  // that is what a menu wears, and under it because the press there does
+  // nothing but shut the menu.
+  if(ui.chrome.openMenu != ui::MenuId::None) {
+    return menuBarHasControlAt(text, ui, layout.menuBar, x, y) ? CursorKind::Pointer
+                                                               : CursorKind::Default;
+  }
   if(isResizeGutter(layout, x, y)) return CursorKind::ResizeHorizontal;
   if(menuBarHasControlAt(text, ui, layout.menuBar, x, y)) return CursorKind::Pointer;
   if(breadcrumbHasControlAt(ui, layout.breadcrumb, x, y)) return CursorKind::Pointer;
@@ -89,14 +114,6 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
   // there is no visibility flag to keep in step with here.
   if(tabStripHasControlAt(ui, x, y)) return CursorKind::Pointer;
   if(rightPanelHasControlAt(ui, text, layout.rightPanel, x, y)) return CursorKind::Pointer;
-
-  // Which part of the overlay, rather than one answer for the whole window.
-  if(ui.overlays.active()) return cursorForOverlay(ui.overlays.cursorAt(x, y));
-  // The card covers the panes below, so the pointer resting on one of its rows
-  // is not resting on the note underneath.
-  if(ui.settings.visible) {
-    return contains(ui.settings.filter, x, y) ? CursorKind::Text : CursorKind::Pointer;
-  }
 
   if(contains(layout.sidebar, x, y)) {
     if(scrollbarHit(sidebarListRect(layout.sidebar), ui.sidebar.list.scroll(), ui.sidebar.list.maxScroll(), x, y)) {

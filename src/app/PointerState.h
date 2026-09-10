@@ -43,7 +43,27 @@ struct PointerState {
   // end up with two tooltips resolved.
   ui::HoverTooltip tooltip;
 
-  bool over(ui::Rect control) const { return ui::contains(control, x, y); }
+  // Whether something above the surface asking owns the pointer: a palette, the
+  // Settings card, an open menu. Set by the frame as it descends the layers --
+  // see the capture ladder in `app/Frame.cpp` -- so a surface never has to know
+  // what is drawn over it.
+  //
+  // The panels behind a modal used to light up under the pointer through its
+  // wash: a sidebar row, a tab and its close cross, a right-panel row, a link
+  // in the note. Every one of them was promising a click that the modal was
+  // going to swallow, which is the same complaint ../microide answers with
+  // `MenuSurfaceCapturingMouse`. It is one flag rather than a test at each of
+  // the seven surfaces because a surface added later would not have known to
+  // ask.
+  bool captured = false;
+
+  bool over(ui::Rect control) const { return !captured && ui::contains(control, x, y); }
+
+  // Where a surface should think the pointer is. Off-window while something
+  // above it has the pointer, which is what the page's own hit tests take --
+  // they are handed a position rather than asked `over`.
+  float hoverX() const { return captured ? -1.0f : x; }
+  float hoverY() const { return captured ? -1.0f : y; }
 
   // Offers a tooltip for `control` when the pointer is inside it. The last
   // caller wins, which is the innermost surface: a tooltip on a tab's close

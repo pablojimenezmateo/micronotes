@@ -384,7 +384,10 @@ Useful runtime controls:
   there is room for it, and minimize / maximize / close at the right. Menus that
   do not fit a narrow window hide behind a chevron rather than being dropped.
   Sliding along the bar with one open switches menus without a click; the arrow
-  keys walk an open menu and Escape shuts it. Dragging the empty part of the bar
+  keys walk an open menu and Escape shuts it. An open menu owns the pointer
+  while it is up: nothing behind it highlights, takes the wheel, or changes the
+  cursor, and a press anywhere but on one of its rows shuts it and is spent on
+  that -- one press, one thing. Dragging the empty part of the bar
   moves the window, and the window's edges resize it. On a platform that refuses
   a hit test the ordinary decorations come back and the drawn buttons stand down.
 - Every menu item is an entry in `ui::Actions` and nothing else, so an item, its

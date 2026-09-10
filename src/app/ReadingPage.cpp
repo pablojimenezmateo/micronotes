@@ -62,8 +62,10 @@ PageFrame pageFrameFor(TextRenderer& text, ui::ImageCache& images, UiRuntime& ui
   // reserve at the top of its scrolling space rather than something drawn over
   // it afterwards.
   frame.headerHeight = pageHeaderHeight(text, ui);
-  frame.pointerX = ui.pointer.x;
-  frame.pointerY = ui.pointer.y;
+  // Off-window while a modal has the pointer, so the page stops lighting up
+  // links and block controls behind the wash. See `PointerState::captured`.
+  frame.pointerX = ui.pointer.hoverX();
+  frame.pointerY = ui.pointer.hoverY();
   return frame;
 }
 

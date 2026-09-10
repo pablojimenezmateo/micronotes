@@ -41,8 +41,13 @@ struct MenuBarClick {
   std::optional<ui::ActionId> action;
 };
 
+// An open menu owns the press, whichever button it is: on one of its rows a
+// left press is the command, and anywhere else -- or with any other button --
+// the press is the dismissal and is spent on it. The bar answers for the whole
+// window while it is open, which is why the button is its business and not the
+// caller's.
 MenuBarClick handleMenuBarClick(ui::TextRenderer& text, UiRuntime& ui, ui::Rect rect,
-                                ui::Rect bounds, float x, float y);
+                                ui::Rect bounds, float x, float y, Uint8 button);
 
 // Sliding along the bar with a menu open switches menus without a click, and
 // sliding down an open popup moves the highlight. Returns whether the frame

@@ -237,7 +237,7 @@ void drawOutlineView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& 
     if(row.y > frame.list.y + frame.list.h) break;
     const auto& entry = entries[i];
     const bool here = i == current;
-    const bool hot = ui::contains(row, ui.pointer.x, ui.pointer.y);
+    const bool hot = ui.pointer.over(row);
     ui::drawRow(renderer, row, here, hot);
     const float x = row.x + kPadX + static_cast<float>(entry.depth) * kIndentStep;
     // A top-level heading carries the note's structure and reads as the
@@ -270,7 +270,7 @@ void drawBacklinksView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime
   for(const auto& link : backlinks) {
     if(y + pitch >= frame.list.y && y <= frame.list.y + frame.list.h) {
       const Rect row = rowRect(frame.list, y, pitch, panelTrailingReserve(ui, frame.rect));
-      ui::drawRow(renderer, row, false, ui::contains(row, ui.pointer.x, ui.pointer.y));
+      ui::drawRow(renderer, row, false, ui.pointer.over(row));
       const int room = static_cast<int>(row.w - kPadX * 2.0f);
       // Two lines centred in the row together, rather than dropped a fixed
       // two pixels into it: the pair grows with the reader's text size and
@@ -320,7 +320,7 @@ void drawTagsView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     if(y + pitch >= frame.list.y && y <= frame.list.y + frame.list.h) {
       const Rect row = rowRect(frame.list, y, pitch, panelTrailingReserve(ui, frame.rect));
       const bool selected = activeTag == tag;
-      ui::drawRow(renderer, row, selected, ui::contains(row, ui.pointer.x, ui.pointer.y));
+      ui::drawRow(renderer, row, selected, ui.pointer.over(row));
       // The tag's colour, and no `#`. Exactly the sidebar's tag row: this is
       // the same object with the same affordance, so it has to be the same mark
       // -- and a dot beside the name is what says "tag" now.
@@ -354,7 +354,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
   for(int i = 0; i < tabCount; ++i) {
     const Rect tab = tabRect(rect, i, tabCount);
     const bool active = workspace.rightPanelView == kViews[i];
-    const bool hot = ui::contains(tab, ui.pointer.x, ui.pointer.y);
+    const bool hot = ui.pointer.over(tab);
     // The active mode takes the chrome's raised ground and an accent rule along
     // its foot, pointing at the list it heads. Hover takes the row highlight
     // alone -- the two used to take the same fill, which made the panel's

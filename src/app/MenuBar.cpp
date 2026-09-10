@@ -281,7 +281,7 @@ void drawOpenMenu(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rec
 }
 
 MenuBarClick handleMenuBarClick(TextRenderer& text, UiRuntime& ui, Rect rect, Rect bounds,
-                                float x, float y) {
+                                float x, float y, Uint8 button) {
   MenuBarClick result;
 
   // The popup first: it is drawn over everything, so it is clicked before
@@ -289,6 +289,13 @@ MenuBarClick handleMenuBarClick(TextRenderer& text, UiRuntime& ui, Rect rect, Re
   const OpenMenu open = openMenuFor(text, ui, rect, bounds);
   if(!open.items.empty() && ui::contains(open.popup, x, y)) {
     result.handled = true;
+    // Only a left press chooses. A right or middle press on a menu row is not
+    // a command anybody meant, so it does what it does everywhere else on the
+    // popup: shuts it, and is spent doing that.
+    if(button != SDL_BUTTON_LEFT) {
+      closeMenu(ui);
+      return result;
+    }
     if(const auto index = ui::menuPopupItemAt(open.popup, open.items, x, y)) {
       const MenuItemSpec& spec = open.items[*index];
       closeMenu(ui);
@@ -298,10 +305,33 @@ MenuBarClick handleMenuBarClick(TextRenderer& text, UiRuntime& ui, Rect rect, Re
   }
 
   if(!ui::contains(rect, x, y)) {
-    // A press anywhere else dismisses an open menu, and is *not* consumed:
-    // clicking a tree row with the File menu open should select that row, which
-    // is what every menu bar does.
-    if(ui.chrome.openMenu != MenuId::None) closeMenu(ui);
+    // A press anywhere else dismisses an open menu and is *consumed* by it. One
+    // press, one thing: shutting the menu is what that press was for, and the
+    // row it happened to land on is not something anybody asked to click.
+    //
+    // This used to fall through -- a press beside the File menu shut it and
+    // selected the tree row underneath in the same click -- on the grounds
+    // that it is what a menu bar does. It also meant the menu was the one
+    // surface in the shell whose open state you could act straight through,
+    // and it disagreed with the pointer: the panel behind the popup does not
+    // highlight and does not take the wheel, so it must not take the click
+    // either. ../microide swallows it the same way, in
+    // `MenuSurfaceCapturingMouse`.
+    if(ui.chrome.openMenu != MenuId::None) {
+      closeMenu(ui);
+      result.handled = true;
+    }
+    return result;
+  }
+
+  if(button != SDL_BUTTON_LEFT) {
+    // On the bar itself, with a menu open: still the dismissal, still spent on
+    // it. With none open there is nothing to dismiss, and nothing a right or
+    // middle press on the bar means, so it is left alone.
+    if(ui.chrome.openMenu != MenuId::None) {
+      closeMenu(ui);
+      result.handled = true;
+    }
     return result;
   }
 

@@ -116,12 +116,19 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
   const ShellLayout layout = shellLayout(ui, width, height);
 
   // The menu bar first, and its popup before that: the popup is drawn over
-  // every panel, so it has to be clicked before them too. A press that misses
-  // both only dismisses an open menu -- it is not swallowed, because clicking a
-  // tree row with the File menu open should select that row.
+  // every panel, so it has to be clicked before them too. An open menu then
+  // owns the press wherever it lands -- a row runs its command, anything else
+  // shuts the menu and the press is spent on that. It used to fall through
+  // instead, so one click beside the File menu both shut it and selected the
+  // tree row underneath; see `handleMenuBarClick`.
+  //
+  // Every button, not only the left one, for the same reason: while a menu is
+  // open the bar answers for the whole window, and a right click that opened a
+  // context menu behind the popup is the same fall-through wearing a different
+  // button.
   const Rect windowRect {0, 0, static_cast<float>(width), static_cast<float>(height)};
-  if(button == SDL_BUTTON_LEFT) {
-    const MenuBarClick menu = handleMenuBarClick(text, ui, layout.menuBar, windowRect, x, y);
+  {
+    const MenuBarClick menu = handleMenuBarClick(text, ui, layout.menuBar, windowRect, x, y, button);
     if(menu.action) {
       if(const auto* spec = ui::findAction(*menu.action)) performCommand(ui, std::string(spec->name));
     }

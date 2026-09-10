@@ -122,7 +122,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     // has already changed.
     if(drag.dragging && slot.index == drag.source) continue;
     const bool active = slot.index == workspace.activeTab;
-    const bool hot = ui::contains(slot.rect, ui.pointer.x, ui.pointer.y);
+    const bool hot = ui.pointer.over(slot.rect);
     ui::drawStripTab(renderer, text, slot.rect, titles[slot.index], active, hot,
                      ui::kTabCloseReserve, colors);
     // A tab only says what it is when the title did not fit. Repeating a title
@@ -137,7 +137,7 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     // Never during a drag: the pointer is holding a tab, not aiming at a cross,
     // and the release would land on one it passed over.
     if(drag.dragging || (!active && !hot)) continue;
-    const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.pointer.x, ui.pointer.y);
+    const bool overClose = ui.pointer.over(ui::tabCloseHitRect(slot));
     ui::drawCloseGlyph(renderer, slot.close,
                        overClose ? theme().textPrimary
                        : active  ? colors.activeText
