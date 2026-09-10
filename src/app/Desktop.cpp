@@ -9,8 +9,20 @@
 #include <unistd.h>
 
 #include <iostream>
+#include <string>
 
 namespace micronotes::app {
+
+namespace {
+
+// The last text this process put on the clipboard, empty until it has put one
+// there -- and empty is also the one value this deliberately cannot claim.
+// Another program copying an image with no text at all leaves the clipboard's
+// text empty too, so an empty record would match that and talk a paste out of
+// looking for the image. An empty copy has nothing to paste either way.
+std::string lastCopiedText;
+
+}
 
 bool setClipboardText(std::string_view value) {
   const std::string text {value};
@@ -30,7 +42,21 @@ bool setClipboardText(std::string_view value) {
     if(!clipboardOk) std::cerr << " error=\"" << clipboardError << "\"";
     std::cerr << "\n";
   }
+  // Recorded only on success. A refused copy leaves the clipboard holding
+  // whatever it held before, so claiming it as ours would be claiming somebody
+  // else's -- including, if that was an image, the one this record exists to
+  // stop being pasted.
+  if(clipboardOk) lastCopiedText = text;
   return clipboardOk;
+}
+
+bool clipboardHoldsOwnText() {
+  if(lastCopiedText.empty()) return false;
+  char* current = SDL_GetClipboardText();
+  if(!current) return false;
+  const bool ours = lastCopiedText == current;
+  SDL_free(current);
+  return ours;
 }
 
 bool spawnDetached(const std::vector<std::string>& command) {

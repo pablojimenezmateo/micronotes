@@ -25,6 +25,27 @@ namespace micronotes::app {
 // ask" from "we asked and were refused".
 bool setClipboardText(std::string_view value);
 
+// Whether the clipboard still holds exactly the text micronotes last put there
+// -- so nothing else has taken it since, and it holds text and only text.
+//
+// Asked before a paste goes looking for image data, because "is there an image
+// on the clipboard?" is a question this platform answers unreliably and
+// sometimes answers with an image that is no longer there. `SDL_HasClipboardData`
+// under X11 is a real selection conversion per mime type, and SDL reads the
+// reply out of a window property it never deletes (`GetSelectionData` in
+// SDL_x11clipboard.c): an owner that refuses the conversion leaves the property
+// holding whatever the *last* successful one wrote, so a refused `image/png`
+// can come back as the PNG from an earlier paste. Which is exactly the fault
+// this answers -- copying text in one note and pasting it into another put back
+// the last image the clipboard had ever held.
+//
+// A fact about the process rather than about the shell -- the selection owner
+// is the process -- which is why the record lives here beside the write rather
+// than on the runtime. False before this process has copied anything, and
+// false for an empty copy, which is a value it cannot tell from an empty
+// clipboard.
+bool clipboardHoldsOwnText();
+
 // A desktop program, launched and let go of.
 //
 // `fork` + `execvp` rather than `system`, so a target with a space or a quote

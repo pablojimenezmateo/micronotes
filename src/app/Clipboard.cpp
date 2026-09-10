@@ -1,6 +1,7 @@
 #include "app/Clipboard.h"
 #include "app/InputDebug.h"
 
+#include "app/Desktop.h"
 #include "app/Fields.h"
 #include "app/Notes.h"
 #include "app/Shell.h"
@@ -64,6 +65,11 @@ bool attachPathToEditor(UiRuntime& ui, const std::filesystem::path& source) {
 }
 
 bool pasteClipboardImage(UiRuntime& ui) {
+  // Text this process copied is text, and asking the platform whether it is
+  // also an image is both pointless and unsafe -- see `clipboardHoldsOwnText`
+  // for the stale selection property that made a text paste come back as the
+  // last image the clipboard had ever held.
+  if(clipboardHoldsOwnText()) return false;
   static constexpr const char* kImageMimes[] = {"image/png", "image/jpeg", "image/jpg", "image/bmp", "image/webp"};
   const char* mime = nullptr;
   for(const char* candidate : kImageMimes) {
