@@ -3,6 +3,7 @@
 #include "ui/Overlay.h"
 
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -33,6 +34,10 @@ Overlay ruledMenu() {
   return overlay;
 }
 
+OverlayItem noteRow(std::string id, std::string label, std::string detail) {
+  return {std::move(id), std::move(label), std::move(detail), {}, true, false, false, false};
+}
+
 // Pressing a key and reporting what came back, so a test reads as a sequence of
 // keystrokes rather than as a sequence of out-parameters.
 std::optional<micronotes::ui::OverlayResult> press(OverlayStack& stack, SDL_Keycode key,
@@ -41,6 +46,15 @@ std::optional<micronotes::ui::OverlayResult> press(OverlayStack& stack, SDL_Keyc
   auto result = stack.handleKey(key, false, shift, handled);
   micronotes::tests::require(handled, "the overlay declined a key it should have taken");
   return result;
+}
+
+// Typing a query into a filterable list one character at a time, the way the
+// shell feeds it.
+void type(OverlayStack& stack, std::string_view query) {
+  for(const char c : query) {
+    const char text[2] = {c, '\0'};
+    micronotes::tests::require(stack.handleText(text), "the overlay declined typed text");
+  }
 }
 
 }
@@ -161,4 +175,46 @@ MICRONOTES_TEST(overlay_a_list_takes_typing_only_when_it_filters) {
   MICRONOTES_REQUIRE(!menu.takesTypedText());
   menu.filterable = true;
   MICRONOTES_REQUIRE(menu.takesTypedText());
+}
+
+// A note's own title is what a reader types at, so a title match ranks above a
+// note found only through its folder -- however well that folder scores. Both
+// used to come off one fuzzy scale, and a folder is a longer string with more
+// separators to earn boundary bonuses on, so "pro" put a note called "Barometer
+// log" above "Product roadmap" purely because it sat in projects/.
+MICRONOTES_TEST(a_filtered_list_ranks_a_label_match_above_a_detail_match) {
+  Overlay palette;
+  palette.kind = OverlayKind::List;
+  palette.id = "jump-note";
+  palette.filterable = true;
+  palette.items = {noteRow("barometer", "Barometer log", "projects"),
+                   noteRow("roadmap", "Product roadmap", "work")};
+
+  OverlayStack stack;
+  stack.open(std::move(palette));
+  type(stack, "pro");
+  // Enter commits the highlighted row, which is the top of the filtered list.
+  const auto result = press(stack, SDLK_RETURN);
+  MICRONOTES_REQUIRE(result.has_value());
+  MICRONOTES_REQUIRE(result->itemId == "roadmap");
+}
+
+// The tier is a tie-break between label and detail, not a replacement for the
+// score: two notes matched on their titles still sort by how well they match.
+MICRONOTES_TEST(a_filtered_list_still_scores_two_label_matches_against_each_other) {
+  Overlay palette;
+  palette.kind = OverlayKind::List;
+  palette.id = "jump-note";
+  palette.filterable = true;
+  // Listed worst-first, so the order that comes back is the filter's doing and
+  // not the order the items went in.
+  palette.items = {noteRow("barometer", "Barometer log", ""),
+                   noteRow("roadmap", "Roadmap meeting", "")};
+
+  OverlayStack stack;
+  stack.open(std::move(palette));
+  type(stack, "rm");
+  const auto result = press(stack, SDLK_RETURN);
+  MICRONOTES_REQUIRE(result.has_value());
+  MICRONOTES_REQUIRE(result->itemId == "roadmap");
 }

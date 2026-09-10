@@ -66,17 +66,35 @@ const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) con
     for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) overlay.filterCache.push_back(i);
     return overlay.filterCache;
   }
-  std::vector<std::pair<int, int>> scored;  // (score, index)
+  // Two tiers, not one pool of scores. The label is what the reader typed at:
+  // a hit in it beats a hit in the detail line however well the detail happens
+  // to score. Both came off the same scale before, and a folder is a longer
+  // string with more separators to earn boundary bonuses on, so "pro" in "Go to
+  // note" put "Barometer log" -- matched only through its projects/ folder --
+  // above "Product roadmap", whose title the query is a prefix of.
+  struct Match {
+    bool onLabel;
+    int score;
+    int index;
+  };
+  std::vector<Match> scored;
   for(int i = 0; i < static_cast<int>(overlay.items.size()); ++i) {
     const auto& item = overlay.items[static_cast<std::size_t>(i)];
     perf::addCounter(perf::CounterId::OverlayFilterItemsScored);
+    bool onLabel = true;
     auto score = util::fuzzyScore(item.label, query);
-    if(!score && !item.detail.empty()) score = util::fuzzyScore(item.detail, query);
-    if(score) scored.emplace_back(*score, i);
+    if(!score && !item.detail.empty()) {
+      score = util::fuzzyScore(item.detail, query);
+      onLabel = false;
+    }
+    if(score) scored.push_back({onLabel, *score, i});
   }
-  std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+  std::stable_sort(scored.begin(), scored.end(), [](const Match& a, const Match& b) {
+    if(a.onLabel != b.onLabel) return a.onLabel;
+    return a.score > b.score;
+  });
   overlay.filterCache.reserve(scored.size());
-  for(const auto& [_, index] : scored) overlay.filterCache.push_back(index);
+  for(const auto& match : scored) overlay.filterCache.push_back(match.index);
   return overlay.filterCache;
 }
 

@@ -231,7 +231,10 @@ Useful runtime controls:
 - `Ctrl+K`: turn the selection into a link and put the caret in the empty `()`.
   Outside the editor there is no selection to link, so it opens the note jump
   instead.
-- `Ctrl+P`: jump to any note in the library by fuzzy title.
+- `Ctrl+P`: jump to any note in the library by fuzzy title. A note is found by
+  its folder as well, but never *above* one whose title matched: the two are
+  ranked in that order rather than on one score, or a note in `projects/` would
+  outrank the note actually called "Product roadmap".
   `Ctrl+Shift+P`: the command palette - every shell command in one filterable
   list, including the ones with no shortcut: set a note icon, move a note or a
   block selection to another note, restore from trash, toggle a favorite,
