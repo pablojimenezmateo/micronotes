@@ -184,27 +184,46 @@ void drawArrowGlyph(SDL_Renderer* renderer, Rect box, ArrowDirection direction, 
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   const auto [cx, cy] = gridFor(box);
   const bool vertical = direction == ArrowDirection::Up || direction == ArrowDirection::Down;
-  // The arm is measured across the axis the arrow spans, so a wide short button
-  // and a tall narrow one both get a head that fits inside them.
+  // The head is a chevron half as deep as it is wide -- the proportion the
+  // disclosure chevron and the close cross are drawn at too -- which is the
+  // same thing as saying its two arms are at forty-five degrees. So there is
+  // only one number to choose here, and the other follows from it.
   //
-  // Rounded to whole pixels, and the tip with it. A fraction of the button's
-  // width put the two arms' ends on halves either side of the centre, and the
-  // renderer took both the same way: the find bar's arrows came out with a
-  // doubled pixel on one arm, a gap on the other and a tip split across two
-  // rows -- a blunt, lopsided head on the one glyph whose whole job is to point.
-  const float arm = std::max(3.0f, std::round((vertical ? box.w : box.h) * 0.22f));
-  // Half the arm along the pointing axis: the head is a chevron half as deep as
-  // it is wide, which is the proportion the chevron and the close cross are
-  // drawn at too.
-  const float tip = std::max(1.0f, std::round(arm * 0.5f));
+  // It used to choose both, and independently: an arm from a fraction of the
+  // button, then a tip from half of that, each rounded on its own. Whenever the
+  // arm came out odd the two stopped agreeing, and every box the shell actually
+  // hands this is one of those. The tab strip's chevrons are handed 16x34, so
+  // the arm was 7 against a tip of 4 -- a slope of eight in seven, which the
+  // grid cannot step evenly. It came out as a run of single steps with one
+  // tread doubled, and the doubled tread fell in a different place on each arm:
+  // the upper one stepped 15, 14, 13, 12, then 11 and 10 together, while the
+  // lower one stepped 10, 11, 12, then 13 and 14 together. Hence a chevron that
+  // was neither a straight diagonal nor the same shape above the tip as below
+  // it. The find bar's 24x24 and the settings steppers' 20x22 were both wrong
+  // the same way.
+  //
+  // At forty-five degrees every step is a diagonal one, so there is no tie for
+  // the renderer to break and nothing left to come out differently on the two
+  // arms.
+  //
+  // `across` is the axis the head spans and `along` the one it points down, so
+  // a wide short button and a tall narrow one both get a head that fits: the
+  // depth is capped at half the room it has to point into.
+  const float across = vertical ? box.w : box.h;
+  const float along = vertical ? box.h : box.w;
+  const float tip = std::max(2.0f, std::min(std::round(across * 0.125f), std::floor(along * 0.5f)));
+  const float arm = tip * 2.0f;
+  // Both arms drawn from the tip outward rather than as a polyline through it.
+  // Nothing depends on that while the arms are at forty-five degrees, and it is
+  // what keeps them a reflected pair if they ever are not.
   if(vertical) {
     const float dy = direction == ArrowDirection::Down ? tip : -tip;
-    SDL_RenderLine(renderer, cx - arm, cy - dy, cx, cy + dy);
+    SDL_RenderLine(renderer, cx, cy + dy, cx - arm, cy - dy);
     SDL_RenderLine(renderer, cx, cy + dy, cx + arm, cy - dy);
     return;
   }
   const float dx = direction == ArrowDirection::Right ? tip : -tip;
-  SDL_RenderLine(renderer, cx - dx, cy - arm, cx + dx, cy);
+  SDL_RenderLine(renderer, cx + dx, cy, cx - dx, cy - arm);
   SDL_RenderLine(renderer, cx + dx, cy, cx - dx, cy + arm);
 }
 
