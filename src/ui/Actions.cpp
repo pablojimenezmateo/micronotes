@@ -69,6 +69,28 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::Link,            "link",           "Link the selection",              "Ctrl+K",       "",              S::Writing, true, false, "", false},
   {ActionId::Undo,            "undo",           "Undo",                            "Ctrl+Z",       "",              S::Writing, true, false, "", false},
   {ActionId::Redo,            "redo",           "Redo",                            "Ctrl+Y",       "",              S::Writing, true, false, "", false},
+  // The five verbs that mean "do this to whatever has the keyboard". They were
+  // help rows and key-handler branches and nothing else, which made them the
+  // one group of editing commands the Edit menu could not offer -- and an Edit
+  // menu without Cut, Copy and Paste is the first place a reader looks and does
+  // not find them. `app/FocusedEdits.h` had already been split out of the key
+  // router for exactly this reason, one release earlier, for Undo and Redo.
+  //
+  // `keyRunsIt` false for the same reason theirs is: the chord means the note
+  // buffer, a block selection in it, or whichever one-line field is focused,
+  // and only the key handler can see which. `inPalette` false for the same
+  // reason `Bold` is: opening the palette takes away the very selection they
+  // act on.
+  {ActionId::Cut,             "cut",            "Cut",                             "Ctrl+X",       "",              S::Writing, false, false, "", false},
+  {ActionId::Copy,            "copy",           "Copy",                            "Ctrl+C",       "",              S::Writing, false, false, "", false},
+  {ActionId::Paste,           "paste",          "Paste",                           "Ctrl+V",       "",              S::Writing, false, false, "", false},
+  // Shift forces text even when the clipboard also carries an image, which is
+  // the opposite of what the shortcut list used to say it did -- it was printed
+  // as "paste an image as an attachment", and an ordinary Ctrl+V is what does
+  // that. Reading the label off the registry is what stops the two disagreeing
+  // again.
+  {ActionId::PastePlain,      "paste-plain",    "Paste as plain text",             "Ctrl+Shift+V", "",              S::Writing, false, false, "", false},
+  {ActionId::SelectAll,       "select-all",     "Select everything",               "Ctrl+A",       "",              S::Writing, false, false, "", false},
   {ActionId::ToggleTask,      "toggle-task",    "Tick or untick a task",           "Ctrl+Enter",   "",              S::Writing, true, false, "", false},
 
   {ActionId::DuplicateBlock,  "duplicate-block","Duplicate the block",             "Ctrl+D",       "",              S::Blocks, true, false, "", false},
@@ -206,9 +228,6 @@ constexpr HelpRow kHelpRows[] = {
   {"PageUp, PageDown", "Move by a screenful", S::Writing},
   {"Tab, Shift+Tab", "Indent, outdent a list item", S::Writing},
   {"Enter", "Continue the list, or leave it when empty", S::Writing},
-  {"Ctrl+A", "Select everything", S::Writing},
-  {"Ctrl+C, Ctrl+X", "Copy, cut", S::Writing},
-  {"Ctrl+V, Ctrl+Shift+V", "Paste, paste an image as an attachment", S::Writing},
 
   {"Esc", "Select the block, again to go back", S::Blocks},
   {"Shift+Up, Shift+Down", "Extend the block selection", S::Blocks},

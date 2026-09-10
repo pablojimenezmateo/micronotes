@@ -134,6 +134,14 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   // menu with the caret in a rename box did nothing while Ctrl+Z worked.
   else if(id == "undo") undoInFocus(ui);
   else if(id == "redo") redoInFocus(ui);
+  // And the other five of the six, through the same functions the keys run,
+  // for the same reason: a second implementation here is what made choosing
+  // Undo from the menu with the caret in a rename box do nothing.
+  else if(id == "cut") cutSelectionInFocus(ui);
+  else if(id == "copy") copySelectionInFocus(ui);
+  else if(id == "paste") pasteInFocus(ui, /*plainTextOnly=*/false);
+  else if(id == "paste-plain") pasteInFocus(ui, /*plainTextOnly=*/true);
+  else if(id == "select-all") selectAllInFocus(ui);
   else if(id == "toggle-task") {
     if(ui.focus != FocusArea::Editor) ui.status = "Put the caret in a task first";
     else if(!applyTransform(ui, doc::toggleTodo)) ui.status = "No task to toggle here";
