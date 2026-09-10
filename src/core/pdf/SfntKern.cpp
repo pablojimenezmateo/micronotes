@@ -41,28 +41,46 @@ int xAdvanceIn(std::string_view gpos, std::size_t at, std::uint16_t format) {
   return s16At(gpos, offset);
 }
 
-// Where `glyph` sits in a coverage table, or -1 when it is not covered.
-int coverageIndex(std::string_view gpos, std::size_t at, std::uint16_t glyph) {
-  const std::uint16_t format = u16At(gpos, at);
-  if(format == 1) {
-    const std::uint16_t count = u16At(gpos, at + 2);
-    // Sorted, so a binary search -- a coverage table on a Latin face runs to
-    // several hundred glyphs and this is asked once per character pair.
-    std::size_t low = 0;
-    std::size_t high = count;
-    while(low < high) {
-      const std::size_t mid = (low + high) / 2;
-      const std::uint16_t candidate = u16At(gpos, at + 4 + mid * 2);
-      if(candidate == glyph) return static_cast<int>(mid);
-      if(candidate < glyph) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
+constexpr std::size_t kNoRecord = static_cast<std::size_t>(-1);
+
+// Binary search over `count` fixed-size records starting at `first`, each led
+// by the glyph id it is about. Returns the record's own offset, or `kNoRecord`.
+//
+// Two of the three tables read here are exactly that and differ only in their
+// stride: a format 1 coverage table is bare glyph ids (stride 2) and a
+// `PairSet`'s entries are a glyph id followed by one or two `ValueRecord`s
+// (stride computed from the value formats). Sorted is the format's guarantee,
+// and a search rather than a walk matters because a coverage table on a Latin
+// face runs to several hundred glyphs and this is asked once per pair.
+std::size_t recordFor(std::string_view gpos, std::size_t first, std::size_t count,
+                      std::size_t stride, std::uint16_t glyph) {
+  std::size_t low = 0;
+  std::size_t high = count;
+  while(low < high) {
+    const std::size_t mid = (low + high) / 2;
+    const std::size_t record = first + mid * stride;
+    const std::uint16_t candidate = u16At(gpos, record);
+    if(candidate == glyph) return record;
+    if(candidate < glyph) {
+      low = mid + 1;
+    } else {
+      high = mid;
     }
-    return -1;
   }
-  if(format != 2) return -1;
+  return kNoRecord;
+}
+
+// The `RangeRecord` array that *both* format 2 tables here are: a count at
+// `at + 2`, then six-byte records of {first glyph, last glyph, value}, sorted
+// and disjoint. Fills `first` and `value` and returns whether the glyph is in
+// one.
+//
+// The two readers take the value differently -- a coverage table's is the
+// index its first glyph has, so the answer is that plus the offset into the
+// range, and a class definition's is the class itself. The *search* is the
+// same, and was written out twice.
+bool rangeRecordFor(std::string_view gpos, std::size_t at, std::uint16_t glyph,
+                    std::uint16_t* first, std::uint16_t* value) {
   const std::uint16_t ranges = u16At(gpos, at + 2);
   std::size_t low = 0;
   std::size_t high = ranges;
@@ -76,10 +94,27 @@ int coverageIndex(std::string_view gpos, std::size_t at, std::uint16_t glyph) {
     } else if(glyph > end) {
       low = mid + 1;
     } else {
-      return static_cast<int>(u16At(gpos, record + 4)) + (glyph - start);
+      *first = start;
+      *value = u16At(gpos, record + 4);
+      return true;
     }
   }
-  return -1;
+  return false;
+}
+
+// Where `glyph` sits in a coverage table, or -1 when it is not covered.
+int coverageIndex(std::string_view gpos, std::size_t at, std::uint16_t glyph) {
+  const std::uint16_t format = u16At(gpos, at);
+  if(format == 1) {
+    const std::size_t record = recordFor(gpos, at + 4, u16At(gpos, at + 2), 2, glyph);
+    if(record == kNoRecord) return -1;
+    return static_cast<int>((record - (at + 4)) / 2);
+  }
+  if(format != 2) return -1;
+  std::uint16_t start = 0;
+  std::uint16_t index = 0;
+  if(!rangeRecordFor(gpos, at, glyph, &start, &index)) return -1;
+  return static_cast<int>(index) + (glyph - start);
 }
 
 // Which class a glyph is in. Class 0 is "everything not mentioned", which is
@@ -93,23 +128,10 @@ std::uint16_t classOf(std::string_view gpos, std::size_t at, std::uint16_t glyph
     return u16At(gpos, at + 6 + static_cast<std::size_t>(glyph - start) * 2);
   }
   if(format != 2) return 0;
-  const std::uint16_t ranges = u16At(gpos, at + 2);
-  std::size_t low = 0;
-  std::size_t high = ranges;
-  while(low < high) {
-    const std::size_t mid = (low + high) / 2;
-    const std::size_t record = at + 4 + mid * 6;
-    const std::uint16_t start = u16At(gpos, record);
-    const std::uint16_t end = u16At(gpos, record + 2);
-    if(glyph < start) {
-      high = mid;
-    } else if(glyph > end) {
-      low = mid + 1;
-    } else {
-      return u16At(gpos, record + 4);
-    }
-  }
-  return 0;
+  std::uint16_t start = 0;
+  std::uint16_t which = 0;
+  if(!rangeRecordFor(gpos, at, glyph, &start, &which)) return 0;
+  return which;
 }
 
 // One `PairPos` subtable, format 1: the pairs written out one by one, grouped
@@ -127,23 +149,10 @@ bool pairFromFormat1(std::string_view gpos, std::size_t at, std::uint16_t left,
   const std::uint16_t pairs = u16At(gpos, set);
   const std::size_t stride = 2 + valueRecordSize(valueFormat1) + valueRecordSize(valueFormat2);
   // Sorted by the second glyph, which the format guarantees.
-  std::size_t low = 0;
-  std::size_t high = pairs;
-  while(low < high) {
-    const std::size_t mid = (low + high) / 2;
-    const std::size_t record = set + 2 + mid * stride;
-    const std::uint16_t second = u16At(gpos, record);
-    if(second == right) {
-      *out = xAdvanceIn(gpos, record + 2, valueFormat1);
-      return true;
-    }
-    if(second < right) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-  return false;
+  const std::size_t record = recordFor(gpos, set + 2, pairs, stride, right);
+  if(record == kNoRecord) return false;
+  *out = xAdvanceIn(gpos, record + 2, valueFormat1);
+  return true;
 }
 
 // The same subtable, format 2: a matrix over two class definitions, which is

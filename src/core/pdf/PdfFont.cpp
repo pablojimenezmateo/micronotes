@@ -33,6 +33,34 @@ void appendUtf16Hex(std::string& out, char32_t value) {
   appendHex16(out, static_cast<unsigned>(0xDC00 + (offset & 0x3FF)));
 }
 
+// The one walk from a run's bytes to its kerned glyphs.
+//
+// It was written twice -- once to measure and once to encode -- which is
+// precisely the failure `PdfFont`'s own header says the class exists to make
+// impossible: "a measurement taken from one font and an encoding written from
+// another is text that overruns the line breaks computed for it". Two copies
+// of a walk is the same hazard one step in, and the two did agree; nothing
+// made them.
+//
+// `visit` is handed the glyph, the code point that produced it, and the pair
+// adjustment that belongs to the *gap before it* -- zero for the first glyph,
+// because charging one there would move the run's own origin away from where
+// the layout placed it.
+template <typename Visit>
+void eachKernedGlyph(const SfntFont& sfnt, std::string_view text, Visit&& visit) {
+  std::size_t at = 0;
+  std::uint16_t previous = 0;
+  bool havePrevious = false;
+  while(at < text.size()) {
+    const util::CodePoint point = util::decodeAt(text, at);
+    const std::uint16_t glyph = sfnt.glyph(point.value);
+    visit(glyph, point.value, havePrevious ? sfnt.kerning(previous, glyph) : 0);
+    previous = glyph;
+    havePrevious = true;
+    at = point.next;
+  }
+}
+
 }
 
 PdfFont::PdfFont(SfntFont font, std::string baseName)
@@ -40,21 +68,9 @@ PdfFont::PdfFont(SfntFont font, std::string baseName)
 
 float PdfFont::width(std::string_view text, float size) const {
   int units = 0;
-  std::size_t at = 0;
-  std::uint16_t previous = 0;
-  bool havePrevious = false;
-  while(at < text.size()) {
-    const util::CodePoint point = util::decodeAt(text, at);
-    const std::uint16_t glyph = sfnt_.glyph(point.value);
-    // The pair adjustment belongs to the gap, so it is charged once, between
-    // the two glyphs -- never before the first, which would move the run's
-    // own origin away from where the layout placed it.
-    if(havePrevious) units += sfnt_.kerning(previous, glyph);
-    units += sfnt_.advance(glyph);
-    previous = glyph;
-    havePrevious = true;
-    at = point.next;
-  }
+  eachKernedGlyph(sfnt_, text, [&](std::uint16_t glyph, char32_t, int kern) {
+    units += kern + sfnt_.advance(glyph);
+  });
   return static_cast<float>(units) * size / 1000.0f;
 }
 
@@ -66,27 +82,18 @@ std::string PdfFont::encode(std::string_view text) {
   std::string out;
   out.reserve(text.size() * 4 + 4);
   out += "[<";
-  std::size_t at = 0;
-  std::uint16_t previous = 0;
-  bool havePrevious = false;
-  while(at < text.size()) {
-    const util::CodePoint point = util::decodeAt(text, at);
-    const std::uint16_t glyph = sfnt_.glyph(point.value);
+  eachKernedGlyph(sfnt_, text, [&](std::uint16_t glyph, char32_t code, int kern) {
     // `.notdef` is recorded like any other: it is a glyph the page shows, and
     // leaving it out of the widths array would have the viewer guess its
     // advance and so shift everything after it on the line.
-    glyphs_.emplace(glyph, point.value);
-    const int kern = havePrevious ? sfnt_.kerning(previous, glyph) : 0;
+    glyphs_.emplace(glyph, code);
     if(kern != 0) {
       out += ">";
       out += std::to_string(-kern);
       out += "<";
     }
     appendHex16(out, glyph);
-    previous = glyph;
-    havePrevious = true;
-    at = point.next;
-  }
+  });
   out += ">]";
   return out;
 }
