@@ -45,7 +45,7 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::RenameNote,      "rename",         "Rename note...",                  "F2",           "",              S::Notes, true,  true, "", true},
   {ActionId::SetNoteIcon,     "icon",           "Set note icon...",                "",             "",              S::Notes, true,  true, "", true},
   {ActionId::EditTags,        "tags",           "Edit tags...",                    "Ctrl+T",       "",              S::Notes, true,  true, "", true},
-  {ActionId::ToggleFavorite,  "favorite",       "Toggle favorite",                 "",             "",              S::Notes, true,  true, "", true},
+  {ActionId::PinNote,         "pin-note",       "Pin or unpin this note",          "",             "",              S::Notes, true,  true, "", true},
   {ActionId::MoveNote,        "move-note",      "Move note to notebook...",        "",             "",              S::Notes, true,  true, "", true},
   // The note is a file, and these three are the questions a reader asks about
   // one. Ported from the sibling microide, whose file tree and tab strip both

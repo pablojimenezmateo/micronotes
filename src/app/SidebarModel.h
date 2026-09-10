@@ -60,7 +60,7 @@ inline constexpr float kSidebarListPadding = ui::kSpace3;
 // to read than the tree it sits above. Named because the count on the band has
 // to be the count of what is under it, and those were two numbers written out
 // at two sites.
-inline constexpr std::size_t kMaxFavoriteRows = 8;
+inline constexpr std::size_t kMaxPinnedRows = 8;
 inline constexpr std::size_t kMaxRecentRows = 5;
 
 // The coloured dots at the trailing edge of a note's row, one per tag.

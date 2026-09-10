@@ -50,13 +50,13 @@ struct ShellLayout {
   // name, and the window controls. Reserved whether or not a note is open, so a
   // hit test against the rest of the window agrees with what was drawn.
   Rect menuBar;
-  Rect sidebar;      // search field, notebooks, favorites, tags
+  Rect sidebar;      // search field, notebooks, pinned notes, tags
   // The tab strip and the breadcrumb under it belong to the page's own column,
   // not to the window: they start where the sidebar ends. A window-wide strip
   // makes the band above the sidebar change owner depending on what is open,
   // and puts the tabs of the note you are reading over the tree you are not.
   Rect tabs;
-  Rect breadcrumb;   // the folder trail, the note's title, the favourite star
+  Rect breadcrumb;   // the folder trail, the note's title, the pin
   Rect content;      // the page itself
   Rect rightPanel;   // outline, backlinks
   Rect status;       // the status bar, full width under everything

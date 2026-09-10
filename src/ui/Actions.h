@@ -36,7 +36,7 @@ enum class ActionId {
   RenameNote,
   SetNoteIcon,
   EditTags,
-  ToggleFavorite,
+  PinNote,
   MoveNote,
   MoveBlocks,
   DeleteNote,

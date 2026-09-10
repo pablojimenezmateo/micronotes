@@ -237,7 +237,7 @@ Useful runtime controls:
   outrank the note actually called "Product roadmap".
   `Ctrl+Shift+P`: the command palette - every shell command in one filterable
   list, including the ones with no shortcut: set a note icon, move a note or a
-  block selection to another note, restore from trash, toggle a favorite,
+  block selection to another note, restore from trash, pin a note,
   settings.
 - `Ctrl+F`: find in this note. A bar floats at the top right of the page with
   the query, two toggles - `Aa` for match case and `ab` for whole word, or
@@ -261,7 +261,7 @@ Useful runtime controls:
   room becomes margin rather than longer lines. Both are stored per library in
   `.micronotes/ui.state`, beside the theme.
 - Choosing a library folder from settings opens it without a restart: the
-  library being left is written out first, so its open note and favorites stay
+  library being left is written out first, so its open note and pinnedNotes stay
   with it. The folder is created if it is not there, `~` is expanded, and
   the choice is remembered in `~/.config/micronotes/library-path` the same way
   `--set-library` does.
@@ -351,7 +351,7 @@ Useful runtime controls:
   dot at the trailing edge of a note's row - to filter by it or to choose its
   colour from a palette of twelve. Hovering a dot names its tag; clicking one
   filters by it.
-- Click a section band - Notebooks, Favorites, Tags, Recent - to shut it, or
+- Click a section band - Notebooks, Pinned, Tags, Recent - to shut it, or
   arrow onto it and use `Left`/`Right`. `Enter` on a sidebar row chooses it,
   which is how a tag or a band is acted on from the keyboard; arrowing over one
   deliberately does not, since either would replace the list being walked.
@@ -376,7 +376,7 @@ Useful runtime controls:
 - Drag a note onto a notebook to move it, or a notebook onto another to
   re-parent it. The row you would drop on is outlined. A notebook refuses to be
   dropped inside itself or inside one of its own children.
-- Favorites sit above the tree and the notes you opened most recently below it;
+- Pinned notes sit above the tree and the notes you opened most recently below it;
   tags are a filter at the bottom rather than a second way to organise notes.
   Both lists are stored in `.micronotes/ui.state` and name notes by id.
 - The window draws its own menu bar rather than wearing the compositor's title
@@ -395,8 +395,8 @@ Useful runtime controls:
   one table, drawn three ways. `ArchitectureTests` proves every action the menus
   or the palette offer actually reaches a command.
 - Under the tab strip, over the page, a breadcrumb band names the notebooks down
-  to the open note (click one to go there) and carries the star that pins it to
-  Favorites. It belongs to the page's own column rather than spanning the window,
+  to the open note (click one to go there) and carries the thumbtack that pins it
+  to Pinned. It belongs to the page's own column rather than spanning the window,
   so the trail sits directly over the note it describes rather than over the tree.
 - Deleting a note or a notebook moves it to the library's own
   `.micronotes/trash/`, not the desktop trash, so "Restore from trash..." in the
@@ -434,7 +434,7 @@ things and both apply: the compositor says how big a pixel is, the text size
 says how big you want the type on top of that.
 
 Note icons are **drawn**, not typeset: eleven marks in `ui/Draw.cpp`, rendered
-with the same lines and rects as the chevrons, the tick and the favourite star.
+with the same lines and rects as the chevrons, the tick and the pin.
 
 They used to be emoji, and could not stay. A colour emoji font such as Noto
 Color Emoji carries a single fixed bitmap strike - 128 pixels - which SDL3_ttf

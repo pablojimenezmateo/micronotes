@@ -27,8 +27,8 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
   // it. Without the rules the destructive row sat flush against "Copy absolute
   // path" and read as one more thing you could do to a path.
   //
-  // The star is a tick rather than the word "Toggle": a row that says "Toggle
-  // favorite" makes you open the menu to find out which way it is set, which is
+  // The pin is a tick rather than the word "Toggle": a row that says "Toggle
+  // pinned" makes you open the menu to find out which way it is set, which is
   // the one thing the menu could have told you without being opened.
   overlay.items = {
     {"new", "New note", "", ui::keysFor(ui::ActionId::NewNote), true, false, false, false},
@@ -36,7 +36,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     {"rename", "Rename", "", ui::keysFor(ui::ActionId::RenameNote), hasNote, false, false, false},
     {"icon", "Set icon", "", "", hasNote, false, false, false},
     {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false, false, false},
-    {"favorite", "Favorite", "", "", hasNote, false, hasNote && ui.state.workspace().isFavorite(noteId), false},
+    {"pin-note", "Pinned", "", "", hasNote, false, hasNote && ui.state.workspace().isPinned(noteId), false},
     {"move", "Move to notebook", "", "", hasNote, false, false, false},
     {"", "", "", "", false, false, false, true},
     // A note is a file, and these are the questions a reader asks about one.
@@ -72,7 +72,7 @@ void openFileMenu(UiRuntime& ui, float x, float y) {
   overlay.anchorY = y;
   overlay.width = 220.0f;
   // The same four groups the note menu has, minus what only a note can do:
-  // there is no icon, no tags and no favourite for a file, because micronotes
+  // there is no icon, no tags and no pin for a file, because micronotes
   // holds nothing about a file but where it is.
   overlay.items = {
     {"open", "Open", "", "", true, false, false, false},
@@ -165,7 +165,12 @@ void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
     {"", "", "", "", false, false, false, true},
     // Ctrl+click already pins, and nothing said so. A tab that is never
     // replaced by the next note opened is worth knowing about.
-    {"pin", pinned ? "Unpin" : "Pin", "", "", true, false},
+    //
+    // A tick rather than a label that swaps between "Pin" and "Unpin", which
+    // is the rule the note menu's own pin row follows and the reason the mark
+    // column exists: a row whose *word* changes makes you open the menu to
+    // find out which way the toggle is set.
+    {"pin", "Pinned", "", "", true, false, pinned, false},
     {"", "", "", "", false, false, false, true},
     {"show-on-disk", "Show on disk", "", "", note != nullptr, false},
     {"copy-relative-path", "Copy relative path", "", "", note != nullptr, false},

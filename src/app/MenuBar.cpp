@@ -128,9 +128,9 @@ bool menuItemChecked(const UiRuntime& ui, ui::ActionId action) {
     case ui::ActionId::ToggleSidebar: return workspace.sidebarVisible;
     case ui::ActionId::ToggleRightPanel: return workspace.rightPanelVisible;
     case ui::ActionId::ToggleTheme: return ui::themeMode() == ui::ThemeMode::Light;
-    case ui::ActionId::ToggleFavorite: {
+    case ui::ActionId::PinNote: {
       const auto& noteId = ui.state.selection().noteId;
-      return !noteId.empty() && ui.state.workspace().isFavorite(noteId);
+      return !noteId.empty() && ui.state.workspace().isPinned(noteId);
     }
     case ui::ActionId::PinTab: {
       const auto& tabs = workspace.tabs;

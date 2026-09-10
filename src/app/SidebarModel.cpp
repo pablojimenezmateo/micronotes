@@ -288,10 +288,10 @@ void rebuildSidebarRows(UiRuntime& ui, Rect rect, const SidebarMetrics& metrics)
     return;
   }
 
-  const auto& favorites = ui.state.workspace().favorites;
-  if(const std::size_t count = build.resolvable(favorites, kMaxFavoriteRows); count > 0) {
-    if(build.section(ui::SidebarSection::Favorites, "Favorites", count)) {
-      build.noteShortcuts(favorites, kMaxFavoriteRows);
+  const auto& pinnedNotes = ui.state.workspace().pinnedNotes;
+  if(const std::size_t count = build.resolvable(pinnedNotes, kMaxPinnedRows); count > 0) {
+    if(build.section(ui::SidebarSection::Pinned, "Pinned", count)) {
+      build.noteShortcuts(pinnedNotes, kMaxPinnedRows);
     }
   }
 
@@ -375,7 +375,7 @@ SidebarRowsShape sidebarRowsShape(const UiRuntime& ui, Rect rect, const SidebarM
   shape.search = ui.fields.search.text();
   shape.searchScope = ui.fields.searchScope;
   shape.tag = ui.state.selection().tag;
-  shape.favorites = workspace.favorites;
+  shape.pinnedNotes = workspace.pinnedNotes;
   shape.recents = workspace.recents;
   shape.collapsedSections = workspace.collapsedSections;
   shape.width = rect.w;

@@ -45,7 +45,7 @@ struct OverlayItem {
   // line up -- but nothing could ask for the tick that column exists for. So the
   // settings list wrote the *word* "current" in the accelerator column instead,
   // where it read as a second value, and a context menu's toggle had to say
-  // "Toggle favorite" because it could not show which way it was set.
+  // "Toggle pinned" because it could not show which way it was set.
   bool checked = false;
   // A rule rather than a row. Menus group their items -- the harmless ones, then
   // the one that deletes something -- and a group with no division between it

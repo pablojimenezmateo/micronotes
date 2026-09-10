@@ -556,7 +556,7 @@ bool saveCurrent(UiRuntime& ui, bool quiet) {
   }
   // The first save of a note that arrived without front matter gives it a
   // permanent id, and `AppState::followIdChange` re-points the selection, the
-  // tabs, the favorites and the recents that named the old one. The buffer's
+  // tabs, the pinned notes and the recents that named the old one. The buffer's
   // record of *which* note is in it is the one thing outside that reach, and
   // left stale it makes the shell believe the note on screen is a different
   // note from the one it loaded: the guard in `loadSelectedIntoEditor` stops

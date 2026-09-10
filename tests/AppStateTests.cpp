@@ -246,7 +246,7 @@ MICRONOTES_TEST(app_state_follows_a_note_whose_id_changed_on_disk) {
 
 // A note another tool wrote has no front matter, so the library files it under
 // an id derived from its path. The first save gives it a permanent one -- and
-// used to leave the selection, the tab and the favorites pointing at the id it
+// used to leave the selection, the tab and the pinned notes pointing at the id it
 // no longer has, so the note vanished the moment you saved it.
 MICRONOTES_TEST(app_state_carries_the_selection_when_a_foreign_note_adopts_an_id) {
   const micronotes::tests::TempDir rootDir("micronotes-adopt-id-test");
@@ -259,14 +259,14 @@ MICRONOTES_TEST(app_state_carries_the_selection_when_a_foreign_note_adopts_an_id
   MICRONOTES_REQUIRE(state.catalog().notes().size() == 1);
   const auto pathId = state.catalog().notes().front().id;
   state.selectNote(pathId);
-  MICRONOTES_REQUIRE(state.editWorkspace().toggleFavorite(pathId));
+  MICRONOTES_REQUIRE(state.editWorkspace().togglePinned(pathId));
 
   MICRONOTES_REQUIRE(state.saveSelectedNote("edited by micronotes\n").ok);
   MICRONOTES_REQUIRE(state.selection().noteId != pathId);
   MICRONOTES_REQUIRE(!state.selection().noteId.empty());
-  // Still open, still selected, still favorite, and still one note.
+  // Still open, still selected, still pinned, and still one note.
   MICRONOTES_REQUIRE(state.openNote().read().has_value());
-  MICRONOTES_REQUIRE(state.workspace().isFavorite(state.selection().noteId));
+  MICRONOTES_REQUIRE(state.workspace().isPinned(state.selection().noteId));
   MICRONOTES_REQUIRE(state.workspace().tabs.front().noteId == state.selection().noteId);
   MICRONOTES_REQUIRE(state.catalog().notes().size() == 1);
 

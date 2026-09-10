@@ -45,7 +45,7 @@ RightPanelView rightPanelViewFromName(std::string_view name);
 // unclear: naming three of four groups is worse than naming none.
 enum class SidebarSection {
   Notebooks,
-  Favorites,
+  Pinned,
   Tags,
   Recent
 };
@@ -86,7 +86,7 @@ struct WorkspaceModel {
   // Notes pinned to the top of the sidebar, and the ones opened most recently,
   // newest first. Both name notes by id and never touch a file: which notes
   // someone keeps to hand is a view preference, not part of the note.
-  std::vector<std::string> favorites;
+  std::vector<std::string> pinnedNotes;
   std::vector<std::string> recents;
 
   // A colour per tag, which is what joins a note's row to the tags it carries.
@@ -126,7 +126,7 @@ struct WorkspaceModel {
   void openNote(const std::string& noteId, TabPolicy policy = TabPolicy::NewTab);
 
   // Re-points everything naming `from` at `to`: its tabs, its place in the
-  // favorites and its place in the recents.
+  // pinned notes and its place in the recents.
   //
   // A note's id changes exactly once in its life: the first time micronotes
   // saves a file that arrived without front matter, it stops being filed under
@@ -142,13 +142,13 @@ struct WorkspaceModel {
   // list would have had to be added to both.
   void renameNote(std::string_view from, const std::string& to);
 
-  // The notes kept to hand. All three are about `favorites` and `recents` and
+  // The notes kept to hand. All three are about `pinnedNotes` and `recents` and
   // nothing else, which is why they are methods here rather than on `AppState`:
   // they were three functions over this struct's fields, reached through it.
-  bool isFavorite(std::string_view noteId) const;
-  // Returns whether the note is a favorite *after* the toggle, which is what
+  bool isPinned(std::string_view noteId) const;
+  // Returns whether the note is pinned *after* the toggle, which is what
   // the two callers say in the status line.
-  bool toggleFavorite(const std::string& noteId);
+  bool togglePinned(const std::string& noteId);
   // Records a note as just opened. Newest first, and capped, so the list stays
   // a shortcut rather than a second library.
   void noteOpened(const std::string& noteId);

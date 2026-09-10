@@ -138,7 +138,7 @@ public:
   //
   // Everything below here changes a file in the reader's library. Grouped
   // because the difference matters and the header did not show it: the
-  // note-writing path sat between `selectedTitle` and `toggleFavorite`, in one
+  // note-writing path sat between `selectedTitle` and `togglePinned`, in one
   // flat list of fifty-five, and nothing said which of them could lose an
   // afternoon's work.
   //
@@ -259,7 +259,7 @@ private:
   // micronotes writes it, so its identity survives a later move.
   void adoptIdIfMissing(library::NoteMetadata& metadata) const;
   // The note's id moved. Everything pointing at the old one -- the selection,
-  // its tab, the favorites, the recents -- has to follow, or the note the user
+  // its tab, the pinned notes, the recents -- has to follow, or the note the user
   // is looking at disappears out from under them.
   void followIdChange(const std::string& previous, const std::string& adopted);
 

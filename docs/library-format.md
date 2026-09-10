@@ -29,7 +29,7 @@ to is saved, so one being present at startup means the last session did not end
 cleanly -- and micronotes offers it back rather than the older text on disk.
 
 `ui.state` carries the appearance settings - theme, text size, page width -
-along with the pane widths, the selection, the favorites and the recents, which
+along with the pane widths, the selection, the pinned notes and the recents, which
 sidebar bands are shut, and what colour each tag is; `tree.state` which
 notebooks the sidebar has open; `folds.state` which sections each note has
 collapsed. None of it is ever written into a note.
@@ -43,7 +43,7 @@ be typeset differently - which is the point on a machine where one of them is
 read on an external monitor.
 
 `collapsed=<band>` names a sidebar band that is shut - `notebooks`,
-`favorites`, `tags` or `recent` - and only shut bands are written, so the usual
+`pinned`, `tags` or `recent` - and only shut bands are written, so the usual
 state costs nothing and a file from before bands existed reads as all four
 open.
 
@@ -126,7 +126,7 @@ What happens next depends on whether the note on screen has unsaved work in it:
   the next save writes the file back.
 
 A note whose front matter `id` changes on disk is followed rather than lost: it
-is the same file, so the selection, its tab and the favorites re-point at the
+is the same file, so the selection, its tab and the pinned notes re-point at the
 new id.
 
 The one thing micronotes never does is choose for you between two versions of a

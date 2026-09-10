@@ -132,11 +132,28 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     if(static_cast<float>(text.width(titles[slot.index], style)) > room) {
       ui.pointer.offerTooltip(slot.rect, titles[slot.index]);
     }
+    const bool pinned = slot.index < workspace.tabs.size() && workspace.tabs[slot.index].pinned;
     // The close button appears on the tab you are pointing at and on the one
     // you are reading; a strip of crosses is a strip that reads as a warning.
     // Never during a drag: the pointer is holding a tab, not aiming at a cross,
     // and the release would land on one it passed over.
-    if(drag.dragging || (!active && !hot)) continue;
+    //
+    // A pinned tab keeps the pin there instead until the pointer arrives.
+    // Pinning did not show anywhere at all: Ctrl+click pinned a tab, the four
+    // bulk closes then quietly stepped over it, and nothing on the strip said
+    // why -- so the one state the strip keeps about a tab was the one thing it
+    // would not tell you. The mark goes in the room the cross takes because
+    // that room is already reserved on every tab, and the two never want to be
+    // shown at once: the cross is what you reach for, the pin is what the tab
+    // is.
+    const bool showClose = !drag.dragging && (hot || (active && !pinned));
+    if(!showClose) {
+      if(pinned && !drag.dragging) {
+        ui::drawPinGlyph(renderer, slot.close, true,
+                         active ? colors.activeText : colors.inactiveText);
+      }
+      continue;
+    }
     const bool overClose = ui.pointer.over(ui::tabCloseHitRect(slot));
     ui::drawCloseGlyph(renderer, slot.close,
                        overClose ? theme().textPrimary

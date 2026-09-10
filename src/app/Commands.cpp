@@ -44,7 +44,7 @@ void cyclePaneMode(UiRuntime& ui) {
 
 
 // Opens a different library without restarting. The one being left is written
-// out first, so its open note and favorites go with it rather than
+// out first, so its open note and its pinned notes go with it rather than
 // following the user into the new one.
 void switchLibrary(UiRuntime& ui, const std::string& typed) {
   std::string value = typed;
@@ -92,10 +92,10 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "rename") beginRename(ui);
   else if(id == "icon") openIconPicker(ui);
   else if(id == "tags") beginTagEdit(ui);
-  else if(id == "favorite") {
+  else if(id == "pin-note") {
     const auto noteId = ui.state.selection().noteId;
     if(noteId.empty()) ui.status = "No note selected";
-    else ui.status = ui.state.editWorkspace().toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
+    else ui.status = ui.state.editWorkspace().togglePinned(noteId) ? "Pinned note" : "Unpinned note";
   }
   // Show on disk / copy relative / copy absolute, about the note on the page.
   else if(handleNotePathCommand(ui, id, {})) {}

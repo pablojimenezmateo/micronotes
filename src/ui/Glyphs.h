@@ -56,12 +56,18 @@ void drawWrapGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 // A magnifier, for the search field.
 void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color);
 
-// The favourite mark: filled when the note is kept, an outline when it is an
-// offer. Drawn rather than typeset because the chrome face is a mono
-// programming face and has neither star -- the breadcrumb used to set them from
-// the proportional face, and switching the chrome to mono left tofu where the
-// star had been.
+// A five-pointed star, one of the marks a note can wear. Filled or as an
+// outline of the same silhouette. Drawn rather than typeset because the chrome
+// face is a mono programming face and has neither star -- the breadcrumb used
+// to set them from the proportional face, and switching the chrome to mono
+// left tofu where the star had been.
 void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color);
+
+// A thumbtack: filled when the thing is pinned, an outline when pinning it is
+// on offer. One mark for both kinds of pinning the shell has -- a note pinned
+// to the sidebar's PINNED band, and a tab pinned so nothing evicts it -- so
+// that the two read as the same gesture, which is what they are.
+void drawPinGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color);
 
 // One of the marks a note can wear beside its name, and what the picker calls
 // it. The id is what goes into the note's front matter, so it has to stay

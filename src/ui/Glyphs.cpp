@@ -254,51 +254,34 @@ void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
                  box.y + box.h - 1.0f);
 }
 
-void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color) {
-  const auto [cx, cy] = gridFor(box);
-  // The largest whole radius that fits with the centre pixel counted in. It
-  // used to be half the box less one, which on an even box is a half -- a
-  // radius measured in half pixels from a centre measured in whole ones, so
-  // nothing about the mark landed where it was asked to.
-  const float r = std::max(4.0f, std::floor((std::min(box.w, box.h) - 1.0f) / 2.0f));
-  // Five points, alternating outer and inner radius, in exact coordinates. Both
-  // states are drawn from this one hull, so a filled star and an outline are
-  // the same star -- an outline of a different one would read as a second mark
-  // rather than as the same mark un-set.
-  //
-  // The same hull, not the same pixels: without anti-aliasing the two states
-  // have to disagree about the five tips by a pixel. A tip reaching 4.755
-  // pixels out covers a fifth of the column at 5, so the fill stops at 4 -- the
-  // last column whose middle it actually covers -- while the outline puts the
-  // tip on the nearest column, which is 5. Rounding the outline in instead
-  // would put it three quarters of a pixel short of the silhouette rather than
-  // a quarter past it.
-  //
-  // Centred on the *middle of the centre pixel*, half a pixel along from the
-  // pixel's own coordinate. That half pixel is the whole reason this mark is
-  // symmetric now. A shape centred on the coordinate is centred on the seam at
-  // the pixel's leading edge, so its two halves fall either side of that seam
-  // and reflect onto each other a pixel out of step; centred on the pixel's
-  // middle, a column and its reflection are equally far from the middle of the
-  // same pixel, and every rule below reflects exactly.
-  constexpr int kPoints = 10;
-  // A waist a little over half the outer radius. It was 0.42, near the ratio a
-  // pentagram gives, which is right where a point has room to taper and is
-  // wrong here: at eleven pixels it left the top point three rows tall and one
-  // pixel wide -- a spike rather than a point -- and closed the notch between
-  // the two lower legs. Widening the waist shortens the points, which is what
-  // buys them width at a size where a point one pixel across is not a point.
-  constexpr float kWaist = 0.56f;
+namespace {
+
+// A mark drawn from one closed hull, filled or as an outline.
+//
+// Two marks are drawn this way -- the star a note can wear and the pin that
+// says a note is kept to hand -- and both need the same two things from the
+// rasteriser, neither of which it gives for free: a filled state and an
+// outline state that are the *same* silhouette, and left-right symmetry to the
+// pixel. Written twice, the second copy would have had to rediscover
+// everything below.
+//
+// The hull is closed (`hull[count] == hull[0]`), has an even `count`, and is
+// laid out so that vertex `i` is the mirror of vertex `count - i`. That
+// pairing is a property of how each hull is written rather than something this
+// can check, and the outline depends on it.
+//
+// `cx`, `cy` are the centre *pixel*; the hull's own coordinates are about the
+// middle of that pixel, half a pixel along. That half pixel is the whole
+// reason these marks are symmetric. A shape centred on the coordinate is
+// centred on the seam at the pixel's leading edge, so its two halves fall
+// either side of that seam and reflect onto each other a pixel out of step;
+// centred on the pixel's middle, a column and its reflection are equally far
+// from the middle of the same pixel, and every rule below reflects exactly.
+void drawHull(SDL_Renderer* renderer, const SDL_FPoint* hull, int count, float cx, float cy,
+              bool filled, SDL_Color color) {
+  if(count < 4) return;
   const float gx = cx + 0.5f;
   const float gy = cy + 0.5f;
-  SDL_FPoint hull[kPoints + 1];
-  for(int i = 0; i < kPoints; ++i) {
-    const float radius = (i % 2 == 0) ? r : r * kWaist;
-    // Starting at -90 degrees, so a point sits at the top where the eye looks.
-    const float angle = -1.5707963f + static_cast<float>(i) * 3.14159265f / 5.0f;
-    hull[i] = SDL_FPoint {gx + std::cos(angle) * radius, gy + std::sin(angle) * radius};
-  }
-  hull[kPoints] = hull[0];
 
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   if(!filled) {
@@ -317,16 +300,18 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
     // half was walked against its right -- and a line rasteriser breaks the tie
     // on a slope passing exactly between two pixels by the direction it is
     // travelling, not by the geometry. Reflection maps vertex `i` to vertex
-    // `kPoints - i`, so drawing each edge together with that reflection, and
+    // `count - i`, so drawing each edge together with that reflection, and
     // counting down so the reflection is travelled the reflected way, has the
     // pair come out as mirror images.
-    SDL_FPoint outline[kPoints + 1];
-    for(int i = 0; i <= kPoints; ++i) {
+    constexpr int kMaxHullPoints = 32;
+    if(count >= kMaxHullPoints) return;
+    SDL_FPoint outline[kMaxHullPoints];
+    for(int i = 0; i <= count; ++i) {
       outline[i] = SDL_FPoint {cx + std::round(hull[i].x - gx), cy + std::round(hull[i].y - gy)};
     }
-    for(int i = 0; i < kPoints / 2; ++i) {
-      const int m = (kPoints - i) % kPoints;
-      const int n = (kPoints - i - 1) % kPoints;
+    for(int i = 0; i < count / 2; ++i) {
+      const int m = (count - i) % count;
+      const int n = (count - i - 1) % count;
       SDL_RenderLine(renderer, outline[i].x, outline[i].y, outline[i + 1].x, outline[i + 1].y);
       SDL_RenderLine(renderer, outline[m].x, outline[m].y, outline[n].x, outline[n].y);
     }
@@ -337,23 +322,31 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
   //
   // It used to take only the leftmost and rightmost crossing, which is a
   // convex-hull fill -- and a star is the textbook non-convex polygon, so the
-  // two lower points were swallowed and what the favourite mark actually drew
-  // was a lump. Sorting the crossings is the whole difference, and a row of a
-  // five-pointed star has at most six of them.
+  // two lower points were swallowed and what the mark actually drew was a
+  // lump. Sorting the crossings is the whole difference, and neither hull here
+  // has a row with more than six.
   //
-  // Three spans a row at the star's waist, over at most the star's own height:
-  // a named ceiling rather than the same `192` written at three of the four
-  // places that had to agree about it.
+  // Three spans a row over at most the mark's own height: a named ceiling
+  // rather than the same `192` written at three of the four places that had to
+  // agree about it.
   constexpr int kMaxSpans = 192;
+  constexpr int kMaxCrossings = 32;
+  if(count > kMaxCrossings) return;
+  float lowest = hull[0].y;
+  float highest = hull[0].y;
+  for(int i = 1; i < count; ++i) {
+    lowest = std::min(lowest, hull[i].y);
+    highest = std::max(highest, hull[i].y);
+  }
   SDL_FRect spans[kMaxSpans];
-  int count = 0;
-  const int top = static_cast<int>(std::floor(gy - r));
-  const int bottom = static_cast<int>(std::ceil(gy + r));
-  for(int y = top; y <= bottom && count + 3 < kMaxSpans; ++y) {
+  int spanCount = 0;
+  const int top = static_cast<int>(std::floor(lowest));
+  const int bottom = static_cast<int>(std::ceil(highest));
+  for(int y = top; y <= bottom && spanCount + 3 < kMaxSpans; ++y) {
     const float row = static_cast<float>(y) + 0.5f;
-    float crossings[kPoints];
+    float crossings[kMaxCrossings];
     int found = 0;
-    for(int i = 0; i < kPoints; ++i) {
+    for(int i = 0; i < count; ++i) {
       const SDL_FPoint a = hull[i];
       const SDL_FPoint b = hull[i + 1];
       if((row < a.y && row < b.y) || (row >= a.y && row >= b.y)) continue;
@@ -379,7 +372,7 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
       }
       crossings[j + 1] = value;
     }
-    for(int i = 0; i + 1 < found && count < kMaxSpans; i += 2) {
+    for(int i = 0; i + 1 < found && spanCount < kMaxSpans; i += 2) {
       // The columns whose own middle the span covers, as a pair of columns.
       //
       // A left edge plus a rounded *width* was the fault here: the two roundings
@@ -394,19 +387,121 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
       if(right < left) {
         // Narrower than a pixel: the nearest single column rather than nothing.
         // The star's two lower legs are thinner than a pixel for most of their
-        // length at this size, and its top point tapers to nothing inside one
-        // row; dropped, the legs go and the mark reads as a triangle with a
-        // spike on top. Rounding the span's own leading edge keeps the pixel it
-        // picks a reflection of the pixel its mirror picks.
+        // length at this size, and the pin's needle is thinner than one for the
+        // whole of its; dropped, the star reads as a triangle with a spike on
+        // top and the pin as a head with nothing under it. Rounding the span's
+        // own leading edge keeps the pixel it picks a reflection of the pixel
+        // its mirror picks.
         const float only = std::round(crossings[i] - 0.5f);
-        spans[count++] = SDL_FRect {only, static_cast<float>(y), 1.0f, 1.0f};
+        spans[spanCount++] = SDL_FRect {only, static_cast<float>(y), 1.0f, 1.0f};
         continue;
       }
-      spans[count++] =
+      spans[spanCount++] =
         SDL_FRect {left, static_cast<float>(y), right - left + 1.0f, 1.0f};
     }
   }
-  if(count > 0) SDL_RenderFillRects(renderer, spans, count);
+  if(spanCount > 0) SDL_RenderFillRects(renderer, spans, spanCount);
+}
+
+// The largest whole radius that fits in `box` with the centre pixel counted in.
+//
+// It used to be half the box less one, which on an even box is a half -- a
+// radius measured in half pixels from a centre measured in whole ones, so
+// nothing about the mark landed where it was asked to.
+float hullRadius(Rect box) {
+  return std::max(4.0f, std::floor((std::min(box.w, box.h) - 1.0f) / 2.0f));
+}
+
+}
+
+void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  const float r = hullRadius(box);
+  // Five points, alternating outer and inner radius, in exact coordinates. Both
+  // states are drawn from this one hull, so a filled star and an outline are
+  // the same star -- an outline of a different one would read as a second mark
+  // rather than as the same mark un-set.
+  //
+  // The same hull, not the same pixels: without anti-aliasing the two states
+  // have to disagree about the five tips by a pixel. A tip reaching 4.755
+  // pixels out covers a fifth of the column at 5, so the fill stops at 4 -- the
+  // last column whose middle it actually covers -- while the outline puts the
+  // tip on the nearest column, which is 5. Rounding the outline in instead
+  // would put it three quarters of a pixel short of the silhouette rather than
+  // a quarter past it.
+  constexpr int kPoints = 10;
+  // A waist a little over half the outer radius. It was 0.42, near the ratio a
+  // pentagram gives, which is right where a point has room to taper and is
+  // wrong here: at eleven pixels it left the top point three rows tall and one
+  // pixel wide -- a spike rather than a point -- and closed the notch between
+  // the two lower legs. Widening the waist shortens the points, which is what
+  // buys them width at a size where a point one pixel across is not a point.
+  constexpr float kWaist = 0.56f;
+  const float gx = cx + 0.5f;
+  const float gy = cy + 0.5f;
+  SDL_FPoint hull[kPoints + 1];
+  for(int i = 0; i < kPoints; ++i) {
+    const float radius = (i % 2 == 0) ? r : r * kWaist;
+    // Starting at -90 degrees, so a point sits at the top where the eye looks.
+    const float angle = -1.5707963f + static_cast<float>(i) * 3.14159265f / 5.0f;
+    hull[i] = SDL_FPoint {gx + std::cos(angle) * radius, gy + std::sin(angle) * radius};
+  }
+  hull[kPoints] = hull[0];
+  drawHull(renderer, hull, kPoints, cx, cy, filled, color);
+}
+
+void drawPinGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  const float r = hullRadius(box);
+  const float gx = cx + 0.5f;
+  const float gy = cy + 0.5f;
+
+  // A thumbtack seen side-on: a head, the wider flange your thumb pushes
+  // against, and a needle tapering to a point. The flange is what makes it a
+  // tack rather than a nail, and at this size it is the only part with room to
+  // say so -- a head and a needle alone read as a lollipop.
+  //
+  // Fractions of the field's radius rather than pixel counts, so the mark keeps
+  // its proportions at whatever size a caller hands it. Not rounded: an edge
+  // wants to fall *between* two pixels, and at the eleven pixels the breadcrumb
+  // and the tab strip use these land on halves exactly -- a head five columns
+  // across over a flange nine across. Rounding them was the first draft and it
+  // widened the head to seven and deepened the flange to four rows, which is an
+  // anvil rather than a tack.
+  const float headHalf = r * 0.5f;        // half the head's width
+  const float flangeHalf = r * 0.9f;      // half the flange's width
+  // The two ends sit at the radius exactly, not half a pixel past it, for the
+  // reason the star's tips do: the outline snaps each vertex to the nearest
+  // pixel, and a half rounds *away* from the centre -- so a top edge written at
+  // `-r - 0.5` put the outline's head a row outside the field and the bar
+  // across the top of the mark simply did not draw.
+  const float headTop = -r;
+  const float flangeTop = -r * 0.5f;
+  const float flangeFoot = -r * 0.1f;
+  const float needleHalf = 0.5f;
+  const float tip = r;
+
+  // Clockwise from the middle of the flat top, and written so that vertex `i`
+  // is the mirror of vertex `count - i` -- which is what `drawHull`'s outline
+  // pass requires, and which nothing but the order below establishes. The two
+  // vertices on the axis, the top and the needle's tip, are their own mirrors.
+  constexpr int kPoints = 12;
+  const SDL_FPoint hull[kPoints + 1] = {
+    {gx,                gy + headTop},      // 0  top centre
+    {gx + headHalf,     gy + headTop},      // 1  top right of the head
+    {gx + headHalf,     gy + flangeTop},    // 2  where the head meets the flange
+    {gx + flangeHalf,   gy + flangeTop},    // 3  the flange's right shoulder
+    {gx + flangeHalf,   gy + flangeFoot},   // 4  its right foot
+    {gx + needleHalf,   gy + flangeFoot},   // 5  where the needle leaves it
+    {gx,                gy + tip},          // 6  the point
+    {gx - needleHalf,   gy + flangeFoot},   // 7
+    {gx - flangeHalf,   gy + flangeFoot},   // 8
+    {gx - flangeHalf,   gy + flangeTop},    // 9
+    {gx - headHalf,     gy + flangeTop},    // 10
+    {gx - headHalf,     gy + headTop},      // 11
+    {gx,                gy + headTop},      // 12 == 0
+  };
+  drawHull(renderer, hull, kPoints, cx, cy, filled, color);
 }
 
 void drawFileGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {

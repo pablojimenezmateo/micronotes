@@ -101,17 +101,17 @@ MICRONOTES_TEST(ui_state_load_does_not_inherit_the_previous_library) {
   const auto statePath = dir / "ui.state";
 
   AppState state;
-  state.editWorkspace().favorites.push_back("note-a");
+  state.editWorkspace().pinnedNotes.push_back("note-a");
   state.selectNote("note-a");
   MICRONOTES_REQUIRE(state.saveUiState(statePath));
   MICRONOTES_REQUIRE(state.loadUiState(statePath));
-  MICRONOTES_REQUIRE(state.workspace().favorites.size() == 1);
+  MICRONOTES_REQUIRE(state.workspace().pinnedNotes.size() == 1);
 
   // A library with no state file of its own opens empty. Without this, opening
-  // one from the settings dialog would show the favorites - and the open note -
+  // one from the settings dialog would show the pinned notes - and the open note -
   // of the library just left.
   MICRONOTES_REQUIRE(!state.loadUiState(dir / "missing.state"));
-  MICRONOTES_REQUIRE(state.workspace().favorites.empty());
+  MICRONOTES_REQUIRE(state.workspace().pinnedNotes.empty());
   MICRONOTES_REQUIRE(state.selection().noteId.empty());
 
   std::filesystem::remove_all(dir);
@@ -150,7 +150,7 @@ MICRONOTES_TEST(ui_state_carries_tag_colours_and_shut_bands) {
   MICRONOTES_REQUIRE(loaded.workspace().sectionCollapsed(SidebarSection::Tags));
   MICRONOTES_REQUIRE(loaded.workspace().sectionCollapsed(SidebarSection::Recent));
   MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Notebooks));
-  MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Favorites));
+  MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Pinned));
 
   // Only shut bands are written, so the common state -- all four open -- costs
   // nothing, and a file from before bands existed reads as all four open,
@@ -164,7 +164,7 @@ MICRONOTES_TEST(ui_state_carries_tag_colours_and_shut_bands) {
 
   // And a library with no state file of its own does not inherit the last
   // one's colours or its shut bands, for the reason it does not inherit its
-  // favorites: this is "the view state is now whatever that file says".
+  // pinned notes: this is "the view state is now whatever that file says".
   MICRONOTES_REQUIRE(!loaded.loadUiState(dir / "missing.state"));
   MICRONOTES_REQUIRE(loaded.workspace().tagColors.choices().empty());
   MICRONOTES_REQUIRE(!loaded.workspace().sectionCollapsed(SidebarSection::Tags));
@@ -252,6 +252,38 @@ MICRONOTES_TEST(ui_state_opens_a_file_written_before_tabs_existed) {
   MICRONOTES_REQUIRE(selection.noteId == "some-note-id");
   // And a key it has never heard of does not stop it reading the rest.
   MICRONOTES_REQUIRE(workspace.sidebarWidth == 240.0f);
+}
+
+// The band and the list were called FAVORITES before they were called PINNED,
+// and the rename would otherwise have silently unpinned every note anybody had
+// pinned and reopened every band they had shut. Both spellings read; only the
+// new one is written, so a library opened once comes back out under it.
+MICRONOTES_TEST(ui_state_reads_what_pinned_notes_were_called_before) {
+  const auto dir = scratchDir("ui-state-pinned");
+  const auto statePath = dir / "ui.state";
+  {
+    std::ofstream out(statePath);
+    out << "favorite=note-a\n";
+    out << "favorite=note-b\n";
+    out << "collapsed=favorites\n";
+  }
+
+  micronotes::ui::WorkspaceModel workspace;
+  micronotes::ui::UiSelection selection;
+  MICRONOTES_REQUIRE(micronotes::ui::readUiState(statePath, workspace, selection));
+  MICRONOTES_REQUIRE(workspace.pinnedNotes.size() == 2);
+  MICRONOTES_REQUIRE(workspace.pinnedNotes[0] == "note-a");
+  MICRONOTES_REQUIRE(workspace.pinnedNotes[1] == "note-b");
+  MICRONOTES_REQUIRE(workspace.sectionCollapsed(micronotes::ui::SidebarSection::Pinned));
+
+  // Written back under the new spelling, and read back the same either way.
+  MICRONOTES_REQUIRE(micronotes::ui::writeUiState(statePath, workspace, selection));
+  std::ifstream back(statePath);
+  const std::string written {std::istreambuf_iterator<char>(back),
+                             std::istreambuf_iterator<char>()};
+  MICRONOTES_REQUIRE(written.find("pinned=note-a") != std::string::npos);
+  MICRONOTES_REQUIRE(written.find("favorite=") == std::string::npos);
+  MICRONOTES_REQUIRE(written.find("collapsed=pinned") != std::string::npos);
 }
 
 // The other direction: a file with `tab=` lines was written by a version that

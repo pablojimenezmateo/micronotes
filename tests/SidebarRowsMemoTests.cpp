@@ -221,7 +221,7 @@ MICRONOTES_TEST(sidebar_rows_shape_compares_every_field_it_holds) {
     s.searchScope = micronotes::library::SearchScope::Title;
   }));
   MICRONOTES_REQUIRE(differs([](SidebarRowsShape& s) { s.tag = "x"; }));
-  MICRONOTES_REQUIRE(differs([](SidebarRowsShape& s) { s.favorites = {"x"}; }));
+  MICRONOTES_REQUIRE(differs([](SidebarRowsShape& s) { s.pinnedNotes = {"x"}; }));
   MICRONOTES_REQUIRE(differs([](SidebarRowsShape& s) { s.recents = {"x"}; }));
   MICRONOTES_REQUIRE(differs([](SidebarRowsShape& s) { s.collapsedSections[2] = true; }));
   MICRONOTES_REQUIRE(differs([](SidebarRowsShape& s) { s.width = 1.0f; }));

@@ -34,7 +34,7 @@ bool writeUiState(const std::filesystem::path& path, const WorkspaceModel& works
 
 // Replaces `workspace` and `selection` with whatever the file says -- including
 // when it says nothing, which is why both are cleared before it is opened: a
-// library with no state file of its own must not inherit the favorites and the
+// library with no state file of its own must not inherit the pinned notes and the
 // open note of the one before it.
 //
 // Also applies the three global view settings the file carries (theme, text

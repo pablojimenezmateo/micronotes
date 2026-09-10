@@ -129,7 +129,7 @@ struct SidebarRowsShape {
   std::string search;
   library::SearchScope searchScope = library::SearchScope::All;
   std::string tag;
-  std::vector<std::string> favorites;
+  std::vector<std::string> pinnedNotes;
   std::vector<std::string> recents;
   // Which bands are shut. Every row below a shut band moves, so this is
   // geometry like the panel's width is -- and a key rather than a flag, because

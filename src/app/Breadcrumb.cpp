@@ -28,15 +28,15 @@ using ui::fill;
 using ui::hLine;
 using ui::theme;
 
-// The favourite star's target, and the icon in front of the note's own crumb.
+// The pin's target, and the icon in front of the note's own crumb.
 // Both were written out inline, and the star's was written out twice -- once
 // as its own left edge and once as the reserve the breadcrumb stops at.
-constexpr float kFavoriteWidth = 26.0f;
+constexpr float kPinWidth = 26.0f;
 constexpr float kCrumbIconSize = 14.0f;
 
 // The star *mark*, which is not the size of the star's *target*.
 //
-// `drawStarGlyph` fills whatever box it is handed, and it was handed the whole
+// `drawPinGlyph` fills whatever box it is handed, and it was handed the whole
 // 26x24 hit rect -- so the mark grew to fill a target sized for a pointer and
 // ended up the largest thing in a 26px strip, competing with the note's own
 // name rather than annotating it. A hit area is sized for the hand and a glyph
@@ -46,11 +46,11 @@ constexpr float kCrumbIconSize = 14.0f;
 // A point under the crumb icon beside it: a five-pointed star reads larger than
 // a document glyph in the same box, so matching the box would not match the
 // weight.
-// Eleven, not thirteen: `drawStarGlyph` now takes the largest whole radius its
+// Eleven, not thirteen: `drawPinGlyph` takes the largest whole radius its
 // field allows, so thirteen would draw a thirteen-pixel star where thirteen
 // used to draw an eleven-pixel one. The mark keeps the weight this constant was
 // tuned for.
-constexpr float kFavoriteGlyphSize = 11.0f;
+constexpr float kPinGlyphSize = 11.0f;
 
 // What a note's tags ask for beside its name.
 //
@@ -95,7 +95,7 @@ void drawTagDots(SDL_Renderer* renderer, UiRuntime& ui, const std::vector<std::s
 
 void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, Rect rect) {
   ui.chrome.crumbs.clear();
-  ui.chrome.favoriteButton = {};
+  ui.chrome.pinButton = {};
   if(ui::empty(rect)) return;
   fill(renderer, rect, theme().chromeBackground);
   hLine(renderer, rect.x, rect.x + rect.w, rect.y + rect.h, theme().border);
@@ -113,7 +113,7 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
   // Whatever the star needs, so the trail cannot run under it. It was a bare
   // 44 against a star placed at `right - 34` with a width of 26, which is two
   // numbers that have to be kept in step by hand.
-  const float limit = rect.x + rect.w - kFavoriteWidth - ui::kSpace2;
+  const float limit = rect.x + rect.w - kPinWidth - ui::kSpace2;
   float x = rect.x + ui::kSidebarInset;
 
   // Every crumb down to the note's own folder, root first.
@@ -157,25 +157,25 @@ void drawBreadcrumb(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui, R
 
   if(!note) return;
   // A filled star reads as "kept"; the outline is an offer.
-  ui.chrome.favoriteButton = {rect.x + rect.w - kFavoriteWidth - ui::kSpace2, rect.y + 1.0f,
-                       kFavoriteWidth, rect.h - 2.0f};
-  const bool pinned = ui.state.workspace().isFavorite(note->id);
-  ui.pointer.offerTooltip(ui.chrome.favoriteButton, pinned ? "Remove from favorites" : "Add to favorites");
-  if(ui.pointer.over(ui.chrome.favoriteButton)) fill(renderer, ui.chrome.favoriteButton, theme().rowHighlight);
+  ui.chrome.pinButton = {rect.x + rect.w - kPinWidth - ui::kSpace2, rect.y + 1.0f,
+                       kPinWidth, rect.h - 2.0f};
+  const bool pinned = ui.state.workspace().isPinned(note->id);
+  ui.pointer.offerTooltip(ui.chrome.pinButton, pinned ? "Unpin this note" : "Pin this note");
+  if(ui.pointer.over(ui.chrome.pinButton)) fill(renderer, ui.chrome.pinButton, theme().rowHighlight);
   // The mark centred in the target rather than filling it. See
-  // `kFavoriteGlyphSize`.
-  ui::drawStarGlyph(renderer,
-                    {std::round(ui.chrome.favoriteButton.x + (ui.chrome.favoriteButton.w - kFavoriteGlyphSize) / 2.0f),
-                     std::round(ui.chrome.favoriteButton.y + (ui.chrome.favoriteButton.h - kFavoriteGlyphSize) / 2.0f),
-                     kFavoriteGlyphSize, kFavoriteGlyphSize},
+  // `kPinGlyphSize`.
+  ui::drawPinGlyph(renderer,
+                    {std::round(ui.chrome.pinButton.x + (ui.chrome.pinButton.w - kPinGlyphSize) / 2.0f),
+                     std::round(ui.chrome.pinButton.y + (ui.chrome.pinButton.h - kPinGlyphSize) / 2.0f),
+                     kPinGlyphSize, kPinGlyphSize},
                     pinned, pinned ? theme().accent : theme().textMuted);
 }
 
 bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
-  if(ui::contains(ui.chrome.favoriteButton, x, y)) {
+  if(ui::contains(ui.chrome.pinButton, x, y)) {
     const auto noteId = ui.state.selection().noteId;
-    ui.status = ui.state.editWorkspace().toggleFavorite(noteId) ? "Added to favorites" : "Removed from favorites";
+    ui.status = ui.state.editWorkspace().togglePinned(noteId) ? "Pinned note" : "Unpinned note";
     return true;
   }
   for(const auto& [crumb, folder] : ui.chrome.crumbs) {
@@ -193,7 +193,7 @@ bool handleBreadcrumbClick(UiRuntime& ui, Rect rect, float x, float y) {
 
 bool breadcrumbHasControlAt(const UiRuntime& ui, Rect rect, float x, float y) {
   if(!ui::contains(rect, x, y)) return false;
-  if(ui::contains(ui.chrome.favoriteButton, x, y)) return true;
+  if(ui::contains(ui.chrome.pinButton, x, y)) return true;
   for(const auto& [crumb, folder] : ui.chrome.crumbs) {
     (void)folder;
     if(ui::contains(crumb, x, y)) return true;

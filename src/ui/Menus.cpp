@@ -93,7 +93,7 @@ constexpr MenuItemSpec kNoteItems[] {
   item(ActionId::RenameNote, "Rename..."),
   item(ActionId::SetNoteIcon, "Set icon..."),
   item(ActionId::EditTags, "Edit tags..."),
-  item(ActionId::ToggleFavorite, "Favorite", true),
+  item(ActionId::PinNote, "Pinned", true),
   sep(),
   item(ActionId::MoveNote, "Move to notebook..."),
   item(ActionId::MoveBlocks, "Move blocks to note..."),

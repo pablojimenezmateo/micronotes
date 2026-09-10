@@ -1809,9 +1809,9 @@ avoid over-allocating is a growth curve in disguise, and the
 largest-allocation column is what makes that visible. Prefer a bound you can
 derive to a constant you guessed.
 
-### Resolved: `pushNoteShortcuts` was O(favorites x notes)
+### Resolved: `pushNoteShortcuts` was O(pinned x notes)
 
-`SidebarModel.cpp` resolved each favourite and each recent by a linear scan of
+`SidebarModel.cpp` resolved each pinned note and each recent by a linear scan of
 the whole note list -- thirteen shortcuts against a thousand notes is thirteen
 thousand string compares to draw thirteen rows. `OrganizationService` keeps an
 id index now, built by the same call that finalises the note list, so its keys
@@ -2529,7 +2529,7 @@ closely enough to make it fast:
   click the note's name again after restarting.
 - **The first save of a note another tool wrote made it vanish.** Such a note is
   filed under an id derived from its path; the save gave it a permanent one and
-  left the selection, its tab and the favorites pointing at the id it no longer
+  left the selection, its tab and the pinnedNotes pointing at the id it no longer
   had.
 
 The lesson is the fifth pass's, one turn further round: the instruments answer

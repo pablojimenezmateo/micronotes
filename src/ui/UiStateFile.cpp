@@ -59,7 +59,7 @@ bool writeUiState(const std::filesystem::path& path, const WorkspaceModel& works
   out << "page_width=" << pageWidthName(pageWidth()) << "\n";
   // One line each rather than a delimited list: a note id never contains a
   // newline, and any other separator would eventually appear inside one.
-  for(const auto& id : workspace.favorites) out << "favorite=" << id << "\n";
+  for(const auto& id : workspace.pinnedNotes) out << "pinned=" << id << "\n";
   for(const auto& id : workspace.recents) out << "recent=" << id << "\n";
   // Only the sections that are shut, so the common state -- all four open --
   // writes nothing and an older file reads as all four open, which is the
@@ -85,8 +85,8 @@ bool readUiState(const std::filesystem::path& path, WorkspaceModel& workspace,
                      UiSelection& selection) {
   // Cleared before the file is even opened: this is "the view state is now
   // whatever that file says", and a library with no state file of its own must
-  // not inherit the favorites and the open note of the one before it.
-  workspace.favorites.clear();
+  // not inherit the pinned notes and the open note of the one before it.
+  workspace.pinnedNotes.clear();
   workspace.recents.clear();
   workspace.tagColors.clearAll();
   workspace.collapsedSections = {};
@@ -142,13 +142,21 @@ bool readUiState(const std::filesystem::path& path, WorkspaceModel& workspace,
     else if(key == "theme") setThemeMode(themeModeFromName(value));
     else if(key == "text_size") setTextSize(textSizeFromName(value));
     else if(key == "page_width") setPageWidth(pageWidthFromName(value));
-    else if(key == "favorite" && !value.empty()) workspace.favorites.push_back(value);
+    else if(key == "pinned" && !value.empty()) workspace.pinnedNotes.push_back(value);
+    // What the pinned list was called before it was called pinned, and what
+    // the band that shows it was called before it was called PINNED. Read and
+    // never written, so a library opened once comes back out under the new
+    // spelling; without it the rename silently unpins every note somebody had
+    // pinned, which is their data and not ours to drop.
+    else if(key == "favorite" && !value.empty()) workspace.pinnedNotes.push_back(value);
     else if(key == "recent" && !value.empty()) workspace.recents.push_back(value);
     else if(key == "collapsed") {
       std::size_t sectionCount = 0;
       const auto* sections = sidebarSections(&sectionCount);
       for(std::size_t i = 0; i < sectionCount; ++i) {
-        if(sidebarSectionName(sections[i]) == value) workspace.setSectionCollapsed(sections[i], true);
+        const bool named = sidebarSectionName(sections[i]) == value ||
+                           (sections[i] == SidebarSection::Pinned && value == "favorites");
+        if(named) workspace.setSectionCollapsed(sections[i], true);
       }
     }
     else if(key == "tag_color") {

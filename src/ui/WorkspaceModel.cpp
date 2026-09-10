@@ -97,22 +97,22 @@ void WorkspaceModel::renameNote(std::string_view from, const std::string& to) {
   for(auto& tab : tabs) {
     if(tab.noteId == from) tab.noteId = to;
   }
-  std::replace(favorites.begin(), favorites.end(), std::string(from), to);
+  std::replace(pinnedNotes.begin(), pinnedNotes.end(), std::string(from), to);
   std::replace(recents.begin(), recents.end(), std::string(from), to);
 }
 
-bool WorkspaceModel::isFavorite(std::string_view noteId) const {
-  return std::find(favorites.begin(), favorites.end(), noteId) != favorites.end();
+bool WorkspaceModel::isPinned(std::string_view noteId) const {
+  return std::find(pinnedNotes.begin(), pinnedNotes.end(), noteId) != pinnedNotes.end();
 }
 
-bool WorkspaceModel::toggleFavorite(const std::string& noteId) {
+bool WorkspaceModel::togglePinned(const std::string& noteId) {
   if(noteId.empty()) return false;
-  const auto found = std::find(favorites.begin(), favorites.end(), noteId);
-  if(found != favorites.end()) {
-    favorites.erase(found);
+  const auto found = std::find(pinnedNotes.begin(), pinnedNotes.end(), noteId);
+  if(found != pinnedNotes.end()) {
+    pinnedNotes.erase(found);
     return false;
   }
-  favorites.push_back(noteId);
+  pinnedNotes.push_back(noteId);
   return true;
 }
 
@@ -160,7 +160,7 @@ ShellLayoutInputs WorkspaceModel::layoutInputs(float windowWidth, float windowHe
 std::string_view sidebarSectionName(SidebarSection section) {
   switch(section) {
     case SidebarSection::Notebooks: return "notebooks";
-    case SidebarSection::Favorites: return "favorites";
+    case SidebarSection::Pinned: return "pinned";
     case SidebarSection::Tags: return "tags";
     case SidebarSection::Recent: return "recent";
   }
@@ -171,7 +171,7 @@ const SidebarSection* sidebarSections(std::size_t* count) {
   // In the order the sidebar stacks them, which is the order the persistence
   // writes them and the order a test walks them.
   static constexpr SidebarSection kSections[] = {
-    SidebarSection::Notebooks, SidebarSection::Favorites, SidebarSection::Tags,
+    SidebarSection::Notebooks, SidebarSection::Pinned, SidebarSection::Tags,
     SidebarSection::Recent,
   };
   if(count) *count = std::size(kSections);

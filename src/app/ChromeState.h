@@ -58,7 +58,7 @@ struct ChromeState {
   // The breadcrumb trail over the page, recorded as it is drawn: a crumb is a
   // folder to jump to, and the star at the end pins the note.
   std::vector<std::pair<ui::Rect, std::filesystem::path>> crumbs;
-  ui::Rect favoriteButton;
+  ui::Rect pinButton;
 
   WindowAction pendingWindowAction = WindowAction::None;
   // Whether this window draws its own controls instead of wearing the
