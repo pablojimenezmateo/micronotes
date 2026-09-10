@@ -360,6 +360,9 @@ add_executable(micronotes_tests
   tests/PerfTraceTests.cpp
   tests/MenusTests.cpp
   tests/SearchTests.cpp
+  tests/LibraryIndexTests.cpp
+  tests/BacklinkTests.cpp
+  tests/OrganizationTests.cpp
   tests/TextSearchTests.cpp
   tests/FindBarTests.cpp
   tests/StatusBarTests.cpp
