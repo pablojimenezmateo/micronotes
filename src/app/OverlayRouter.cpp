@@ -3,7 +3,6 @@
 #include "app/BlockMenus.h"
 #include "app/Commands.h"
 #include "app/EditCommands.h"
-#include "app/ExportPdf.h"
 #include "app/Notes.h"
 #include "app/Prompts.h"
 #include "app/Shell.h"
@@ -34,12 +33,13 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
   } else if(result.overlayId == "delete-folder") {
     deleteSelectedFolder(ui);
   } else if(result.overlayId == "note-menu") {
-    if(result.itemId == "new") beginNoteCreate(ui);
-    else if(result.itemId == "rename") beginRename(ui);
-    else if(result.itemId == "delete") openDeleteNoteConfirm(ui);
-    // The rest are the palette's, so the menu and the palette cannot drift.
-    else if(result.itemId == "move") performCommand(ui, "move-note");
-    else performCommand(ui, result.itemId);
+    // Every row of it, with no arm of its own. Its ids *are* the action names,
+    // so the row a right click offers and the row the Note menu offers are one
+    // command by construction rather than by two branches agreeing. Three of
+    // them used to be spelled `new`, `move` and `delete` here and needed three
+    // arms to say what `new-note`, `move-note` and `delete-note` say for
+    // nothing.
+    performCommand(ui, result.itemId);
   } else if(handleTabMenuResult(ui, result)) {
     // Close, pin, and the three path commands, about the tab it was opened on.
   } else if(handleTagOverlayResult(ui, result)) {
@@ -104,10 +104,10 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     else if(result.itemId == "delete") openDeleteCompanionConfirm(ui);
     else if(handleCompanionPathCommand(ui, result.itemId, ui.sidebar.companionTarget)) {}
   } else if(result.overlayId == "folder-menu") {
-    if(result.itemId == "new-folder") beginFolderCreate(ui);
-    else if(result.itemId == "new-note") createNoteInFolder(ui, ui.state.selection().folder);
-    else if(result.itemId == "rename") beginFolderRename(ui);
-    else if(result.itemId == "delete") openDeleteFolderConfirm(ui);
+    // "New note here" is the one row that is not the action of the same name:
+    // the Note menu's `new-note` asks where to put it, and this one already
+    // knows, because it was opened on the notebook.
+    if(result.itemId == "new-note") createNoteInFolder(ui, ui.state.selection().folder);
     else if(handleFolderPathCommand(ui, result.itemId, ui.state.selection().folder)) {}
     // And the rest are the palette's, which is the rule the note menu above
     // follows: a row whose id is an action name needs no arm here, and cannot

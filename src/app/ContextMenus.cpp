@@ -31,7 +31,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
   // pinned" makes you open the menu to find out which way it is set, which is
   // the one thing the menu could have told you without being opened.
   overlay.items = {
-    ui::menuItem("new", "New note").withKeys(ui::keysFor(ui::ActionId::NewNote)),
+    ui::menuItem("new-note", "New note").withKeys(ui::keysFor(ui::ActionId::NewNote)),
     ui::menuSeparator(),
     ui::menuItem("rename", "Rename")
       .withKeys(ui::keysFor(ui::ActionId::RenameNote))
@@ -43,7 +43,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     ui::menuItem("pin-note", "Pinned")
       .enabledIf(hasNote)
       .ticked(hasNote && ui.state.workspace().isPinned(noteId)),
-    ui::menuItem("move", "Move to notebook").enabledIf(hasNote),
+    ui::menuItem("move-note", "Move to notebook").enabledIf(hasNote),
     ui::menuSeparator(),
     // A note is a file, and these are the questions a reader asks about one.
     // The ids are the action names, so the menu row, the palette row and any
@@ -57,7 +57,7 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     // are too. Ends in an ellipsis because it asks where to put it.
     ui::menuItem("export-note-pdf", "Export as PDF...").enabledIf(hasNote),
     ui::menuSeparator(),
-    ui::menuItem("delete", "Delete").enabledIf(hasNote).destroys(),
+    ui::menuItem("delete-note", "Delete").enabledIf(hasNote).destroys(),
   };
   // A context menu shows all of itself. The default row cap is a palette's --
   // twelve, with the rest scrolled -- and once the rules above were added the
@@ -297,7 +297,7 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
     ui::menuItem("new-folder", "New notebook").withKeys(ui::keysFor(ui::ActionId::NewFolder)),
     ui::menuItem("new-note", "New note here").enabledIf(hasFolder),
     ui::menuSeparator(),
-    ui::menuItem("rename", "Rename").enabledIf(hasFolder),
+    ui::menuItem("rename-folder", "Rename").enabledIf(hasFolder),
     ui::menuSeparator(),
     // A notebook is a directory, and the same three questions are worth asking
     // about it as about a note. The note menu has had them since they were
@@ -310,7 +310,7 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
     // Offered even on the root, where it means the library.
     ui::menuItem("export-folder-pdf", "Export as PDF..."),
     ui::menuSeparator(),
-    ui::menuItem("delete", "Delete").enabledIf(hasFolder).destroys(),
+    ui::menuItem("delete-folder", "Delete").enabledIf(hasFolder).destroys(),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
