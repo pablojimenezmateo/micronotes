@@ -379,6 +379,7 @@ add_executable(micronotes_tests
   tests/SidebarRowsMemoTests.cpp
   tests/SidebarRowsTests.cpp
   tests/SingleLineEditorTests.cpp
+  tests/TabStripTests.cpp
   tests/TabsTests.cpp
   tests/TextFitTests.cpp
   tests/TagColorTests.cpp

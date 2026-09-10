@@ -75,6 +75,10 @@ enum class ActionId {
   NextTab,
   PreviousTab,
   CloseTab,
+  CloseOtherTabs,
+  CloseTabsToRight,
+  CloseTabsToLeft,
+  CloseAllTabs,
   OpenInNewTab,
   PinTab,
 

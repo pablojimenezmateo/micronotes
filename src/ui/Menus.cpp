@@ -78,6 +78,10 @@ constexpr MenuItemSpec kViewItems[] {
   item(ActionId::PreviousTab),
   item(ActionId::PinTab, "Pin tab", true),
   item(ActionId::CloseTab, "Close tab"),
+  item(ActionId::CloseOtherTabs, "Close other tabs"),
+  item(ActionId::CloseTabsToRight, "Close tabs to the right"),
+  item(ActionId::CloseTabsToLeft, "Close tabs to the left"),
+  item(ActionId::CloseAllTabs, "Close all tabs"),
 };
 
 constexpr MenuItemSpec kGoItems[] {

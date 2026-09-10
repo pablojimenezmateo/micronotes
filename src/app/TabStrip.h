@@ -111,6 +111,25 @@ void handleTabStripRelease(UiRuntime& ui);
 void stepTab(UiRuntime& ui, int delta);
 void closeActiveTab(UiRuntime& ui);
 
+// Which tabs a bulk close takes, measured from the tab it was asked about.
+//
+// Four scopes rather than four functions because the only thing that differs
+// between them is one comparison against that tab's index -- the save, the
+// descending walk that keeps the indices valid, and the reload afterwards are
+// the same work in all four, and were the part worth not writing four times.
+enum class TabCloseScope { Others, ToRight, ToLeft, All };
+
+// Closes every tab in `scope` around `index`, reports what it did in the status
+// line, and says how many went. Pinned tabs are spared; see the comment on the
+// implementation for why that is what pinning already meant.
+std::size_t closeTabs(UiRuntime& ui, std::size_t index, TabCloseScope scope);
+
+// The same, measured from the tab showing. The strip's own menu is about the
+// tab it was opened on -- which is why a right click does not switch to one --
+// and the menu bar and the palette have no such tab to name, so they mean this
+// one.
+void closeTabsAroundActive(UiRuntime& ui, TabCloseScope scope);
+
 // Carries out a choice from a tab's own menu, and says whether it was one of
 // its. The tab travels in the result's `value`, so a menu opened on one tab
 // cannot act on another -- which is the whole point of not switching to a tab

@@ -173,6 +173,10 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "next-tab") stepTab(ui, 1);
   else if(id == "previous-tab") stepTab(ui, -1);
   else if(id == "close-tab") closeActiveTab(ui);
+  else if(id == "close-other-tabs") closeTabsAroundActive(ui, TabCloseScope::Others);
+  else if(id == "close-tabs-right") closeTabsAroundActive(ui, TabCloseScope::ToRight);
+  else if(id == "close-tabs-left") closeTabsAroundActive(ui, TabCloseScope::ToLeft);
+  else if(id == "close-all-tabs") closeTabsAroundActive(ui, TabCloseScope::All);
   else if(id == "new-tab") openNotePalette(ui, "jump-note-new", "Open in a new tab");
   else if(id == "pin-tab") {
     if(auto* tab = ui.state.editWorkspace().activeTab_()) {

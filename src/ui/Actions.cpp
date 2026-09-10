@@ -90,6 +90,16 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::NextTab,         "next-tab",       "Next tab",                        "Ctrl+Tab",     "",              S::View, false, true, "", true},
   {ActionId::PreviousTab,     "previous-tab",   "Previous tab",                    "Ctrl+Shift+Tab","",             S::View, false, true, "", true},
   {ActionId::CloseTab,        "close-tab",      "Close this tab",                  "Ctrl+W",       "",              S::View, true,  true, "", true},
+  // The four bulk closes. `needsNote` for all of them: with nothing open there
+  // is no tab for "other", "right" or "left" to be measured from, and each is
+  // listed and refused rather than hidden for the reason the flag's comment
+  // gives. Only `close-others` gets a chord -- the strip's own menu is where
+  // the other three are reached, and a key apiece would be three bindings
+  // spent on gestures nobody reaches for mid-sentence.
+  {ActionId::CloseOtherTabs,  "close-other-tabs", "Close other tabs",              "Ctrl+Alt+W",   "",              S::View, true,  true, "", true},
+  {ActionId::CloseTabsToRight,"close-tabs-right", "Close tabs to the right",       "",             "",              S::View, true,  true, "", true},
+  {ActionId::CloseTabsToLeft, "close-tabs-left",  "Close tabs to the left",        "",             "",              S::View, true,  true, "", true},
+  {ActionId::CloseAllTabs,    "close-all-tabs",   "Close all tabs",                "",             "",              S::View, true,  true, "", true},
   {ActionId::OpenInNewTab,    "new-tab",        "Open a note in a new tab...",     "Ctrl+Shift+T", "",              S::View, false, true, "", true},
   {ActionId::PinTab,          "pin-tab",        "Pin or unpin this tab",           "",             "",              S::View, true,  true, "", true},
   {ActionId::CycleRightPanel, "cycle-right",    "Outline, links or tags",      "Ctrl+Alt+Up",  "",              S::View, false, true, "", true},

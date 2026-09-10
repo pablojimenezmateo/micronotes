@@ -287,6 +287,20 @@ bool handleTabMenuResult(UiRuntime& ui, const ui::OverlayResult& result) {
     loadSelectedIntoEditor(ui);
     return true;
   }
+  // The four bulk closes, each about the tab the menu was opened on rather than
+  // the one showing -- which is the whole reason a right click does not switch
+  // to a tab, and why "close to the right" means right of *that* tab.
+  static constexpr std::pair<std::string_view, TabCloseScope> kScopes[] {
+    {"close-others", TabCloseScope::Others},
+    {"close-right", TabCloseScope::ToRight},
+    {"close-left", TabCloseScope::ToLeft},
+    {"close-all", TabCloseScope::All},
+  };
+  for(const auto& [itemId, scope] : kScopes) {
+    if(result.itemId != itemId) continue;
+    if(index != std::string::npos) closeTabs(ui, index, scope);
+    return true;
+  }
   if(result.itemId == "pin") {
     if(index != std::string::npos) workspace.tabs[index].pinned = !workspace.tabs[index].pinned;
     ui.status = index != std::string::npos && workspace.tabs[index].pinned ? "Pinned tab"
@@ -312,6 +326,41 @@ void closeActiveTab(UiRuntime& ui) {
   if(!saveCurrent(ui, true)) return;
   ui.state.closeTab(workspace.activeTab);
   loadSelectedIntoEditor(ui);
+}
+
+std::size_t closeTabs(UiRuntime& ui, std::size_t index, TabCloseScope scope) {
+  const auto& tabs = ui.state.workspace().tabs;
+  if(index >= tabs.size()) return 0;
+  std::vector<std::size_t> doomed;
+  for(std::size_t i = 0; i < tabs.size(); ++i) {
+    // Pinned tabs are spared, in all four scopes. Pinning already means "this
+    // one stays" -- it is the tab the ceiling will not evict and a browse will
+    // not take over -- so a reader who pinned a note has already said the one
+    // thing there is to say about it, and "Close all tabs" taking it anyway
+    // would make the pin mean nothing the moment it mattered most.
+    if(tabs[i].pinned) continue;
+    const bool inScope = scope == TabCloseScope::All       ? true
+                         : scope == TabCloseScope::Others  ? i != index
+                         : scope == TabCloseScope::ToRight ? i > index
+                                                           : i < index;
+    if(inScope) doomed.push_back(i);
+  }
+  if(doomed.empty()) {
+    ui.status = "No tabs to close";
+    return 0;
+  }
+  if(!saveCurrent(ui, true)) return 0;
+  // Highest index first. Closing a tab renumbers every tab after it, so a
+  // forward walk closes the wrong note from its second step on -- and the last
+  // steps run off the end of a strip that has since shrunk.
+  for(auto at = doomed.rbegin(); at != doomed.rend(); ++at) ui.state.closeTab(*at);
+  loadSelectedIntoEditor(ui);
+  ui.status = "Closed " + std::to_string(doomed.size()) + (doomed.size() == 1 ? " tab" : " tabs");
+  return doomed.size();
+}
+
+void closeTabsAroundActive(UiRuntime& ui, TabCloseScope scope) {
+  closeTabs(ui, ui.state.workspace().activeTab, scope);
 }
 
 }

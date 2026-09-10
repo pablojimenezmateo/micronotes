@@ -133,15 +133,41 @@ void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
   const auto& tabs = ui.state.workspace().tabs;
   const auto index = ui.state.workspace().findTab(noteId);
   const bool pinned = index != std::string::npos && tabs[index].pinned;
+  // Whether each bulk close has anything to take. Offered greyed rather than
+  // hidden when it has not: a menu whose rows come and go is a menu whose shape
+  // you cannot learn, and "Close tabs to the right" being present-but-dead on
+  // the last tab is itself the answer to where in the strip you are.
+  //
+  // Pinned tabs are spared by all of them (see `closeTabs`), so the count that
+  // decides this has to skip them too -- otherwise the row on a strip of one
+  // unpinned tab beside three pinned ones offers a close that does nothing.
+  const auto unpinnedIn = [&tabs](std::size_t from, std::size_t to) {
+    std::size_t count = 0;
+    for(std::size_t i = from; i < std::min(to, tabs.size()); ++i) {
+      if(!tabs[i].pinned) ++count;
+    }
+    return count;
+  };
+  const bool haveTab = index != std::string::npos;
+  const std::size_t others = haveTab ? unpinnedIn(0, tabs.size()) - (pinned ? 0 : 1) : 0;
+  const std::size_t toRight = haveTab ? unpinnedIn(index + 1, tabs.size()) : 0;
+  const std::size_t toLeft = haveTab ? unpinnedIn(0, index) : 0;
   overlay.items = {
     {"close", "Close", "", ui::keysFor(ui::ActionId::CloseTab), true, false},
+    {"close-others", "Close others", "", ui::keysFor(ui::ActionId::CloseOtherTabs), others > 0, false},
+    {"close-right", "Close to the right", "", "", toRight > 0, false},
+    {"close-left", "Close to the left", "", "", toLeft > 0, false},
+    {"close-all", "Close all", "", "", unpinnedIn(0, tabs.size()) > 0, false},
+    {"", "", "", "", false, false, false, true},
     // Ctrl+click already pins, and nothing said so. A tab that is never
     // replaced by the next note opened is worth knowing about.
     {"pin", pinned ? "Unpin" : "Pin", "", "", true, false},
+    {"", "", "", "", false, false, false, true},
     {"show-on-disk", "Show on disk", "", "", note != nullptr, false},
     {"copy-relative-path", "Copy relative path", "", "", note != nullptr, false},
     {"copy-absolute-path", "Copy absolute path", "", "", note != nullptr, false},
   };
+  overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
 }
 
