@@ -2,6 +2,7 @@
 
 #include "doc/LinkTarget.h"
 #include "export/PdfPage.h"
+#include "ui/DocRuns.h"
 #include "ui/DocStyle.h"
 #include "ui/Metrics.h"
 
@@ -198,6 +199,14 @@ void paintRuns(PdfContent& content, const BlockInk& ink, const doc::BlockLayout&
   for(const auto& line : layout.lines) {
     if(banded && (line.y + line.height <= paint.from || line.y >= paint.to)) continue;
     const float lineTop = paint.y + line.y;
+    // Every tinted ground on this line, before any of its text: a band's
+    // sideways inflation reaches into the run beside it, and in a content
+    // stream as on screen the later operation is the one that shows. See
+    // `ui::forEachCodeSpan`.
+    ui::forEachCodeSpan(layout.runsOf(line), [&](float spanX, float spanWidth) {
+      content.fillRect(paint.x + spanX - 1.5f, lineTop + 0.5f, spanWidth + 3.0f,
+                       line.height - 1.0f, theme.codeBackground);
+    });
     for(const auto& run : layout.runsOf(line)) {
       if(run.text.empty()) continue;
       const float size = run.style.size > 0.0f ? run.style.size : defaultSize;
@@ -206,10 +215,6 @@ void paintRuns(PdfContent& content, const BlockInk& ink, const doc::BlockLayout&
       const float x = paint.x + run.rect.x;
       const float baseline = lineTop + baselineIn(font, line.height, size);
 
-      if(run.role == doc::TextRole::Code && !run.isMarker) {
-        content.fillRect(x - 1.5f, lineTop + 0.5f, run.rect.w + 3.0f, line.height - 1.0f,
-                         theme.codeBackground);
-      }
       const SDL_Color colour =
         run.role == doc::TextRole::Body ? paint.bodyInk : ui::inkFor(theme, run.role);
       content.text(font, slot, size, x, baseline, run.text, colour);

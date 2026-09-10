@@ -14,17 +14,16 @@ std::size_t paintRuns(SDL_Renderer* renderer, TextRenderer& text, const doc::Blo
   for(const auto& line : layout.lines) {
     if(banded && (line.y + line.height <= paint.from || line.y >= paint.to)) continue;
     const float lineY = paint.y + line.y;
+    // Every tinted ground on this line, before any of its text. See
+    // `forEachCodeSpan` for why the order is the whole point.
+    forEachCodeSpan(layout.runsOf(line), [&](float spanX, float spanWidth) {
+      fill(renderer, {paint.x + spanX - 2.0f, lineY + 1.0f, spanWidth + 4.0f, line.height - 2.0f},
+           palette.codeBackground);
+    });
     for(const auto& run : layout.runsOf(line)) {
       if(run.text.empty()) continue;
       ++drawn;
       const float x = paint.x + run.rect.x;
-      // The tinted ground behind an inline code span. Not behind the backticks
-      // themselves: a marker is drawn in the muted ink and its own ground
-      // would show as two tabs either side of the span.
-      if(run.role == doc::TextRole::Code && !run.isMarker) {
-        fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f},
-             palette.codeBackground);
-      }
       const SDL_Color ink =
         run.role == doc::TextRole::Body ? paint.bodyInk : inkFor(palette, run.role);
       text.draw(run.text, x, lineY, ink, textStyleFor(run.style));

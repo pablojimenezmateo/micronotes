@@ -7,6 +7,8 @@
 #include <SDL3/SDL.h>
 
 #include <cstddef>
+#include <span>
+#include <utility>
 #include <vector>
 
 // Painting the runs of a laid-out block onto a window.
@@ -54,6 +56,44 @@ struct RunPaint {
   // measure pass and a table cell drawn for its ink alone pass nothing.
   std::vector<LinkRegion>* links = nullptr;
 };
+
+// The tinted grounds behind the inline code spans of one line, as one band per
+// *span* rather than one per run, reported left to right.
+//
+// A span is several runs -- `` `202 Accepted` `` is three, the two words and
+// the space between them -- and each ground is inflated sideways so the pieces
+// meet rather than showing the page between them. Filled from inside the run
+// loop, that inflation lands on top of the glyphs of the run *before* it,
+// because a glyph's ink can reach past the advance the run's width is the sum
+// of: the last digit of `202` lost two columns to the ground of the space
+// after it, on screen and in an exported PDF alike. Bands are filled before
+// any of the line's text is drawn, and there is nothing left to overpaint.
+//
+// A template over the callback and a header for the reason `doc/Flow.h` is
+// one: this runs once per visual line per frame, and it allocates nothing.
+template <class Fn>
+void forEachCodeSpan(std::span<const doc::TextRun> runs, Fn&& fn) {
+  bool open = false;
+  float left = 0.0f;
+  float right = 0.0f;
+  for(const auto& run : runs) {
+    if(run.text.empty()) continue;
+    // A marker is drawn in the muted ink and its own ground would show as two
+    // tabs either side of the span, so a shown backtick ends the band rather
+    // than extending it.
+    if(run.role == doc::TextRole::Code && !run.isMarker) {
+      if(!open) {
+        left = run.rect.x;
+        open = true;
+      }
+      right = run.rect.x + run.rect.w;
+      continue;
+    }
+    if(open) fn(left, right - left);
+    open = false;
+  }
+  if(open) fn(left, right - left);
+}
 
 // Returns how many runs were drawn, which is what the page's per-frame counter
 // reports.

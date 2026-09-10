@@ -393,6 +393,7 @@ add_executable(micronotes_tests
   tests/OverlayTests.cpp
   tests/PathUtilsTests.cpp
   tests/PdfExportTests.cpp
+  tests/DocRunsTests.cpp
   tests/RenderLayoutTests.cpp
   tests/PdfWriterTests.cpp
   tests/Utf8Tests.cpp

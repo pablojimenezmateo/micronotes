@@ -686,7 +686,11 @@ MICRONOTES_TEST(architecture_the_md4c_render_model_is_laid_out_in_one_place) {
 // fields are the tell -- `style.strike` and `linkIndex` are only interesting to
 // something deciding how a run *looks*.
 MICRONOTES_TEST(architecture_a_run_is_inked_once_per_surface) {
-  const std::set<std::string> painters {"DocRuns.cpp", "PdfBlocks.cpp"};
+  // `DocRuns.h` is the third only in file count: it holds `forEachCodeSpan`,
+  // which is the one decision the two painters make *identically* -- where the
+  // tinted ground behind a code span begins and ends -- and it is here rather
+  // than in each loop precisely so there is one answer instead of two.
+  const std::set<std::string> painters {"DocRuns.h", "DocRuns.cpp", "PdfBlocks.cpp"};
   // Where the fields are *set* rather than read: the tokenizer fills them in.
   const std::set<std::string> producers {"Flow.h"};
   std::string offenders;
