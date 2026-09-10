@@ -367,6 +367,24 @@ when the counters went in it turned out to be 70% of every frame.
   context menus and the palette are one object reached through two item tables;
   when they were two paints and two stackings, the tick sat a pixel apart and
   the accelerator a whole size apart between them.
+  **A row of either table is built by name, never positionally.** The bar's is
+  `ui::MenuItemSpec` through `item()`/`sep()` in `ui/Menus.cpp`; a context
+  menu's is `ui::OverlayItem` through `ui::menuItem` and `ui::menuSeparator`,
+  with `.enabledIf`, `.ticked`, `.destroys`, `.withKeys` and `.withDetail` for
+  the rest. `OverlayItem` has eight fields and four of them are bools, so
+  written out in order a row's meaning was which trailing `false` had become a
+  `true`; `architecture_a_menu_row_names_the_field_it_sets` fails on the
+  separator's old spelling. A designated initializer would say the same thing
+  and GCC 13 warns on every field it leaves defaulted, which is the point of
+  using one.
+  **And a context menu's item id is the action's name.** The note menu and the
+  notebook menu carry no routing of their own beyond the one row that is not
+  the action of that name -- `handleOverlayResult` hands the id to
+  `performCommand` -- so a row a right click offers and the bar's row for the
+  same command cannot come to mean different things. The `files` tree's two
+  menus are about `ui.sidebar.companionTarget` rather than the selection, so
+  their ids say `-file`: calling them `rename` and `delete` left them one
+  fallback away from acting on the note instead.
 - What a `PageView` needs before it lays out is `app::PageFrame`, handed over in
   one `beginFrame`. Do not add a per-frame setter: the reason that struct exists
   is that a page which is not told about a new revision does not fail, it keeps
