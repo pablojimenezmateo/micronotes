@@ -23,13 +23,6 @@ namespace {
 // Eleven of them, and not a hundred: an icon here is a note saying what kind of
 // thing it is, and a reader who has to hunt through a grid for the right shade
 // of meaning has been handed a worse job than typing the word.
-constexpr NoteGlyph kNoteGlyphs[] = {
-  {"star", "Star"},         {"check", "Done"},      {"flag", "Follow up"},
-  {"bookmark", "Bookmark"}, {"tag", "Label"},       {"folder", "Collection"},
-  {"calendar", "Dated"},    {"clock", "Waiting"},   {"bolt", "Urgent"},
-  {"warning", "Careful"},   {"code", "Technical"},
-};
-
 // The grid every mark in this file is laid out on: one pixel at the centre,
 // and whole-pixel offsets either side of it.
 //
@@ -531,153 +524,196 @@ void drawFileGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   strokePath(renderer, fold, 3, color);
 }
 
+namespace {
+
+// The eleven note marks, one function each.
+//
+// Each takes the button it is drawn in and works in the eleven-pixel field
+// `gridFor` centres inside it, so one set of offsets serves a 16px sidebar row
+// and a 30px picker cell alike, and so that a mark meant to be symmetric is
+// symmetric. See `kGlyphRadius`.
+//
+// Named functions rather than the arms of one `if(id == ...)` chain, because
+// the chain was the *second* list of these marks: `kNoteGlyphs` below is the
+// first, and the picker is built from that one. Two lists of the same eleven
+// things with nothing holding them level -- a mark added to the table and not
+// the chain is a picker cell that draws nothing, and one added to the chain
+// and not the table cannot be chosen at all, and neither fails to compile.
+// The table carries the function now, so there is one list.
+
+void drawStarNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  drawStarGlyph(renderer, fieldOf(gridFor(box)), true, color);
+}
+
+void drawCheckNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  drawCheckGlyph(renderer, fieldOf(gridFor(box)), color);
+}
+
+void drawFlagNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // A pole with the pennant on its top half, so the mark has a baseline the
+  // way a letter does.
+  SDL_RenderLine(renderer, cx - 4.0f, cy - 5.0f, cx - 4.0f, cy + 5.0f);
+  // The pennant filled row by row rather than outlined and then filled
+  // separately. Its two edges are one slope mirrored about the row the point
+  // sits on, so measuring each row's reach from that row gives the rows in
+  // mirrored pairs -- where an outline plus a fill inside it was two
+  // different shapes rounding two different ways, and the pennant came out
+  // with a step on its lower edge that its upper edge did not have.
+  for(int dy = -5; dy <= 1; ++dy) {
+    const float fromPoint = std::abs(static_cast<float>(dy) + 2.0f);
+    const float reach = std::round(7.0f * (3.0f - fromPoint) / 3.0f);
+    hLine(renderer, cx - 3.0f, cx - 3.0f + reach, cy + static_cast<float>(dy), color);
+  }
+}
+
+void drawBookmarkNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // The notch cut at forty-five degrees from each bottom corner, meeting on
+  // the centre column.
+  const SDL_FPoint ribbon[] = {
+    {cx - 4.0f, cy + 5.0f}, {cx - 4.0f, cy - 5.0f}, {cx + 4.0f, cy - 5.0f},
+    {cx + 4.0f, cy + 5.0f}, {cx, cy + 1.0f},        {cx - 4.0f, cy + 5.0f},
+  };
+  strokePath(renderer, ribbon, 6, color);
+}
+
+void drawTagNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // A luggage label: square at the string end, pointed at the other, with the
+  // hole the string goes through near the square end. The hole is what says
+  // "tag" rather than "arrow" -- without it the shape is a chevron.
+  //
+  // The point is two forty-five degree edges meeting on the centre row, so
+  // the upper and lower halves step identically. They used to start from a
+  // half coordinate, which the renderer took the same way for both, and the
+  // point came out a row off the middle of the label it belongs to.
+  const SDL_FPoint label[] = {
+    {cx - 5.0f, cy - 4.0f}, {cx + 1.0f, cy - 4.0f}, {cx + 5.0f, cy},
+    {cx + 1.0f, cy + 4.0f}, {cx - 5.0f, cy + 4.0f}, {cx - 5.0f, cy - 4.0f},
+  };
+  strokePath(renderer, label, 6, color);
+  // Three pixels square, not two: an even hole cannot sit centred on an odd
+  // field, and a hole one row off centre in a nine-row label is visible.
+  fill(renderer, {cx - 3.0f, cy - 1.0f, 3.0f, 3.0f}, color);
+}
+
+void drawFolderNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // The tab first, then the body under it: two rules meeting at the tab's
+  // right shoulder is what reads as a folder at this size. The shoulder is
+  // two across against two down -- the one diagonal here that is meant to be
+  // short, and the only mark in the set that is meant to be lopsided.
+  const SDL_FPoint folder[] = {
+    {cx - 5.0f, cy + 4.0f}, {cx - 5.0f, cy - 4.0f}, {cx - 1.0f, cy - 4.0f},
+    {cx + 1.0f, cy - 2.0f}, {cx + 5.0f, cy - 2.0f}, {cx + 5.0f, cy + 4.0f},
+    {cx - 5.0f, cy + 4.0f},
+  };
+  strokePath(renderer, folder, 7, color);
+}
+
+void drawCalendarNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  stroke(renderer, {cx - 5.0f, cy - 3.0f, 11.0f, 9.0f}, color);
+  // The filled band is the month header; the two ticks above it are the
+  // rings. Without them the mark is a picture frame.
+  fill(renderer, {cx - 5.0f, cy - 3.0f, 11.0f, 3.0f}, color);
+  SDL_RenderLine(renderer, cx - 3.0f, cy - 5.0f, cx - 3.0f, cy - 3.0f);
+  SDL_RenderLine(renderer, cx + 3.0f, cy - 5.0f, cx + 3.0f, cy - 3.0f);
+}
+
+void drawClockNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  strokeCircle(renderer, cx, cy, kGlyphRadius, color);
+  // Hands at twelve and three, drawn as filled bars rather than as lines: a
+  // one-pixel diagonal inside a one-pixel ring is lost against the ring, and
+  // a clock face with no hands on it is a circle.
+  fill(renderer, {cx, cy - 3.0f, 1.0f, 4.0f}, color);
+  fill(renderer, {cx, cy, 3.0f, 1.0f}, color);
+}
+
+void drawBoltNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // Two strokes down and one across, doubled sideways for weight -- a
+  // single-pixel lightning bolt reads as a scratch. Asymmetric on purpose,
+  // and the one mark here where that is the shape rather than a fault.
+  for(float d = 0.0f; d <= 1.0f; d += 1.0f) {
+    const SDL_FPoint bolt[] = {
+      {cx + 1.0f + d, cy - 5.0f},
+      {cx - 3.0f + d, cy},
+      {cx + d, cy},
+      {cx - 2.0f + d, cy + 5.0f},
+    };
+    strokePath(renderer, bolt, 4, color);
+  }
+}
+
+void drawWarningNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // Sides at one across for every two down. That is a slope the grid steps
+  // exactly, and both sides pass through the apex pixel, so the point comes
+  // out a point -- where the shallower join this had before drew a stray dot
+  // a row above the triangle, which had to be cut flat by a pixel to hide it.
+  // Cutting the apex is no longer needed.
+  //
+  // Three separate strokes rather than one closed path, and both sides drawn
+  // *from the apex* outward. A one-in-two slope has a tie on every other row
+  // -- the exact centre of the pixel pair it has to choose between -- and a
+  // line rasteriser breaks that tie by the direction it is travelling, not by
+  // the geometry. Walked as a loop, the right side ran apex-to-base and the
+  // left base-to-apex, so the two sides broke their ties opposite ways and
+  // the right edge stepped a row before its partner all the way down. From a
+  // common origin with the run mirrored, they break them the same way.
+  SDL_RenderLine(renderer, cx, cy - 5.0f, cx + 5.0f, cy + 5.0f);
+  SDL_RenderLine(renderer, cx, cy - 5.0f, cx - 5.0f, cy + 5.0f);
+  hLine(renderer, cx - 5.0f, cx + 5.0f, cy + 5.0f, color);
+  // The bar and its dot on the centre column, in the lower two thirds where
+  // the triangle is wide enough to leave air either side of them.
+  fill(renderer, {cx, cy - 1.0f, 1.0f, 3.0f}, color);
+  fill(renderer, {cx, cy + 3.0f, 1.0f, 1.0f}, color);
+}
+
+void drawCodeNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  const auto [cx, cy] = gridFor(box);
+  // `< >`, the two chevrons the chrome already draws for a disclosure, turned
+  // outward and set either side of the centre. Three across against three
+  // down, so each of the four arms steps once per row and the left pair and
+  // the right pair are the same shape reflected.
+  SDL_RenderLine(renderer, cx - 2.0f, cy - 3.0f, cx - 5.0f, cy);
+  SDL_RenderLine(renderer, cx - 5.0f, cy, cx - 2.0f, cy + 3.0f);
+  SDL_RenderLine(renderer, cx + 2.0f, cy - 3.0f, cx + 5.0f, cy);
+  SDL_RenderLine(renderer, cx + 5.0f, cy, cx + 2.0f, cy + 3.0f);
+}
+
+// The whole set, in picker order, each with what draws it.
+constexpr NoteGlyph kNoteGlyphs[] = {
+  {"star", "Star", drawStarNote},
+  {"check", "Done", drawCheckNote},
+  {"flag", "Follow up", drawFlagNote},
+  {"bookmark", "Bookmark", drawBookmarkNote},
+  {"tag", "Label", drawTagNote},
+  {"folder", "Collection", drawFolderNote},
+  {"calendar", "Dated", drawCalendarNote},
+  {"clock", "Waiting", drawClockNote},
+  {"bolt", "Urgent", drawBoltNote},
+  {"warning", "Careful", drawWarningNote},
+  {"code", "Technical", drawCodeNote},
+};
+
+}
+
 std::span<const NoteGlyph> noteGlyphs() {
   return std::span<const NoteGlyph>(kNoteGlyphs, std::size(kNoteGlyphs));
 }
 
 bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Color color) {
   if(id.empty()) return false;
-  // An eleven-pixel field centred on one pixel, so one set of offsets below
-  // serves a 16px sidebar row and a 30px picker cell alike, and so that a mark
-  // meant to be symmetric is symmetric. See `kGlyphRadius`.
-  const auto grid = gridFor(box);
-  const float cx = grid.cx;
-  const float cy = grid.cy;
-  SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-
-  if(id == "star") {
-    drawStarGlyph(renderer, fieldOf(grid), true, color);
-    return true;
-  }
-  if(id == "check") {
-    drawCheckGlyph(renderer, fieldOf(grid), color);
-    return true;
-  }
-  if(id == "flag") {
-    // A pole with the pennant on its top half, so the mark has a baseline the
-    // way a letter does.
-    SDL_RenderLine(renderer, cx - 4.0f, cy - 5.0f, cx - 4.0f, cy + 5.0f);
-    // The pennant filled row by row rather than outlined and then filled
-    // separately. Its two edges are one slope mirrored about the row the point
-    // sits on, so measuring each row's reach from that row gives the rows in
-    // mirrored pairs -- where an outline plus a fill inside it was two
-    // different shapes rounding two different ways, and the pennant came out
-    // with a step on its lower edge that its upper edge did not have.
-    for(int dy = -5; dy <= 1; ++dy) {
-      const float fromPoint = std::abs(static_cast<float>(dy) + 2.0f);
-      const float reach = std::round(7.0f * (3.0f - fromPoint) / 3.0f);
-      hLine(renderer, cx - 3.0f, cx - 3.0f + reach, cy + static_cast<float>(dy), color);
-    }
-    return true;
-  }
-  if(id == "bookmark") {
-    // The notch cut at forty-five degrees from each bottom corner, meeting on
-    // the centre column.
-    const SDL_FPoint ribbon[] = {
-      {cx - 4.0f, cy + 5.0f}, {cx - 4.0f, cy - 5.0f}, {cx + 4.0f, cy - 5.0f},
-      {cx + 4.0f, cy + 5.0f}, {cx, cy + 1.0f},        {cx - 4.0f, cy + 5.0f},
-    };
-    strokePath(renderer, ribbon, 6, color);
-    return true;
-  }
-  if(id == "tag") {
-    // A luggage label: square at the string end, pointed at the other, with the
-    // hole the string goes through near the square end. The hole is what says
-    // "tag" rather than "arrow" -- without it the shape is a chevron.
-    //
-    // The point is two forty-five degree edges meeting on the centre row, so
-    // the upper and lower halves step identically. They used to start from a
-    // half coordinate, which the renderer took the same way for both, and the
-    // point came out a row off the middle of the label it belongs to.
-    const SDL_FPoint label[] = {
-      {cx - 5.0f, cy - 4.0f}, {cx + 1.0f, cy - 4.0f}, {cx + 5.0f, cy},
-      {cx + 1.0f, cy + 4.0f}, {cx - 5.0f, cy + 4.0f}, {cx - 5.0f, cy - 4.0f},
-    };
-    strokePath(renderer, label, 6, color);
-    // Three pixels square, not two: an even hole cannot sit centred on an odd
-    // field, and a hole one row off centre in a nine-row label is visible.
-    fill(renderer, {cx - 3.0f, cy - 1.0f, 3.0f, 3.0f}, color);
-    return true;
-  }
-  if(id == "folder") {
-    // The tab first, then the body under it: two rules meeting at the tab's
-    // right shoulder is what reads as a folder at this size. The shoulder is
-    // two across against two down -- the one diagonal here that is meant to be
-    // short, and the only mark in the set that is meant to be lopsided.
-    const SDL_FPoint folder[] = {
-      {cx - 5.0f, cy + 4.0f}, {cx - 5.0f, cy - 4.0f}, {cx - 1.0f, cy - 4.0f},
-      {cx + 1.0f, cy - 2.0f}, {cx + 5.0f, cy - 2.0f}, {cx + 5.0f, cy + 4.0f},
-      {cx - 5.0f, cy + 4.0f},
-    };
-    strokePath(renderer, folder, 7, color);
-    return true;
-  }
-  if(id == "calendar") {
-    stroke(renderer, {cx - 5.0f, cy - 3.0f, 11.0f, 9.0f}, color);
-    // The filled band is the month header; the two ticks above it are the
-    // rings. Without them the mark is a picture frame.
-    fill(renderer, {cx - 5.0f, cy - 3.0f, 11.0f, 3.0f}, color);
-    SDL_RenderLine(renderer, cx - 3.0f, cy - 5.0f, cx - 3.0f, cy - 3.0f);
-    SDL_RenderLine(renderer, cx + 3.0f, cy - 5.0f, cx + 3.0f, cy - 3.0f);
-    return true;
-  }
-  if(id == "clock") {
-    strokeCircle(renderer, cx, cy, kGlyphRadius, color);
-    // Hands at twelve and three, drawn as filled bars rather than as lines: a
-    // one-pixel diagonal inside a one-pixel ring is lost against the ring, and
-    // a clock face with no hands on it is a circle.
-    fill(renderer, {cx, cy - 3.0f, 1.0f, 4.0f}, color);
-    fill(renderer, {cx, cy, 3.0f, 1.0f}, color);
-    return true;
-  }
-  if(id == "bolt") {
-    // Two strokes down and one across, doubled sideways for weight -- a
-    // single-pixel lightning bolt reads as a scratch. Asymmetric on purpose,
-    // and the one mark here where that is the shape rather than a fault.
-    for(float d = 0.0f; d <= 1.0f; d += 1.0f) {
-      const SDL_FPoint bolt[] = {
-        {cx + 1.0f + d, cy - 5.0f},
-        {cx - 3.0f + d, cy},
-        {cx + d, cy},
-        {cx - 2.0f + d, cy + 5.0f},
-      };
-      strokePath(renderer, bolt, 4, color);
-    }
-    return true;
-  }
-  if(id == "warning") {
-    // Sides at one across for every two down. That is a slope the grid steps
-    // exactly, and both sides pass through the apex pixel, so the point comes
-    // out a point -- where the shallower join this had before drew a stray dot
-    // a row above the triangle, which had to be cut flat by a pixel to hide it.
-    // Cutting the apex is no longer needed.
-    //
-    // Three separate strokes rather than one closed path, and both sides drawn
-    // *from the apex* outward. A one-in-two slope has a tie on every other row
-    // -- the exact centre of the pixel pair it has to choose between -- and a
-    // line rasteriser breaks that tie by the direction it is travelling, not by
-    // the geometry. Walked as a loop, the right side ran apex-to-base and the
-    // left base-to-apex, so the two sides broke their ties opposite ways and
-    // the right edge stepped a row before its partner all the way down. From a
-    // common origin with the run mirrored, they break them the same way.
-    SDL_RenderLine(renderer, cx, cy - 5.0f, cx + 5.0f, cy + 5.0f);
-    SDL_RenderLine(renderer, cx, cy - 5.0f, cx - 5.0f, cy + 5.0f);
-    hLine(renderer, cx - 5.0f, cx + 5.0f, cy + 5.0f, color);
-    // The bar and its dot on the centre column, in the lower two thirds where
-    // the triangle is wide enough to leave air either side of them.
-    fill(renderer, {cx, cy - 1.0f, 1.0f, 3.0f}, color);
-    fill(renderer, {cx, cy + 3.0f, 1.0f, 1.0f}, color);
-    return true;
-  }
-  if(id == "code") {
-    // `< >`, the two chevrons the chrome already draws for a disclosure, turned
-    // outward and set either side of the centre. Three across against three
-    // down, so each of the four arms steps once per row and the left pair and
-    // the right pair are the same shape reflected.
-    SDL_RenderLine(renderer, cx - 2.0f, cy - 3.0f, cx - 5.0f, cy);
-    SDL_RenderLine(renderer, cx - 5.0f, cy, cx - 2.0f, cy + 3.0f);
-    SDL_RenderLine(renderer, cx + 2.0f, cy - 3.0f, cx + 5.0f, cy);
-    SDL_RenderLine(renderer, cx + 5.0f, cy, cx + 2.0f, cy + 3.0f);
+  for(const NoteGlyph& glyph : kNoteGlyphs) {
+    if(glyph.id != id) continue;
+    // Set once, here: several of the marks reach straight for `SDL_RenderLine`,
+    // which takes the renderer's standing colour rather than one of its own.
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    glyph.draw(renderer, box, color);
     return true;
   }
   return false;

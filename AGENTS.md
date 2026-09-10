@@ -488,6 +488,14 @@ when the counters went in it turned out to be 70% of every frame.
   specific: the comparison and the assignment are two lists, they drift, and
   the memo then answers for inputs it was not built from -- silently, because it
   is only wrong when the field nobody stored is the field that changed.
+- **A note's mark lives once, in `ui::noteGlyphs()`.** The row carries the id,
+  the label and the function that draws it, and `drawNoteGlyph` is a lookup in
+  that table. It was a table *and* an `if(id == ...)` chain -- two lists of the
+  same eleven marks, where a mark in the table and not the chain is a picker
+  cell that draws nothing and one in the chain and not the table cannot be
+  chosen, and neither fails to compile. `every_note_glyph_offered_draws_something`
+  renders each one over a software renderer and counts the pixels, which is
+  what makes "has a function" mean "draws".
 - A key binding lives once, in `ui::actionSpecs()`. `ActionSpec::keyRunsIt` says
   whether the key alone runs it; if it does, `handleKey` hands the name to
   `performCommand` and there is no branch to write. Only a chord whose meaning

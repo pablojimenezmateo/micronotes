@@ -75,6 +75,16 @@ void drawPinGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color
 struct NoteGlyph {
   std::string_view id;
   std::string_view label;
+  // What draws it, centred in the box it is given.
+  //
+  // On the row rather than in a chain beside it, for the same reason a
+  // counter's wire name sits with its id and a key binding lives once in
+  // `ui::actionSpecs`. This was two lists of the same eleven marks -- this
+  // table, which the picker is built from, and an `if(id == ...)` chain in
+  // `drawNoteGlyph` -- with nothing holding them level. A mark in the table
+  // and not the chain is a picker cell that draws nothing; one in the chain
+  // and not the table cannot be chosen at all. Neither fails to compile.
+  void (*draw)(SDL_Renderer* renderer, Rect box, SDL_Color color);
 };
 
 // The whole set, in picker order.
