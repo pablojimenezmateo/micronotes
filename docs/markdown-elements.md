@@ -2,18 +2,16 @@
 
 This file is both documentation for micronotes' Markdown rendering scope and a
 manual regression fixture. Open it as a note and check each section below in
-both panes, which are one renderer:
+the **reading view** (`Ctrl+2`), and again in **split** (`Ctrl+3`), where the
+same rendering sits beside the source it came from.
 
-- **Live** (`Ctrl+1`), where the formatting is drawn around a caret you can put
-  anywhere. Its scanner owns the simple blocks and hands tables, raw HTML,
-  footnote definitions and indented code to md4c, drawn read-only until you
-  click into one.
-- **Reading** (`Ctrl+3`), the same page with the caret, the hover gutter and the
-  selection toolbar turned off.
+The reading view's scanner owns the simple blocks and hands tables, raw HTML,
+footnote definitions and indented code to md4c.
 
-The two are meant to be **pixel-identical** for a note nobody is editing, and
-that is the cheapest regression test this file has: screenshot each and `cmp`
-them. Anything that differs outside the status bar is a bug in one of them.
+The two arrangements are meant to render **pixel-identically** at the same
+column width, and that is the cheapest regression test this file has:
+screenshot each and `cmp` them. Anything that differs outside the chrome is a
+bug in one of them.
 
 In each: the content wraps without overflow, scrolls, and links stay clickable.
 **Nothing scrolls sideways, and nothing needs to.** Micronotes has one axis on
@@ -22,9 +20,9 @@ the column broke it, and a table wider than the page shares the page between its
 columns and wraps inside the cells. A break the *file* contains never wears the
 mark -- that distinction is `doc::VisualLine::continuation`, and without it every
 hand-wrapped line in a note would claim to have been broken by the window.
-In the live surface, additionally: a block's syntax markers appear only while
-the caret is inside it, `Ctrl+.` folds any heading or list item that owns
-something, and typing anywhere leaves the rest of the file byte-identical.
+Additionally: a block's syntax markers are hidden but keep their offsets, so a
+selection covers them and a click lands between them and the word; and typing
+anywhere leaves the rest of the file byte-identical.
 
 The last of those is the real test. Type into a section, undo it, save, and
 `git diff` this file: it must come back empty. The scanner describes the buffer
@@ -108,7 +106,7 @@ Autolinks should render as links when supported by md4c GFM:
 <https://example.com/autolink>.
 
 A bare URL pasted straight into a line is a link too, in the reading view and
-the live surface alike, and keeps every `&`, `%` and `=` in its query string:
+the reading view, and keeps every `&`, `%` and `=` in its query string:
 https://example.com/report?e=4x&ovuser=a%2Cb%40c.com&x=eyJBIjoiQiJ9%3D%3D
 
 The sentence punctuation after one is not part of it, so this full stop stays
@@ -164,7 +162,7 @@ Nested mixed lists:
 Task lists:
 
 - [x] Parse GFM task list syntax
-- [ ] Checkboxes are clickable in the live surface; tick this one to check
+- [ ] Checkboxes are clickable in the reading view; tick this one to check
 - [x] Keep checkbox alignment stable
 
 ## Blockquotes And Admonitions

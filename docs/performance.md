@@ -2,6 +2,16 @@
 
 How to measure this app, and what the numbers currently say.
 
+> **A note on the passes below.** Everything from "Resolved:" downwards is a
+> record of a measurement pass, written when it was taken. Several of them
+> measured the *live editing surface* -- the pane that rendered formatting in
+> place around a caret -- which has since been removed, along with folding, the
+> hover gutter, the block selection and the selection toolbar. Those passes are
+> kept as written rather than rewritten: the findings' *shapes* are the reusable
+> part, and a lab notebook that gets edited to match the present is no longer
+> evidence. Where such a pass describes machinery that is gone, it says so.
+> The instruments, the budgets and the recipes above this line are current.
+
 ## The three instruments
 
 Guessing at performance here is not necessary. All three live in
@@ -138,11 +148,9 @@ ones where it can be slow:
 | `type.near_top` / `type.middle` / `type.at_end` | an edit is asymmetric -- near the top almost nothing above it carries over and everything below shifts, at the end the reverse. A reuse scheme only ever tested in the middle can be silently O(document) at one end. |
 | `backspace.middle` | the other branch of every prefix/suffix comparison |
 | `newline.split_and_join` | the block *partition* changes, so blocks below shift by an index as well as an offset |
-| `caret.block_to_block` | the arrow keys: the source stands completely still and two blocks change which markers they show |
 | `scroll.idle_frame` | the relayout a scroll must **not** do |
 | `scroll.viewport_queries` | the work a scroll genuinely does -- `blockRange`, `offsetAt`, `blockAt` -- which has to stay proportional to the window, not the note |
 | `open.cold_layout` | first paint, the one case here that is meant to be O(document) |
-| `fold.toggle_heading` / `fold.idle_frame_after_toggle` | the toggle, and the idle frame after it that a stamped fold revision should make free |
 | `resize.width_step` | every cached block invalidated at once, at a width never seen before |
 
 Two things about the numbers on those lines.
@@ -242,7 +250,7 @@ first paint as the user sees it -- rasterizing, the shell surfaces, the panels
 Xvfb :97 -screen 0 1600x1000x24 &
 DISPLAY=:97 MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 \
   ./build-release/bin/micronotes --library /path/to/library \
-    --select "Some Note" --size 1600x1000 --pane live --panels sidebar,right \
+    --select "Some Note" --size 1600x1000 --pane split --panels sidebar,right \
     --screenshot /tmp/shot.png
 ```
 
@@ -395,7 +403,7 @@ And in the harness, `scroll.frame_relayout_median` went 0.566 ms -> **0.011 ms**
 Three separate causes, all with the same shape.
 
 **The layout rebuilt an answer it already had.** `layout.unchanged_updates` read
-59 of 60: the live surface re-lays the note out once per frame whether or not
+59 of 60: the page re-lays the note out once per frame whether or not
 anything happened, and a scroll is by definition a frame where nothing did. The
 per-block layout cache was working -- 99% hits -- so a profile of the relayout
 looked healthy; the cost was the whole-document copy, rescan, per-block key hash
@@ -433,7 +441,6 @@ it needed to, and only a count says so.
 
 `layout_update_does_nothing_when_nothing_changed`,
 `layout_update_rebuilds_when_an_input_moves`,
-`layout_update_rebuilds_when_a_fold_closes`,
 `layout_block_range_covers_the_band_and_nothing_else` and
 `editor_revision_moves_only_when_the_text_does` guard all of it, and the
 `scroll` scenario fails its budget if a frame that changed nothing costs more
@@ -474,7 +481,7 @@ The overhaul was a visual change rather than a performance one, but it added a
 surface -- a menu bar that lays itself out on every frame -- so it was measured
 rather than assumed. Interleaved headless sessions, before and after, twice
 each on the same library and window (`1600x1000`, sidebar and right panel open,
-live pane):
+split view):
 
 | | p50 | p95 |
 | --- | --- | --- |
@@ -535,14 +542,21 @@ against `sidebar.rows_built` says which one ran.
 
 ### Resolved: the fold predicate, asked per block per frame
 
+> **Since removed.** Folding was the live editing surface's, and both went when
+> that surface did. `foldRevision`, `LayoutOptions::folded` and the
+> `layout.fold_*` counters no longer exist; `sourceRevision` remains and still
+> does the job described for it below. Kept here because the *shape* of the
+> finding -- a reuse check paying a per-block query to prove nothing moved -- is
+> the reusable part.
+
 Listed as open above, and it was worse than the 0.05 ms estimated there: on the
 460 KB note it was `layout.fold_queries` **2,801 per frame**, because the reuse
 check has to resolve the folds to establish that they have not moved, and each
 resolution builds a fold key and takes a map lookup on the note id.
 
 The fix is not to make the predicate cheaper but to stop asking. `LayoutOptions`
-now takes two optional identity stamps -- `sourceRevision` and `foldRevision` --
-and when they are unchanged the reuse check skips both the memcmp of the whole
+took two optional identity stamps -- `sourceRevision` and `foldRevision` -- and
+when they were unchanged the reuse check skipped both the memcmp of the whole
 note and the per-block fold query. Zero means "cannot say", so a caller with no
 revision to offer (the harness, the tests) gets exactly the old behaviour.
 
@@ -551,12 +565,10 @@ revision to offer (the harness, the tests) gets exactly the old behaviour.
 | `layout.fold_queries` per frame | 2,801 | **0** |
 | `layout.update` self, steady frame | 0.18 ms | **~0.00 ms** |
 
-`layout_stamped_reuse_asks_the_fold_predicate_nothing`,
-`layout_a_moved_fold_stamp_re_resolves_the_folds` and
-`layout_an_unstamped_caller_still_compares_bytes` guard it. The stamps are a
-promise, so the one place that breaks it is handled explicitly: the caret-unwind
-loop in `PageView::layout` expands a fold mid-pass and withdraws the stamp for
-the pass that follows.
+The fold half of this went with the live surface, and so did its tests. What
+guards the surviving `sourceRevision` is
+`layout_an_unstamped_caller_still_compares_bytes`, plus
+`layout_update_does_nothing_when_nothing_changed` either side of it.
 
 ### Resolved: opening a large note shaped every word of it
 

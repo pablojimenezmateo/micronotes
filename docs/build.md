@@ -254,8 +254,8 @@ Useful runtime controls:
   room becomes margin rather than longer lines. Both are stored per library in
   `.micronotes/ui.state`, beside the theme.
 - Choosing a library folder from settings opens it without a restart: the
-  library being left is written out first, so its open note, favorites and folds
-  stay with it. The folder is created if it is not there, `~` is expanded, and
+  library being left is written out first, so its open note and favorites stay
+  with it. The folder is created if it is not there, `~` is expanded, and
   the choice is remembered in `~/.config/micronotes/library-path` the same way
   `--set-library` does.
 - `Enter`: continues the list, quote, or callout you are in. On an empty item it
@@ -268,8 +268,7 @@ Useful runtime controls:
 - `Backspace` at a block's first character strips the block's marker, outdenting
   a nested list item first. `Ctrl+Backspace` and `Ctrl+Delete` work by word.
 - `Ctrl+Enter`: tick or untick the task under the caret. Task checkboxes are
-  also clickable in the live surface, except in the block holding the caret,
-  where the raw `- [ ]` is shown instead.
+  also clickable in the reading view.
 - `Ctrl+D`, `Ctrl+Shift+D`: duplicate or delete the block under the caret.
 - `Alt+Up`, `Alt+Down`: move the block past its neighbour, carrying the blank
   line that separated them so two paragraphs never run together.
@@ -277,27 +276,9 @@ Useful runtime controls:
   `Ctrl+Shift+7/8/9`: numbered item, bullet, task.
 - `/` at the start of a line or after a space opens the block inserter: a
   fuzzy-filtered list of block types. `Esc` closes it and leaves the `/` alone.
-- `Esc` in the live surface selects the block the caret is in; a second `Esc`
-  puts the caret back. With blocks selected, `Up`/`Down` walk them,
-  `Shift+Up`/`Shift+Down` extend the range, `Shift+click` extends it to the
-  block clicked, and duplicate, delete, move, turn-into and `Ctrl+C` all act
-  over the whole range at once. `Enter` returns to editing the text.
-- Hovering a block in the live surface shows two controls in the left margin:
-  `+` inserts a new block below it (nothing is written until you pick a type),
-  and the dotted handle drags the block - or the whole block selection - to the
-  line marked by the drop indicator.
-- Right-clicking a block opens its menu: turn into, duplicate, fold, move up or
-  down, and delete.
-- `Ctrl+.` folds the heading or list item the caret is in, hiding everything
-  nested under it: a heading owns its section down to the next heading of the
-  same rank, a list item owns the items indented beneath it. A disclosure
-  triangle in the left margin does the same with the pointer, and stays visible
-  while a block is collapsed. Folding is a view preference, so it never touches
-  the file; which toggles a note has collapsed is stored in
-  `.micronotes/folds.state` and keyed by the block's text, so it survives edits
-  elsewhere in the note.
-- Selecting text raises a formatting toolbar above it: bold, italic, code,
-  strikethrough, link, and turn into.
+- A block command applies to every block the selection covers, so selecting
+  three list items and pressing `Alt+Up` moves all three. With nothing
+  selected it applies to the block holding the caret.
 - `Ctrl+Left`/`Ctrl+Right` move by word, `Ctrl+Home`/`Ctrl+End` jump to the ends
   of the note, `PageUp`/`PageDown` move by a screenful, and holding `Shift` with
   any movement extends the selection.
@@ -306,8 +287,8 @@ Useful runtime controls:
   ` ``` `) is already the syntax it looks like, so it is left exactly as typed.
 - A run of `>` lines is drawn as one quote or one callout rather than one per
   line. `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and `[!CAUTION]`
-  each get their own colour and a badge, in the live surface and the reading
-  view alike; the slash menu and the turn-into menu offer all five.
+  each get their own colour and a badge; the slash menu and the turn-into menu
+  offer all five.
 - A fenced code block shows its language and a `Copy` button in its top right.
 - A note can carry an `icon:` in its front matter, shown beside it in the tree
   and the breadcrumb. It names one of the marks the shell draws -- `star`,
@@ -316,16 +297,15 @@ Useful runtime controls:
   that grid is "none", which removes the key. Front matter keys micronotes does
   not model are preserved exactly as they were written, so a note written by
   another tool survives being saved here.
-- `Ctrl+1`: live surface. Markdown is rendered where you type it: headings,
-  emphasis, code spans, links, list bullets, and task checkboxes all show as
-  formatting, and a block's syntax markers appear only while the caret is in it.
-  Tables, raw HTML, footnote definitions, and indented code render read-only
-  through the reading-view renderer; click one to edit it as raw Markdown until
-  the caret leaves it. This is the default.
-- `Ctrl+2`: raw Markdown source. The escape hatch for anything the live surface
-  does not model.
-- `Ctrl+3`: reading view. `Ctrl+4`: source beside the reading view.
-- `Ctrl+L`: cycle through the four pane modes.
+- `Ctrl+1`: raw Markdown source, which is where you type.
+- `Ctrl+2`: reading view. Markdown is rendered rather than shown as source:
+  headings, emphasis, code spans, links, list bullets and task checkboxes all
+  show as formatting, and the syntax markers are hidden. Text is selectable,
+  links and task checkboxes are clickable, and a fenced block keeps its `Copy`
+  button. Tables, raw HTML, footnote definitions and indented code render
+  through the `md4c` model.
+- `Ctrl+3`: source beside the reading view. This is the default.
+- `Ctrl+L`: cycle through the three pane modes.
 - `Ctrl+Shift+L`: switch between the light and dark theme. The choice is stored
   in the library's `.micronotes/ui.state`.
 - `/`: focus search when the editor is not focused.
@@ -456,7 +436,7 @@ These exist to make UI work reproducible and are not part of normal use:
 --size 1400x900        # window size
 --theme light|dark     # override the stored theme
 --scale 2              # override the display scale
---pane live|editor|viewer|split
+--pane editor|viewer|split
 --select <title>       # open the first note whose title contains this
 --search <query>       # seed the sidebar's search field, to capture it searching
 --find <query>         # open the find bar over the note with this needle in it

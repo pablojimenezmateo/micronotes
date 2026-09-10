@@ -4,15 +4,15 @@
 TBD - created by archiving change bootstrap-micronotes. Update Purpose after archive.
 ## Requirements
 ### Requirement: Raw Markdown Editor
-The system SHALL provide a raw Markdown text editing mode for note bodies, selectable by the user, in addition to the live editing surface.
+The system SHALL provide a raw Markdown text editing mode for note bodies, which is where the user types.
 
 #### Scenario: Edit note text as raw Markdown
-- **WHEN** the user switches to raw mode and types in the editor pane
+- **WHEN** the user types in the editor pane
 - **THEN** the system updates the note buffer as raw Markdown text and can save it to the note's `.md` file
 
-#### Scenario: Escape hatch for unmodelled Markdown
-- **WHEN** a note contains Markdown that the live editing surface does not model
-- **THEN** the user can switch to raw mode and edit the source directly
+#### Scenario: Every construct is editable
+- **WHEN** a note contains Markdown the rendered view does not model
+- **THEN** the user can still edit its source directly, because the source is the editing surface
 
 ### Requirement: Rendered Markdown Viewer
 The system SHALL provide a rendered Markdown viewer based on vendored `md4c` parsing and native SDL rendering.
@@ -46,26 +46,30 @@ The Markdown viewer MUST NOT fetch remote images, scripts, stylesheets, or other
 - **WHEN** a note contains an image link with an `http` or `https` URL
 - **THEN** the system does not download the image and instead presents the link as unavailable or ordinary link text
 
-### Requirement: Live Markdown Editing Surface
-The system SHALL provide a live editing surface, used by default, in which Markdown formatting is rendered in place while the note remains editable.
+### Requirement: Note Area Arrangements
+The system SHALL offer the note area in three arrangements -- raw source, a rendered read-only view, and the two side by side -- and SHALL default to the side-by-side arrangement.
 
-#### Scenario: Formatting renders while editing
-- **WHEN** the user views a note in the live surface with the caret outside a given block
-- **THEN** that block's headings, emphasis, strong text, code spans, links, list markers, and task checkboxes are displayed as rendered formatting rather than as syntax characters
+#### Scenario: Switch arrangement
+- **WHEN** the user chooses the raw, reading, or split arrangement
+- **THEN** the note area shows that arrangement, and the choice belongs to the tab rather than to the window
 
-#### Scenario: Markers reveal at the caret
-- **WHEN** the caret is inside a block
-- **THEN** that block's Markdown syntax markers are shown so the user can edit them directly
+#### Scenario: Formatting renders in the reading view
+- **WHEN** the user views a note in the reading view
+- **THEN** its headings, emphasis, strong text, code spans, links, list markers, and task checkboxes are displayed as rendered formatting rather than as syntax characters
+
+#### Scenario: Markers keep their offsets
+- **WHEN** a block's Markdown syntax markers are hidden in the reading view
+- **THEN** they still occupy their source offsets, so a selection covers them and a click maps to a position between them and the text
 
 #### Scenario: Unmodelled block types
 - **WHEN** a block is a table, an HTML block, or a footnote definition
-- **THEN** the live surface renders it through the `md4c` render model as read-only content and allows the user to edit it as raw text on demand
+- **THEN** the reading view renders it through the `md4c` render model
 
 ### Requirement: Source Fidelity
-The live editing surface MUST NOT modify any part of the note buffer that the user did not edit. Saving a note SHALL NOT reformat, normalize, or reserialize unedited Markdown.
+Editing MUST NOT modify any part of the note buffer that the user did not edit. Saving a note SHALL NOT reformat, normalize, or reserialize unedited Markdown.
 
 #### Scenario: Open and save without editing
-- **WHEN** the user opens a note in the live surface and saves it without typing
+- **WHEN** the user opens a note and saves it without typing
 - **THEN** the `.md` file on disk is byte-for-byte unchanged
 
 #### Scenario: Edit one block
@@ -76,11 +80,15 @@ The live editing surface MUST NOT modify any part of the note buffer that the us
 The system SHALL let the user act on individual blocks through direct manipulation.
 
 #### Scenario: Reorder a block
-- **WHEN** the user drags a block's gutter handle to another position
+- **WHEN** the user moves the block under the caret past its neighbour
 - **THEN** the system moves that block's source lines to the new position as a single undoable edit
 
+#### Scenario: A command covers the selection
+- **WHEN** the user selects text spanning several blocks and runs a block command
+- **THEN** the command applies to every block the selection covers rather than only the one holding the caret
+
 #### Scenario: Insert a block from the slash menu
-- **WHEN** the user types `/` in an empty block and chooses a block type
+- **WHEN** the user types `/` at the start of a block, or runs the insert-block command, and chooses a block type
 - **THEN** the system replaces the block with the chosen block type's Markdown
 
 #### Scenario: Change a block's type

@@ -155,7 +155,7 @@ tools/session-compare.sh main     # the same, through a REAL headless session:
 ```
 
 **The harness draws nothing.** It has a font lane -- real faces, real shaping,
-through the same `app::documentMetrics` the live surface lays out with -- and a
+through the same `app::documentMetrics` the note page lays out with -- and a
 persistence lane that goes through `AppState`'s real writes to disk, but no
 window, no textures and no present, and nothing in it goes through `src/app/`'s
 key handling or its shell surfaces. So for anything above that a real session
@@ -179,8 +179,8 @@ clocks and the allocation counter every lane measures through.
 
 The **shell lane** (`tools/perf/ShellLane.cpp`) is the one to add to when the
 work is above `doc::Layout`. It
-drives a real `UiRuntime` through a keystroke -- the editor, the live page, the
-outline panel, the status bar, the raw pane -- over the real faces and stops
+drives a real `UiRuntime` through a keystroke -- the editor, the reading page,
+the outline panel, the status bar, the raw pane -- over the real faces and stops
 short of the paint. Anything memoised on `ui.editor.revision()` is by
 construction recomputed on every keystroke, and the memo makes it look handled;
 that is the shape this lane exists to catch, and it caught one the day it was
@@ -199,7 +199,7 @@ MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 MICRONOTES_TRACE_FRAMES=1 \
 Xvfb :97 -screen 0 1600x1000x24 &
 DISPLAY=:97 MICROCORE_PERF_COUNTERS=1 MICROCORE_PERF_SUMMARY=1 \
   ./build-release/bin/micronotes --library /path/to/library --select "Some Note" \
-    --size 1600x1000 --pane live --panels sidebar,right --screenshot /tmp/shot.png
+    --size 1600x1000 --pane split --panels sidebar,right --screenshot /tmp/shot.png
 ```
 
 The headless form prints both tables and exits, so it is a command rather than a
@@ -247,6 +247,14 @@ when the counters went in it turned out to be 70% of every frame.
   `docs/library-format.md`, "Changes Made Outside micronotes".
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
   only at a durable polymorphic boundary.
+- The note area has three arrangements, and they are `microcore::ui::PaneMode`:
+  raw Markdown source (`Ctrl+1`), a read-only rendering (`Ctrl+2`), and the two
+  side by side (`Ctrl+3`), which is the default. There is one renderer for the
+  rendering -- `app/PageView.h`, driven by `app/ReadingPage.h` -- and the source
+  side is `app/RawPane.h`. **There used to be a fourth, "live", which rendered
+  the formatting in place around a caret you could type into; it is gone.** Do
+  not reintroduce a second renderer for a note: that is what `PageView` was
+  merged out of, and the six ways the two had drifted are in this file's history.
 - **Where a unit goes depends on how often it runs.** Release carries no LTO --
   which was measured, not assumed, and LTO itself was measured and is a mixed
   result rather than a win (`docs/performance.md`, "The tenth pass"). So a unit
@@ -269,7 +277,7 @@ when the counters went in it turned out to be 70% of every frame.
   the ASCII case fold, `isAsciiSpace`, `splitLines` and `ellipsize`;
   `core/util/TextSearch.h` is the one literal search over a buffer -- every
   match, the whole-word predicate and the three "which match comes next" walks
-  -- and it exists because the find bar, the live page and the raw pane each had
+  -- and it exists because the find bar, the note page and the raw pane each had
   a scan of their own and so gave three answers to one question;
   `core/util/Utf8.h` has the
   boundary walks; `core/util/Hash.h` is the one FNV; `core/platform/PathUtils.h`
