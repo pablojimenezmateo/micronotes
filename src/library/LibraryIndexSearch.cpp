@@ -188,11 +188,24 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
         collectRows(stmt, out, lowerQuery);
       }
       if(out.empty()) {
+        // No `lower()` around the columns, and that is the difference between
+        // scanning the library and building a lowered copy of it to scan.
+        //
+        // SQLite's `LIKE` folds ASCII case itself unless `case_sensitive_like`
+        // is turned on, which nothing here does -- and `lower()` folds ASCII
+        // and nothing else, so the two agreed exactly. What they did not agree
+        // on is cost: `lower(body)` materialises a second copy of every note's
+        // body, for every row of the table, to answer a question `LIKE` would
+        // have answered against the bytes already in the page cache.
+        //
+        // This is the branch a query being typed spends its whole life in --
+        // FTS matches whole terms, so every keystroke before the query becomes
+        // a word falls through to here and scans the entire library.
         const char* likeSql = scope == SearchScope::Title
-          ? "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
+          ? "SELECT id,path,title,body FROM notes WHERE title LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
           : scope == SearchScope::Content
-            ? "SELECT id,path,title,body FROM notes WHERE lower(body) LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
-            : "SELECT id,path,title,body FROM notes WHERE lower(title) LIKE ?1 ESCAPE '\\' OR lower(body) LIKE ?2 ESCAPE '\\' OR lower(path) LIKE ?3 ESCAPE '\\' ORDER BY title LIMIT 200;";
+            ? "SELECT id,path,title,body FROM notes WHERE body LIKE ? ESCAPE '\\' ORDER BY title LIMIT 200;"
+            : "SELECT id,path,title,body FROM notes WHERE title LIKE ?1 ESCAPE '\\' OR body LIKE ?2 ESCAPE '\\' OR path LIKE ?3 ESCAPE '\\' ORDER BY title LIMIT 200;";
         if(Statement stmt = db.prepare(likeSql); stmt) {
           const std::string q = likePattern(lowerQuery);
           persistence::bindText(stmt, 1, q);

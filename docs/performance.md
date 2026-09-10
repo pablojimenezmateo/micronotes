@@ -3188,3 +3188,64 @@ Both are tallied in plain members and added once per block. `perf::addCounter`
 is an unconditional relaxed atomic add and this loop runs ~290,000 times for a
 cold 200 KB note, so counting at each site would have been counting most of the
 way to measuring it.
+
+---
+
+## The eleventh pass: the query that costs most is the one with no answer
+
+The search lanes had been sitting in the harness with an ordering nobody had
+looked at twice:
+
+```
+search.query_hits_everything                 725 us
+search.query_titles_only                     867 us
+search.query_matches_nothing                1086 us
+```
+
+A query matching nothing cost half again as much as a query matching every note
+in the library. That is backwards on its face -- the expensive part of a result
+is supposed to be the result -- and the reason is the fallback: FTS matches
+whole terms, so a query that is the *middle* of a word returns no rows, and
+`LibraryIndex::search` then falls through to a `LIKE '%q%'` scan of the whole
+`notes` table.
+
+That fallback is not a mistake. It is the only thing that finds `pital` inside
+`capitalised`, and it is the branch a query being typed spends its entire life
+in: every keystroke before the query becomes a whole word lands there. So the
+lane that looked like the least interesting one is the one measuring what
+typing into the search box costs.
+
+### Resolved: the fallback scan built a lowered copy of the library to read it
+
+The predicate was `lower(body) LIKE ? ESCAPE '\'`, against a pattern the caller
+had already lowered. `lower()` is not free: SQLite evaluates it per row and
+materialises a second copy of every note's body to hand to `LIKE`. On the
+thousand-note fixture that is a copy of the whole library, per query, to answer
+a question about bytes already in the page cache.
+
+And it was never needed. SQLite's `LIKE` folds ASCII case itself unless
+`case_sensitive_like` is turned on, which nothing here does, and `lower()` folds
+ASCII and nothing else -- so the two agreed on every input and differed only in
+cost. Dropping `lower()` from the three predicates (title, body, path):
+
+```
+search.query_matches_nothing               1.217 ms -> 0.528 ms   -56.6%
+```
+
+Seven interleaved iterations per side through `tools/perf-compare.py`, and the
+only row in the report that cleared its noise band. No counter moved, which is
+correct and worth saying: the work that went away was inside SQLite, where this
+project counts nothing. The proof that the *answers* did not change is a test
+rather than a counter -- `library_index_finds_a_mid_word_substring_in_any_case`
+asks for a mid-word substring in three cases against both columns, which is the
+branch nothing had covered. The existing case test went through FTS and could
+not have told the two spellings apart.
+
+### What this one says about reading a lane
+
+The lane had been in the harness, printing that number, since the search work
+in the ninth pass. Nothing was wrong with the instrument; what was missing was
+reading the three rows *against each other*. An absolute number gets compared
+to a budget and passes. A number that is larger than the number above it when
+it should be smaller is an inconsistency, and an inconsistency is a question
+with an answer at the end of it.
