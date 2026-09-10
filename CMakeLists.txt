@@ -236,6 +236,7 @@ target_compile_definitions(micronotes_core PUBLIC
 # testable at all.
 set(MICRONOTES_SHELL_SOURCES
   src/app/Application.cpp
+  src/app/AppWindow.cpp
   src/app/Autosave.cpp
   src/app/CaretPolicy.cpp
   src/app/CursorTheme.cpp

@@ -1,6 +1,7 @@
 #include "CoreAliases.h"
 #include "app/Application.h"
 
+#include "app/AppWindow.h"
 #include "app/Autosave.h"
 #include "app/CaretPolicy.h"
 #include "app/Chrome.h"
@@ -26,7 +27,6 @@
 #include "core/perf/PerformanceCounters.h"
 #include "ui/Actions.h"
 #include "ui/ImageCache.h"
-#include "ui/Painter.h"
 #include "ui/TextRenderer.h"
 #include "ui/Fonts.h"
 #include "ui/Menus.h"
@@ -37,7 +37,6 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
-#include <cmath>
 #include <iostream>
 #include <string>
 
@@ -71,84 +70,37 @@ int run(ApplicationOptions options) {
   // not draw: the tests and the perf harness stop here.
   if(options.headless) return 0;
 
-  setInputHints();
-  if(!SDL_Init(SDL_INIT_VIDEO)) {
-    std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
-    return 1;
-  }
-
   if(options.theme) ui::setThemeMode(*options.theme);
 
-  SDL_Window* window = createAppWindow(options.windowWidth, options.windowHeight);
-  if(!window) {
-    SDL_Quit();
-    return 1;
-  }
-
-  SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
-  if(!renderer) {
-    std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    return 1;
-  }
-  ui::configureRenderer(renderer);
+  // Declared before the two texture caches below, which is what puts them
+  // ahead of it in destruction order: `SDL_Renderer` owns every texture made
+  // against it, so a cache outliving the renderer calls `SDL_DestroyTexture`
+  // on memory SDL has already freed. `app/AppWindow.h` has the rest of why
+  // this is a type and not five locals.
+  AppWindow app;
+  if(!app.open(options.windowWidth, options.windowHeight)) return 1;
+  SDL_Window* window = app.window();
+  SDL_Renderer* renderer = app.renderer();
 
   // Held for the lifetime of the window: SDL keeps the pointer and calls back
   // into it on every pointer press near the frame.
   HitTestContext hitTestContext;
   installWindowHitTest(window, renderer, ui, hitTestContext);
 
-  // Present in step with the display. Without this the renderer tears on one
-  // frame and stalls on the next, which reads as jitter even when every frame
-  // is well inside budget.
-  SDL_SetRenderVSync(renderer, 1);
-
-  SDL_StartTextInput(window);
   installWatcherWake(ui);
   TextRenderer text(renderer);
-  // Every layout number in this file is in logical (density-independent) units,
-  // and SDL_GetWindowSize reports the same, so one render scale is all that
-  // HIGH_PIXEL_DENSITY needs to produce a sharper image rather than a bigger
-  // one. Layout stays logical, SDL scales it up, and glyph textures are drawn at
-  // their own physical size so they stay sharp. Expressed as a scale rather than
-  // a ratio against a fixed window size, it stays correct across resizes; the
-  // display-changed event below re-reads it when the window moves to a monitor
-  // with a different scale.
-  //
-  // A second lambda used to seed the same render scale from the window's pixel
-  // density just above here; nothing called it twice and this one overwrote it
-  // unconditionally, so it was a density that never reached a frame.
-  float appliedScale = 0.0f;
-  auto applyDisplayScale = [&]() {
-    float scale = options.scale > 0.0f ? options.scale : SDL_GetWindowDisplayScale(window);
-    if(scale <= 0.0f) scale = 1.0f;
-    if(std::abs(scale - appliedScale) < 0.01f) return;
-    appliedScale = scale;
-    text.setDisplayScale(scale);
-    SDL_SetRenderScale(renderer, scale, scale);
-  };
-  applyDisplayScale();
+  app.applyDisplayScale(text, options.scale);
   if(inputDebugEnabled()) {
     std::cerr << "fonts source=\"" << text.fonts().sourceDescription() << "\""
               << " ready=" << text.fonts().ready() << "\n";
   }
   ImageCache images(renderer);
-  SystemCursors cursors;
-  if(!cursors.init()) {
-    std::cerr << "SDL_CreateSystemCursor failed: " << SDL_GetError() << "\n";
-  }
   applyWindowOptions(ui, options);
 
   if(!options.screenshotPath.empty()) {
     // An unmapped window reads back blank, so a capture maps it before drawing.
     SDL_ShowWindow(window);
-    const int code = captureFrame(renderer, text, images, ui, options);
-    cursors.destroy();
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-    return code;
+    return captureFrame(renderer, text, images, ui, options);
   }
 
   revealWindow(window, [&](int width, int height) { drawApp(renderer, text, images, ui, width, height); });
@@ -185,11 +137,11 @@ int run(ApplicationOptions options) {
         // changed", the cursor has to ask for a present of its own on a real
         // shape change. Hovering a link changes no pixels at all.
         needsDraw = true;
-        const EventOutcome outcome = routeEvent(event, text, ui, cursors, width, height);
+        const EventOutcome outcome = routeEvent(event, text, ui, app.cursors(), width, height);
         if(outcome.quit) running = false;
-        // The loop's own business, because it owns the renderer's scale and the
-        // face cache that has to be dropped with it.
-        if(outcome.displayScaleChanged) applyDisplayScale();
+        // Handed straight back to the window, which owns the renderer's scale
+        // and the face cache that has to be dropped with it.
+        if(outcome.displayScaleChanged) app.applyDisplayScale(text, options.scale);
         // A held key or a fast trackpad refills the queue as fast as it
         // empties, and draining it whole starves the paint: the window stops
         // updating while input is still arriving. Stop at the budget and let
@@ -221,11 +173,6 @@ int run(ApplicationOptions options) {
 
   if(autosavePending(ui)) (void)saveCurrent(ui, true);
   persistLibraryState(ui);
-  SDL_StopTextInput(window);
-  cursors.destroy();
-  SDL_DestroyRenderer(renderer);
-  SDL_DestroyWindow(window);
-  SDL_Quit();
   return 0;
 }
 
