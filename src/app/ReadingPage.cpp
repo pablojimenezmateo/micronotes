@@ -90,9 +90,11 @@ void publishPageChrome(SDL_Renderer* renderer, TextRenderer& text, UiRuntime& ui
     const Rect header = ui.readingPage.headerRect();
     drawPageHeader(text, ui, header, header.y);
   }
-  for(const auto& link : ui.readingPage.links()) {
-    ui.linkRegions.push_back({link.rect, link.target, link.wiki});
-  }
+  // One type on both sides, so this is an append rather than the field-by-field
+  // copy it was -- `PageView` handed back an `app::PageLink` and the shell kept
+  // an `app::LinkRegion`, which were the same three fields under two names.
+  const auto& links = ui.readingPage.links();
+  ui.linkRegions.insert(ui.linkRegions.end(), links.begin(), links.end());
 }
 
 }
@@ -119,8 +121,7 @@ void drawReading(SDL_Renderer* renderer, TextRenderer& text, ui::ImageCache& ima
     ui.readingPage.revealOffset(selection.start);
     ui.revealViewerSelection = false;
   }
-  ui.readingPage.draw(renderer, text, selection, ui.focus == FocusArea::Viewer,
-                      ui.find.matches, ui.find.activeIndex());
+  ui.readingPage.draw(renderer, text, selection, ui.find.matches, ui.find.activeIndex());
   publishPageChrome(renderer, text, ui);
 
   if(ui.editor.text().empty()) {

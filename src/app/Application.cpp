@@ -3,7 +3,6 @@
 
 #include "app/AppWindow.h"
 #include "app/Autosave.h"
-#include "app/CaretPolicy.h"
 #include "app/Chrome.h"
 #include "app/Clipboard.h"
 #include "app/Commands.h"
@@ -17,12 +16,13 @@
 #include "app/Layout.h"
 #include "app/MenuBar.h"
 #include "app/Notes.h"
+#include "app/WindowChrome.h"
+#include "app/Pending.h"
 #include "app/PointerRouter.h"
 #include "app/Scroll.h"
 #include "app/SessionState.h"
 #include "app/Shell.h"
 #include "app/Startup.h"
-#include "app/WindowChrome.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
 #include "ui/Actions.h"
@@ -149,17 +149,8 @@ int run(ApplicationOptions options) {
         if(shouldYieldEventDrain(drained, needsDraw)) break;
       } while(SDL_PollEvent(&event));
     }
-    if(applyPendingWindowAction(window, ui, running)) needsDraw = true;
-    if(applyWatchedChanges(ui)) needsDraw = true;
-    // The caret's blink, which is the one change with no event behind it.
-    if(caretPhaseChanged(ui)) needsDraw = true;
-
-    const Uint64 now = SDL_GetTicks();
-    if(autosaveDue(ui, now)) {
-      ui.lastAutosaveAttempt = now;
-      (void)saveCurrent(ui, true);
-      needsDraw = true;
-    }
+    // Everything that moves without an event behind it. See `app/Pending.h`.
+    if(applyPendingWork(window, ui, running, SDL_GetTicks())) needsDraw = true;
     if(needsDraw) {
       int width = 1280;
       int height = 800;

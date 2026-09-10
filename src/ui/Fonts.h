@@ -3,6 +3,7 @@
 #include <SDL3/SDL_pixels.h>
 #include <SDL3/SDL_surface.h>
 
+#include <filesystem>
 #include <string_view>
 
 namespace micronotes::ui {
@@ -60,6 +61,20 @@ TextStyle chromeStyle();
 // The same, for the one row of chrome that wants a second step down: a search
 // snippet under its note's title, a caption under a section label.
 TextStyle chromeSmallStyle();
+
+// The file one face is loaded from: the vendored copy when the vendored tree
+// is where it should be, and whatever the system is configured to use when it
+// is not.
+//
+// Exposed because the PDF exporter has to *embed* the same faces the screen
+// draws with, and a second list of candidate directories beside the one here
+// is a second answer to "which Inter". It resolves a path and opens nothing,
+// so it is safe before `FontStore::init` and outside SDL entirely -- which is
+// what lets it be answered on a machine with no SDL_ttf at all.
+//
+// Empty when no candidate exists, which for the exporter means there is no
+// face to embed and for the screen means the fallback chain below it.
+std::filesystem::path faceFile(FontFamily family, bool strong, bool italic);
 
 // Owns every font face and hides SDL_ttf from the rest of the application.
 class FontStore {

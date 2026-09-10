@@ -7,15 +7,17 @@ First-stop operating guide for agents working in this repository.
 - `micronotes` is a Linux-only Markdown notes app in C++20, CMake, SDL3, SQLite.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
-  something is unaccounted for, and add to it rather than leaving a `TODO`. It
-  is **currently empty**, which is a claim rather than an oversight -- so
-  something that looks unaccounted for probably is, and the honest answers are
-  to fix it or to open an entry that says what it costs and why not.
+  something is unaccounted for, and add to it rather than leaving a `TODO`.
+  Two entries are open: one about selecting inside a block the live scanner
+  does not model, and one about how far a CFF face can be subsetted without
+  writing a CFF writer. So something that looks unaccounted for elsewhere
+  probably is, and the honest answers are to fix it or to open an entry that
+  says what it costs and why not.
 - `src/core/` is the app-agnostic layer. Read the rule below before touching it.
 - The tree is layered and the layers only point one way: **core < doc < library
-  < ui < app**. `architecture_the_layers_only_point_one_way` checks it, because
-  it had already broken -- one include, for one function -- and made `ui` and
-  `library` a cycle without anything failing.
+  < ui < export < app**. `architecture_the_layers_only_point_one_way` checks
+  it, because it had already broken -- one include, for one function -- and
+  made `ui` and `library` a cycle without anything failing.
 - Build with `cmake`, test with `ctest`, and prefer `tools/run-checks.sh` so output lands in a readable log.
 - Performance work is measured, not guessed: `docs/performance.md` explains the three instruments and the harness.
 
@@ -45,6 +47,13 @@ App-only code stays outside, in the layer that owns the concept:
   `doc/Tokenize.h` turns source bytes into tokens, `doc/Flow.h` turns tokens
   into visual lines, and `doc/LayoutUpdate.cpp` decides which blocks need either.
   `doc/Layout.cpp` is what is left -- styling, staging, placement.
+  A block the scanner deliberately does *not* model -- a table, raw HTML, a
+  footnote definition -- is parsed by md4c and laid out by `doc/RenderLayout.h`,
+  through that same tokenizer and that same flow. It lives here rather than in
+  either surface because both surfaces need it: it was written twice, once in
+  `app/` with a second line breaker of its own and once in `export/` with no
+  line breaker at all, and the copy that could not reach the other set every
+  table cell as plain text. Two painters over one layout, again.
 - `src/library/` -- the *folder of notes*: the index, front matter, search
   scope, trash, and which note a `[[target]]` resolves to. `NoteCatalog` is the
   library, its index and the memos over both kept in step -- every write to a
@@ -69,6 +78,56 @@ App-only code stays outside, in the layer that owns the concept:
   compounds a surface assembles itself from). They were one `ui/Draw.h`, which
   meant a file that only measured a string included the picture decoder.
   Include the layer you draw with, not the stack.
+  `ui/DocStyle.h` is the odd one and is here on purpose: it turns a
+  `doc::RunStyle` into a face and a `doc::TextRole` into ink, and this is the
+  lowest layer that can see both a role and a palette -- `doc/` names no colour
+  at all, and `app/` and `export/` are both above. Both of those had a copy of
+  that table, and the copies had drifted. `ui/DocRuns.h` is there for the same
+  reason and one step further on: it is the *whole* run loop for the window --
+  the code span's ground, the strikethrough, the link rule, the rect a click
+  gets back -- and it is one loop because it was two, one per surface that
+  paints a `doc::BlockLayout`, and they had drifted too. The rect it hands back
+  is `ui::LinkRegion`, which is why that type is in `ui/` and not `app/`.
+- `src/export/` -- turning a note into a file that is not a note. Today that
+  is PDF, and the shape is worth knowing before adding to it: the *format* is
+  app-agnostic and lives in `src/core/pdf/` (objects, streams, the xref,
+  `FlateDecode`, sfnt parsing, font embedding), and what lives here is the
+  composition -- the page, the pagination, and painting a `doc::` layout onto
+  it. `export/PdfBlocks.cpp` is the counterpart of `app/PageViewPaint.cpp` and
+  the two are deliberately **two painters over one layout, not two renderers**:
+  the block partition, the line breaking and the run styling are `doc::`'s and
+  are computed once for whichever surface asks. Anything that has to *decide*
+  something about a note belongs down in `doc::` -- `export/PdfComplex.cpp` was
+  the exception and stopped being one: it carried an md4c renderer of its own,
+  which is how it came to draw only the first table in a block, to set every
+  cell as plain text, and to show a footnote definition as grey monospace
+  source when the screen showed a footnote. It shapes through
+  `doc/RenderLayout.h` now.
+  Inside this layer there is one run painter, `exporting::paintRuns`, and both
+  page painters go through it. The per-block ink overrides that look like they
+  need a callback -- a quote's muted body, a ticked task, a callout's head line
+  -- all reduce to *the ink a `TextRole::Body` run takes*, which is one colour.
+  The screen has the same treatment, in `ui/DocRuns.h`, and
+  `architecture_a_run_is_inked_once_per_surface` holds it: there are two output
+  surfaces, so there are two of those loops and no more. This layer sits above
+  `ui` because it reads the theme's palette and resolves the vendored faces
+  through `ui::faceFile`, and it must never reach `app` -- an export takes
+  notes and returns bytes, which is what lets it be tested with no window at
+  all.
+  Three things about the font side are worth knowing before touching it, and
+  all three are in `src/core/pdf/`. `PdfFont` is the only thing that knows text
+  is made of characters, and it *measures* and *encodes* -- both, from one
+  `SfntFont`, because a measurement from one face and an encoding from another
+  is text that overruns its own line breaks. `SfntKern.h` reads the pair
+  kerning out of `GPOS` (no vendored face has a `kern` table at all, so a
+  reader of that one would have kerned nothing while looking like it worked)
+  and `PdfFont` resolves it into the `TJ` arrays of the content stream rather
+  than leaving it to a shaper, because there is no shaper on the other side of
+  a PDF. And `SfntSubset.h` cuts the embedded face down to the glyphs the pages
+  showed -- which is a filter rather than the font toolchain it was assumed to
+  be, and only because the encoding is `Identity-H` with an `/Identity`
+  CID-to-GID map: glyph numbers never move, so nothing has to be renumbered.
+  Do not renumber them.
 - `src/app/` -- the surfaces themselves, the routers and the loop.
 
 That list is not a description, it is where things go. `src/ui/` had become a
@@ -86,8 +145,9 @@ to every core edit. Do not reintroduce it: if a second app ever wants this code,
 make it a library with a version, not a hashed copy.
 
 Three targets are built from it. `micronotes_core` is everything above;
-`micronotes_shell` is every surface that draws (`src/app/`, plus the four
-`src/ui/` files they draw through); `micronotes` is `main.cpp` and a link line.
+`micronotes_shell` is every surface that draws (`src/app/`, plus the
+`src/ui/` files they draw through, plus `src/export/`, which needs the same
+faces and the same image decoder); `micronotes` is `main.cpp` and a link line.
 The test binary and the perf harness both link the **shell**, so a pane, a model
 or a policy under `src/app/` is ordinary testable code -- it was not, until
 recently, and the workarounds that left are still visible.
@@ -330,6 +390,11 @@ when the counters went in it turned out to be 70% of every frame.
   show in the first place.
 - Avoid hidden coupling through mutable global state. The perf tables are the
   deliberate exception, and they are process-wide by design.
+- Everything that changes between two events -- a queued window action, a
+  change another program made to the library, the caret's blink, a finished
+  file chooser, the autosave clock -- is `app/Pending.h`, in one list in the
+  order it has to run. Each of them arrived as one more `if` in the event
+  loop, which is what the line budget below exists to push back on.
 - `src/app/Application.cpp` is the window, the renderer and the wait, and
   nothing else. It was a 2,700-line catch-all; the dispatch over event *kinds*
   is `app/EventRouter.h` and the routing of a press or a keystroke once it is

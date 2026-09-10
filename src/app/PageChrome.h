@@ -41,7 +41,7 @@ std::optional<std::string> codeUnderCopyButton(const PageView& page, std::string
 // chances for the cursor to promise a click that lands somewhere else -- the
 // same failure `ui::layoutTabs` had, where the hit test and the paint
 // disagreed and a click on the second tab opened the first.
-const LinkRegion* linkAt(const UiRuntime& ui, float x, float y);
+const ui::LinkRegion* linkAt(const UiRuntime& ui, float x, float y);
 
 // Whether there is a link under the pointer at all, without following it.
 //

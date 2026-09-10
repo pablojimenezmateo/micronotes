@@ -225,7 +225,11 @@ ThemeMode& activeMode() {
 }
 
 CalloutStyle calloutStyle(std::string_view rawKind) {
-  const bool light = activeMode() == ThemeMode::Light;
+  return calloutStyle(rawKind, activeMode());
+}
+
+CalloutStyle calloutStyle(std::string_view rawKind, ThemeMode mode) {
+  const bool light = mode == ThemeMode::Light;
   // The tag is read as the author wrote it, so `[!note]` and `[!NOTE]` have to
   // land on the same colour.
   const std::string kind = util::toUpperAscii(rawKind);
@@ -253,7 +257,11 @@ CalloutStyle calloutStyle(std::string_view rawKind) {
 }
 
 const Theme& theme() {
-  return activeMode() == ThemeMode::Light ? lightTheme() : darkTheme();
+  return themeFor(activeMode());
+}
+
+const Theme& themeFor(ThemeMode mode) {
+  return mode == ThemeMode::Light ? lightTheme() : darkTheme();
 }
 
 ThemeMode themeMode() {

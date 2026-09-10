@@ -2,6 +2,17 @@
 
 namespace microcore::markdown {
 
+std::string plainText(const std::vector<Inline>& inlines) {
+  std::string out;
+  for(const auto& item : inlines) {
+    if(item.type == InlineType::Image) continue;
+    if(item.type == InlineType::Link) out += item.text.empty() ? item.target : item.text;
+    else if(item.type == InlineType::FootnoteRef) out += "[" + item.text + "]";
+    else out += item.text;
+  }
+  return out;
+}
+
 std::string plainText(const Document& document) {
   std::string out;
   std::size_t size = document.blocks.size();

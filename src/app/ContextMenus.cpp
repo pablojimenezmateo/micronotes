@@ -46,6 +46,10 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     {"show-on-disk", "Show on disk", "", "", hasNote, false, false, false},
     {"copy-relative-path", "Copy relative path", "", "", hasNote, false, false, false},
     {"copy-absolute-path", "Copy absolute path", "", "", hasNote, false, false, false},
+    // With the file rows rather than in a group of its own: an export is a
+    // question about the note as a document, which is what the three above it
+    // are too. Ends in an ellipsis because it asks where to put it.
+    {"export-pdf", "Export as PDF...", "", "", hasNote, false, false, false},
     {"", "", "", "", false, false, false, true},
     {"delete", "Delete", "", "", hasNote, true, false, false},
   };
@@ -289,6 +293,9 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
     {"show-on-disk", "Show on disk", "", "", true, false, false, false},
     {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
     {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
+    // The whole notebook, its sub-notebooks included, bound into one file.
+    // Offered even on the root, where it means the library.
+    {"export-pdf", "Export as PDF...", "", "", true, false, false, false},
     {"", "", "", "", false, false, false, true},
     {"delete", "Delete", "", "", hasFolder, true, false, false},
   };

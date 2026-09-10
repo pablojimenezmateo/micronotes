@@ -237,11 +237,12 @@ MICRONOTES_TEST(tabs_scroll_to_keep_the_active_tab_on_screen) {
       MICRONOTES_REQUIRE(shown[i] == shown[i - 1] + 1);
     }
     // Every visible tab sits inside the strip, and they tile it left to right
-    // starting at its left edge.
-    // An overflowing strip keeps a chevron at each end, so the window of tabs
-    // starts one button in rather than at the strip's own edge.
-    MICRONOTES_REQUIRE(slots[shown.front()].rect.x ==
-                       kStrip.x + micronotes::ui::kTabScrollButtonWidth);
+    // starting at its left edge -- one button in when there is a left chevron
+    // to make room for, and flush against the edge when there is not.
+    const float lead = slots[shown.front()].rect.x - kStrip.x;
+    MICRONOTES_REQUIRE(lead == (shown.front() == 0
+                                  ? 0.0f
+                                  : micronotes::ui::kTabScrollButtonWidth));
     for(const auto index : shown) {
       const Rect box = slots[index].rect;
       MICRONOTES_REQUIRE(box.x >= kStrip.x);
@@ -283,8 +284,14 @@ MICRONOTES_TEST(tabs_grow_overflow_chevrons_only_when_they_overflow) {
   const auto atStart = layoutTabs(names, kStrip, measure, 0);
   MICRONOTES_REQUIRE(atStart.hiddenLeft == 0);
   MICRONOTES_REQUIRE(atStart.hiddenRight > 0);
+  MICRONOTES_REQUIRE(micronotes::ui::empty(atStart.scrollLeft));
   MICRONOTES_REQUIRE(!micronotes::ui::empty(atStart.scrollRight));
   MICRONOTES_REQUIRE(atStart.scrollRight.x + atStart.scrollRight.w == kStrip.x + kStrip.w);
+  // With no left chevron there is no room kept for one either. The reserve was
+  // taken at both ends the moment the strip overflowed at all, which left a
+  // button-shaped hole against the strip's leading edge in exactly the case
+  // there is nothing to put in it.
+  MICRONOTES_REQUIRE(atStart.slots.front().rect.x == kStrip.x);
 
   // Every tab is accounted for: shown, hidden left, or hidden right.
   std::size_t shown = 0;

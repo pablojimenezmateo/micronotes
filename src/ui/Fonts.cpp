@@ -124,6 +124,48 @@ std::vector<std::filesystem::path> fontRoots() {
   return roots;
 }
 
+// The first candidate root that actually holds the vendored tree, resolved
+// once. A root is recognised by the one face every other path is relative to
+// being in it: a directory with a stray `inter/` in it and nothing else is not
+// the font tree.
+const std::filesystem::path& vendoredRoot() {
+  static const std::filesystem::path root = [] {
+    for(const auto& candidate : fontRoots()) {
+      std::error_code ec;
+      if(!std::filesystem::exists(candidate / kSansRegular, ec)) continue;
+      auto resolved = std::filesystem::weakly_canonical(candidate, ec);
+      return ec ? candidate : resolved;
+    }
+    return std::filesystem::path {};
+  }();
+  return root;
+}
+
+}
+
+std::filesystem::path faceFile(FontFamily family, bool strong, bool italic) {
+  const bool mono = family == FontFamily::Mono;
+  const std::filesystem::path& root = vendoredRoot();
+  if(!root.empty()) {
+    const char* relative = mono
+      ? (strong ? kMonoStrong : (italic ? kMonoItalic : kMonoRegular))
+      : (strong ? (italic ? kSansStrongItalic : kSansStrong)
+                : (italic ? kSansItalic : kSansRegular));
+    const auto candidate = root / relative;
+    std::error_code ec;
+    if(std::filesystem::exists(candidate, ec)) return candidate;
+  }
+  // Ask fontconfig what this system actually uses before falling back to
+  // guessed paths: a machine without the hardcoded files rendered no text at
+  // all, and pinning a face means never picking up the configured UI font.
+  if(const auto resolved = render::resolveFontFile({mono, strong, italic}); !resolved.empty()) {
+    return resolved;
+  }
+  for(const auto& path : systemFallbacks(mono, strong, italic)) {
+    std::error_code ec;
+    if(std::filesystem::exists(path, ec)) return path;
+  }
+  return {};
 }
 
 const TypeScale& type() {
@@ -164,25 +206,7 @@ struct FontStore::Impl {
   std::vector<TTF_Font*> fallbacks;
 
   std::string facePath(bool mono, bool strong, bool italic) const {
-    if(!root.empty()) {
-      const char* relative = mono
-        ? (strong ? kMonoStrong : (italic ? kMonoItalic : kMonoRegular))
-        : (strong ? (italic ? kSansStrongItalic : kSansStrong) : (italic ? kSansItalic : kSansRegular));
-      const auto candidate = root / relative;
-      std::error_code ec;
-      if(std::filesystem::exists(candidate, ec)) return candidate.string();
-    }
-    // Ask fontconfig what this system actually uses before falling back to
-    // guessed paths: a machine without the hardcoded files rendered no text at
-    // all, and pinning a face means never picking up the configured UI font.
-    if(const auto resolved = render::resolveFontFile({mono, strong, italic}); !resolved.empty()) {
-      return resolved;
-    }
-    for(const auto& path : systemFallbacks(mono, strong, italic)) {
-      std::error_code ec;
-      if(std::filesystem::exists(path, ec)) return path;
-    }
-    return {};
+    return faceFile(mono ? FontFamily::Mono : FontFamily::Sans, strong, italic).string();
   }
 
   TTF_Font* open(bool mono, bool strong, bool italic, int px) {
@@ -254,14 +278,10 @@ bool FontStore::init() {
   impl_ = new Impl();
   impl_->ttfReady = TTF_Init();
   if(!impl_->ttfReady) return false;
-  for(const auto& candidate : fontRoots()) {
-    std::error_code ec;
-    if(!std::filesystem::exists(candidate / kSansRegular, ec)) continue;
-    impl_->root = std::filesystem::weakly_canonical(candidate, ec);
-    if(ec) impl_->root = candidate;
-    impl_->source = impl_->root.string();
-    break;
-  }
+  // The same root `faceFile` resolves, so what the diagnostic reports and what
+  // the faces are actually opened from cannot be two different directories.
+  impl_->root = vendoredRoot();
+  if(!impl_->root.empty()) impl_->source = impl_->root.string();
   return true;
 }
 

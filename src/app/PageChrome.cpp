@@ -23,7 +23,7 @@ std::optional<std::string> codeUnderCopyButton(const PageView& page, std::string
 }
 
 
-const LinkRegion* linkAt(const UiRuntime& ui, float x, float y) {
+const ui::LinkRegion* linkAt(const UiRuntime& ui, float x, float y) {
   for(const auto& link : ui.linkRegions) {
     if(ui::contains(link.rect, x, y)) return &link;
   }
@@ -35,7 +35,7 @@ bool pointOnLink(const UiRuntime& ui, float x, float y) {
 }
 
 bool followLinkAt(UiRuntime& ui, float x, float y) {
-  if(const LinkRegion* found = linkAt(ui, x, y)) {
+  if(const ui::LinkRegion* found = linkAt(ui, x, y)) {
     const auto target = found->target;
     const bool wiki = found->wiki;
     if(wiki) {

@@ -471,7 +471,7 @@ std::vector<Token>& DocumentLayout::nextGroup(std::size_t* count) const {
   return group;
 }
 
-std::size_t DocumentLayout::stageSourceLines(const SourceBlock& block, const Flags& flags,
+std::size_t DocumentLayout::stageSourceLines(const SourceBlock& block,
                                              const RunStyle& base) const {
   const std::string_view source = source_;
   const RunStyle markerStyle = base;
@@ -595,7 +595,7 @@ void DocumentLayout::applyInlineSpans(const SourceBlock& block,
   }
 }
 
-std::size_t DocumentLayout::stageInlineContent(const SourceBlock& block, const Flags& flags,
+std::size_t DocumentLayout::stageInlineContent(const SourceBlock& block,
                                                const RunStyle& base, BlockLayout& out) const {
   const std::string_view source = source_;
   const RunStyle markerStyle = base;
@@ -695,8 +695,8 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     return out;
   }
 
-  const std::size_t groupCount = asSourceLines ? stageSourceLines(block, flags, base)
-                                               : stageInlineContent(block, flags, base, out);
+  const std::size_t groupCount = asSourceLines ? stageSourceLines(block, base)
+                                               : stageInlineContent(block, base, out);
 
   reserveFlowOutput(block, flags, base, available, groupCount, out);
 

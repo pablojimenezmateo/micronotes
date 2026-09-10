@@ -90,6 +90,12 @@ struct CalloutStyle {
 };
 
 CalloutStyle calloutStyle(std::string_view kind);
+// The same, for a palette that is not the one the window is currently in.
+// The PDF exporter is the caller: a note printed in the dark theme is a page
+// of white text on a black rectangle, which is a waste of ink and reads as a
+// bug rather than as a preference, so an export is always composed against
+// the light palette whatever the app is showing.
+CalloutStyle calloutStyle(std::string_view kind, ThemeMode mode);
 
 // A callout's name as it is drawn: the kind in title case, and "Note" when the
 // author named no kind at all.
@@ -100,6 +106,8 @@ CalloutStyle calloutStyle(std::string_view kind);
 std::string calloutLabel(std::string_view kind);
 
 const Theme& theme();
+// A named palette rather than the active one. Same caller, same reason.
+const Theme& themeFor(ThemeMode mode);
 ThemeMode themeMode();
 void setThemeMode(ThemeMode mode);
 

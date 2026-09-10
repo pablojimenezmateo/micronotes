@@ -6,7 +6,17 @@ the **reading view** (`Ctrl+2`), and again in **split** (`Ctrl+3`), where the
 same rendering sits beside the source it came from.
 
 The reading view's scanner owns the simple blocks and hands tables, raw HTML,
-footnote definitions and indented code to md4c.
+footnote definitions and indented code to md4c. What md4c hands back is laid
+out by `doc/RenderLayout.h`, through the same tokenizer and the same line
+breaker the scanner's own blocks go through -- so a table cell wraps, styles
+and links exactly as a paragraph does, and it does so identically wherever the
+note is drawn.
+
+**Export this file too** (`File > Export as PDF`). The page is the third
+surface, and it is the one whose divergences are easiest to miss: it shapes
+through the same layer, but it has its own ink, its own type scale in points,
+and a page that ends. `pdftotext -layout` on the result is the quick read, and
+`gs -o /dev/null -sDEVICE=nullpage` says whether a reader would open it.
 
 The two arrangements are meant to render **pixel-identically** at the same
 column width, and that is the cheapest regression test this file has:

@@ -19,7 +19,8 @@ namespace micronotes::doc {
 // that counts characters, over tokens a test writes by hand.
 class Flow {
 public:
-  Flow(const Metrics& metrics, const FlowGeometry& geometry, BlockLayout& out, FlowScratch& scratch);
+  Flow(const TextMetrics& metrics, const FlowGeometry& geometry, BlockLayout& out,
+       FlowScratch& scratch);
 
   // Non-const `groups`: a token's text is moved into the run it becomes rather
   // than copied. Every word in the document was being materialised three times
@@ -57,7 +58,7 @@ private:
   void pushLine(bool continues = true);
   void splitWord(Token& token);
 
-  const Metrics& metrics_;
+  const TextMetrics& metrics_;
   std::size_t base_ = 0;
   float textLeft_ = 0.0f;
   float right_ = 0.0f;
@@ -105,7 +106,7 @@ private:
 // exactly as it was. `flow_codegen_is_not_split_across_a_translation_unit`
 // in ArchitectureTests is what keeps it that way.
 
-inline Flow::Flow(const Metrics& metrics, const FlowGeometry& geometry, BlockLayout& out,
+inline Flow::Flow(const TextMetrics& metrics, const FlowGeometry& geometry, BlockLayout& out,
            FlowScratch& scratch)
     : metrics_(metrics),
       base_(geometry.base),

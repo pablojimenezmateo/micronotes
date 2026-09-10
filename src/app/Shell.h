@@ -12,10 +12,11 @@
 #include "app/PointerState.h"
 #include "app/ChromeState.h"
 #include "app/EditingState.h"
+#include "app/ExportState.h"
 #include "app/Fields.h"
 #include "app/FindState.h"
 #include "app/Focus.h"
-#include "app/LinkRegion.h"
+#include "ui/LinkRegion.h"
 #include "app/RawPaneState.h"
 #include "app/ResizePacing.h"
 #include "app/TextFields.h"
@@ -50,6 +51,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <functional>
 #include <map>
 #include <optional>
@@ -109,7 +111,7 @@ struct UiRuntime {
   std::string loadedNoteId;
   // What the shell remembers about it, each with its own forgetting rule. See
   // `app/NoteCaches.h`.
-  ComplexParseCache complexParses;
+  ComplexRenderCache complexRenders;
   ImagePathCache imagePaths;
   WikiTargets wikiTargets;
   PageHeaderMemo pageHeader;
@@ -122,7 +124,7 @@ struct UiRuntime {
   // Where every link the panes drew this frame landed, so a click and the
   // cursor shape can find one without laying a page out again. Cleared at the
   // top of the frame; see `app/PageChrome.h`.
-  std::vector<LinkRegion> linkRegions;
+  std::vector<ui::LinkRegion> linkRegions;
   // A heading to scroll to once the note now being opened has been laid out.
   //
   // A link that crosses notes -- `[a section](other.md#a-section)` -- names
@@ -153,6 +155,10 @@ struct UiRuntime {
   StatusLine status;
   // The two memos the bar's readouts stand on. See `app/StatusBar.h`.
   StatusBarState statusBar;
+  // An export waiting on the desktop's file chooser, which answers on another
+  // thread -- and may answer after this runtime is gone, which is why it is
+  // shared rather than held. See `app/ExportState.h`.
+  std::shared_ptr<PdfExportState> pdfExport = std::make_shared<PdfExportState>();
 
   // ---- where the reader is -----------------------------------------------
   FocusArea focus = FocusArea::Editor;

@@ -18,6 +18,7 @@ namespace microcore::attachments {}
 namespace microcore::editor {}
 namespace microcore::markdown {}
 namespace microcore::perf {}
+namespace microcore::pdf {}
 namespace microcore::persistence {}
 namespace microcore::platform {}
 namespace microcore::render {}
@@ -29,6 +30,7 @@ namespace micronotes {
 namespace attachments = microcore::attachments;
 namespace editor = microcore::editor;
 namespace markdown = microcore::markdown;
+namespace pdf = microcore::pdf;
 namespace perf = microcore::perf;
 namespace persistence = microcore::persistence;
 namespace platform = microcore::platform;

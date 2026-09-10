@@ -5,14 +5,18 @@
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
 #include "doc/LinkTarget.h"
+#include "ui/ClipGuard.h"
+#include "ui/DocRuns.h"
+#include "ui/DocStyle.h"
 #include "ui/Fonts.h"
-#include "ui/Settings.h"
-#include "ui/ShellLayout.h"
-#include "ui/Theme.h"
 #include "ui/Glyphs.h"
+#include "ui/Metrics.h"
 #include "ui/Painter.h"
 #include "ui/Scrollbar.h"
-#include "ui/ClipGuard.h"
+#include "ui/Settings.h"
+#include "ui/ShellLayout.h"
+#include "ui/TextRenderer.h"
+#include "ui/Theme.h"
 
 #include <algorithm>
 #include <cmath>
@@ -37,15 +41,52 @@ namespace {
 
 using micronotes::ui::Rect;
 using micronotes::ui::TextRenderer;
-using micronotes::ui::drawChevron;
 using micronotes::ui::fill;
 using micronotes::ui::hLine;
 using micronotes::ui::stroke;
 using micronotes::ui::theme;
 
-using pageview::colorFor;
 using pageview::toRect;
-using pageview::toTextStyle;
+
+// The mark a line the *column* broke wears at the point it broke, so a reader
+// can tell it from a line the file itself ended.
+//
+// Drawn on the line that wrapped rather than on the one that continues it, at
+// the trailing edge, which is where the eye is when it runs out of room. It is
+// the one thing this painter draws per line that `ui::paintRuns` does not: it
+// is a property of the *pair* of lines, and it needs the column's right edge,
+// neither of which a run knows.
+struct WrapMarks {
+  float ox = 0.0f;
+  float columnWidth = 0.0f;
+  float top = 0.0f;
+  float viewTop = 0.0f;
+  float viewBottom = 0.0f;
+};
+
+void drawWrapMarks(SDL_Renderer* renderer, const doc::BlockLayout& layout, const WrapMarks& at) {
+  for(std::size_t i = 0; i + 1 < layout.lines.size(); ++i) {
+    if(!layout.lines[i + 1].continuation) continue;
+    const doc::VisualLine& line = layout.lines[i];
+    const float lineY = at.top + line.y;
+    if(lineY + line.height < at.viewTop || lineY > at.viewBottom) continue;
+    const float size = std::max(6.0f, line.height * 0.45f);
+    const float markX = at.ox + at.columnWidth - size - 2.0f;
+    // Only where it has somewhere to go. A code line keeps
+    // `doc::kWrapMarkReserve` clear for it; a paragraph does not, because it
+    // breaks at a space and almost always leaves the room itself -- and on the
+    // rare line that ends flush with the column, a mark drawn over the last
+    // word would say less than the flush edge already does.
+    float lineRight = at.ox + layout.textLeft;
+    for(const auto& run : layout.runsOf(line)) {
+      lineRight = std::max(lineRight, at.ox + run.rect.x + run.rect.w);
+    }
+    if(lineRight > markX - 2.0f) continue;
+    ui::drawWrapGlyph(renderer,
+                      {markX, std::round(lineY + (line.height - size) / 2.0f), size, size},
+                      theme().textDisabled);
+  }
+}
 
 }
 
@@ -119,69 +160,24 @@ bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t
     columnClip.emplace(renderer, Rect {paint.ox, std::max(page_.y + 1.0f, top), columnWidth_,
                                        std::min(layout.height, page_.y + page_.h - top)});
   }
-  for(std::size_t lineIndex = 0; lineIndex < layout.lines.size(); ++lineIndex) {
-    const doc::VisualLine& line = layout.lines[lineIndex];
-    const float lineY = top + line.y;
-    if(lineY + line.height < paint.viewTop || lineY > paint.viewBottom) continue;
-    // A line the *column* broke wears a mark at the point it broke, so a
-    // reader can tell it from a line the file itself ended. Drawn on the line
-    // that wrapped rather than on the one that continues it, at the trailing
-    // edge, which is where the eye is when it runs out of room.
-    if(lineIndex + 1 < layout.lines.size() && layout.lines[lineIndex + 1].continuation) {
-      const float size = std::max(6.0f, line.height * 0.45f);
-      const float markX = paint.ox + columnWidth_ - size - 2.0f;
-      // Only where it has somewhere to go. A code line keeps
-      // `doc::kWrapMarkReserve` clear for it; a paragraph does not, because it
-      // breaks at a space and almost always leaves the room itself -- and on
-      // the rare line that ends flush with the column, a mark drawn over the
-      // last word would say less than the flush edge already does.
-      float lineRight = paint.ox + layout.textLeft;
-      for(const auto& run : layout.runsOf(line)) {
-        lineRight = std::max(lineRight, paint.ox + run.rect.x + run.rect.w);
-      }
-      if(lineRight <= markX - 2.0f) {
-        ui::drawWrapGlyph(renderer,
-                          {markX, std::round(lineY + (line.height - size) / 2.0f), size, size},
-                          theme().textDisabled);
-      }
-    }
-    for(const auto& run : layout.runsOf(line)) {
-      if(run.text.empty()) continue;
-      ++runs;
-      const ui::TextStyle style = toTextStyle(run.style);
-      const float x = paint.ox + run.rect.x;
-      if(run.role == doc::TextRole::Code && !run.isMarker) {
-        fill(renderer, {x - 2.0f, lineY + 1.0f, run.rect.w + 4.0f, line.height - 2.0f}, theme().codeBackground);
-      }
-      SDL_Color ink = colorFor(run.role, block.kind);
-      // A ticked task is done being read. The layout already struck it
-      // through; muting the ink is the other half of saying so.
-      if(block.kind == doc::BlockKind::Todo && block.checked &&
-         run.role == doc::TextRole::Body) {
-        ink = theme().textMuted;
-      }
-      // A callout's head line is its name, so it is drawn in the kind's own
-      // colour rather than in the muted ink the rest of a quote takes.
-      if(layout.calloutTitle && run.role == doc::TextRole::Body) {
-        ink = ui::calloutStyle(block.info(document_.source())).accent;
-      }
-      text.draw(run.text, x, lineY, ink, style);
-      if(run.style.strike) {
-        hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);
-      }
-      if(run.linkIndex >= 0 && run.linkIndex < static_cast<int>(layout.links.size())) {
-        // No rule under an image's caption: the picture below it is the
-        // affordance, and an underline there reads as a stray link.
-        if(run.role != doc::TextRole::ImageAlt) {
-          hLine(renderer, x, x + run.rect.w, lineY + line.height - 4.0f, theme().accent);
-        }
-        const bool wiki = run.role == doc::TextRole::WikiLink ||
-                          run.role == doc::TextRole::WikiLinkUnresolved;
-        links_.push_back({{x, lineY, run.rect.w, line.height},
-                          layout.links[static_cast<std::size_t>(run.linkIndex)], wiki});
-      }
-    }
+  drawWrapMarks(renderer, layout, {paint.ox, columnWidth_, top, paint.viewTop, paint.viewBottom});
+
+  ui::RunPaint runPaint;
+  runPaint.x = paint.ox;
+  runPaint.y = top;
+  runPaint.bodyInk = ui::inkFor(theme(), doc::TextRole::Body, block.kind);
+  // A ticked task is done being read. The layout already struck it through;
+  // muting the ink is the other half of saying so.
+  if(block.kind == doc::BlockKind::Todo && block.checked) runPaint.bodyInk = theme().textMuted;
+  // A callout's head line is its name, so it is drawn in the kind's own colour
+  // rather than in the muted ink the rest of a quote takes.
+  if(layout.calloutTitle) {
+    runPaint.bodyInk = ui::calloutStyle(block.info(document_.source())).accent;
   }
+  runPaint.from = paint.viewTop - top;
+  runPaint.to = paint.viewBottom - top;
+  runPaint.links = &links_;
+  runs += ui::paintRuns(renderer, text, layout, runPaint);
 
   // The pictures under the block. Their boxes were reserved by the layout, so
   // this is a blit at a rect that is already right rather than a second
@@ -197,8 +193,7 @@ bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t
 }
 
 void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, const PageSelection& selection,
-                    bool focused, std::span<const util::TextMatch> findMatches,
-                    std::size_t activeMatch) {
+                    std::span<const util::TextMatch> findMatches, std::size_t activeMatch) {
   const perf::ScopeTimer timer("page.draw");
   perf::addCounter(perf::CounterId::PageDrawCalls);
   links_.clear();

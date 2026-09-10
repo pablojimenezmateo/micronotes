@@ -3,6 +3,7 @@
 #include "CoreAliases.h"
 
 #include "core/markdown/MarkdownParser.h"
+#include "doc/RenderLayout.h"
 #include "library/Organization.h"
 #include "ui/Memo.h"
 #include "ui/NoteProperties.h"
@@ -48,19 +49,24 @@ struct NoteRevision {
 // The open note's front matter, as the rows drawn above its first block.
 using PageHeaderMemo = ui::Memo<std::vector<ui::NoteProperty>, NoteRevision>;
 
-// md4c documents for the blocks the note page hands off to it -- tables,
-// footnote definitions, anything the block scanner does not model.
+// The blocks the note page hands off to md4c -- tables, footnote definitions,
+// anything the block scanner does not model -- parsed and laid out.
 //
 // Keyed by the block's own source text, and looked up through a view, so
-// finding a parse does not first allocate a copy of the bytes to look it up by.
-class ComplexParseCache {
+// finding an entry does not first allocate a copy of the bytes to look it up
+// by.
+//
+// It holds the *layout* and not only the parse, because the note page measures
+// each of these blocks and then draws it -- the layout asks for a height when
+// the block is relaid and the paint asks again every frame -- and a cache of
+// only the parse meant shaping every table on screen twice per frame. Laying
+// one out again at a width it is already laid out at is a comparison.
+class ComplexRenderCache {
 public:
-  // The parse of `source`, or null when there is not one yet. Counts the hit.
-  const markdown::Document* find(std::string_view source);
-  // Keeps `document` under `source` and hands back what was kept. No eviction
-  // here: what is dead is decided by the note, and the note is not in scope
-  // from inside a layout pass.
-  const markdown::Document& keep(std::string_view source, markdown::Document document);
+  // The entry for `source`, created empty when there is not one yet: a fresh
+  // one has no parse and no layout, and the caller fills both in place. Counts
+  // the reuse when there was one.
+  doc::RenderedBlock& entry(std::string_view source);
 
   // Whether enough entries have accumulated to be worth walking the note to
   // find out which are dead. One comparison, which is the point: the answer is
@@ -72,15 +78,15 @@ public:
   // non-distinct keys makes the next sweep fire a block early, every frame.
   void sweep(std::vector<std::string_view> live);
 
-  // How many parses are held. Observation only: the tests assert that a note's
-  // parses are kept across layouts and dropped when the note is replaced, and
-  // there is nothing else that says so -- the counters cannot distinguish "not
-  // reparsed because it was cached" from "not reparsed because it was not laid
-  // out".
+  // How many entries are held. Observation only: the tests assert that a
+  // note's parses are kept across layouts and dropped when the note is
+  // replaced, and there is nothing else that says so -- the counters cannot
+  // distinguish "not reparsed because it was cached" from "not reparsed
+  // because it was not laid out".
   std::size_t size() const { return entries_.size(); }
 
 private:
-  std::map<std::string, markdown::Document, std::less<>> entries_;
+  std::map<std::string, doc::RenderedBlock, std::less<>> entries_;
   // How many distinct `Complex` blocks the last sweep found in the note. The
   // cache is allowed to run this far past it before the next sweep.
   std::size_t live_ = 0;

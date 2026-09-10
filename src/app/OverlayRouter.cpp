@@ -3,6 +3,7 @@
 #include "app/BlockMenus.h"
 #include "app/Commands.h"
 #include "app/EditCommands.h"
+#include "app/ExportPdf.h"
 #include "app/Notes.h"
 #include "app/Prompts.h"
 #include "app/Shell.h"
@@ -36,6 +37,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     if(result.itemId == "new") beginNoteCreate(ui);
     else if(result.itemId == "rename") beginRename(ui);
     else if(result.itemId == "delete") openDeleteNoteConfirm(ui);
+    else if(result.itemId == "export-pdf") exportNoteToPdf(ui, ui.state.selection().noteId);
     // The rest are the palette's, so the menu and the palette cannot drift.
     else if(result.itemId == "move") performCommand(ui, "move-note");
     else performCommand(ui, result.itemId);
@@ -107,6 +109,7 @@ void handleOverlayResult(UiRuntime& ui, const ui::OverlayResult& result) {
     else if(result.itemId == "new-note") createNoteInFolder(ui, ui.state.selection().folder);
     else if(result.itemId == "rename") beginFolderRename(ui);
     else if(result.itemId == "delete") openDeleteFolderConfirm(ui);
+    else if(result.itemId == "export-pdf") exportFolderToPdf(ui, ui.state.selection().folder);
     else if(handleFolderPathCommand(ui, result.itemId, ui.state.selection().folder)) {}
   }
 }

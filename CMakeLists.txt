@@ -111,6 +111,23 @@ if(MICRONOTES_ASSERT_OFFLINE_BUILD)
   endforeach()
 endif()
 
+# zlib is what a PDF's one stream filter, `FlateDecode`, actually is. Optional:
+# without it `core/pdf/Deflate.cpp` writes deflate's *stored* block type, which
+# every reader accepts and nothing compresses -- a larger PDF, not a worse one.
+set(MICRONOTES_ZLIB_TARGET "")
+find_package(ZLIB QUIET)
+if(TARGET ZLIB::ZLIB)
+  set(MICRONOTES_ZLIB_TARGET ZLIB::ZLIB)
+elseif(PkgConfig_FOUND)
+  pkg_check_modules(ZLIB_PC QUIET IMPORTED_TARGET zlib)
+  if(TARGET PkgConfig::ZLIB_PC)
+    set(MICRONOTES_ZLIB_TARGET PkgConfig::ZLIB_PC)
+  endif()
+endif()
+if(MICRONOTES_ZLIB_TARGET STREQUAL "")
+  message(STATUS "zlib not found; PDF export writes uncompressed streams")
+endif()
+
 # fontconfig resolves the faces the user actually configured, the same way every
 # other app on the desktop does. Optional: without it FontResolver falls back to
 # scanning the standard font directories.
@@ -146,6 +163,16 @@ set(MICROCORE_SOURCES
   src/core/markdown/BareUrl.cpp
   src/core/markdown/MarkdownParser.cpp
   src/core/markdown/RenderModel.cpp
+  src/core/pdf/Deflate.cpp
+  src/core/pdf/PdfContent.cpp
+  src/core/pdf/PdfDocument.cpp
+  src/core/pdf/PdfFont.cpp
+  src/core/pdf/PdfImage.cpp
+  src/core/pdf/PdfWriter.cpp
+  src/core/pdf/Sfnt.cpp
+  src/core/pdf/CffSubset.cpp
+  src/core/pdf/SfntKern.cpp
+  src/core/pdf/SfntSubset.cpp
   src/core/perf/Perf.cpp
   src/core/perf/PerformanceCounters.cpp
   src/core/perf/TraceChannel.cpp
@@ -178,6 +205,7 @@ set(MICRONOTES_APP_SOURCES
   src/doc/Layout.cpp
   src/doc/LayoutUpdate.cpp
   src/doc/LayoutQueries.cpp
+  src/doc/RenderLayout.cpp
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/LibraryIndexSearch.cpp
@@ -216,12 +244,16 @@ target_link_libraries(micronotes_core PUBLIC md4c md4c_html ${MICRONOTES_SQLITE_
 if(NOT MICRONOTES_FONTCONFIG_TARGET STREQUAL "")
   target_link_libraries(micronotes_core PUBLIC ${MICRONOTES_FONTCONFIG_TARGET})
 endif()
+if(NOT MICRONOTES_ZLIB_TARGET STREQUAL "")
+  target_link_libraries(micronotes_core PUBLIC ${MICRONOTES_ZLIB_TARGET})
+endif()
 target_compile_definitions(micronotes_core PUBLIC
   MICROCORE_HAS_FONTCONFIG=$<BOOL:${MICRONOTES_FONTCONFIG_TARGET}>
   MICROCORE_APP_NAME="micronotes"
   # What the About page prints. From the project version rather than a string in
   # a source file, so the packaged version and the reported one cannot differ.
   MICRONOTES_VERSION="${PROJECT_VERSION}"
+  MICROCORE_HAS_ZLIB=$<BOOL:${MICRONOTES_ZLIB_TARGET}>
   MICRONOTES_HAS_SDL3_IMAGE=$<BOOL:${MICRONOTES_SDL3_IMAGE_TARGET}>
   MICRONOTES_HAS_SDL3_TTF=$<BOOL:${MICRONOTES_SDL3_TTF_TARGET}>
 )
@@ -251,8 +283,8 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/FindBar.cpp
   src/app/FocusedEdits.cpp
   src/app/EventRouter.cpp
+  src/app/ExportPdf.cpp
   src/app/Frame.cpp
-  src/app/InlineText.cpp
   src/app/KeyRouter.cpp
   src/app/Layout.cpp
   src/app/KeySurfaces.cpp
@@ -268,7 +300,7 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/PagePress.cpp
   src/app/PageView.cpp
   src/app/PageViewPaint.cpp
-  src/app/PageViewStyle.cpp
+  src/app/Pending.cpp
   src/app/PointerRouter.cpp
   src/app/Prompts.cpp
   src/app/RawPane.cpp
@@ -287,6 +319,13 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/TabStrip.cpp
   src/app/WikiLinks.cpp
   src/app/WindowChrome.cpp
+  src/export/NotePdf.cpp
+  src/export/PdfBlocks.cpp
+  src/export/PdfComplex.cpp
+  src/export/PdfFaces.cpp
+  src/export/PdfPictures.cpp
+  src/ui/DocRuns.cpp
+  src/ui/DocStyle.cpp
   src/ui/Fonts.cpp
   src/ui/Glyphs.cpp
   src/ui/ImageCache.cpp
@@ -353,6 +392,10 @@ add_executable(micronotes_tests
   tests/OutlineTests.cpp
   tests/OverlayTests.cpp
   tests/PathUtilsTests.cpp
+  tests/PdfExportTests.cpp
+  tests/RenderLayoutTests.cpp
+  tests/PdfWriterTests.cpp
+  tests/Utf8Tests.cpp
   tests/PerfTraceTests.cpp
   tests/MenusTests.cpp
   tests/SearchTests.cpp

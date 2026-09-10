@@ -8,28 +8,26 @@
 
 namespace micronotes::app {
 
-// Room for the parses an edit is part-way through replacing, so a keystroke
+// Room for the entries an edit is part-way through replacing, so a keystroke
 // inside a table does not sweep the note on every character. The layout's block
-// cache keeps 256 for the same reason; a parse is heavier than a block layout,
-// so this keeps fewer.
+// cache keeps 256 for the same reason; a parse and its layout are heavier than
+// a block layout, so this keeps fewer.
 constexpr std::size_t kComplexSpare = 32;
 
-const markdown::Document* ComplexParseCache::find(std::string_view source) {
+doc::RenderedBlock& ComplexRenderCache::entry(std::string_view source) {
   const auto found = entries_.find(source);
-  if(found == entries_.end()) return nullptr;
-  perf::addCounter(perf::CounterId::ComplexParsesReused);
-  return &found->second;
+  if(found != entries_.end()) {
+    perf::addCounter(perf::CounterId::ComplexParsesReused);
+    return found->second;
+  }
+  return entries_.emplace(std::string(source), doc::RenderedBlock {}).first->second;
 }
 
-const markdown::Document& ComplexParseCache::keep(std::string_view source, markdown::Document document) {
-  return entries_.emplace(std::string(source), std::move(document)).first->second;
-}
-
-bool ComplexParseCache::sweepDue() const {
+bool ComplexRenderCache::sweepDue() const {
   return entries_.size() > live_ + kComplexSpare;
 }
 
-void ComplexParseCache::sweep(std::vector<std::string_view> live) {
+void ComplexRenderCache::sweep(std::vector<std::string_view> live) {
   perf::addCounter(perf::CounterId::ComplexCacheSweeps);
   std::sort(live.begin(), live.end());
   live.erase(std::unique(live.begin(), live.end()), live.end());

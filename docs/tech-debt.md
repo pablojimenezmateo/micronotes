@@ -11,21 +11,73 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-36 have been used. Closing an entry means deleting it and saying so in the
+TD-44 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
 ---
 
-## Nothing is open
+## TD-41 — Text in a table cannot be selected on the rendered page
 
-The register is empty, and that is a claim rather than an oversight: every entry
-it held has been closed by a commit that says so, and `docs/performance.md` has
-no `### Open:` heading left either.
+A table is a `BlockKind::Complex` block, and `doc/Layout.cpp` gives such a block
+exactly one `TextRun`: zero-width, empty `text`, spanning the block's whole
+source range. Both query paths in `doc/LayoutQueries.cpp` skip a run with no
+text, so `selectionRectFor` returns nothing for a table's line and `offsetAt`
+falls through to the block's content start.
 
-It will not stay empty, and the thing to resist when it stops being empty is
-writing down a *preference*. An entry earns its place by saying what it costs
-today -- with a number, if the cost is one that has a number -- and why that has
-not been paid. Something that fails either half is not debt; it is either a
-thing to do now or a thing nobody has to know about.
+**What it costs.** Three things, and the third is the one a reader notices.
+A click anywhere in a table puts the caret at the table's first byte rather
+than in the cell that was clicked, so there is no way to select part of one.
+A drag that crosses a table paints no highlight over it, so the selection
+appears to jump the block. And a drag from above the table to below it does
+select the table's bytes -- the offsets are contiguous in the buffer -- so the
+copy carries the author's `| --- | --- |` pipes and dashes rather than the words
+that were on screen. Pasting a table out of a note into a message means
+retyping it.
 
+**Why it has not been paid.** Selection is addressed in *source* offsets, and a
+`Complex` block has no map from a pixel inside it back to a source offset: md4c
+parses it separately, `app/MarkdownBlocks.cpp` draws the result, and nothing in
+between records which bytes of the block a given cell came from. Giving it one
+means the complex path producing positioned runs that carry offsets into the
+*note's buffer*. `doc/RenderLayout.h` now produces positioned runs, so half of
+that is done -- but their offsets index the flattened text it builds, because
+md4c's callbacks report no source offsets at all and there is nothing to
+address the buffer with. Closing this means either carrying offsets through
+md4c's parse or scanning the block's source alongside its parse to recover
+them. Until then the block is one addressable position by construction, and a
+fix that only painted a highlight over it would be highlighting bytes the copy
+does not match.
+
+## TD-44 — A subsetted CFF is cut down, not laid out again
+
+`core/pdf/SfntSubset.cpp` cuts an embedded face down to the glyphs a note
+showed, and for the TrueType face that is a real subset: `glyf` and `loca` are
+rebuilt and the table shrinks to what was used (`JetBrainsMono-Regular` goes
+into a note as 5.7 KB rather than 128 KB). For the CFF face it is not. The
+charstring INDEX is rebuilt *inside the byte range it already occupied* —
+kept charstrings packed at the front, one `endchar` per dropped glyph, the rest
+zero filled — because a CFF's Top DICT holds absolute offsets to its charset,
+its encoding and its private DICT, and shortening the INDEX moves all of them.
+
+**What it costs.** About 55 KB of compressed stream per CFF face, where a real
+subset would be nearer 10. Measured, on `Inter-Regular` with sixty glyphs
+shown: 460 KB of `CFF ` table compressing to 49 KB, made up of the string
+INDEX (14.6 KB — the glyph *names*, which a PDF reads glyphs by number and so
+never consults), the global subroutines (11.6 KB), the private DICT and local
+subroutines (9 KB), and the charset. A one-paragraph note exports at 113 KB
+against the 489 KB it was, and against the 30 KB a real subset would give;
+a note in four faces at 181 KB against 852 KB. The uncompressed font program
+is still 474 KB, which is what a viewer decompresses and holds — nothing has
+said that matters, and it is the only cost of the blanking that is not paid.
+
+**Why it has not been paid.** The three remaining pieces each need something
+this deliberately does not do. Dropping the unused *subroutines* means
+interpreting charstrings to find which ones they call, which is a Type 2
+interpreter. Dropping the string INDEX and the charset means rewriting the Top
+DICT's offsets, and doing that without changing the DICT's own size means
+re-emitting every offset operand in the fixed-width five-byte form — which is
+a CFF writer, and the place for it is `core/pdf/CffSubset.cpp`, which is the
+only thing that reads the table. The cost the debt named was file size and
+three quarters of it is paid; what is left is worth a CFF writer only when
+somebody minds the last 50 KB.

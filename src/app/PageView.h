@@ -3,6 +3,7 @@
 #include "core/util/TextSearch.h"
 #include "doc/Layout.h"
 #include "ui/TextRenderer.h"
+#include "ui/LinkRegion.h"
 #include "ui/ScrollList.h"
 
 #include <SDL3/SDL.h>
@@ -52,16 +53,6 @@ struct PageViewHooks {
   // a surface that does not want pictures does.
   std::function<doc::ImageBox(std::string_view target, float column, float maxHeight)> measureImage;
   std::function<void(std::string_view target, ui::Rect)> drawImage;
-};
-
-struct PageLink {
-  ui::Rect rect;
-  std::string target;
-  // A [[wikilink]] names a note; every other link names a file or a URL. They
-  // look the same as strings and are followed in completely different ways, so
-  // which one it is travels with the rect rather than being guessed at from the
-  // target's shape.
-  bool wiki = false;
 };
 
 // A task checkbox the user can click. `blockStart` addresses the owning block.
@@ -157,8 +148,13 @@ public:
   // re-scanned every visible line every frame, and neither could be told to
   // match case because the toggle lived in neither of them.
   static constexpr std::size_t kNoActiveMatch = static_cast<std::size_t>(-1);
+  //
+  // No `focused` any more. The page used to be drawn as a bordered card that
+  // turned accent-coloured when it had the keyboard; the border went, and the
+  // parameter stayed for a while saying the page draws differently when
+  // focused -- which it does not.
   void draw(SDL_Renderer* renderer, ui::TextRenderer& text, const PageSelection& selection,
-            bool focused, std::span<const microcore::util::TextMatch> findMatches = {},
+            std::span<const microcore::util::TextMatch> findMatches = {},
             std::size_t activeMatch = kNoActiveMatch);
 
   std::size_t offsetAt(float x, float y) const;
@@ -205,7 +201,7 @@ public:
   // block edits borrow instead of scanning the note for themselves -- see
   // `doc::Edits.h`.
   doc::BlockSpan blocksAt(std::uint64_t sourceRevision) const;
-  const std::vector<PageLink>& links() const;
+  const std::vector<ui::LinkRegion>& links() const;
 
 private:
   // Hand the page rect, the header and the document extent to the scroll, which
@@ -218,7 +214,6 @@ private:
   // Half-open range of block indices this frame has to consider, which is the
   // viewport's worth rather than the document's.
   std::pair<std::size_t, std::size_t> visibleBlocks() const;
-  // Backgrounds and rules, drawn under the text of every visible block.
   // What a block's paint needs that does not change from one block to the next.
   struct BlockPaint {
     float ox = 0.0f;
@@ -255,7 +250,7 @@ private:
   // document extent all settle -- so a wheel or a scrollbar drag clamps against
   // what was actually laid out.
   ui::ScrollList scroll_;
-  std::vector<PageLink> links_;
+  std::vector<ui::LinkRegion> links_;
   std::vector<PageCheckbox> checkboxes_;
   std::vector<PageCodeButton> codeButtons_;
   bool wired_ = false;

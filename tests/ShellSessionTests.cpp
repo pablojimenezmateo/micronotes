@@ -1,23 +1,10 @@
 #include "TestSupport.h"
 #include "TempDir.h"
 
-#include "app/InlineText.h"
-#include "app/MarkdownBlocks.h"
-#include "app/PageChrome.h"
-#include "app/PageView.h"
-#include "app/RightPanel.h"
 #include "app/Shell.h"
-#include "core/perf/PerformanceCounters.h"
-#include "doc/BlockScan.h"
-#include "doc/LinkTarget.h"
-#include "app/SidebarModel.h"
 #include "app/Dismiss.h"
-#include "app/Fields.h"
 #include "app/Notes.h"
 #include "app/SessionState.h"
-#include "app/WikiLinks.h"
-#include "ui/ImageCache.h"
-#include "ui/TextRenderer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -34,14 +21,6 @@
 // is a library now and the test binary links it, so these are ordinary unit
 // tests over code that had none.
 
-using micronotes::doc::headingAnchor;
-using micronotes::app::InlineRun;
-using micronotes::app::inlineRuns;
-using micronotes::app::searchResultRowHeight;
-using micronotes::app::SidebarMetrics;
-using micronotes::app::sidebarMetrics;
-using micronotes::app::sidebarRowRange;
-using micronotes::app::SidebarRow;
 
 // The shell around the note: opening one, the tabs that result, what a change
 // made outside the app does to the buffer, and what Escape steps back out of.

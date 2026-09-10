@@ -1,23 +1,9 @@
 #include "TestSupport.h"
-#include "TempDir.h"
 
-#include "app/InlineText.h"
 #include "app/MarkdownBlocks.h"
-#include "app/PageChrome.h"
-#include "app/PageView.h"
 #include "app/RightPanel.h"
 #include "app/Shell.h"
-#include "core/perf/PerformanceCounters.h"
-#include "doc/BlockScan.h"
-#include "doc/LinkTarget.h"
-#include "app/SidebarModel.h"
-#include "app/Dismiss.h"
-#include "app/Fields.h"
-#include "app/Notes.h"
-#include "app/SessionState.h"
-#include "app/WikiLinks.h"
 #include "ui/ImageCache.h"
-#include "ui/TextRenderer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -34,14 +20,6 @@
 // is a library now and the test binary links it, so these are ordinary unit
 // tests over code that had none.
 
-using micronotes::doc::headingAnchor;
-using micronotes::app::InlineRun;
-using micronotes::app::inlineRuns;
-using micronotes::app::searchResultRowHeight;
-using micronotes::app::SidebarMetrics;
-using micronotes::app::sidebarMetrics;
-using micronotes::app::sidebarRowRange;
-using micronotes::app::SidebarRow;
 
 // The page surface: the anchors it records, the markers it reveals, the md4c
 // parses it caches, and the block partition the outline panel borrows from it.
@@ -159,7 +137,7 @@ MICRONOTES_TEST(shell_complex_parses_survive_a_note_bigger_than_any_cap) {
   MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 120);
   MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 0);
   MICRONOTES_REQUIRE(layOutEveryComplexBlock() == 0);
-  MICRONOTES_REQUIRE(ui.complexParses.size() == 120);
+  MICRONOTES_REQUIRE(ui.complexRenders.size() == 120);
 }
 
 // And the other half: a parse the note no longer contains does not stay
@@ -185,10 +163,10 @@ MICRONOTES_TEST(shell_complex_parses_go_when_the_note_does) {
     micronotes::app::sweepComplexCache(ui, blocks, source);
   };
   layOut(tableNote("first", 100));
-  MICRONOTES_REQUIRE(ui.complexParses.size() == 100);
+  MICRONOTES_REQUIRE(ui.complexRenders.size() == 100);
   layOut(tableNote("second", 100));
   // The first note's hundred are gone rather than accumulated.
-  MICRONOTES_REQUIRE(ui.complexParses.size() == 100);
+  MICRONOTES_REQUIRE(ui.complexRenders.size() == 100);
 }
 
 // An image cache miss must not be able to move `generation()`, because every

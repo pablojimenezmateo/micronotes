@@ -61,6 +61,9 @@ enum class TextRole {
   // they are. Still a link -- a remote image has nothing but its alt text to be
   // reached by -- just not one shouting about it.
   ImageAlt,
+  // Text a step back from the surface's own: the body rows of a table, whose
+  // header is what reads as the page's text. `doc/RenderLayout.h` sets a
+  // table's non-header cells in it.
   Muted
 };
 
@@ -207,9 +210,21 @@ struct TypeMetrics {
   float lineHeightRatio = 1.5f;
 };
 
-struct Metrics {
+// What measuring *text* needs, and nothing else: the width of a string in a
+// style and the height of a line set in one.
+//
+// Its own type because that is all the line breaker reads, and two callers
+// have only this to give. `doc/RenderLayout.h` lays a table cell out with no
+// document, no pictures and no complex blocks under it, and would otherwise
+// have to invent the two callbacks below to hand over the two it uses.
+struct TextMetrics {
   std::function<float(std::string_view, const RunStyle&)> measure;
   std::function<float(const RunStyle&)> lineHeight;
+};
+
+// Everything laying a *document* out needs to ask about, which is the two
+// above plus what only a whole note has an answer for.
+struct Metrics : TextMetrics {
   // Height of a block the scanner does not model, rendered through md4c.
   std::function<float(const SourceBlock&, float width)> measureComplex;
   // The box `![alt](target)` takes, fitted to the column and to `maxHeight`.
@@ -575,9 +590,9 @@ private:
   // block or a block dropped to raw is the *file's* own lines, and everything
   // else is one group with the inline grammar applied to it. Both return how
   // many groups came out live.
-  std::size_t stageSourceLines(const SourceBlock& block, const Flags& flags,
+  std::size_t stageSourceLines(const SourceBlock& block,
                                const RunStyle& base) const;
-  std::size_t stageInlineContent(const SourceBlock& block, const Flags& flags,
+  std::size_t stageInlineContent(const SourceBlock& block,
                                  const RunStyle& base, BlockLayout& out) const;
   // Everything the inline scanner found, as a per-byte attribute table. The one
   // place the inline grammar reaches the layout: downstream reads only the

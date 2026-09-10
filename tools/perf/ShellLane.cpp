@@ -6,6 +6,7 @@
 #include "core/perf/PerformanceCounters.h"
 
 #include "app/FindBar.h"
+#include "app/MarkdownBlocks.h"
 #include "app/PageView.h"
 #include "app/RawPane.h"
 #include "app/RightPanel.h"
@@ -74,6 +75,35 @@ static constexpr std::uint64_t kShellPageBudgetMicros = 20000;
 // pleased with.
 static constexpr std::uint64_t kShellRawBudgetMicros = 3000;
 static constexpr std::uint64_t kShellKeystrokeBudgetMicros = 24000;
+// The blocks md4c renders -- tables, raw HTML, footnote definitions -- with the
+// hook actually wired, which for the rest of this lane it is not.
+//
+// It is its own scenario because it is the one part of the page whose shaping
+// is *not* incremental: `doc::DocumentLayout` relays only the blocks that
+// moved, but a complex block is one opaque height to it, so the block goes to
+// md4c and through the line breaker again whenever it is asked. The memo in
+// `ComplexRenderCache` is what makes that once per width rather than once per
+// frame, and this is the number that says so: a change that drops the memo, or
+// keys it on something that moves, multiplies this by the frame rate with
+// nothing else in the harness noticing. Which is the gap this lane's own
+// header describes -- a readout the instruments cannot see -- and it was open
+// for the md4c path the whole time the path was rendered twice.
+//
+// Two scenarios: a keystroke reshapes the one block it landed in, and a change
+// of *width* reshapes the blocks in view, which is what a resize and a panel
+// toggle do. Both around 20 us and a few hundred allocations as measured.
+//
+// **What the budgets can and cannot catch.** Losing the memo means shaping
+// each block once per frame instead of once per width -- roughly a doubling
+// here, which is inside the run-to-run spread this machine has and so is not
+// something a clock budget can gate. These numbers are therefore set to catch
+// an order of magnitude, and the readable signal for the doubling is the
+// **allocation count** printed beside them: the shaping allocates a few
+// hundred and a hit allocates none. The structural claim itself is pinned by a
+// test rather than by a number -- `render_layout_reuses_a_layout_at_the_same
+// _width` in `tests/RenderLayoutTests.cpp`.
+static constexpr std::uint64_t kShellTablesBudgetMicros = 1000;
+static constexpr std::uint64_t kShellTablesResizeBudgetMicros = 1000;
 
 bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
   micronotes::ui::TextRenderer text(nullptr);
@@ -194,6 +224,81 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
                                                     askRawPane();
                                                   }),
        kShellRawBudgetMicros + kShellEditBudgetMicros);
+
+  // The md4c blocks, with the hook wired to the real one. A separate runtime
+  // rather than a mode of the one above: wiring the hook changes what every
+  // scenario before this measures, and the fixture wants tables in it, which
+  // the shared body has one of.
+  {
+    micronotes::app::UiRuntime tables;
+    if(tables.state.openOrCreateLibrary(root)) {
+      tables.state.selectNote(notes.front().id);
+      std::string tableBody = "# Tables\n\n";
+      for(int i = 0; i < 40; ++i) {
+        tableBody += "| Name | Detail | Link |\n| --- | :---: | ---: |\n";
+        for(int row = 0; row < 6; ++row) {
+          tableBody += "| **bold " + std::to_string(row) + "** | *italic* and `code` | [a](b) |\n";
+        }
+        tableBody += "\nA paragraph between the tables.\n\n";
+      }
+      tables.editor.setText(tableBody);
+      // Inside a table, not in the heading above them: a keystroke that lands
+      // in an ordinary paragraph reshapes no complex block at all, and a lane
+      // that typed there would report the memo's hit and call it the cost.
+      const std::size_t inCell = tableBody.find("| **bold 3**", tableBody.size() / 2);
+      tables.editor.moveCursor(inCell == std::string::npos ? tableBody.size() / 2 : inCell + 4);
+      micronotes::app::PageViewHooks wired;
+      wired.measureComplex = [&text, &tables](const micronotes::doc::SourceBlock& block,
+                                              float width) {
+        return micronotes::app::measureComplexBlock(text, tables, block, width);
+      };
+      tables.readingPage.setHooks(std::move(wired));
+      const auto layoutTables = [&] {
+        micronotes::app::PageFrame frame;
+        frame.sourceRevision = tables.editor.revision();
+        frame.editedSpan = tables.editor.lastChange();
+        tables.readingPage.beginFrame(frame);
+        tables.readingPage.layout(text, tables.editor.text(), page);
+        micronotes::app::sweepComplexCache(tables, tables.readingPage.document().blocks(),
+                                           tables.editor.text());
+      };
+      const auto layoutTablesAt = [&](float width) {
+        micronotes::app::PageFrame frame;
+        frame.sourceRevision = tables.editor.revision();
+        frame.editedSpan = tables.editor.lastChange();
+        tables.readingPage.beginFrame(frame);
+        tables.readingPage.layout(text, tables.editor.text(), {0.0f, 0.0f, width, page.h});
+        micronotes::app::sweepComplexCache(tables, tables.readingPage.document().blocks(),
+                                           tables.editor.text());
+      };
+      layoutTables();
+      gate("shell.tables_page", measureIterations("shell.tables_page", 8,
+                                                  [&](int) {
+                                                    tables.editor.insert("x");
+                                                    layoutTables();
+                                                  }),
+           kShellTablesBudgetMicros);
+
+      // Every complex block reshaped, because none of them is laid out at the
+      // width being asked for. A *fresh* width each step, and both facts about
+      // it were learned by getting them wrong:
+      //
+      //   * they have to be under `ui::pageWidthPx()`. The reading column is
+      //     capped at that measure, so two window widths above the cap are the
+      //     same column and relay nothing. That version read one microsecond
+      //     with no allocations at all.
+      //   * they have to be distinct. Two widths alternated are two the block
+      //     cache and the render memo both already hold by the third step, so
+      //     six of eight iterations measured a hit. That version read six
+      //     microseconds, which is the memo working and not the shaping.
+      gate("shell.tables_resize", measureIterations("shell.tables_resize", 8,
+                                                    [&](int step) {
+                                                      layoutTablesAt(520.0f -
+                                                                     static_cast<float>(step) * 9.0f);
+                                                    }),
+           kShellTablesResizeBudgetMicros);
+    }
+  }
 
   // And the whole thing, in the order the frame does it. This is the number
   // that would have caught both ninth-pass findings on the day they landed.

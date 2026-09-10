@@ -4,14 +4,16 @@
 #include "app/FrameTrace.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
+#include "doc/LinkTarget.h"
+#include "ui/DocStyle.h"
 #include "ui/Fonts.h"
+#include "ui/Glyphs.h"
 #include "ui/Metrics.h"
+#include "ui/Painter.h"
 #include "ui/Settings.h"
 #include "ui/ShellLayout.h"
-#include "doc/LinkTarget.h"
+#include "ui/TextRenderer.h"
 #include "ui/Theme.h"
-#include "ui/Glyphs.h"
-#include "ui/Painter.h"
 
 #include <algorithm>
 #include <cctype>
@@ -24,7 +26,6 @@ namespace {
 
 using micronotes::ui::Rect;
 using micronotes::ui::TextRenderer;
-using micronotes::ui::drawChevron;
 using micronotes::ui::fill;
 using micronotes::ui::hLine;
 using micronotes::ui::stroke;
@@ -32,7 +33,6 @@ using micronotes::ui::theme;
 
 using pageview::kContentTopPadding;
 using pageview::toRect;
-using pageview::toTextStyle;
 
 }
 
@@ -49,12 +49,12 @@ doc::Metrics documentMetrics(ui::TextRenderer& text) {
   doc::Metrics metrics;
   ui::TextRenderer* renderer = &text;
   metrics.measure = [renderer](std::string_view value, const doc::RunStyle& style) {
-    return static_cast<float>(renderer->width(value, toTextStyle(style)));
+    return static_cast<float>(renderer->width(value, ui::textStyleFor(style)));
   };
   metrics.lineHeight = [renderer](const doc::RunStyle& style) {
     const float ratio = style.size >= ui::type().h3 ? 1.25f : ui::type().lineHeightRatio;
     const float fromRatio = std::round((style.size > 0.0f ? style.size : ui::type().body) * ratio);
-    return std::max(static_cast<float>(renderer->lineHeight(toTextStyle(style))), fromRatio);
+    return std::max(static_cast<float>(renderer->lineHeight(ui::textStyleFor(style))), fromRatio);
   };
   return metrics;
 }
@@ -92,7 +92,7 @@ doc::BlockSpan PageView::blocksAt(std::uint64_t sourceRevision) const {
   return document_.blocksAt(sourceRevision);
 }
 
-const std::vector<PageLink>& PageView::links() const {
+const std::vector<ui::LinkRegion>& PageView::links() const {
   return links_;
 }
 

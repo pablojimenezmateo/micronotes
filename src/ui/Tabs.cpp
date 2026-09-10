@@ -42,17 +42,35 @@ TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
   }();
   // An overflowing strip keeps a chevron at each end, and they come off the
   // room the tabs have rather than sitting on top of the outermost one.
-  const float reserve = overflows ? kTabScrollButtonWidth : 0.0f;
-  const float room = std::max(kMinTabWidth, strip.w - reserve * 2.0f);
+  const float rightReserve = overflows ? kTabScrollButtonWidth : 0.0f;
 
-  std::size_t first = active;
-  float used = widths[active];
-  while(first > 0 && used + widths[first - 1] <= room) {
-    --first;
-    used += widths[first];
-  }
+  // Where the window starts, for a given amount of room taken at the left.
+  const auto windowStart = [&](float leftReserve) {
+    const float room = std::max(kMinTabWidth, strip.w - leftReserve - rightReserve);
+    std::size_t first = active;
+    float used = widths[active];
+    while(first > 0 && used + widths[first - 1] <= room) {
+      --first;
+      used += widths[first];
+    }
+    return first;
+  };
 
-  float x = strip.x + reserve;
+  // The left chevron is only *drawn* when tabs are hidden behind it, so it may
+  // only *take room* when they are. Reserving it unconditionally left an empty
+  // button's width between the strip's edge and the first tab whenever the
+  // strip overflowed to the right only -- which is every strip scrolled to its
+  // start, the common case.
+  //
+  // One pass answers it. Assume the chevron is there, find the window, and if
+  // that window already reaches tab 0 then nothing is hidden to the left and
+  // the reserve goes. Widening the room cannot pull more tabs in, because the
+  // walk left has nowhere further to go, so the answer does not change under
+  // its own correction and there is no second pass to run.
+  std::size_t first = windowStart(rightReserve);
+  const float leftReserve = first == 0 ? 0.0f : rightReserve;
+
+  float x = strip.x + leftReserve;
   for(std::size_t i = 0; i < titles.size(); ++i) {
     TabSlot slot;
     slot.index = i;
@@ -72,7 +90,7 @@ TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
     // to hold a whole one: the window already decided to show it, and a strip
     // that then draws none of them looks broken rather than tight. The rest are
     // by fit, so visibility still never comes back once it stops.
-    slot.visible = i == first || x + width <= strip.x + strip.w - reserve + 0.5f;
+    slot.visible = i == first || x + width <= strip.x + strip.w - rightReserve + 0.5f;
     if(!slot.visible) ++layout.hiddenRight;
     slot.close = {
       x + width - kTabClosePadding - kTabCloseSize,

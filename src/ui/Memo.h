@@ -21,8 +21,8 @@
 //
 // Not a cache: there is one entry, because every one of these answers a
 // question about *the thing the reader is looking at*, and the previous note's
-// outline has no readers. A keyed cache with eviction is `ComplexParseCache` in
-// `app/NoteCaches.h`, and it is a different shape for that reason.
+// outline has no readers. A keyed cache with eviction is `ComplexRenderCache`
+// in `app/NoteCaches.h`, and it is a different shape for that reason.
 namespace micronotes::ui {
 
 template <typename Value, typename Key>

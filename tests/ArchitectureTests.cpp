@@ -243,7 +243,7 @@ MICRONOTES_TEST(architecture_connections_go_through_the_sqlite_wrapper) {
 // Both numbers are ratchets, not targets: a change that moves behaviour into a
 // named unit lowers them in the same commit, and nothing raises them. If either
 // fails, the fix is a named unit under src/ -- not a bigger budget.
-constexpr int kApplicationLineBudget = 179;
+constexpr int kApplicationLineBudget = 170;
 constexpr int kShellFileLineBudget = 1000;
 // And the same rule again, over every source in the tree rather than the shell
 // alone -- because the shell ceiling did not stop a catch-all either, it only
@@ -634,9 +634,84 @@ MICRONOTES_TEST(architecture_the_state_directory_is_named_once) {
 // is a question about a document (`doc/WikiLink.h`) and "which note does this
 // target name" is a question about a library (`library/WikiResolve.h`), and
 // that they had been one header only because they were both about links.
+// md4c's render model is laid out in exactly one place.
+//
+// A `markdown::Block`'s `inlines` and `tableRows` are the model, and turning
+// them into lines is a *decision* -- where the text breaks, what a cell is set
+// in, which bytes are a `[[wikilink]]`. It was made twice: once in `src/app/`
+// with a line breaker of its own beside the tested one, and once in
+// `src/export/` with none at all, which is why a table cell exported as plain
+// text and a paragraph beside a table did not export at all.
+//
+// Reading these fields anywhere above `doc/` is that split starting again. The
+// answer is `doc/RenderLayout.h`, which hands back the same `doc::BlockLayout`
+// the note's own blocks produce, and painting one of those is what a surface
+// is allowed to do.
+MICRONOTES_TEST(architecture_the_md4c_render_model_is_laid_out_in_one_place) {
+  const std::vector<std::string> above {"library", "ui", "export", "app"};
+  std::string offenders;
+  for(const auto& layer : above) {
+    for(const auto& path : sourceFiles(repoRoot() / "src" / layer)) {
+      const std::string text = readText(path);
+      for(const char* field : {".tableRows", "->tableRows"}) {
+        if(text.find(field) == std::string::npos) continue;
+        if(!offenders.empty()) offenders += "; ";
+        offenders += "src/" + layer + "/" + path.filename().string() + " reads " + field;
+      }
+    }
+  }
+  micronotes::tests::require(
+    offenders.empty(),
+    "md4c's render model is read above doc/: " + offenders +
+      " -- laying it out is a decision, and a decision made in two layers is "
+      "one that drifts. Lay it out with doc/RenderLayout.h and paint the "
+      "doc::BlockLayout it hands back");
+}
+
+// A run's appearance is decided once per output surface, not once per loop.
+//
+// This was TD-43 and it had already cost something. `app/PageViewPaint.cpp`
+// walked a `doc::BlockLayout`'s lines and runs for the note's own blocks and
+// `app/MarkdownBlocks.cpp` walked the same fields of the same type for the
+// blocks md4c lays out, and the two made the same decisions from the same
+// fields: the tinted ground behind a code span, the strikethrough, the link
+// rule, the rect handed back to a click. They drifted -- the strikethrough at
+// 0.55 of the line box in one and 0.45 in the other, the link rule two pixels
+// above the bottom in one and four in the other -- so a struck word inside a
+// table wore its line lower than the same word in the paragraph above it.
+//
+// There are exactly two outputs, so there are exactly two of these loops:
+// `ui/DocRuns.cpp` draws one onto a window and `export/PdfBlocks.cpp` paints
+// one onto a page. A third file reading these fields is a third loop, and the
+// fields are the tell -- `style.strike` and `linkIndex` are only interesting to
+// something deciding how a run *looks*.
+MICRONOTES_TEST(architecture_a_run_is_inked_once_per_surface) {
+  const std::set<std::string> painters {"DocRuns.cpp", "PdfBlocks.cpp"};
+  // Where the fields are *set* rather than read: the tokenizer fills them in.
+  const std::set<std::string> producers {"Flow.h"};
+  std::string offenders;
+  for(const auto& path : sourceFiles(repoRoot() / "src")) {
+    const std::string name = path.filename().string();
+    if(painters.count(name) != 0 || producers.count(name) != 0) continue;
+    const std::string text = readText(path);
+    for(const char* field : {"run.style.strike", "run.linkIndex", "run.isMarker"}) {
+      if(text.find(field) == std::string::npos) continue;
+      if(!offenders.empty()) offenders += "; ";
+      offenders += name + " reads " + field;
+    }
+  }
+  micronotes::tests::require(
+    offenders.empty(),
+    "a run's appearance is decided outside the two run painters: " + offenders +
+      " -- there are two output surfaces, a window and a page, so there are two "
+      "loops: ui::paintRuns and exporting::paintRuns. A third copy of those "
+      "decisions is a third set of them to drift, which is what TD-43 was. Pass "
+      "what your surface knows through ui::RunPaint instead");
+}
+
 MICRONOTES_TEST(architecture_the_layers_only_point_one_way) {
   // Lowest first. A layer may include itself and anything before it.
-  const std::vector<std::string> layers {"core", "doc", "library", "ui", "app"};
+  const std::vector<std::string> layers {"core", "doc", "library", "ui", "export", "app"};
 
   std::string offenders;
   for(std::size_t i = 0; i < layers.size(); ++i) {
@@ -654,7 +729,8 @@ MICRONOTES_TEST(architecture_the_layers_only_point_one_way) {
   micronotes::tests::require(
     offenders.empty(),
     "a layer includes one above it: " + offenders +
-    " -- the order is core < doc < library < ui < app. Whatever is wanted from the upper layer is "
+    " -- the order is core < doc < library < ui < export < app. Whatever is wanted from the upper "
+    "layer is "
     "either in the wrong place or is two things: move the half the lower layer needs down, and "
     "leave the half that needs the upper layer where it is");
 }

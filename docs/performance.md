@@ -3311,3 +3311,54 @@ The whole-note rewrap itself is still a whole-note rewrap. What this pass says
 is that "there is a known reason this lane is slow" stopped anyone reading the
 three numbers printed next to it, two of which had nothing to do with that
 reason.
+
+### The md4c blocks had no lane at all
+
+The shell lane's own header says what it is for: a readout added above the
+paint that no instrument can see. It then stubbed out the one path that fits
+that description exactly --
+
+```cpp
+  // md4c is not wired here, so those blocks measure zero and lay out empty
+  hooks.measureComplex = [](const doc::SourceBlock&, float) { return 0.0f; };
+```
+
+-- so tables, raw HTML and footnote definitions were measured by nothing in the
+harness. That mattered more after `doc/RenderLayout.h` made the md4c path
+*shared* shaping rather than two throwaway renderers: it is the one part of the
+page whose layout is not incremental. `doc::DocumentLayout` relays only the
+blocks that moved, but a complex block is one opaque height to it, so the block
+goes back through the tokenizer and the line breaker whenever it is asked.
+What keeps that once per width rather than once per frame is the memo in
+`app::ComplexRenderCache`, and nothing was watching it.
+
+Two scenarios, on a fixture of forty three-column tables with marked-up cells:
+
+| | median | allocations |
+|---|---|---|
+| `shell.tables_page` — a keystroke *inside a cell* | 20 us | 336 |
+| `shell.tables_resize` — a fresh column width | 21 us | 393 |
+
+Both numbers took three attempts to become measurements, and the two wrong
+versions are the useful part:
+
+* **Typing in the heading above the tables.** The caret starts at offset 0
+  after `setText`, so the keystroke landed in `# Tables` and reshaped no
+  complex block at all. 5 us, 8 allocations — the memo's hit, reported as the
+  cost of the path.
+* **Resizing between two widths above the reading cap.** `ui::pageColumnIn`
+  caps the column at `pageWidthPx()`, so 900 and 820 are the *same* column and
+  relayed nothing: 1 us and zero allocations. Under the cap but alternating
+  between two values was the second wrong version — both widths are in the
+  block cache by the third step, so six of eight iterations measured a hit at
+  6 us. A fresh width per step is what finally shapes anything.
+
+**What these budgets cannot catch.** Losing the memo means shaping once per
+frame instead of once per width, which is roughly a doubling of the numbers
+above — inside this machine's run-to-run spread, and so not something a clock
+budget can gate. The budgets are set to catch an order of magnitude. The
+readable signal for the doubling is the allocation count printed beside them,
+which is deterministic: the shaping allocates a few hundred and a hit allocates
+none. And the claim itself — that laying the same block out again at the same
+width is a comparison — is pinned by a test rather than by a number:
+`render_layout_reuses_a_layout_at_the_same_width`.

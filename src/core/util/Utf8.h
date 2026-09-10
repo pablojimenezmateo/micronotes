@@ -40,4 +40,22 @@ std::size_t nextBoundary(std::string_view text, std::size_t offset);
 // non-ASCII.
 std::size_t countCodePoints(std::string_view text);
 
+// One decoded code point and where the next one starts.
+//
+// The rest of this header walks boundaries without ever asking what is between
+// them, because the editor never needs to know: a caret moves over characters
+// and a splice copies bytes. Anything that has to *identify* a character does
+// -- the PDF exporter asks a font which glyph a code point is -- and that is
+// this.
+//
+// A byte that starts no valid sequence decodes as U+FFFD and advances by one,
+// so a walk over broken input terminates and stays in step with the byte
+// offsets either side of it rather than resynchronising somewhere else.
+struct CodePoint {
+  char32_t value = 0;
+  std::size_t next = 0;
+};
+
+CodePoint decodeAt(std::string_view text, std::size_t offset);
+
 }

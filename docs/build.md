@@ -311,12 +311,31 @@ Useful runtime controls:
 - `/`: focus search when the editor is not focused.
 - Click in the editor to place the cursor.
 - Right-click a note anywhere in the sidebar - in the tree or in a list of
-  search results - for Rename, Set icon, Edit tags, Move, Delete, and the three
+  search results - for Rename, Set icon, Edit tags, Move, Delete, and the four
   questions about the note as a *file*: Show on disk, Copy relative path, Copy
-  absolute path. The same three are on the menu bar's Note menu and in the
-  command palette. A relative path is relative to the library root, which is
-  what makes it the one worth having: it is the spelling that means the same
-  thing to somebody else looking at the same library.
+  absolute path, and Export as PDF. The three path commands are also on the
+  menu bar's Note menu and in the command palette. A relative path is relative
+  to the library root, which is what makes it the one worth having: it is the
+  spelling that means the same thing to somebody else looking at the same
+  library.
+- Export as PDF is on the notebook menu too, where it means the notebook and
+  everything under it bound into one file, one note per page in tree order.
+  Both open the desktop's own save dialog. The page is A4 with the note's title
+  and tags at the top, a running header on continuation pages and a page number
+  at the foot, and it is always set light on white whatever theme the window is
+  in - a dark-theme PDF is a rectangle of ink on every sheet that goes through
+  a printer. The text is real text rather than a picture of it: it can be
+  selected, copied and searched, and the vendored faces are embedded so it
+  looks the same on a machine that does not have them - cut down to the glyphs
+  the note actually shows, which is the difference between a 113 KB
+  one-paragraph note and a 489 KB one. It is kerned as well: the pair spacing
+  the faces ask for is read out of their `GPOS` tables and written into the
+  page, so a heading on paper has the letter fit it has on screen. Links are
+  live where they can be - an `https://` target becomes a clickable annotation,
+  and a link to a note or a file inside the library does not, because neither
+  is anywhere a reader of the PDF can go. Pictures come along - a JPEG is
+  passed through untouched, anything else is decoded - and a table breaks
+  between its rows rather than running off the page.
 - Right-click a tab for Close, Pin and those same three path commands. The menu
   is about the tab under the pointer rather than the note on the page, and
   opening it does not switch to that tab. `Ctrl+click` a tab also pins it; a

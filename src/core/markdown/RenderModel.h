@@ -83,4 +83,14 @@ struct Document {
 
 std::string plainText(const Document& document);
 
+// One run of inlines flattened to the words a reader sees: a link becomes its
+// label (or its target, when it has no label), a footnote reference becomes
+// `[label]`, and an image contributes nothing -- it is a picture, and its alt
+// text is not part of the sentence around it.
+//
+// Down here rather than beside either caller because both the screen's table
+// and the exported one measure a cell by it, and a cell measured one way and
+// drawn the other is a column whose rules miss its own text.
+std::string plainText(const std::vector<Inline>& inlines);
+
 }
