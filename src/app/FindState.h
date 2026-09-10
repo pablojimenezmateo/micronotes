@@ -25,11 +25,21 @@
 // is what makes all three possible.
 namespace micronotes::app {
 
-// A memo, spelled out rather than a `ui::Memo`, because the value is a vector
-// the refresh wants to reuse the capacity of: `ui::Memo::store` takes the value
-// by value, so keying the match list on it would free and re-grow the buffer on
-// every keystroke -- which for a needle with thousands of hits is the whole cost
-// of the scan again. The key is compared here and the vector is filled in place.
+// A memo, spelled out rather than a `ui::Memo`, and the reason is not the one
+// that was written here. It said `Memo::store` takes its value by value and so
+// would free and re-grow the match vector on every keystroke; `Memo::rebuild`
+// exists for exactly that and hands the stored value back to fill in place.
+//
+// The reason it stays hand-rolled is `forget`. Three surfaces read
+// `FindState::matches` straight to paint their highlights, and when the note
+// being searched is replaced those offsets address a buffer that is gone -- so
+// forgetting has to *empty* the vector, not merely mark it stale. `Memo` is
+// deliberately the other way round: `value()` answers whatever is held whether
+// or not it is current. A memo whose stale value is dangerous to read is not
+// this shape.
+//
+// The key is still compared and assigned whole, which is the failure `ui::Memo`
+// exists to prevent, so what is left here is the safe half of that shape.
 struct FindMatchKey {
   std::uint64_t revision = 0;
   std::string needle;

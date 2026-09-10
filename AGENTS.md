@@ -8,10 +8,11 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Four entries are open: one about selecting inside a block the live scanner
+  Five entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
-  writing a CFF writer, one about the wheel over the tab strip, and one about
-  the command chain being checked by grepping its own source. So
+  writing a CFF writer, one about the wheel over the tab strip, one about
+  the command chain being checked by grepping its own source, and one about
+  the find bar rescanning the whole note per keystroke. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.
@@ -341,7 +342,10 @@ when the counters went in it turned out to be 70% of every frame.
   match, the whole-word predicate and the three "which match comes next" walks
   -- and it exists because the find bar, the note page and the raw pane each had
   a scan of their own and so gave three answers to one question;
-  `core/util/Utf8.h` has the
+  `core/editor/SoftWrap.h` is the one wrap of a buffer to a column that keeps
+  each row's source range -- there were two of those and the second had no
+  callers left, which is how a tree comes to break lines by two different
+  rules; `core/util/Utf8.h` has the
   boundary walks; `core/util/Hash.h` is the one FNV; `core/platform/PathUtils.h`
   has `uniquePath`, `sanitizeFileStem` and `displayPath`; `ui/Memo.h` is how a
   memoised value is spelled; `ui/TextFit.h` is the measured text helpers;
@@ -362,6 +366,12 @@ when the counters went in it turned out to be 70% of every frame.
   because for a variable-height list nothing else can know it. Four surfaces had
   written the placement out for themselves, and the copies had grown separate
   fields for the same two concepts.
+- A context menu is opened by `ui::anchoredMenu` and `ui::openMenu`, which are
+  the eight lines every one of them wrapped its rows in. `openMenu` is where
+  the row cap is set from the rows there are, because a context menu shows all
+  of itself -- the `Overlay` default is a *palette's*, twelve with the rest
+  scrolled, and a menu that scrolls hides the destructive row this tree puts
+  last. Five of the six set it by hand and the sixth did not.
 - A popup menu's row is `ui::MenuRow`, painted by `ui::drawMenuRow`, and a
   popup's rows are stacked with `ui::menuPopupRows`. The menu bar's popups, the
   context menus and the palette are one object reached through two item tables;
@@ -455,6 +465,23 @@ when the counters went in it turned out to be 70% of every frame.
   which is a struct with an assignment operator precisely so that the hundred
   and forty existing `ui.status = "..."` sites keep working and none of them can
   forget to stamp the clock.
+- **A readout derived from the note is bounded by the edit, not by the note.**
+  Every surface that derives something from the buffer memoises it on
+  `editor.revision()`, and every one of those memos misses on every keystroke
+  by construction -- so on a miss the question is not "recompute it" but "how
+  much of it". `editor::TextEdit` is what makes that answerable: the splice,
+  stamped with the revision it came from and the one it produced, so a consumer
+  can *check* that the edit leads from the state it holds rather than trust it.
+  Three things are already bounded this way and they are worth reading as one
+  pattern -- `doc::DocumentLayout` relays only the blocks the edit moved,
+  `editor::softWrapUpdate` rewraps only the logical lines it touched, and the
+  status bar walks the caret's line and column from the place it last answered
+  with rather than from the note's first byte. All three put the validity check
+  on the *caller*, because only the caller knows what the standing value was
+  built from; `ui::Memo::key()` is what they read to find out. And all three
+  are proved the same way, by equality with the unbounded computation over a
+  long sequence of edits rather than by a list of cases. `docs/performance.md`,
+  the twelfth and thirteenth passes.
 - A memoised value is `ui::Memo<Value, Key>`, not a value plus a `valid` flag
   plus the key spelled out field by field. The failure that shape has is
   specific: the comparison and the assignment are two lists, they drift, and
