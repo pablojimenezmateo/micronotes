@@ -57,8 +57,6 @@ namespace microcore::perf {
   X(EditorWordCountBytesScanned, "editor.word_count_bytes_scanned")                   \
   X(EditorSingleLineLayouts, "editor.single_line_layouts")                              \
   X(EditorSingleLineMeasures, "editor.single_line_measures")                            \
-  X(EditorWrapLines, "editor.wrap_lines")                                                \
-  X(EditorWrapMeasures, "editor.wrap_measures")                                          \
   /* --- literal text search ------------------------------------------------ */      \
   /* One scan of a buffer for a needle. `scans` is what says the memo above it  */     \
   /* is working: the find bar re-asks on every keystroke and every frame, and    */     \

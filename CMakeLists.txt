@@ -159,7 +159,6 @@ set(MICROCORE_SOURCES
   src/core/editor/SingleLineView.cpp
   src/core/editor/SoftWrap.cpp
   src/core/editor/TextField.cpp
-  src/core/editor/WrappedLines.cpp
   src/core/markdown/BareUrl.cpp
   src/core/markdown/MarkdownParser.cpp
   src/core/markdown/RenderModel.cpp
@@ -429,7 +428,6 @@ add_executable(micronotes_tests
   tests/ScrollListTests.cpp
   tests/WikiLinkTests.cpp
   tests/WorkspaceModelTests.cpp
-  tests/WrappedLinesTests.cpp
 )
 target_include_directories(micronotes_tests PRIVATE src tests)
 target_compile_definitions(micronotes_tests PRIVATE MICRONOTES_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
