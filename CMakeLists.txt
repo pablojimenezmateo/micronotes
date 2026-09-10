@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(micronotes VERSION 0.2.0 LANGUAGES CXX C)
+project(micronotes VERSION 0.3.0 LANGUAGES CXX C)
 
 if(NOT UNIX OR APPLE)
   message(FATAL_ERROR "micronotes is Linux-only for this product scope.")
