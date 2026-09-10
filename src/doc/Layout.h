@@ -201,6 +201,33 @@ struct BlockLayout {
   std::span<const TextRun> runsOf(const VisualLine& line) const {
     return std::span<const TextRun>(runs).subspan(line.runBegin, line.runCount());
   }
+
+  // Empties this for another block to be laid out into, keeping the four
+  // vectors' capacity. See `DocumentLayout::recycleCache` for why that is
+  // worth anything.
+  //
+  // Written as "default-construct, then put the buffers back" rather than as a
+  // list of fields to clear, and that is the whole reason it is a method. A
+  // list of fields to clear is one that a field added to this struct does not
+  // get added to, and the failure then is a recycled layout carrying the
+  // previous block's `complex` or `calloutTitle` -- a wrong block drawn, with
+  // nothing to point at. Assigning a fresh value resets every scalar there is,
+  // including the ones added after this was written.
+  void reuse() {
+    std::vector<VisualLine> keptLines = std::move(lines);
+    std::vector<TextRun> keptRuns = std::move(runs);
+    std::vector<std::string> keptLinks = std::move(links);
+    std::vector<BlockImage> keptImages = std::move(images);
+    keptLines.clear();
+    keptRuns.clear();
+    keptLinks.clear();
+    keptImages.clear();
+    *this = BlockLayout {};
+    lines = std::move(keptLines);
+    runs = std::move(keptRuns);
+    links = std::move(keptLinks);
+    images = std::move(keptImages);
+  }
 };
 
 struct TypeMetrics {
@@ -564,11 +591,22 @@ private:
   struct Tally {
     std::uint64_t keyBytes = 0;
     std::uint64_t cacheHits = 0;
+    // Which of the two a relaid block's layout came from. Here rather than
+    // counted at the site because the rule above is not theoretical: added
+    // inline, these two put 4% on a cold layout of the 200 KB note, with every
+    // allocation count identical.
+    std::uint64_t layoutsRecycled = 0;
+    std::uint64_t layoutsAllocated = 0;
   };
   // Block `index` under `flags`, taken from the cache or laid out into it, with
   // the key it lives under written back through `key`.
+  //
+  // `deadKey` is the key this same block was filed under a moment ago, when
+  // the caller knows that key can never be asked for again -- see
+  // `recyclableKey`. On a miss the entry it names is re-keyed and laid into
+  // rather than allocated and the old one freed.
   const BlockLayout* resolveEntry(std::size_t index, const Flags& flags, std::uint64_t geometry,
-                                  std::uint64_t* key, Tally* tally);
+                                  std::uint64_t* key, Tally* tally, std::uint64_t deadKey = 0);
 
   // The type, the air above and below, and where the text starts. One switch
   // over the block's kind, and the only part of laying a block out that is
@@ -604,7 +642,9 @@ private:
   void reserveFlowOutput(const SourceBlock& block, const Flags& flags, const RunStyle& base,
                          float available, std::size_t groupCount, BlockLayout& out) const;
 
-  BlockLayout layoutBlock(std::size_t index, const Flags& flags) const;
+  // Fills `out`, which the caller supplies so a recycled one can be reused.
+  // It must be empty -- freshly constructed, or through `BlockLayout::reuse`.
+  void layoutBlockInto(std::size_t index, const Flags& flags, BlockLayout& out) const;
   const BlockLayout* layoutForOffset(std::size_t offset, std::size_t* blockIndex) const;
   // The visual-row index space, addressed through `lineStart_` rather than
   // through a materialised table of rows.
@@ -630,7 +670,8 @@ private:
   // placement walk that was happening anyway, and every query is a binary
   // search over it.
   std::vector<std::uint32_t> lineStart_;
-  std::unordered_map<std::uint64_t, BlockLayout> cache_;
+  using CacheMap = std::unordered_map<std::uint64_t, BlockLayout>;
+  CacheMap cache_;
   std::vector<std::uint64_t> liveKeys_;
   // `liveKeys_` sorted, for the cache sweep. A member so the sweep does not
   // allocate a copy of it on the one frame it is already the slowest thing in.

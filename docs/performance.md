@@ -3495,3 +3495,100 @@ The walk itself is pinned by exhaustive equality rather than by cases —
 `caretPlaceFrom` from **every** anchor to **every** caret of a small buffer
 with an empty first line, consecutive breaks, a trailing break and a multi-byte
 character in it, each against `caretPlaceIn` of the same offset.
+
+## The fourteenth pass: the window drag that allocated a document to redraw one
+
+`resize.width_step` is a step of a window drag: every block in the note has to
+be laid out again, because every cached one was measured at the old column. The
+lane's own comment said it was "meant to be expensive -- it is here so that
+'expensive' stays a number somebody can watch rather than an assumption". The
+number nobody had watched was the one beside it:
+
+```
+resize.width_step   8313 us median   25,241 allocs   6,772.4 KB
+```
+
+Twenty-five thousand allocations for 9,612 blocks -- and, arriving afterwards,
+a `layout.update.evict_cache` of 17.7 ms across the run, which the sweep's own
+comment describes as "where a resize spends its worst frame, because it frees
+layouts in bulk".
+
+**Those are the same buffers.** Laying a block out allocates three times before
+it does anything else: the run array, the line array -- both reserved to an
+exact or near-exact size -- and the `unordered_map` node they are filed under.
+The sweep then frees three per block. The allocations and the frees are one
+generation's worth of the same three things, and the only reason they are not
+the same memory is the *order*: the relayout runs first and the sweep runs
+after it.
+
+What makes reordering them sound is a fact the cache already relies on for its
+correctness. Every cache key is a hash the *geometry* seeds, so a width change
+makes every standing entry not merely stale but **unreachable**: no key the new
+geometry produces can equal one the old geometry did. The dead generation is
+dead by construction, and it can be handed to the relayout that replaces it.
+
+### Positionally, not out of a pool
+
+The first version pooled: empty the cache into a vector of node handles, and
+let each block take whichever came off the top. It worked --
+
+| | before | pool |
+|---|---:|---:|
+| allocations | 25,241 | 11,410 |
+| bytes | 6,772 KB | 1,838 KB |
+
+-- and it leaked capacity. A pooled buffer goes to whichever block asks next,
+not to the block it was sized for, so the largest paragraph's arrays land on a
+one-line heading and stay there. Over rounds the document's largest capacity
+diffuses across every entry and the layout's memory tends toward *block count ×
+largest block*: **+3.8 MB of peak RSS after eight width steps, +6.0 MB after
+sixty**, and still climbing. A pool of buffers with no notion of size is a slow
+leak wearing a cache's clothes.
+
+The fix is to recycle **positionally**: block `i` is laid out into the entry
+block `i` was filed under, re-keyed in place through `node.key()`. That is an
+exact fit by construction rather than by policy -- the run array is reserved to
+the block's *token count*, which does not depend on the width at all -- and it
+ratchets nowhere. There is no pool, no threshold, and no number anybody had to
+choose.
+
+| | before | after |
+|---|---:|---:|
+| `resize.width_step` median | 8,313 us | **6,437 us (−28%)** |
+| allocations | 25,241 | **10,285 (−59%)** |
+| bytes allocated | 6,772.4 KB | **311.4 KB (−95%)** |
+| largest single allocation | 4.2 KB | **0.0 KB** |
+| `layout.update.evict_cache` | 17.7 ms | **0.0 ms (−100%)** |
+| `layout.block` self | 46.2 ms | **40.3 ms (−12.7%)** |
+| peak RSS | 32.0 MB | **32.1 MB** |
+
+`layout.cache_sweeps` goes from 9 to 0 over the harness run, which is the whole
+claim restated: every sweep the harness used to perform was a resize cleaning
+up after itself.
+
+The `layout.block` row is a separate small thing found on the way. Both the old
+code and the first version of this one laid a block out into a local and then
+*moved* it into the map -- four vector steals and the scalars, ten thousand
+times per cold open, for a value whose home was always going to be the node.
+Filing an empty entry and laying out into it removes the move, and is the
+reason `open.cold_layout` came out slightly *faster* than the baseline rather
+than slightly slower.
+
+### What the counters say, and what the test says
+
+`layout.block_layouts_recycled` and `layout.block_layouts_allocated` are the
+deterministic half: on a width step every block is recycled, and on a cold open
+every block is allocated because there is no dead generation to take back.
+Those two were first written as `perf::addCounter` at the site, which is an
+unconditional relaxed atomic add on a path that runs once per block: it put
+**4% on a cold layout with every allocation count identical**. They are tallied
+per update now, which is the rule `doc::Flow` already states and this is the
+second time it has been paid for.
+
+`layout_takes_the_dead_generation_back_when_the_width_changes` asserts all
+three of "nothing was evicted", "blocks were recycled" and "nothing was
+allocated" together, because each alone has a passing bug behind it. And the
+sweep's own regression test had to be rewritten: it drove the sweep by changing
+the width fourteen times, which no longer reaches the sweep at all. It edits at
+a fixed width now, which is the shape that still overflows the cache -- and
+that it had to be rewritten is the clearest statement of what changed.

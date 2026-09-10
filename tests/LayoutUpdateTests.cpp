@@ -433,6 +433,29 @@ MICRONOTES_TEST(layout_an_edit_rescans_and_replaces_only_what_it_touched) {
                                " blocks of " + std::to_string(blocks));
 }
 
+// Every block's layout still readable and still agreeing with the placement:
+// the read that would fault on a freed node, and the arithmetic that would
+// disagree if a recycled entry kept anything of the block before it.
+void requireLayoutReadsBack(const DocumentLayout& layout) {
+  float top = 0.0f;
+  std::size_t rows = 0;
+  for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+    const auto& block = layout.layout(i);
+    micronotes::tests::require(std::abs(layout.blockTop(i) - top) < 0.01f,
+                               "a block is not where the placement says it is");
+    top += block.height;
+    rows += block.lines.size();
+    for(const auto& line : block.lines) {
+      for(const auto& run : block.runsOf(line)) {
+        micronotes::tests::require(run.srcEnd >= run.srcStart, "a run spans backwards");
+      }
+    }
+  }
+  micronotes::tests::require(rows > 0, "the document laid out no rows at all");
+  micronotes::tests::require(std::abs(top - layout.totalHeight()) < 0.01f,
+                             "the blocks do not sum to the document's height");
+}
+
 // The cache sweep erases most of the map while `placed_` still holds pointers
 // into it. That is sound only because `unordered_map` is node-based -- erasing
 // one element leaves pointers to every other element valid -- and the sweep
@@ -441,39 +464,68 @@ MICRONOTES_TEST(layout_an_edit_rescans_and_replaces_only_what_it_touched) {
 // which is why this reads the entire layout back afterwards and why it belongs
 // in the sanitizer lanes.
 MICRONOTES_TEST(layout_survives_a_cache_sweep_that_erases_most_of_the_map) {
-  const std::string source = manyBlocks(120);
+  // Small on purpose: the sweep triggers at `blocks + kSpareEntries`, so a
+  // short document is what reaches it in a number of edits a test can afford.
+  const std::string source = manyBlocks(20);
   DocumentLayout layout;
   layout.setMetrics(stubMetrics());
   LayoutOptions options;
 
   using microcore::perf::CounterId;
+  options.width = 500.0f;
+  layout.update(source, options);
   const auto before = counter(CounterId::LayoutCacheEvictions);
-  // Every width is a new geometry, so every block gets a new key. A generation
-  // is smaller than the block count here because identical blocks share a key,
-  // which is the point of keying on content -- so it takes a dozen passes to
-  // overflow a cache sized at three generations of *blocks*.
-  for(int step = 0; step < 14; ++step) {
-    options.width = 500.0f + static_cast<float>(step) * 37.0f;
-    layout.update(source, options);
+  // Edits at a fixed width, which is the shape that still overflows the cache:
+  // each one gives the block it touched a key nothing will ask for again, and
+  // the entry under the old key stays until the sweep takes it. A *width*
+  // change no longer gets here at all -- see the test below.
+  std::string edited = source;
+  for(int step = 0; step < 500; ++step) {
+    edited.insert(edited.size() / 2, 1, static_cast<char>('a' + step % 26));
+    layout.update(edited, options);
   }
   MICRONOTES_REQUIRE(counter(CounterId::LayoutCacheEvictions) > before);
 
   // Every block's layout has to still be readable and still agree with the
   // placement. This is the read that would fault on a freed node.
-  float top = 0.0f;
-  std::size_t rows = 0;
-  for(std::size_t i = 0; i < layout.blockCount(); ++i) {
-    const auto& block = layout.layout(i);
-    MICRONOTES_REQUIRE(std::abs(layout.blockTop(i) - top) < 0.01f);
-    top += block.height;
-    rows += block.lines.size();
-    for(const auto& line : block.lines) {
-      for(const auto& run : block.runsOf(line)) MICRONOTES_REQUIRE(run.srcEnd >= run.srcStart);
-    }
+  requireLayoutReadsBack(layout);
+}
+
+// A width change makes every key in the cache unreachable -- the geometry
+// seeds every one of them -- so the standing generation is not swept
+// afterwards, it is *taken back*: block `i` is laid out into the very entry
+// block `i` was filed under, re-keyed in place. Two things follow and both
+// are asserted here, because either one alone would be satisfied by a bug.
+//
+// Nothing is evicted, because nothing dead is left to evict; and every block
+// relaid comes from a recycled entry rather than a new one. A version that
+// recycled out of a shared pool would pass the first and the second, and still
+// be wrong -- it hands the largest paragraph's arrays to the next block that
+// asks -- so the read-back below is what says the entries fit the blocks they
+// landed on.
+MICRONOTES_TEST(layout_takes_the_dead_generation_back_when_the_width_changes) {
+  const std::string source = manyBlocks(120);
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 500.0f;
+  layout.update(source, options);
+
+  using microcore::perf::CounterId;
+  const auto evictedBefore = counter(CounterId::LayoutCacheEvictions);
+  const auto recycledBefore = counter(CounterId::LayoutBlockLayoutsRecycled);
+  const auto allocatedBefore = counter(CounterId::LayoutBlockLayoutsAllocated);
+  for(int step = 1; step < 30; ++step) {
+    options.width = 500.0f + static_cast<float>(step) * 37.0f;
+    layout.update(source, options);
   }
-  MICRONOTES_REQUIRE(rows > 0);
-  MICRONOTES_REQUIRE(std::abs(top - layout.totalHeight()) < 0.01f);
-  MICRONOTES_REQUIRE(layout.offsetAt(80.0f, top * 0.5f) < source.size());
+  MICRONOTES_REQUIRE(counter(CounterId::LayoutCacheEvictions) == evictedBefore);
+  MICRONOTES_REQUIRE(counter(CounterId::LayoutBlockLayoutsRecycled) > recycledBefore);
+  // Identical blocks share a key, so the first block under a key recycles the
+  // old entry and the rest hit the one it just inserted. What must not happen
+  // is a *new* entry: that is the allocation this exists to remove.
+  MICRONOTES_REQUIRE(counter(CounterId::LayoutBlockLayoutsAllocated) == allocatedBefore);
+  requireLayoutReadsBack(layout);
 }
 
 // Installing metrics throws the block cache away, and every entry in the

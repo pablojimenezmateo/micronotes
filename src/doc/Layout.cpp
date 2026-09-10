@@ -279,7 +279,7 @@ DocumentLayout::Flags DocumentLayout::flagsFor(std::size_t index) const {
 
 const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& flags,
                                                 std::uint64_t geometry, std::uint64_t* key,
-                                                Tally* tally) {
+                                                Tally* tally, std::uint64_t deadKey) {
   const SourceBlock& block = blocks_[index];
   tally->keyBytes += block.end() - block.start;
   std::uint64_t hash =
@@ -302,13 +302,33 @@ const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& 
   *key = hash;
 
   auto found = cache_.find(hash);
-  if(found == cache_.end()) {
-    ++lastRelaid_;
-    found = cache_.emplace(hash, layoutBlock(index, flags)).first;
-  } else {
+  if(found != cache_.end()) {
     ++tally->cacheHits;
+    return &found->second;
   }
-  return &found->second;
+
+  ++lastRelaid_;
+  // The entry this block was filed under a moment ago, when the caller knows
+  // nothing can ask for that key again. A node carries the map's own
+  // allocation as well as the layout's two arrays, and `node.key()` is
+  // assignable -- which is what lets the entry be re-filed under the new key
+  // rather than one being freed and another allocated.
+  CacheMap::node_type dead = deadKey == 0 ? CacheMap::node_type {} : cache_.extract(deadKey);
+  if(dead.empty()) {
+    ++tally->layoutsAllocated;
+    // Filed empty and then laid into, rather than laid out and moved in. A
+    // `BlockLayout` move is four vector steals and the scalars, and a cold
+    // open of the 200 KB note does it ten thousand times for no reason: the
+    // node is where the layout is going to live either way.
+    BlockLayout& fresh = cache_.emplace(hash, BlockLayout {}).first->second;
+    layoutBlockInto(index, flags, fresh);
+    return &fresh;
+  }
+  ++tally->layoutsRecycled;
+  dead.key() = hash;
+  dead.mapped().reuse();
+  layoutBlockInto(index, flags, dead.mapped());
+  return &cache_.insert(std::move(dead)).position->second;
 }
 
 // Everything about the *shape* a block would be laid out in, as one number.
@@ -638,11 +658,11 @@ std::size_t DocumentLayout::stageInlineContent(const SourceBlock& block,
   return groupCount;
 }
 
-BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) const {
+void DocumentLayout::layoutBlockInto(std::size_t index, const Flags& flags,
+                                     BlockLayout& out) const {
   const perf::ScopeTimer blockTimer("layout.block");
   const SourceBlock& block = blocks_[index];
 
-  BlockLayout out;
   out.kind = block.kind;
 
   const BlockStyle style = styleForBlock(block, flags, out);
@@ -692,7 +712,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     float bottom = style.padTop + std::max(lineHeight, height);
     if(flags.trailingLine) bottom = appendTrailingLine(bottom);
     out.height = bottom + style.padBottom;
-    return out;
+    return;
   }
 
   const std::size_t groupCount = asSourceLines ? stageSourceLines(block, base)
@@ -731,7 +751,6 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
   // below this block is already right.
   if(!out.images.empty()) bottom = placeImages(out, bottom);
   out.height = bottom + style.padBottom;
-  return out;
 }
 
 // Roughly how many lines this is about to wrap into, so the line vector grows

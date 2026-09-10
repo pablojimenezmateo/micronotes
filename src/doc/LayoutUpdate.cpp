@@ -86,6 +86,11 @@ public:
       tail_ = 0;
     }
     shift_ = static_cast<std::ptrdiff_t>(count_) - static_cast<std::ptrdiff_t>(previousCount_);
+    // See `deadEntryKey`. Deliberately narrower than `!patchable_`: that is
+    // also false with no standing layout at all, and with arrays of the wrong
+    // length, and in neither case does `liveKeys_[i]` name anything.
+    recyclable_ = doc_.built_ && geometry_ != doc_.geometryHash_ && count_ == previousCount_ &&
+                  doc_.liveKeys_.size() == count_;
 
     const perf::ScopeTimer placeTimer("layout.update.place_blocks");
     alignPlacement();
@@ -262,6 +267,29 @@ private:
     shifted_ += low - settled_;
   }
 
+  // The cache entry block `i` was filed under a moment ago, when that key is
+  // provably dead and the entry provably this block's -- zero otherwise, which
+  // is what `resolveEntry` reads as "allocate".
+  //
+  // Both halves have to hold. The key is dead when the *geometry* moved: the
+  // geometry seeds every cache key, so no key this call produces can equal one
+  // the last call did, and the whole standing generation is unreachable rather
+  // than merely stale. And the entry is this block's when the block count did
+  // not change, because then `liveKeys_[i]` was not shifted and still names
+  // what index `i` resolved to last time.
+  //
+  // The second half is what makes it worth doing positionally rather than out
+  // of a pool. A pooled buffer goes to whichever block asks next, so the
+  // largest paragraph's capacity diffuses across every entry and the layout's
+  // memory tends towards (block count x largest block): measured, that was
+  // +3.8 MB of peak RSS after eight width steps and +6.0 MB after sixty, and
+  // it kept climbing. Block `i` taking back block `i`'s own arrays is an exact
+  // fit by construction -- the run count is the block's token count, which
+  // does not depend on the width at all -- and it ratchets nowhere.
+  std::uint64_t deadEntryKey(std::size_t i) const {
+    return recyclable_ ? doc_.liveKeys_[i] : 0;
+  }
+
   void relayRange(std::size_t low, std::size_t high) {
     // The first block of the document starts at zero by definition; any other
     // takes its position from the block above, which is settled by now.
@@ -285,7 +313,7 @@ private:
         layout = doc_.placed_[i].layout;
       } else {
         std::uint64_t key = 0;
-        layout = doc_.resolveEntry(i, flags, geometry_, &key, &tally_);
+        layout = doc_.resolveEntry(i, flags, geometry_, &key, &tally_, deadEntryKey(i));
         doc_.liveKeys_[i] = key;
         doc_.flags_[i] = flags;
       }
@@ -332,6 +360,8 @@ private:
     perf::addCounter(perf::CounterId::LayoutKeyBytesHashed, tally_.keyBytes);
     perf::addCounter(perf::CounterId::LayoutBlocksRelaid, doc_.lastRelaid_);
     perf::addCounter(perf::CounterId::LayoutCacheHits, tally_.cacheHits);
+    perf::addCounter(perf::CounterId::LayoutBlockLayoutsRecycled, tally_.layoutsRecycled);
+    perf::addCounter(perf::CounterId::LayoutBlockLayoutsAllocated, tally_.layoutsAllocated);
     perf::addCounter(perf::CounterId::LayoutVisualRows, doc_.lineStart_[count_]);
     perf::addCounter(patchable_ ? perf::CounterId::LayoutPlacementPatches
                                 : perf::CounterId::LayoutPlacementRebuilds);
@@ -350,6 +380,7 @@ private:
   const LayoutOptions& opts_;
 
   std::uint64_t geometry_ = 0;
+  bool recyclable_ = false;
   std::size_t previousCount_ = 0;
   bool sourceStamped_ = false;
   bool patchable_ = false;

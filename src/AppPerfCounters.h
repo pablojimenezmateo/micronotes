@@ -277,6 +277,13 @@
   /* the two against each other: a lower one sweeps more often and frees less     */  \
   /* each time, for the same total and a smaller spike.                           */  \
   X(LayoutCacheSweeps, "layout.cache_sweeps")                                        \
+  /* Where a relaid block's layout came from: the entry the same block was     */      \
+  /* filed under before the geometry moved, re-keyed in place, or a new one.    */     \
+  /* A width step should be nearly all recycled and a note opening nearly all   */     \
+  /* allocated, because a note opening has no dead generation to take back.     */     \
+  /* `recycled` climbing while `cache_evictions` stays put is the whole claim.  */     \
+  X(LayoutBlockLayoutsRecycled, "layout.block_layouts_recycled")                     \
+  X(LayoutBlockLayoutsAllocated, "layout.block_layouts_allocated")                   \
   /* Updates whose source, geometry and reveal state were byte-for-byte what the */    \
   /* previous update already laid out -- i.e. work that produced the exact same  */    \
   /* answer as last frame. This is the counter that names the scroll problem: on */    \
