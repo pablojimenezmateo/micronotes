@@ -8,9 +8,10 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Three entries are open: one about selecting inside a block the live scanner
+  Four entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
-  writing a CFF writer, and one about the wheel over the tab strip. So
+  writing a CFF writer, one about the wheel over the tab strip, and one about
+  the command chain being checked by grepping its own source. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.

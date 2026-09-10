@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-45 have been used. Closing an entry means deleting it and saying so in the
+TD-46 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -109,3 +109,35 @@ without that means giving the strip a scroll offset of its own and deriving the
 visible window from two things instead of one, which is the layout's whole
 simplification undone for a gesture. Worth doing when somebody decides which of
 those two a wheel over the tabs should mean.
+
+---
+
+## TD-46 — `performCommand` is checked by grepping its own source
+
+Every shell command is dispatched by one `if`/`else if` chain over string ids
+in `app/Commands.cpp`, ninety branches long. Nothing is wrong with the chain
+itself; the problem is how it is *checked*. `architecture_every_offered_action_is_dispatched`
+proves that every action the menus and the palette offer reaches a command by
+reading `src/app/*.cpp` as text and looking for the literal `== "name"`, and it
+guards against its own obsolescence by also asserting that the exact line
+`void performCommand(UiRuntime& ui, const std::string& id) {` is still there.
+
+**What it costs.** The test cannot see what a branch *does*, only that the
+spelling appears somewhere under `src/app/`, so a branch left in an arm that
+never runs — one nested inside another id's `if`, or one after an arm that
+already matched — passes it. `MenuActionTests` covers that gap now by running
+every row, but it does so with a fixture, so it can only speak for the states
+that fixture is in: the notebook export that this pass found broken was invisible
+to the source scan and visible only once something ran the row. A dispatch
+*table* — `{name, void (*)(UiRuntime&)}` — would let both tests ask the
+registry directly instead of one grepping for a spelling and the other
+reconstructing a shell to observe an effect.
+
+**Why it has not been paid.** The chain is not merely a table written out: a
+dozen of its arms close over local state (`ui.state.selection().noteId`, a
+pane mode, a `FindToggle`), several are guarded conditionals rather than plain
+calls, and one — `handleNotePathCommand` — matches three ids at once and
+returns whether it did. A table means a lambda per arm and a decision about
+what the three-id arm becomes, which is a wide diff through the one file every
+surface routes through, for a gain that is entirely in the tests. Worth doing
+the next time that file is opened for another reason.
