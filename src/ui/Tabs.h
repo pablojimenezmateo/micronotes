@@ -110,4 +110,57 @@ TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
 // the paint uses `slot.close` itself.
 Rect tabCloseHitRect(const TabSlot& slot);
 
+// --- dragging a tab into a new place ---------------------------------------
+
+// How far the pointer has to travel from where it went down before the press
+// becomes a drag rather than a click. Without it every click on a tab that
+// twitched by a pixel would reorder the strip.
+inline constexpr float kTabDragStartDistance = 6.0f;
+
+// Where the dragged tab is drawn, pinned inside the strip.
+//
+// The pointer keeps the grip it took on the tab -- grabbing a tab by its right
+// edge and having it jump so the pointer is at its middle is the thing that
+// makes a drag feel like it is fighting you -- so this is the pointer less that
+// grip, clamped to the strip. `std::clamp` on a strip narrower than the tab is
+// undefined behaviour, which a very narrow window reaches, so the upper bound
+// is raised to the lower one first.
+float draggedTabX(Rect strip, float tabWidth, float pointerX, float grabOffsetX);
+
+// The accent rule that marks the gap a dragged tab would drop into. Two pixels,
+// the same as the lid over the active tab, so the strip has one accent weight.
+inline constexpr float kTabDropCaretWidth = 2.0f;
+
+// Which gap in the strip the dragged tab would drop into: the index it would
+// take, so `0` is before the first tab and `tabCount` is past the last.
+//
+// Resolved from `x`, the leading edge of the *drawn* tab, rather than from the
+// pointer. Keying it off the pointer makes the landing place depend on where
+// inside the tab it was grabbed, so dragging a wide tab held near one edge
+// feels like the strip is trailing half a tab behind the hand.
+//
+// Both ends pin to what is *visible*. A scrolled strip is a window onto the
+// list, and answering 0 or `tabCount` for a drop past a visible edge would
+// teleport the tab to a slot that is not on screen -- the chevrons are how the
+// window moves.
+std::size_t tabDropSlot(const TabStripLayout& layout, Rect strip, float x,
+                        std::size_t tabCount);
+
+// The index the tab at `from` ends up at when dropped into `slot`.
+//
+// A slot is a gap between tabs and an index is a tab, and the two differ by one
+// on the right of the tab being moved: lifting tab 2 out and dropping it into
+// the gap at 5 lands it at index 4, because tabs 3 and 4 each slid one to the
+// left to fill the hole it left.
+std::size_t tabIndexForDropSlot(std::size_t slot, std::size_t from, std::size_t tabCount);
+
+// Moves the tab at `from` to `to`, keeping `activeTab` on whichever tab it
+// already named. False on an out-of-range index; true otherwise, the
+// `from == to` no-op included.
+//
+// One rotate rather than erase-then-insert: that pair moves every tab between
+// the two positions twice, plus a tab hoisted out and back in.
+bool moveTab(std::vector<NoteTab>& tabs, std::size_t& activeTab, std::size_t from,
+             std::size_t to);
+
 }

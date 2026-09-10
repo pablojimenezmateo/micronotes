@@ -11,8 +11,12 @@
 #include "ui/Painter.h"
 #include "ui/Widgets.h"
 #include "ui/ClipGuard.h"
+#include "core/render/ColorMath.h"
 
+#include <algorithm>
+#include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace micronotes::app {
@@ -40,6 +44,52 @@ std::function<int(std::string_view)> tabMeasure(ui::TextRenderer& text) {
   return [&text, style](std::string_view value) { return text.width(value, style); };
 }
 
+// The two things a drag adds to the strip: where the tab would land, and the
+// tab itself under the pointer.
+//
+// Drawn after everything else, so the carried tab passes over its neighbours
+// rather than under them -- a ghost that slides behind the strip reads as the
+// tab having been dropped already.
+void drawTabDrag(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect strip,
+                 const ui::StripTabColors& colors) {
+  const TabDrag& drag = ui.tabStrip.drag;
+  const auto& layout = ui.tabStrip.layout;
+  const auto& titles = ui.tabStrip.titles;
+  if(drag.source >= titles.size()) return;
+
+  // The insertion caret: a full-height accent rule in the gap the tab would
+  // take. At the leading edge of the tab now in that slot, or the trailing edge
+  // of the last one when the drop is past the end.
+  float caretX = strip.x;
+  bool haveCaret = false;
+  for(const auto& slot : layout.slots) {
+    if(!slot.visible) continue;
+    if(slot.index == drag.dropSlot) {
+      caretX = slot.rect.x;
+      haveCaret = true;
+      break;
+    }
+    caretX = slot.rect.x + slot.rect.w;
+    haveCaret = true;
+  }
+  if(haveCaret) {
+    ui::fill(renderer, {std::round(caretX) - ui::kTabDropCaretWidth / 2.0f, strip.y,
+                        ui::kTabDropCaretWidth, strip.h},
+             theme().accent);
+  }
+
+  // The carried tab. Drawn as the active one whether or not it is -- it is the
+  // one thing the pointer is holding -- with a shadow behind it and an accent
+  // outline, which together are what lift it off the strip.
+  const float x = ui::draggedTabX(strip, drag.tabWidth, drag.pointerX, drag.grabOffsetX);
+  const Rect carried {x, strip.y, drag.tabWidth, strip.h};
+  ui::fill(renderer, {carried.x + 1.0f, carried.y + 2.0f, carried.w, carried.h},
+           render::blend(theme().surfaceBackground, SDL_Color{0, 0, 0, 255}, 0.5f));
+  ui::drawStripTab(renderer, text, carried, titles[drag.source], true, false,
+                   ui::kTabCloseReserve, colors);
+  ui::stroke(renderer, carried, theme().accent);
+}
+
 }
 void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui, Rect rect) {
   // The strip is chrome, so it takes the chrome's ground; the active tab is a
@@ -56,6 +106,8 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   const auto& layout = ui.tabStrip.layout;
   const ui::StripTabColors colors = ui::stripTabColors();
 
+  const TabDrag& drag = ui.tabStrip.drag;
+
   for(const auto& slot : layout.slots) {
     // `continue`, not `break`. Under the old layout the only invisible tabs
     // were the ones past the right edge, so stopping at the first was the same
@@ -64,6 +116,11 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     // strip overflowed. The hit test beside it already used `continue`, so the
     // two disagreed about the same list.
     if(!slot.visible) continue;
+    // The tab being carried is lifted out of the strip for the whole gesture
+    // and drawn last, following the pointer. The hole it leaves stays open,
+    // which is what says the strip is short one tab rather than that the order
+    // has already changed.
+    if(drag.dragging && slot.index == drag.source) continue;
     const bool active = slot.index == workspace.activeTab;
     const bool hot = ui::contains(slot.rect, ui.pointer.x, ui.pointer.y);
     ui::drawStripTab(renderer, text, slot.rect, titles[slot.index], active, hot,
@@ -77,7 +134,9 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
     }
     // The close button appears on the tab you are pointing at and on the one
     // you are reading; a strip of crosses is a strip that reads as a warning.
-    if(!active && !hot) continue;
+    // Never during a drag: the pointer is holding a tab, not aiming at a cross,
+    // and the release would land on one it passed over.
+    if(drag.dragging || (!active && !hot)) continue;
     const bool overClose = ui::contains(ui::tabCloseHitRect(slot), ui.pointer.x, ui.pointer.y);
     ui::drawCloseGlyph(renderer, slot.close,
                        overClose ? theme().textPrimary
@@ -94,6 +153,8 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
                               ui.pointer.over(layout.scrollRight));
   if(layout.hiddenLeft > 0) ui.pointer.offerTooltip(layout.scrollLeft, "Earlier tabs");
   if(layout.hiddenRight > 0) ui.pointer.offerTooltip(layout.scrollRight, "Later tabs");
+
+  if(drag.dragging) drawTabDrag(renderer, text, ui, rect, colors);
 }
 
 bool tabStripHasControlAt(const UiRuntime& ui, float x, float y) {
@@ -148,6 +209,21 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
       if(slot.index < tabs.size()) tabs[slot.index].pinned = !tabs[slot.index].pinned;
       return true;
     }
+    // A left press on a tab is both a switch and the start of a possible drag.
+    // Armed before the switch, and against the slot rather than the active tab,
+    // so a drag still works on the tab that was already showing and on one
+    // whose switch a failed save refused.
+    ui.tabStrip.drag = TabDrag {
+      .pressed = true,
+      .pressX = x,
+      .pressY = y,
+      .source = slot.index,
+      .grabOffsetX = x - slot.rect.x,
+      .tabWidth = slot.rect.w,
+      .pointerX = x,
+      // Where it would land if it never moved, which is where it already is.
+      .dropSlot = slot.index,
+    };
     if(slot.index == ui.state.workspace().activeTab) return true;
     if(!saveCurrent(ui, true)) return true;
     ui.state.editWorkspace().activeTab = slot.index;
@@ -156,6 +232,47 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
     return true;
   }
   return true;
+}
+
+bool handleTabStripMotion(UiRuntime& ui, float x, float y) {
+  auto& drag = ui.tabStrip.drag;
+  if(!drag.pressed) return false;
+  // The button let go without a release reaching us -- a window that lost focus
+  // mid-gesture is the usual way. Commit what the drag had resolved to and hand
+  // the motion on, rather than leaving a drag armed against a pointer that is
+  // no longer holding anything.
+  if((SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) == 0) {
+    handleTabStripRelease(ui);
+    return false;
+  }
+  if(!drag.dragging) {
+    const float dx = x - drag.pressX;
+    const float dy = y - drag.pressY;
+    if(std::hypot(dx, dy) < ui::kTabDragStartDistance) return true;
+    drag.dragging = true;
+  }
+  drag.pointerX = x;
+  const std::size_t count = ui.state.workspace().tabs.size();
+  // From the drawn tab's leading edge, not from the pointer -- see `tabDropSlot`.
+  const float carriedX =
+    ui::draggedTabX(ui.tabStrip.rect, drag.tabWidth, x, drag.grabOffsetX);
+  drag.dropSlot = ui::tabDropSlot(ui.tabStrip.layout, ui.tabStrip.rect, carriedX, count);
+  return true;
+}
+
+void handleTabStripRelease(UiRuntime& ui) {
+  const TabDrag drag = ui.tabStrip.drag;
+  ui.tabStrip.drag.clear();
+  if(!drag.dragging) return;
+  auto& workspace = ui.state.editWorkspace();
+  const std::size_t count = workspace.tabs.size();
+  const std::size_t target = ui::tabIndexForDropSlot(drag.dropSlot, drag.source, count);
+  if(target == drag.source) return;
+  if(!ui::moveTab(workspace.tabs, workspace.activeTab, drag.source, target)) return;
+  // No reload: the strip is a different order and the note showing is the same
+  // note. Only the selection could go stale, and `activeTab` was carried with
+  // the tab it named, so it has not.
+  ui.status = "Moved tab";
 }
 
 

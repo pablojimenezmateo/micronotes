@@ -4,7 +4,9 @@
 
 #include "ui/Metrics.h"
 
+#include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 using micronotes::ui::layoutTabs;
@@ -313,4 +315,151 @@ MICRONOTES_TEST(tabs_survive_an_active_index_past_the_end) {
   const auto slots = slotsOf(layoutTabs(titles(3), kStrip, measure, 99));
   MICRONOTES_REQUIRE(slots.size() == 3);
   MICRONOTES_REQUIRE(slots.back().visible);
+}
+
+// --- dragging a tab into a new place ---------------------------------------
+
+namespace {
+
+std::vector<micronotes::ui::NoteTab> tabsNamed(std::string_view ids) {
+  std::vector<micronotes::ui::NoteTab> out;
+  for(const char c : ids) out.push_back({std::string(1, c), {}, false});
+  return out;
+}
+
+std::string orderOf(const std::vector<micronotes::ui::NoteTab>& tabs) {
+  std::string out;
+  for(const auto& tab : tabs) out += tab.noteId;
+  return out;
+}
+
+}
+
+MICRONOTES_TEST(tabs_a_move_to_the_right_slides_the_ones_it_passed_left) {
+  auto tabs = tabsNamed("abcde");
+  std::size_t active = 1;
+  MICRONOTES_REQUIRE(micronotes::ui::moveTab(tabs, active, 1, 3));
+  MICRONOTES_REQUIRE(orderOf(tabs) == "acdbe");
+  // The active tab moved with the tab it named, not with the index.
+  MICRONOTES_REQUIRE(active == 3);
+  MICRONOTES_REQUIRE(tabs[active].noteId == "b");
+}
+
+MICRONOTES_TEST(tabs_a_move_to_the_left_slides_the_ones_it_passed_right) {
+  auto tabs = tabsNamed("abcde");
+  std::size_t active = 3;
+  MICRONOTES_REQUIRE(micronotes::ui::moveTab(tabs, active, 3, 0));
+  MICRONOTES_REQUIRE(orderOf(tabs) == "dabce");
+  MICRONOTES_REQUIRE(active == 0);
+  MICRONOTES_REQUIRE(tabs[active].noteId == "d");
+}
+
+// The strip's own menu reorders the tab it was opened on, which need not be the
+// one showing -- so the note on screen has to stay on screen whichever side of
+// it the moved tab passes.
+MICRONOTES_TEST(tabs_a_move_keeps_the_note_showing_on_screen) {
+  for(const auto& [from, to] : {std::pair<std::size_t, std::size_t> {0, 4},
+                               std::pair<std::size_t, std::size_t> {4, 0},
+                               std::pair<std::size_t, std::size_t> {1, 2},
+                               std::pair<std::size_t, std::size_t> {3, 2}}) {
+    for(std::size_t active = 0; active < 5; ++active) {
+      auto tabs = tabsNamed("abcde");
+      const std::string showing = tabs[active].noteId;
+      std::size_t moved = active;
+      MICRONOTES_REQUIRE(micronotes::ui::moveTab(tabs, moved, from, to));
+      MICRONOTES_REQUIRE(moved < tabs.size());
+      micronotes::tests::require(tabs[moved].noteId == showing,
+                                 "moving " + std::to_string(from) + " to " + std::to_string(to) +
+                                   " lost the note showing at " + std::to_string(active));
+    }
+  }
+}
+
+MICRONOTES_TEST(tabs_a_move_out_of_range_changes_nothing) {
+  auto tabs = tabsNamed("abc");
+  std::size_t active = 1;
+  MICRONOTES_REQUIRE(!micronotes::ui::moveTab(tabs, active, 0, 9));
+  MICRONOTES_REQUIRE(!micronotes::ui::moveTab(tabs, active, 9, 0));
+  MICRONOTES_REQUIRE(orderOf(tabs) == "abc");
+  MICRONOTES_REQUIRE(active == 1);
+  // A move onto its own place is a no-op that succeeded, not a failure.
+  MICRONOTES_REQUIRE(micronotes::ui::moveTab(tabs, active, 1, 1));
+  MICRONOTES_REQUIRE(orderOf(tabs) == "abc");
+}
+
+// A slot is a gap and an index is a tab, and they differ by one on the right of
+// the tab being carried, because the tabs it passed have slid left to fill the
+// hole it left.
+MICRONOTES_TEST(tabs_a_drop_slot_becomes_the_index_the_tab_lands_at) {
+  using micronotes::ui::tabIndexForDropSlot;
+  // Carrying tab 1 rightwards.
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(0, 1, 5) == 0);
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(1, 1, 5) == 1);
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(2, 1, 5) == 1);
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(3, 1, 5) == 2);
+  // Past the last gap, which is one more than there are tabs.
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(5, 1, 5) == 4);
+  // Carrying tab 3 leftwards: no slide, so slot and index agree.
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(1, 3, 5) == 1);
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(0, 3, 5) == 0);
+  // Nothing open at all.
+  MICRONOTES_REQUIRE(tabIndexForDropSlot(0, 0, 0) == 0);
+}
+
+MICRONOTES_TEST(tabs_the_drop_slot_is_the_gap_the_carried_tab_has_reached) {
+  const auto names = titles(4);
+  const auto layout = layoutTabs(names, kStrip, measure, 0);
+  const auto& slots = layout.slots;
+  MICRONOTES_REQUIRE(slots.size() == 4);
+  const auto slotAt = [&](float x) {
+    return micronotes::ui::tabDropSlot(layout, kStrip, x, names.size());
+  };
+  // Before the first tab's midpoint: the gap in front of it.
+  MICRONOTES_REQUIRE(slotAt(kStrip.x) == 0);
+  MICRONOTES_REQUIRE(slotAt(slots[0].rect.x + slots[0].rect.w / 2.0f - 1.0f) == 0);
+  // Past it: the gap in front of the second.
+  MICRONOTES_REQUIRE(slotAt(slots[0].rect.x + slots[0].rect.w / 2.0f + 1.0f) == 1);
+  MICRONOTES_REQUIRE(slotAt(slots[2].rect.x + slots[2].rect.w / 2.0f + 1.0f) == 3);
+  // Past the last tab's midpoint: the gap after every tab there is.
+  MICRONOTES_REQUIRE(slotAt(slots[3].rect.x + slots[3].rect.w) == 4);
+  // And with nothing open there is one gap, whatever the pointer says.
+  MICRONOTES_REQUIRE(micronotes::ui::tabDropSlot(layout, kStrip, 500.0f, 0) == 0);
+}
+
+// A scrolled strip is a window onto the list, so a drop past a visible edge
+// pins to what is on screen rather than teleporting the tab to a slot nobody
+// can see. The chevrons are how the window moves.
+MICRONOTES_TEST(tabs_a_drop_past_a_visible_edge_pins_to_what_is_on_screen) {
+  const auto names = titles(20);
+  const Rect narrow {0.0f, 0.0f, 420.0f, 34.0f};
+  const auto layout = layoutTabs(names, narrow, measure, 10);
+  std::size_t firstVisible = names.size();
+  std::size_t lastVisible = 0;
+  for(const auto& slot : layout.slots) {
+    if(!slot.visible) continue;
+    firstVisible = std::min(firstVisible, slot.index);
+    lastVisible = std::max(lastVisible, slot.index);
+  }
+  MICRONOTES_REQUIRE(firstVisible > 0);
+  MICRONOTES_REQUIRE(lastVisible + 1 < names.size());
+  MICRONOTES_REQUIRE(micronotes::ui::tabDropSlot(layout, narrow, narrow.x - 200.0f,
+                                                 names.size()) == firstVisible);
+  MICRONOTES_REQUIRE(micronotes::ui::tabDropSlot(layout, narrow, narrow.x + narrow.w + 200.0f,
+                                                 names.size()) == lastVisible + 1);
+}
+
+// The pointer keeps the grip it took on the tab, and the tab stays inside the
+// strip -- including when the strip is narrower than the tab, where clamping
+// the other way round would be undefined behaviour.
+MICRONOTES_TEST(tabs_the_carried_tab_keeps_its_grip_and_stays_in_the_strip) {
+  using micronotes::ui::draggedTabX;
+  MICRONOTES_REQUIRE(draggedTabX(kStrip, 132.0f, 400.0f, 30.0f) == 370.0f);
+  // Dragged off the left edge and off the right.
+  MICRONOTES_REQUIRE(draggedTabX(kStrip, 132.0f, -500.0f, 30.0f) == kStrip.x);
+  MICRONOTES_REQUIRE(draggedTabX(kStrip, 132.0f, 5000.0f, 30.0f) ==
+                     kStrip.x + kStrip.w - 132.0f);
+  // A strip with no room for the tab at all pins it to the leading edge.
+  const Rect sliver {10.0f, 0.0f, 40.0f, 34.0f};
+  MICRONOTES_REQUIRE(draggedTabX(sliver, 132.0f, 5000.0f, 0.0f) == sliver.x);
+  MICRONOTES_REQUIRE(draggedTabX(sliver, 132.0f, -5000.0f, 0.0f) == sliver.x);
 }

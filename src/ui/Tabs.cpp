@@ -94,6 +94,55 @@ TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
   return layout;
 }
 
+float draggedTabX(Rect strip, float tabWidth, float pointerX, float grabOffsetX) {
+  const float furthest = std::max(strip.x, strip.x + strip.w - tabWidth);
+  return std::clamp(pointerX - grabOffsetX, strip.x, furthest);
+}
+
+std::size_t tabDropSlot(const TabStripLayout& layout, Rect strip, float x,
+                        std::size_t tabCount) {
+  if(tabCount == 0) return 0;
+  // The first visible tab whose resting midpoint is right of `x`: the dragged
+  // tab has passed everything before it, so the gap in front of that tab is
+  // where it lands.
+  std::size_t lastVisible = 0;
+  bool sawOne = false;
+  for(const auto& slot : layout.slots) {
+    if(!slot.visible) continue;
+    if(x < slot.rect.x + slot.rect.w / 2.0f) return slot.index;
+    lastVisible = slot.index;
+    sawOne = true;
+  }
+  // Nothing visible at all -- a strip with no room for even one tab -- leaves
+  // the halves of the strip as the only answer there is.
+  if(!sawOne) return x <= strip.x + strip.w / 2.0f ? 0 : tabCount;
+  return std::min(tabCount, lastVisible + 1);
+}
+
+std::size_t tabIndexForDropSlot(std::size_t slot, std::size_t from, std::size_t tabCount) {
+  if(tabCount == 0) return 0;
+  const std::size_t clamped = std::min(slot, tabCount);
+  return std::min(clamped > from ? clamped - 1 : clamped, tabCount - 1);
+}
+
+bool moveTab(std::vector<NoteTab>& tabs, std::size_t& activeTab, std::size_t from,
+             std::size_t to) {
+  if(from >= tabs.size() || to >= tabs.size()) return false;
+  if(from == to) return true;
+  const auto begin = tabs.begin();
+  const auto at = [&](std::size_t i) { return begin + static_cast<std::ptrdiff_t>(i); };
+  if(from < to) std::rotate(at(from), at(from + 1), at(to + 1));
+  else std::rotate(at(to), at(from), at(from + 1));
+  // The tab showing must still be showing afterwards, and it is not
+  // necessarily the one that moved: the strip's menu reorders the tab it was
+  // opened on. Which way the active index shifts is decided by whether the
+  // moved tab passed over it.
+  if(activeTab == from) activeTab = to;
+  else if(from < to && activeTab > from && activeTab <= to) --activeTab;
+  else if(to < from && activeTab >= to && activeTab < from) ++activeTab;
+  return true;
+}
+
 Rect tabCloseHitRect(const TabSlot& slot) {
   return {
     slot.close.x - kTabCloseHitInflate,

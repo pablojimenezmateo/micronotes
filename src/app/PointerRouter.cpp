@@ -195,6 +195,9 @@ void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button) {
         SDL_SetPrimarySelectionText(field->editor.selectedText().c_str());
       }
     }
+    // Before the flags below are cleared: the drop reads the strip's recorded
+    // layout, which is still last frame's, and commits the reorder.
+    handleTabStripRelease(ui);
     ui.sidebar.resizing = false;
     ui.textSelect.active = false;
     ui.fieldSelect.active = false;
@@ -265,6 +268,10 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
                               {0, 0, static_cast<float>(width), static_cast<float>(height)}, x, y);
     return;
   }
+  // A tab being carried, before anything the page owns: the gesture started on
+  // the strip and keeps the pointer until the button comes up, wherever it
+  // wanders in the meantime.
+  if(handleTabStripMotion(ui, x, y)) return;
   if(ui.blockDrag.active) {
     ui.blockDrag.dropOffset = ui.livePage.dropOffsetAt(y);
     return;
