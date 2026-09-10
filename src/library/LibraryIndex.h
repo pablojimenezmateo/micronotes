@@ -39,15 +39,24 @@ struct SearchResult {
   std::string id;
   std::filesystem::path path;
   std::string title;
-  std::string beforeLine {};
-  std::string matchLine {};
-  std::string afterLine {};
-  std::size_t matchStart = 0;
-  std::size_t matchLength = 0;
   // Capped to what anything downstream will draw: the sidebar shows three
   // lines per result, and a query matching a thousand lines of one note used to
   // build a thousand snippets and throw all but three of them away.
+  //
+  // The first of these used to be *also* stored flat on the result, as
+  // `matchLine` and its two neighbours and its two offsets. Nothing but the
+  // fill wrote them and they were always a copy of `snippets.front()`, so a
+  // query returning two hundred rows made six hundred string copies of lines
+  // it already had -- and the two readers each carried a
+  // `if(snippets.empty())` branch onto the flat fields that could not run,
+  // because the flat fields were only ever filled when `snippets` was not
+  // empty. One fact, one place.
   std::vector<Snippet> snippets {};
+
+  // The first line the query was found on, or nothing. Every reader wants
+  // either this or the whole list, and asking for it is what the flat copy was
+  // standing in for.
+  const Snippet* firstMatch() const { return snippets.empty() ? nullptr : &snippets.front(); }
 };
 
 // A note as the index already holds it. Everything the note list needs, without

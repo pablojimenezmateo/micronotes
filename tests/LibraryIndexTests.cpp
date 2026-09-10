@@ -410,7 +410,9 @@ MICRONOTES_TEST(library_index_stores_the_terms_rather_than_the_text) {
   MICRONOTES_REQUIRE(index.search("zarquon", micronotes::library::SearchScope::Content).size() == 1);
   // And the snippet, which is the thing that would go missing if it had been
   // coming out of the full-text table rather than out of `notes`.
-  MICRONOTES_REQUIRE(index.search("zarquon").front().matchLine.find("zarquon") !=
+  const auto zarquon = index.search("zarquon");
+  MICRONOTES_REQUIRE(zarquon.front().firstMatch() != nullptr);
+  MICRONOTES_REQUIRE(zarquon.front().firstMatch()->matchLine.find("zarquon") !=
                      std::string::npos);
 
   // A rewrite has to retire the old terms. This is the operation a contentless

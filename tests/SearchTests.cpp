@@ -33,8 +33,8 @@ MICRONOTES_TEST(library_index_rebuilds_sqlite_cache_from_files) {
   const auto results = index.search("needle");
   MICRONOTES_REQUIRE(results.size() == 1);
   MICRONOTES_REQUIRE(results[0].id == "note-search");
-  MICRONOTES_REQUIRE(results[0].matchLine == "needle body");
   MICRONOTES_REQUIRE(results[0].snippets.size() == 2);
+  MICRONOTES_REQUIRE(results[0].snippets[0].matchLine == "needle body");
   // Where in each line the query landed, so the sidebar can mark the match
   // rather than the whole line -- and trim a long line around it rather than
   // ellipsizing the match itself away.
@@ -43,7 +43,6 @@ MICRONOTES_TEST(library_index_rebuilds_sqlite_cache_from_files) {
   MICRONOTES_REQUIRE(results[0].snippets[1].matchLine == "second needle line");
   MICRONOTES_REQUIRE(results[0].snippets[1].matchStart == 7);
   MICRONOTES_REQUIRE(results[0].snippets[1].matchLength == 6);
-  MICRONOTES_REQUIRE(results[0].matchStart == results[0].snippets[0].matchStart);
   const auto partial = index.search("eedle bo");
   MICRONOTES_REQUIRE(partial.size() == 1);
   MICRONOTES_REQUIRE(partial[0].id == "note-search");
@@ -134,9 +133,10 @@ MICRONOTES_TEST(library_index_snippets_carry_the_lines_around_the_match) {
   MICRONOTES_REQUIRE(snippets[2].beforeLine == "fifth");
   MICRONOTES_REQUIRE(snippets[2].matchLine == "needle at the end");
   MICRONOTES_REQUIRE(snippets[2].afterLine.empty());
-  // The result's own fields mirror the first snippet.
-  MICRONOTES_REQUIRE(results[0].beforeLine == snippets[0].beforeLine);
-  MICRONOTES_REQUIRE(results[0].afterLine == snippets[0].afterLine);
+  // And `firstMatch` is the first of them rather than a copy of it -- the
+  // copy is what this used to hold, six strings per result that nothing wrote
+  // but the fill and nothing read but through a branch that could not run.
+  MICRONOTES_REQUIRE(results[0].firstMatch() == &snippets.front());
 }
 
 // `%` and `_` are SQL LIKE's own wildcards. A query carrying one used to match

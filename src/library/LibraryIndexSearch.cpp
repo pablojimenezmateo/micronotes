@@ -136,13 +136,6 @@ static void fillSnippet(SearchResult& result, std::string_view body, std::string
     previous = line;
     if(awaiting == kNone && result.snippets.size() >= kMaxSnippets) break;
   }
-  if(!result.snippets.empty()) {
-    result.beforeLine = result.snippets.front().beforeLine;
-    result.matchLine = result.snippets.front().matchLine;
-    result.afterLine = result.snippets.front().afterLine;
-    result.matchStart = result.snippets.front().matchStart;
-    result.matchLength = result.snippets.front().matchLength;
-  }
 }
 
 static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out,

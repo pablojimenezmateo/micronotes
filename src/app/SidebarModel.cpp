@@ -24,7 +24,6 @@ namespace micronotes::app {
 // carries. Counted here and trimmed in `fillSearchSnippets`, and the two have to
 // agree or a row's height will not match its text.
 std::size_t countMatchLines(const library::SearchResult& result) {
-  if(result.snippets.empty()) return result.matchLine.empty() ? 0 : 1;
   std::size_t lines = 0;
   for(const auto& snippet : result.snippets) {
     if(!snippet.matchLine.empty()) ++lines;
@@ -454,12 +453,8 @@ void fillSearchSnippets(UiRuntime& ui, std::size_t index, float width,
     perf::addCounter(perf::CounterId::SidebarSnippetsTrimmed);
     row.matchLines.push_back(ui::snippetAroundMatch(line, at, length, room, measure));
   };
-  if(result.snippets.empty()) {
-    push(result.matchLine, result.matchStart, result.matchLength);
-  } else {
-    for(const auto& snippet : result.snippets) {
-      push(snippet.matchLine, snippet.matchStart, snippet.matchLength);
-    }
+  for(const auto& snippet : result.snippets) {
+    push(snippet.matchLine, snippet.matchStart, snippet.matchLength);
   }
 }
 
