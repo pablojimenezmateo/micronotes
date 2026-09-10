@@ -30,6 +30,11 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
   // The pin is a tick rather than the word "Toggle": a row that says "Toggle
   // pinned" makes you open the menu to find out which way it is set, which is
   // the one thing the menu could have told you without being opened.
+  //
+  // Every id here is an action's name, so this menu needs no routing of its
+  // own -- `handleOverlayResult` hands the id straight to `performCommand`,
+  // and the row a right click offers is the Note menu's row for the same
+  // command rather than a second thing that has to be kept equal to it.
   overlay.items = {
     ui::menuItem("new-note", "New note").withKeys(ui::keysFor(ui::ActionId::NewNote)),
     ui::menuSeparator(),
@@ -46,9 +51,6 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
     ui::menuItem("move-note", "Move to notebook").enabledIf(hasNote),
     ui::menuSeparator(),
     // A note is a file, and these are the questions a reader asks about one.
-    // The ids are the action names, so the menu row, the palette row and any
-    // future key binding are one entry -- which is the rule the whole action
-    // table exists to keep.
     ui::menuItem("show-on-disk", "Show on disk").enabledIf(hasNote),
     ui::menuItem("copy-relative-path", "Copy relative path").enabledIf(hasNote),
     ui::menuItem("copy-absolute-path", "Copy absolute path").enabledIf(hasNote),
