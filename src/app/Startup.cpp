@@ -51,6 +51,12 @@ ui::PaneMode paneModeFromOption(int value) {
 }
 
 bool applyStartupOptions(UiRuntime& ui, ApplicationOptions& options) {
+  // First, because the point of saying it is that the session about to start
+  // is not the one that was asked for. Not fatal: a capture with one option
+  // this build does not have is still a capture.
+  for(const auto& problem : options.problems) {
+    std::cerr << "micronotes: " << problem << "\n";
+  }
   if(options.configuredLibraryRoot) {
     if(!writeConfiguredLibraryRoot(*options.configuredLibraryRoot)) {
       std::cerr << "Failed to write library path config: " << *options.configuredLibraryRoot << "\n";

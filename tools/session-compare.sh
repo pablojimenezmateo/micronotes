@@ -13,7 +13,7 @@
 #
 # Usage:
 #   tools/session-compare.sh <baseline-ref> [--library DIR] [--select TITLE]
-#                            [--panes live,reading,split] [--rounds 3]
+#                            [--panes raw,reading,split] [--rounds 3]
 #
 #   tools/session-compare.sh main
 #   tools/session-compare.sh HEAD~3 --library ~/notes --select "Some Note"
@@ -45,7 +45,7 @@ shift || true
 
 LIBRARY=""
 SELECT=""
-PANES="live,reading,split"
+PANES="raw,reading,split"
 ROUNDS=3
 SIZE="1600x1000"
 PANELS="sidebar,right"

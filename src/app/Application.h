@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace micronotes::app {
 
@@ -40,6 +41,16 @@ struct ApplicationOptions {
   std::optional<bool> showRightPanel;
   // Which of the right panel's views a captured frame should be showing.
   std::string rightPanelView;
+  // What the command line asked for and this build could not give it.
+  //
+  // Collected rather than ignored, and a value rather than a write to stderr,
+  // so a test can read it. `--pane live` named the fourth arrangement, which
+  // was removed with the live view; the arm that would have matched it went
+  // with it, and every `--pane live` since has captured whatever pane the
+  // persisted state happened to be in and said nothing. `session-compare.sh`
+  // still passed it by default, so a third of every A/B's rounds compared the
+  // same surface against itself under a name that no longer existed.
+  std::vector<std::string> problems;
 };
 
 int run(ApplicationOptions options);

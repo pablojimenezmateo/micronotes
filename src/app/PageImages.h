@@ -10,8 +10,8 @@
 // The page holds a buffer, not a library and not a texture cache, so it asks
 // for an image's box and hands the drawing back -- exactly as it asks whether a
 // `[[wikilink]]` resolves. This is the answer, and there is one of it: both
-// panes are the same renderer, so a picture that is fitted one way in the live
-// surface and another way in the reading pane is the class of divergence the
+// panes are the same renderer, so a picture that is fitted one way in the raw
+// pane and another way in the reading pane is the class of divergence the
 // merge exists to remove.
 namespace micronotes::app {
 

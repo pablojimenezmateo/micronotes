@@ -53,6 +53,12 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       if(value == "editor" || value == "raw") options.paneMode = 0;
       else if(value == "viewer" || value == "reading") options.paneMode = 1;
       else if(value == "split") options.paneMode = 2;
+      // Said rather than ignored. There are three arrangements and there used
+      // to be four, so the value a script is most likely to be carrying is a
+      // name this build no longer has -- and silently keeping the pane the
+      // state file happened to be in makes a capture of the wrong surface
+      // indistinguishable from a capture of the right one.
+      else options.problems.push_back("--pane " + value + ": expected raw, reading or split");
     } else if(arg == "--select" && i + 1 < argc) {
       options.selectTitle = argv[++i];
     } else if(arg == "--search" && i + 1 < argc) {
