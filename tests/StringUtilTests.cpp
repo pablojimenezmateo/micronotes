@@ -2,6 +2,7 @@
 
 #include "core/util/StringUtil.h"
 
+#include <string_view>
 #include <string>
 #include <vector>
 
@@ -112,4 +113,42 @@ MICRONOTES_TEST(string_util_split_lines_keeps_the_trailing_piece) {
   // A CR is content, not a line ending: the split is on '\n' alone, so a CRLF
   // buffer keeps its CR and the trim above is what takes it off.
   MICRONOTES_REQUIRE(splitLines("a\r\nb") == std::vector<std::string>({"a\r", "b"}));
+}
+
+// The keyboard is the reason this exists. SDL's Wayland backend reports what a
+// keystroke produced with no filter of its own, so Backspace arrives as the
+// text "\b", Tab as "\t" and Enter as "\r" -- right after the key events that
+// have already erased, indented and broken the line. Inserted raw, they sit at
+// the caret as invisible bytes. See `app::handleText`.
+MICRONOTES_TEST(string_util_finds_and_strips_the_ascii_control_bytes) {
+  using microcore::util::hasAsciiControl;
+  using microcore::util::withoutAsciiControls;
+
+  MICRONOTES_REQUIRE(!hasAsciiControl("plain text"));
+  MICRONOTES_REQUIRE(!hasAsciiControl(""));
+  MICRONOTES_REQUIRE(hasAsciiControl("\b"));
+  MICRONOTES_REQUIRE(hasAsciiControl("\t"));
+  MICRONOTES_REQUIRE(hasAsciiControl("\r"));
+  MICRONOTES_REQUIRE(hasAsciiControl("\n"));
+  MICRONOTES_REQUIRE(hasAsciiControl("a\x7F" "b"));
+  MICRONOTES_REQUIRE(hasAsciiControl(std::string_view("a\0b", 3)));
+
+  // A keystroke whose whole text was a control byte leaves nothing to insert,
+  // which is the Backspace and Tab case and the point of the filter.
+  MICRONOTES_REQUIRE(withoutAsciiControls("\b").empty());
+  MICRONOTES_REQUIRE(withoutAsciiControls("\t") == "");
+  MICRONOTES_REQUIRE(withoutAsciiControls("a\tb") == "ab");
+  MICRONOTES_REQUIRE(withoutAsciiControls("plain text") == "plain text");
+}
+
+// Bytes above 0x7F are UTF-8 lead and continuation bytes, not control
+// characters: a filter that took them would truncate every accented letter
+// anybody types into a note title.
+MICRONOTES_TEST(string_util_control_stripping_leaves_utf8_intact) {
+  using microcore::util::hasAsciiControl;
+  using microcore::util::withoutAsciiControls;
+  const std::string cafe = "caf\xC3\xA9";
+  MICRONOTES_REQUIRE(!hasAsciiControl(cafe));
+  MICRONOTES_REQUIRE(withoutAsciiControls(cafe) == cafe);
+  MICRONOTES_REQUIRE(withoutAsciiControls("\t" + cafe + "\r") == cafe);
 }

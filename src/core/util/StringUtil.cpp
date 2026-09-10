@@ -33,6 +33,28 @@ bool equalsIgnoringAsciiCase(std::string_view a, std::string_view b) {
 }
 
 
+namespace {
+
+bool isAsciiControl(char c) {
+  const auto byte = static_cast<unsigned char>(c);
+  return byte < 0x20 || byte == 0x7F;
+}
+
+}
+
+bool hasAsciiControl(std::string_view value) {
+  return std::any_of(value.begin(), value.end(), isAsciiControl);
+}
+
+std::string withoutAsciiControls(std::string_view value) {
+  std::string out;
+  out.reserve(value.size());
+  for(const char c : value) {
+    if(!isAsciiControl(c)) out.push_back(c);
+  }
+  return out;
+}
+
 std::vector<std::string> splitLines(std::string_view text) {
   std::vector<std::string> lines;
   std::string current;

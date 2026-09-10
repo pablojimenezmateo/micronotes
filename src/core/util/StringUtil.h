@@ -73,4 +73,20 @@ void toUpperAsciiInPlace(std::string& value);
 // wanted this each lowered a copy of both sides first.
 [[nodiscard]] bool equalsIgnoringAsciiCase(std::string_view a, std::string_view b);
 
+// Whether `value` carries an ASCII control byte: C0 (0x00-0x1F) or DEL (0x7F).
+//
+// Asked before the strip below so that the ordinary case pays nothing. Bytes
+// above 0x7F are UTF-8 continuation and lead bytes and are not control
+// characters, which is why this tests the range rather than `std::iscntrl` --
+// that one takes an `int` that must be representable as `unsigned char` and is
+// locale-dependent besides, so on a byte of "cafe" it is undefined.
+[[nodiscard]] bool hasAsciiControl(std::string_view value);
+
+// `value` with those bytes dropped.
+//
+// For text arriving from the *keyboard*, where a control byte is never
+// something anybody typed: it is what a control key happens to produce. See
+// `app::handleText`, the one caller, for the backend that produces them.
+[[nodiscard]] std::string withoutAsciiControls(std::string_view value);
+
 }

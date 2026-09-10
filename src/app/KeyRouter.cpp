@@ -24,6 +24,7 @@
 #include "app/SidebarModel.h"
 #include "app/WikiLinks.h"
 #include "core/editor/TextField.h"
+#include "core/util/StringUtil.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
 #include "ui/Actions.h"
@@ -38,8 +39,13 @@
 #include <string_view>
 
 namespace micronotes::app {
-void handleText(UiRuntime& ui, const char* input) {
-  if(!input) return;
+namespace {
+
+// One keystroke's worth of text, once it is certain to be text.
+//
+// Split from `handleText` so the filter above it runs exactly once, at the
+// boundary, rather than being restated by each of the four surfaces this feeds.
+void insertTypedText(UiRuntime& ui, const char* input) {
   if(ui.overlays.active()) {
     ui.overlays.handleText(input);
     return;
@@ -76,6 +82,33 @@ void handleText(UiRuntime& ui, const char* input) {
       if(bracket > 0 && ui.editor.text()[bracket - 1] == '[') openWikiMenu(ui, bracket - 1);
     }
   }
+}
+
+}
+
+void handleText(UiRuntime& ui, const char* input) {
+  if(!input || !*input) return;
+  // SDL reports what a keystroke *produced*, and on the Wayland backend that is
+  // whatever xkbcommon maps the keysym to -- with no filter. So Backspace
+  // arrives twice: once as the key that erases a character, and again, straight
+  // after, as the text "\b"; Tab arrives as "\t" and Enter as "\r". Inserted
+  // raw, they land at the caret as invisible bytes, which is why clearing a
+  // note-name prompt with Backspace left a blank cell sitting at the front of
+  // the field, and why every Enter in the editor put a stray CR beside the
+  // newline the key handler had just inserted. The X11 backend filters them, so
+  // none of this happened in a headless test.
+  //
+  // Never anything but a mistake: no surface here wants a control byte from the
+  // keyboard. Tab in the editor indents and Enter breaks the line, and both are
+  // decided by the key handler that has already run by the time this is called.
+  if(util::hasAsciiControl(input)) {
+    const std::string typed = util::withoutAsciiControls(input);
+    // A keystroke whose whole text was control bytes has nothing left to insert
+    // -- which is the Backspace and Tab case, and the point of the filter.
+    if(!typed.empty()) insertTypedText(ui, typed.c_str());
+    return;
+  }
+  insertTypedText(ui, input);
 }
 
 void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod mod) {
