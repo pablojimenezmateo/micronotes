@@ -67,13 +67,18 @@ static constexpr std::uint64_t kShellFindBudgetMicros = 2000;
 // shapes glyphs. Loose for the reason the font lane is loose: shaping is the
 // scenario whose cost moves most with what else the machine is doing.
 static constexpr std::uint64_t kShellPageBudgetMicros = 20000;
-// The raw pane rewraps the whole note on every keystroke and has no incremental
-// form. What it no longer does is *shape* anything to find out where a line
-// ends: the pane is a monospaced grid, so a run of ASCII is as wide as it is
-// long. That took it from 70 ms to 0.7 ms, and a budget in the hundreds of
-// microseconds is a budget again rather than a ceiling on a number nobody was
-// pleased with.
-static constexpr std::uint64_t kShellRawBudgetMicros = 3000;
+// The raw pane's soft wrap, which is now bounded by the edit rather than by the
+// note. Two things got it here. It stopped *shaping* to find out where a line
+// ends -- the pane is a monospaced grid, so a run of ASCII is as wide as it is
+// long -- which took it from 70 ms to 0.7 ms; and then it stopped rewrapping
+// the lines the edit did not reach, which took it from 494 us to 4 us and from
+// 450 KB of rows a keystroke to none.
+//
+// So the budget is tight on purpose. At 3,000 us it was a ceiling on a number
+// nobody was pleased with; at 100 it is the thing that fails when the wrap goes
+// back to being whole-note, which is the only way this number moves by an order
+// of magnitude.
+static constexpr std::uint64_t kShellRawBudgetMicros = 100;
 static constexpr std::uint64_t kShellKeystrokeBudgetMicros = 24000;
 // The blocks md4c renders -- tables, raw HTML, footnote definitions -- with the
 // hook actually wired, which for the rest of this lane it is not.

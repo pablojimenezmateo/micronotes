@@ -88,16 +88,45 @@ static editor::MeasureText editorMeasure(TextRenderer& text) {
 // reader makes the text bigger, so at one width the pane used to keep wrapping
 // the note to a font it was no longer drawn in.
 //
-// What is *not* fixed is the rewrap itself: it is still the whole note, because
-// `editor::softWrap` has no incremental form. At 0.7 ms against a 2 ms keystroke
-// budget that is a thing to know rather than a thing to fix, and
-// `shell.raw_pane_rewrap` in the harness is what keeps it that way.
+// The rewrap is incremental, and that is the whole cost of the pane. It used to
+// be the whole note on every keystroke -- 494 us and 450 KB of rows for a
+// 200 KB one, against a 62 us keystroke -- because the memo can only say
+// "not this revision", so a miss meant starting over. What the note page does
+// instead is bound the work by the edit, and the editor already hands out
+// exactly what that needs: `lastChange()` is the splice, stamped with the
+// revision it came from and the one it produced.
+//
+// So the standing rows are updated when three things hold -- same column, same
+// face, and an edit that leads from the revision they *were* built at to this
+// one -- and rebuilt otherwise. The check is here rather than inside
+// `softWrapUpdate` because only this side knows what the rows were built from;
+// getting it wrong is a wrap that does not match the buffer, so it is written
+// as a conjunction of the three, not as an assumption about any of them.
 const std::vector<editor::SoftWrapRow>& rawPaneRows(TextRenderer& text, UiRuntime& ui, Rect rect) {
   const Rect writing = editorWritingRect(rect);
   const RawRowsKey key {ui.editor.revision(), static_cast<int>(std::max(1.0f, writing.w - 20.0f)),
                         ui::textSize()};
   if(const auto* rows = ui.raw.rows.get(key)) return *rows;
-  return ui.raw.rows.store(key, editor::softWrap(ui.editor.text(), key.wrapWidth, editorMeasure(text)));
+
+  const editor::MeasureText measure = editorMeasure(text);
+  const editor::TextEdit edit = ui.editor.lastChange();
+  // A copy, and read before `rebuild`: `rebuild` replaces the memo's key, so a
+  // reference into it would be answering about the wrap this call is producing
+  // rather than the one it is standing on.
+  const RawRowsKey was = ui.raw.rows.key();
+  const bool updatable = ui.raw.rows.valid() && was.wrapWidth == key.wrapWidth &&
+                         was.textSize == key.textSize && edit.known() &&
+                         edit.fromRevision == was.revision && edit.toRevision == key.revision;
+  // `rebuild` rather than `store`: the rows vector is 300 KB on a 200 KB note
+  // and both paths fill it in place, so the last wrap's allocation is reused
+  // rather than freed and taken again.
+  auto& rows = ui.raw.rows.rebuild(key);
+  if(updatable) {
+    editor::softWrapUpdate(rows, ui.raw.wrapScratch, ui.editor.text(), edit, key.wrapWidth, measure);
+  } else {
+    editor::softWrapInto(rows, ui.editor.text(), key.wrapWidth, measure);
+  }
+  return rows;
 }
 
 Rect editorWritingRect(Rect editorRect) {

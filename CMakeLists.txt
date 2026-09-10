@@ -413,6 +413,7 @@ add_executable(micronotes_tests
   tests/ShellLayoutTests.cpp
   tests/ShellLinkTests.cpp
   tests/ShellPageTests.cpp
+  tests/ShellRawPaneTests.cpp
   tests/ShellSessionTests.cpp
   tests/ShellSidebarTests.cpp
   tests/SidebarRowsMemoTests.cpp

@@ -57,6 +57,18 @@ namespace microcore::perf {
   X(EditorWordCountBytesScanned, "editor.word_count_bytes_scanned")                   \
   X(EditorSingleLineLayouts, "editor.single_line_layouts")                              \
   X(EditorSingleLineMeasures, "editor.single_line_measures")                            \
+  /* The soft wrap a source pane shows the buffer through. `rebuilds` wraps    */      \
+  /* the whole note and `updates` only the logical lines one edit reached;      */     \
+  /* `bytes` is what the two actually looked at, which is the number that says   */    \
+  /* the increment is working -- a regression to rewrapping shows up here as     */    \
+  /* bytes per keystroke going from a line's worth to the note's. `rows_laid`    */    \
+  /* is the wrapping and `rows_shifted` the addition per row the tail costs      */    \
+  /* instead of it.                                                             */     \
+  X(EditorSoftWrapRebuilds, "editor.soft_wrap_rebuilds")                                \
+  X(EditorSoftWrapUpdates, "editor.soft_wrap_updates")                                  \
+  X(EditorSoftWrapBytes, "editor.soft_wrap_bytes")                                      \
+  X(EditorSoftWrapRowsLaid, "editor.soft_wrap_rows_laid")                               \
+  X(EditorSoftWrapRowsShifted, "editor.soft_wrap_rows_shifted")                         \
   /* --- literal text search ------------------------------------------------ */      \
   /* One scan of a buffer for a needle. `scans` is what says the memo above it  */     \
   /* is working: the find bar re-asks on every keystroke and every frame, and    */     \

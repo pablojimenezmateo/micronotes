@@ -67,6 +67,17 @@ public:
   // forgotten, only unequal.
   void invalidate() { valid_ = false; }
 
+  // What the standing value was built from, for a producer that can *update* it
+  // rather than rebuild it -- an incremental rewrap, say, which needs to know
+  // which revision the rows it is holding describe, not merely that it is not
+  // this one. Only meaningful when `valid()`.
+  //
+  // Deliberately narrower than it looks: a reader that only wants to know
+  // whether the value is current asks `get`, which compares the whole key.
+  // Reaching for a field of this one to write a comparison by hand is the
+  // drifting-two-lists shape above, spelled differently.
+  const Key& key() const { return key_; }
+
   // What is held, whatever it was built from. For the reader that has just
   // called `store` or `get` and only wants the value again -- a draw that
   // measured on one line and paints on the next. A reader that has not asked

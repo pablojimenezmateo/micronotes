@@ -3362,3 +3362,84 @@ which is deterministic: the shaping allocates a few hundred and a hit allocates
 none. And the claim itself — that laying the same block out again at the same
 width is a comparison — is pinned by a test rather than by a number:
 `render_layout_reuses_a_layout_at_the_same_width`.
+
+## The twelfth pass: the pane that rewrapped a note to type one character into it
+
+The shell lane's raw-pane scenario had a comment on it saying it was known and
+not worth fixing:
+
+```
+shell.raw_pane_rewrap                        494 us median   2 allocs   450.6 KB
+```
+
+> What is *not* fixed is the rewrap itself: it is still the whole note, because
+> `editor::softWrap` has no incremental form. At 0.7 ms against a 2 ms
+> keystroke budget that is a thing to know rather than a thing to fix.
+
+Two things were wrong with that. The first is the arithmetic: the number to
+compare it against is not the budget, it is `shell.keystroke` — 62 us. In split
+view both panes are live, so a keystroke on a 200 KB note cost 62 us of note
+page and 494 us of raw pane, and the surface showing the file as *bytes* was
+eight times the cost of the one shaping every word of it. The second is the
+450 KB. That is the rows vector, freed and taken again on every keystroke,
+which does not show up in a timing at all on a machine with a warm allocator
+and is the whole of the pane's memory traffic.
+
+**The fix is the one the note page already had.** `doc::DocumentLayout` bounds
+its work by the edit rather than by the note, and what makes that possible is
+`editor::TextEdit`: the splice, stamped with the revision it came from and the
+one it produced, so a consumer can *check* that the edit leads from the state
+it is holding rather than trust that it does. The raw pane had the same
+consumer shape — a `ui::Memo` keyed on the revision — and used it only to ask
+"is this still current", which on a keystroke is always no.
+
+A wrap is a partition of the buffer into rows, a logical line's rows are
+contiguous in it, and a line break is a *byte*. So an edit can only change the
+wrap of the logical lines its own bytes touch: everything before them is
+byte-identical and wraps identically, and everything after is byte-identical
+too and merely sits `newEnd - oldEnd` further along — an addition per row
+instead of a measurement per row. `editor::softWrapUpdate` widens the edit to
+whole logical lines, rewraps only those, splices the result in, and shifts the
+tail.
+
+| | before | after |
+|---|---:|---:|
+| `shell.raw_pane_rewrap` median | 494 us | **4 us** |
+| allocations per keystroke | 2 | **0** |
+| bytes allocated per keystroke | 450.6 KB | **0.0 KB** |
+
+The counters say the same thing without a clock: `editor.soft_wrap_bytes` over
+the whole harness run is 207,048 — one cold wrap of the 200 KB fixture plus a
+line's worth for each of eight keystrokes — where it would have been eight
+times that. And the budget went from 3,000 us to **100**, because at 3,000 it
+was a ceiling on a number nobody was pleased with; at 100 it is the thing that
+fails if the wrap ever goes back to being whole-note, which is the only way
+this number moves by an order of magnitude.
+
+### What the proof is, and what it is not
+
+An incremental anything is only worth having if it is *exactly* the full
+computation. So the test is not a list of cases: it is that equality, asserted
+after every edit of a 400-step deterministic sequence of random splices against
+a full rewrap of the same buffer, plus a hand-written sequence for the shapes
+with an edge in them (insert at offset zero, a break the writer put in, a
+deletion joining two logical lines, a replacement spanning several). Removing
+the widening back to the line start — the subtlest of the four steps — fails
+the long sequence and passes everything else, which is what says the long
+sequence is doing the work.
+
+The wiring is a second proof and a separate one. `softWrapUpdate` cannot know
+whether the rows it is handed describe the buffer the edit came from; the pane
+does, and answers with a conjunction of three things (same column, same face,
+an edit leading from the standing memo's revision to this one). `Memo::key()`
+exists for that — an incremental producer needs to know *which* key the value
+it holds was built from, not merely that it is not this one.
+
+There is also a cheap half of the check inside the wrap itself, because a caller
+that gets it wrong should not corrupt a partition: rows cover the whole buffer,
+so the last one ends at its size, which makes "do these rows describe the
+buffer this edit came from" an O(1) question about lengths. It catches a
+skipped edit that changed the size. It cannot catch one that did not, and
+`shell_raw_pane_wrap_rebuilds_when_the_edit_it_missed_kept_the_length` is the
+test that holds the revision check load-bearing for that case — it passes with
+the length guard alone and fails the moment the revision check goes.

@@ -37,6 +37,9 @@ struct RawRowsKey {
 
 struct RawPaneState {
   ui::Memo<std::vector<editor::SoftWrapRow>, RawRowsKey> rows;
+  // Reused by the incremental rewrap, so a keystroke allocates nothing. See
+  // `editor::SoftWrapScratch` for why it is here rather than inside the wrap.
+  editor::SoftWrapScratch wrapScratch;
   ScrollList list;
   // Rows the pane last had room for, so PageUp/PageDown match the view.
   int visibleRows = kEditorPageLines;

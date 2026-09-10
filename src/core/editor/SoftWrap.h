@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/editor/TextEdit.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <functional>
@@ -37,7 +39,46 @@ inline std::string_view textIn(std::string_view buffer, const SoftWrapRow& row) 
   return buffer.substr(row.start, std::min(row.end, buffer.size()) - row.start);
 }
 
+// The whole buffer, wrapped. `softWrapInto` is the same thing over a vector the
+// caller owns, so the last wrap's allocation is reused rather than freed and
+// taken again -- a 200 KB note is 19,000 rows and 300 KB of them.
+void softWrapInto(std::vector<SoftWrapRow>& rows, std::string_view text, int width,
+                  const MeasureText& measure);
 std::vector<SoftWrapRow> softWrap(std::string_view text, int width, const MeasureText& measure);
+
+// Scratch an incremental wrap reuses, so it allocates nothing after the first
+// call. Owned by the caller rather than hidden in a function-local static for
+// the same reason `doc::FlowScratch` is: a static would be shared mutable state
+// between surfaces that have no other relationship, and this tree keeps the
+// perf tables as its only deliberate exception to that.
+struct SoftWrapScratch {
+  std::vector<SoftWrapRow> relaid;
+};
+
+// The same rows after one edit, without wrapping the lines the edit did not
+// reach.
+//
+// `rows` must be the wrap of the buffer at `edit.fromRevision`, `text` the
+// buffer at `edit.toRevision`, and the width and the face must be the ones
+// `rows` was built with -- none of which this can check, so the caller checks
+// them: that is what the revision stamps on `TextEdit` are for. Getting it
+// wrong is a wrap that does not match the buffer, which is a caret in the wrong
+// place rather than a crash, so the caller's check is the whole safety of it.
+//
+// Why it is sound. Rows partition the buffer, a logical line's rows are
+// contiguous, and a line break inside `text` is a byte -- so an edit can only
+// change the wrap of the logical lines its own bytes touch. Everything before
+// the first of those is byte-identical and wraps identically; everything after
+// is byte-identical too and merely sits `newEnd - oldEnd` further along, which
+// is an addition per row rather than a measurement.
+//
+// Returns the number of rows it produced for the region it rewrapped, which is
+// what says the increment is working: one keystroke should relay one line's
+// worth of rows, not the note's.
+std::size_t softWrapUpdate(std::vector<SoftWrapRow>& rows, SoftWrapScratch& scratch,
+                           std::string_view text, const TextEdit& edit, int width,
+                           const MeasureText& measure);
+
 int rowForOffset(const std::vector<SoftWrapRow>& rows, std::size_t offset);
 // The offset in `buffer` that `x` logical pixels into `row` addresses, snapped
 // to a codepoint boundary and never past the row's end.
