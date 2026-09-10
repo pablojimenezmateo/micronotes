@@ -4,8 +4,11 @@
 #include "doc/Edits.h"
 #include "core/editor/MarkdownEditor.h"
 
+#include "doc/BlockScan.h"
+
 #include <algorithm>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -405,8 +408,9 @@ MICRONOTES_TEST(edits_refuse_a_range_that_holds_nothing) {
 }
 
 MICRONOTES_TEST(edits_move_blocks_without_merging_them) {
-  // The blank line between two paragraphs has to travel with the block that
-  // moves, or the two run together into one paragraph.
+  // A step is a swap with the nearest neighbour, and the blank run between them
+  // stays where it is -- which is what keeps two paragraphs from running
+  // together without the run having to travel with the block.
   const std::string source = "one\n\ntwo\n\nthree\n";
   MICRONOTES_REQUIRE(applied(source, micronotes::doc::moveBlock(source, 5, -1)) == "two\n\none\n\nthree\n");
   MICRONOTES_REQUIRE(applied(source, micronotes::doc::moveBlock(source, 5, 1)) == "one\n\nthree\n\ntwo\n");
@@ -541,6 +545,105 @@ MICRONOTES_TEST(edits_lending_the_partition_changes_nothing) {
       MICRONOTES_REQUIRE(same(moveBlocks(source, caret, to, 1), moveBlocks(source, caret, to, 1, blocks)));
       MICRONOTES_REQUIRE(same(turnBlocksInto(source, caret, to, BlockKind::Bullet),
                               turnBlocksInto(source, caret, to, BlockKind::Bullet, 1, blocks)));
+    }
+  }
+}
+
+// The blank lines are the complaint this fixes: moving a block up or down used
+// to invent and swallow them, and worst where the neighbour was a list.
+//
+// Both of these came from the step being a lift-and-drop that carried the blank
+// run along with the group. Which side of the group the run landed on cannot be
+// right for both directions at once, so one of the two always tore a hole and
+// filled another.
+MICRONOTES_TEST(edits_a_step_leaves_the_blank_lines_where_they_were) {
+  // A list above a paragraph. Moving the second item up over the first used to
+  // push a blank line between the two items and pull the one below out, which
+  // split the list and merged the item into the paragraph.
+  const std::string list = "- a\n- b\n\npara\n";
+  MICRONOTES_REQUIRE(applied(list, micronotes::doc::moveBlock(list, 4, -1)) ==
+                     "- b\n- a\n\npara\n");
+
+  // The first paragraph moved down used to merge with the second and stack its
+  // blank line onto the next one's: two blank lines out of one.
+  const std::string paragraphs = "one\n\ntwo\n\nthree\n";
+  MICRONOTES_REQUIRE(applied(paragraphs, micronotes::doc::moveBlock(paragraphs, 0, 1)) ==
+                     "two\n\none\n\nthree\n");
+
+  // A heading over a list, which is where the two faults met: moving the first
+  // item down left the heading jammed against the list and two blank lines
+  // above the paragraph.
+  const std::string mixed = "# H\n\n- a\n- b\n\npara\n";
+  MICRONOTES_REQUIRE(applied(mixed, micronotes::doc::moveBlock(mixed, 5, 1)) ==
+                     "# H\n\n- b\n- a\n\npara\n");
+
+  // A run of more than one blank line is a position too, and stays one.
+  const std::string wide = "a\n\n\nb\n";
+  MICRONOTES_REQUIRE(applied(wide, micronotes::doc::moveBlock(wide, 0, 1)) == "b\n\n\na\n");
+}
+
+// A step never changes the note's length or its blank lines, in either
+// direction and whatever the shape around the block. That is the property the
+// old rule could not have: it spelled the two directions separately, so one of
+// them always tore a hole and filled another.
+MICRONOTES_TEST(edits_a_step_never_changes_the_length_or_the_blank_lines) {
+  const std::vector<std::string> bodies {
+    "one\n\ntwo\n\nthree\n",
+    "- a\n- b\n- c\n",
+    "- a\n- b\n\npara\n",
+    "para\n\n- a\n- b\n",
+    "# H\n\n- a\n- b\n\npara\n",
+    "- a\n\npara\n\n- b\n",
+    "a\n\n\nb\n",
+    "A\n\nB",
+  };
+  const auto newlines = [](std::string_view text) {
+    return static_cast<std::size_t>(std::count(text.begin(), text.end(), '\n'));
+  };
+  for(const auto& body : bodies) {
+    const auto blocks = micronotes::doc::scanBlocks(body);
+    for(const auto& block : blocks) {
+      if(block.kind == BlockKind::Blank) continue;
+      for(const int delta : {-1, 1}) {
+        const auto step = micronotes::doc::moveBlock(body, block.start, delta);
+        if(!step.valid) continue;
+        const std::string moved = applied(body, step);
+        const std::string what = "moving the block at " + std::to_string(block.start) + " by " +
+                                 std::to_string(delta) + " turned [" + body + "] into [" + moved +
+                                 "]";
+        micronotes::tests::require(moved.size() == body.size(), what);
+        micronotes::tests::require(newlines(moved) == newlines(body), what);
+        // The caret comes out inside the block that moved, which is what the
+        // next step in the same direction has to act on.
+        micronotes::tests::require(step.cursor >= step.anchor && step.cursor <= moved.size(), what);
+      }
+    }
+  }
+}
+
+// A step and the step back put the note back byte for byte -- as long as the
+// move did not change how the note *divides* into blocks. A paragraph dropped
+// directly under a list item becomes a lazy continuation of it, so the way back
+// is a step of a block that did not exist before; that is the scanner's rule
+// about the new text and not the move failing to undo itself.
+MICRONOTES_TEST(edits_a_step_and_the_step_back_come_back_to_the_start) {
+  const std::vector<std::string> bodies {
+    "one\n\ntwo\n\nthree\n",
+    "- a\n- b\n- c\n",
+    "# one\n\n# two\n\n# three\n",
+    "A\n\nB",
+  };
+  for(const auto& body : bodies) {
+    const auto blocks = micronotes::doc::scanBlocks(body);
+    for(const auto& block : blocks) {
+      if(block.kind == BlockKind::Blank) continue;
+      const auto down = micronotes::doc::moveBlock(body, block.start, 1);
+      if(!down.valid) continue;
+      const std::string moved = applied(body, down);
+      const auto up = micronotes::doc::moveBlock(moved, down.cursor, -1);
+      micronotes::tests::require(up.valid, "no way back from [" + moved + "]");
+      micronotes::tests::require(applied(moved, up) == body,
+                                 "[" + body + "] came back as [" + applied(moved, up) + "]");
     }
   }
 }

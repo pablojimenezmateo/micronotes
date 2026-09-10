@@ -340,11 +340,15 @@ Edit outdent(std::string_view source, std::size_t caret, BlockSpan blocks) {
 
 namespace {
 
-// Every move is the same operation: lift the blocks [first, last] together with
-// the blank run that separates them from their neighbour, then drop the pair at
+// A drop at a chosen boundary: lift the blocks [first, last] together with the
+// blank run that separates them from their neighbour, then drop the pair at
 // `dest`. The separator travels on the group's trailing side going up and its
 // leading side going down, which is what stops two paragraphs from merging into
-// one when they change places.
+// one when the group lands against another block.
+//
+// Reached from the block *drag* only. A one-step move up or down is
+// `swapWithNeighbour` below, which needs none of this -- see the note there for
+// what carrying the run cost when the step went through here too.
 Edit moveGroup(std::string_view source, const BlockList& blocks, std::size_t first,
                std::size_t last, std::size_t dest, std::size_t caret, bool selects) {
   Edit edit;
@@ -400,6 +404,113 @@ Edit moveGroup(std::string_view source, const BlockList& blocks, std::size_t fir
   return edit;
 }
 
+// One step up or down: the group changes places with its nearest neighbour, and
+// the blank run between them stays exactly where it is.
+//
+// A *swap*, not a lift and a drop, which is what `moveGroup` above does for a
+// drag to a chosen boundary. The step used to go through that too, and carried
+// the blank run along with the group; which side of the group the run landed on
+// then had to be decided, and no single rule for it is right in both
+// directions. So one direction always tore a hole and filled another:
+//
+//   * `one\n\ntwo\n\nthree`, first paragraph moved down, came back as
+//     `two\none\n\n\nthree` -- "one" merged into "two", and the blank line it
+//     had been carrying stacked onto the next one's. Two blank lines out of one.
+//   * `- a\n- b\n\npara`, second item moved up, came back as
+//     `- b\n\n- a\npara` -- a blank line pushed between two list items, the one
+//     below pulled out, the list split and the item merged into the paragraph.
+//
+// Neither fault is about paragraphs merging, which is what carrying the run was
+// for. The run is a *position* in the document, and swapping the two blocks
+// either side of it cannot merge anything that was not merged already: the
+// arrangement of blank runs between positions comes out exactly as it went in.
+// So there is nothing to carry, and nothing that can be invented or swallowed
+// -- the region keeps its byte count, its blank lines and its final newline.
+Edit swapWithNeighbour(std::string_view source, const BlockList& blocks, std::size_t first,
+                       std::size_t last, int delta, std::size_t caret, bool selects) {
+  Edit edit;
+  const std::size_t gs = blocks[first].start;
+  const std::size_t ge = blocks[last].end();
+  if(ge <= gs) return edit;
+
+  const auto blankRun = [&blocks](std::size_t i) {
+    // The synthetic last-line block has no width, so it separates nothing --
+    // and is not a block anything can change places with either.
+    return blocks[i].kind == BlockKind::Blank && blocks[i].end() > blocks[i].start;
+  };
+  // The neighbour, found past whatever blank run lies between, and that run.
+  std::size_t neighbour = 0;
+  std::size_t gapStart = 0;
+  std::size_t gapEnd = 0;
+  if(delta < 0) {
+    std::size_t j = first;
+    while(j > 0 && blankRun(j - 1)) --j;
+    if(j == 0) return edit;
+    neighbour = j - 1;
+    gapStart = blocks[neighbour].end();
+    gapEnd = gs;
+  } else {
+    std::size_t j = last;
+    while(j + 1 < blocks.size() && blankRun(j + 1)) ++j;
+    if(j + 1 >= blocks.size()) return edit;
+    neighbour = j + 1;
+    gapStart = ge;
+    gapEnd = blocks[neighbour].start;
+  }
+  const std::size_t otherStart = blocks[neighbour].start;
+  const std::size_t otherEnd = blocks[neighbour].end();
+  // Nothing to change places with: the group is already against the end it was
+  // sent towards, and the only thing past it is the empty last line.
+  if(otherEnd <= otherStart) return edit;
+
+  const std::size_t regionStart = delta < 0 ? otherStart : gs;
+  const std::size_t regionEnd = delta < 0 ? ge : otherEnd;
+  const bool regionEndsWithNewline = source[regionEnd - 1] == '\n';
+
+  std::string out;
+  out.reserve(regionEnd - regionStart + 2);
+  std::size_t groupAt = regionStart;
+  std::size_t groupLength = 0;
+  const auto append = [&](std::size_t from, std::size_t to, bool isGroup) {
+    const std::size_t at = out.size();
+    if(isGroup) groupAt = regionStart + at;
+    out.append(source.substr(from, to - from));
+    // Every piece has to end the line it sits on, or the piece after it runs
+    // onto the same line -- which is the one way a swap could merge two blocks
+    // that were not merged before. The last piece's ending is corrected below.
+    if(out.empty() || out.back() != '\n') out.push_back('\n');
+    if(isGroup) groupLength = out.size() - at;
+  };
+  if(delta < 0) {
+    append(gs, ge, true);
+    append(gapStart, gapEnd, false);
+    append(otherStart, otherEnd, false);
+  } else {
+    append(otherStart, otherEnd, false);
+    append(gapStart, gapEnd, false);
+    append(gs, ge, true);
+  }
+  // The region keeps whatever ending it had, so a note without a final newline
+  // does not grow one.
+  if(!regionEndsWithNewline && !out.empty() && out.back() == '\n') {
+    out.pop_back();
+    if(groupAt + groupLength > regionStart + out.size()) --groupLength;
+  }
+
+  const std::size_t limit = regionStart + out.size();
+  // Where in the group the caret was, so it comes out of the move still against
+  // the same word rather than at the top of the block.
+  const std::size_t within = caret >= gs && caret < ge ? caret - gs : 0;
+  edit.valid = true;
+  edit.start = regionStart;
+  edit.end = regionEnd;
+  edit.text = out;
+  edit.anchor = groupAt;
+  edit.cursor = std::min(selects ? groupAt + groupLength : groupAt + within, limit);
+  edit.selects = selects;
+  return edit;
+}
+
 }
 
 Edit moveBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCaret, int delta,
@@ -410,21 +521,8 @@ Edit moveBlocks(std::string_view source, std::size_t fromCaret, std::size_t toCa
   if(!range.valid) return edit;
   const BlockList& partition = range.blocks;
   if(range.first == range.last && partition[range.first].kind == BlockKind::Blank) return edit;
-
-  std::size_t destination = 0;
-  if(delta < 0) {
-    std::size_t j = range.first;
-    while(j > 0 && partition[j - 1].kind == BlockKind::Blank) --j;
-    if(j == 0) return edit;
-    destination = partition[j - 1].start;
-  } else {
-    std::size_t j = range.last;
-    while(j + 1 < partition.size() && partition[j + 1].kind == BlockKind::Blank) ++j;
-    if(j + 1 >= partition.size()) return edit;
-    destination = partition[j + 1].end();
-  }
-  return moveGroup(source, partition, range.first, range.last, destination,
-                   std::min(fromCaret, toCaret), fromCaret != toCaret);
+  return swapWithNeighbour(source, partition, range.first, range.last, delta,
+                           std::min(fromCaret, toCaret), fromCaret != toCaret);
 }
 
 Edit moveBlock(std::string_view source, std::size_t caret, int delta, BlockSpan blocks) {
