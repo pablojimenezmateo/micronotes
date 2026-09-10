@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-47 have been used. Closing an entry means deleting it and saying so in the
+TD-48 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -175,3 +175,49 @@ while a query is being typed, which the current scan already handles in one
 pass with no allocation (`search.query_matches_nothing`, `docs/performance.md`,
 the eleventh pass). Worth doing, and worth doing after somebody decides what
 `truncated` means under an increment.
+
+---
+
+## TD-48 — Autosave re-stores and re-tokenises the whole note, once a second
+
+Every save goes through `LibraryIndex::refreshWrittenFile`, which upserts the
+note's row -- `notes.body` holds the entire buffer -- and then deletes and
+re-inserts its `notes_fts` entry, which tokenises the same bytes again. Both
+halves scale with the *note*, not with the edit, and autosave runs once a
+second for as long as somebody keeps typing.
+
+**What it costs.** Measured on the 200 KB fixture in a 1,000-note library,
+with the split timers this entry was opened alongside:
+
+| | per save |
+|---|---:|
+| `library_index.write_fts` (tokenise) | 1.02 ms |
+| `library_index.write_rows` (store the body) | 1.19 ms worst |
+| `library_index.refresh_file` self (the `COMMIT` those two fill) | 0.63 ms |
+| `library_index.refresh_file` total | **1.24 ms** |
+| `save.autosave_note`, the whole path | 2.73 ms |
+
+So the index is about half of what an autosave costs, and the note's own
+durable file write is the other half. `library.index_body_bytes_stored` and
+`library.index_body_bytes_indexed` are the deterministic half of the same
+statement: a minute of typing in a 200 KB note puts 12 MB through each.
+
+It is not a dropped frame -- 2.7 ms once a second against a 16.7 ms frame --
+so this is CPU and battery rather than stutter, which is why it is an entry
+rather than a fix. It is also the *floor* the eighth pass left: that one took
+a save from 18.7 ms to here by removing a whole-library tree walk and three
+whole-file reads, and what is left is genuinely the note being written twice.
+
+**Why it has not been paid.** The obvious shape is to write the row's list
+fields eagerly and the body and its FTS entry lazily -- flushed before a search
+reads them, or when the editor goes idle -- which coalesces sixty index writes
+into one. The cost is that `LibraryIndex`'s contract stops being "current after
+every write" and becomes "current before every read", and every reader has to
+be one that flushes: the search, the backlinks panel, the tag list, the
+external-change watcher, and whatever is added next. This tree's stated
+priority order is speed, then correctness, then low CPU, and buying CPU with
+correctness surface is the wrong way round for a cost that is not a dropped
+frame. Worth doing when either the number moves (a bigger note, a slower disk)
+or the flush points can be made structural rather than remembered -- a reader
+that cannot forget, the way `NoteCatalog` is the one path a note's file is
+written through.

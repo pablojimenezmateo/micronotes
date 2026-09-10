@@ -23,6 +23,13 @@
   /* gone back to rescanning the library once a second.                         */   \
   X(LibraryIndexFileRefreshCalls, "library.index_file_refresh_calls")                  \
   X(LibraryIndexFilesReread, "library.index_files_reread")                             \
+  /* What an index write actually moves: the note's body stored in `notes` and */      \
+  /* the same bytes tokenised into `notes_fts`. Both scale with the *note*      */     \
+  /* rather than with the row, and a save runs once a second while somebody     */     \
+  /* types -- so a 200 KB note autosaved for a minute puts 12 MB through each   */     \
+  /* of these. Two counters because the two are separately avoidable.           */     \
+  X(LibraryIndexBodyBytesStored, "library.index_body_bytes_stored")                    \
+  X(LibraryIndexBodyBytesIndexed, "library.index_body_bytes_indexed")                  \
   X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
   X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \

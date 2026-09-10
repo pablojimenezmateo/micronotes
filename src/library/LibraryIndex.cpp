@@ -179,6 +179,7 @@ public:
   // the fts delete, which a table that was just emptied cannot need.
   bool write(const NoteRow& row, bool intoEmptyTables) {
     perf::ScopeTimer timer("library_index.write_rows");
+    perf::addCounter(perf::CounterId::LibraryIndexBodyBytesStored, row.body().size());
     sqlite3_reset(upsert_);
     persistence::bindText(upsert_, 1, row.id);
     persistence::bindText(upsert_, 2, row.relative);
@@ -205,12 +206,21 @@ public:
       if(sqlite3_step(deleteFts_) != SQLITE_DONE) return false;
     }
 
-    sqlite3_reset(insertFts_);
-    sqlite3_bind_int64(insertFts_, 1, rowId);
-    persistence::bindText(insertFts_, 2, row.title);
-    persistence::bindTextBorrowed(insertFts_, 3, row.body());
-    persistence::bindText(insertFts_, 4, row.relative);
-    if(sqlite3_step(insertFts_) != SQLITE_DONE) return false;
+    {
+      // Its own timer, because it is the half of a write that scales with the
+      // *note* rather than with the row: the notes upsert stores the body and
+      // fts5 tokenises it, and a save runs once a second while somebody types.
+      // Without the split the two are one number and the number is a mean over
+      // a thousand small notes and one large one.
+      perf::ScopeTimer ftsTimer("library_index.write_fts");
+      perf::addCounter(perf::CounterId::LibraryIndexBodyBytesIndexed, row.body().size());
+      sqlite3_reset(insertFts_);
+      sqlite3_bind_int64(insertFts_, 1, rowId);
+      persistence::bindText(insertFts_, 2, row.title);
+      persistence::bindTextBorrowed(insertFts_, 3, row.body());
+      persistence::bindText(insertFts_, 4, row.relative);
+      if(sqlite3_step(insertFts_) != SQLITE_DONE) return false;
+    }
 
     // Rewritten wholesale rather than diffed: a note's links are however many
     // it has, and working out which of them changed costs more than writing
