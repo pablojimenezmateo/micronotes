@@ -35,6 +35,14 @@ namespace micronotes::ui {
 // width; at the ~10^5 distinct runs a session sees, that is around one chance in
 // three billion, and the texture cache beside it already takes the same bet for
 // a worse outcome (wrong glyphs rather than a wrong advance).
+//
+// **Before enlarging it: the misses are compulsory, not conflict.** Measured
+// on the harness's worst case -- `font.open_unique_words`, a 200 KB note in
+// which no word repeats -- eight times the slots (2^16 to 2^19) moved the hit
+// rate from 53.2% to 55.7% and peak RSS from 32.1 MB to 39.6 MB. A keystroke
+// went from 97.0% to 99.2% and did not get faster, because 97% was already
+// past the point where the shaping matters. The 47% that miss are words the
+// cache has never seen, and no size fixes that.
 class TextMeasureCache {
 public:
   // Rounded up to a power of two, so the index is a mask rather than a modulo.
