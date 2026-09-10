@@ -2529,7 +2529,7 @@ closely enough to make it fast:
   click the note's name again after restarting.
 - **The first save of a note another tool wrote made it vanish.** Such a note is
   filed under an id derived from its path; the save gave it a permanent one and
-  left the selection, its tab and the pinnedNotes pointing at the id it no longer
+  left the selection, its tab and the pinned notes pointing at the id it no longer
   had.
 
 The lesson is the fifth pass's, one turn further round: the instruments answer

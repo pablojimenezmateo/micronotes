@@ -261,7 +261,7 @@ Useful runtime controls:
   room becomes margin rather than longer lines. Both are stored per library in
   `.micronotes/ui.state`, beside the theme.
 - Choosing a library folder from settings opens it without a restart: the
-  library being left is written out first, so its open note and pinnedNotes stay
+  library being left is written out first, so its open note and its pinned notes stay
   with it. The folder is created if it is not there, `~` is expanded, and
   the choice is remembered in `~/.config/micronotes/library-path` the same way
   `--set-library` does.
@@ -318,10 +318,10 @@ Useful runtime controls:
 - `/`: focus search when the editor is not focused.
 - Click in the editor to place the cursor.
 - Right-click a note anywhere in the sidebar - in the tree or in a list of
-  search results - for Rename, Set icon, Edit tags, Move, Delete, and the four
-  questions about the note as a *file*: Show on disk, Copy relative path, Copy
-  absolute path, and Export as PDF. The three path commands are also on the
-  menu bar's Note menu and in the command palette. A relative path is relative
+  search results - for Rename, Set icon, Edit tags, Pinned, Move, Delete, and
+  the four questions about the note as a *file*: Show on disk, Copy relative
+  path, Copy absolute path, and Export as PDF. All of those are on the menu
+  bar's Note menu and in the command palette too. A relative path is relative
   to the library root, which is what makes it the one worth having: it is the
   spelling that means the same thing to somebody else looking at the same
   library.
@@ -343,10 +343,13 @@ Useful runtime controls:
   is anywhere a reader of the PDF can go. Pictures come along - a JPEG is
   passed through untouched, anything else is decoded - and a table breaks
   between its rows rather than running off the page.
-- Right-click a tab for Close, Pin and those same three path commands. The menu
-  is about the tab under the pointer rather than the note on the page, and
-  opening it does not switch to that tab. `Ctrl+click` a tab also pins it; a
-  pinned tab is never the one replaced by the next note opened.
+- Right-click a tab for Close, the four bulk closes, Pinned and those same
+  three path commands. The menu is about the tab under the pointer rather than
+  the note on the page, and opening it does not switch to that tab.
+  `Ctrl+click` a tab also pins it. A pinned tab is never the one replaced by
+  the next note opened and is spared by all four bulk closes, and it wears a
+  thumbtack where the close cross would be -- the same mark the breadcrumb
+  uses for a pinned note, because it is the same gesture.
 - Right-click a tag - on its row in the sidebar's Tags band, or on any coloured
   dot at the trailing edge of a note's row - to filter by it or to choose its
   colour from a palette of twelve. Hovering a dot names its tag; clicking one
@@ -380,7 +383,7 @@ Useful runtime controls:
   tags are a filter at the bottom rather than a second way to organise notes.
   Both lists are stored in `.micronotes/ui.state` and name notes by id.
 - The window draws its own menu bar rather than wearing the compositor's title
-  bar: File, Edit, View, Go, Note and Help, the application's name centred when
+  bar: File, Edit, View, Go, Tabs, Note and Help, the application's name centred when
   there is room for it, and minimize / maximize / close at the right. Menus that
   do not fit a narrow window hide behind a chevron rather than being dropped.
   Sliding along the bar with one open switches menus without a click; the arrow
@@ -390,10 +393,18 @@ Useful runtime controls:
   that -- one press, one thing. Dragging the empty part of the bar
   moves the window, and the window's edges resize it. On a platform that refuses
   a hit test the ordinary decorations come back and the drawn buttons stand down.
+- What each menu holds: **File** makes notes and notebooks, saves, exports,
+  refreshes and restores; **Edit** is the text -- undo, the clipboard, the
+  inline styles, the block verbs; **View** is the three arrangements, the two
+  panels and the theme; **Go** is getting somewhere, which includes finding;
+  **Tabs** is the strip; **Note** is this note and this notebook; **Help** is
+  the keys and the version.
 - Every menu item is an entry in `ui::Actions` and nothing else, so an item, its
   palette row and its keyboard chord cannot drift apart -- they are one row in
   one table, drawn three ways. `ArchitectureTests` proves every action the menus
-  or the palette offer actually reaches a command.
+  or the palette offer actually reaches a command, and `MenuActionTests` runs
+  every row of every menu -- the bar's seven and the six the overlay backs --
+  and fails on one that moves nothing.
 - Under the tab strip, over the page, a breadcrumb band names the notebooks down
   to the open note (click one to go there) and carries the thumbtack that pins it
   to Pinned. It belongs to the page's own column rather than spanning the window,
