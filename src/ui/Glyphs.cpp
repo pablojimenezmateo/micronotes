@@ -30,19 +30,88 @@ constexpr NoteGlyph kNoteGlyphs[] = {
   {"warning", "Careful"},   {"code", "Technical"},
 };
 
-// A ring, from a polygon with enough sides that the corners are gone at this
-// size. Cheaper than the disc in `drawTagDot`, which fills; a clock face wants
-// the hole.
+// The grid every mark in this file is laid out on: one pixel at the centre,
+// and whole-pixel offsets either side of it.
+//
+// The marks used to be placed in a twelve-pixel field, and twelve pixels have
+// no middle one -- the centre falls on the seam between the sixth and the
+// seventh. A pair of coordinates written to mirror each other across that seam,
+// `left + 4.5` and `left + side - 4.5`, are both halves, and the renderer
+// rounds two halves the same way rather than opposite ways. So the arm on the
+// right landed a pixel wide of its partner on the left, and that is the whole
+// of what was wrong with the diagonals: the two halves of `< >` stepped
+// differently, the warning triangle's right edge sat a pixel out from its left,
+// the tag's point and the clock's ring leaned, and the star -- mirror-perfect
+// as a polygon -- lost the right edge of its widest row.
+//
+// Eleven pixels have a middle one. Every offset below is a whole number of
+// pixels from it, so `cx - d` and `cx + d` name pixels that are exact mirrors
+// and no coordinate lands on a half where the renderer has to choose. An odd
+// field cannot sit exactly centred in an even box, so a mark is half a pixel
+// off the middle of its button -- which is invisible, where a mark that is not
+// symmetric about itself is not.
+constexpr float kGlyphRadius = 5.0f;
+
+struct Grid {
+  float cx = 0.0f;
+  float cy = 0.0f;
+};
+
+// Floor rather than round, so a mark that hands its own field on to another --
+// `drawNoteGlyph` gives its field to `drawStarGlyph` -- gets back the centre it
+// passed in rather than one a pixel along.
+Grid gridFor(Rect box) {
+  return Grid {std::floor(box.x + box.w / 2.0f), std::floor(box.y + box.h / 2.0f)};
+}
+
+// The square field that grid describes, for the marks that hand it on.
+Rect fieldOf(Grid grid) {
+  const float side = kGlyphRadius * 2.0f + 1.0f;
+  return Rect {grid.cx - kGlyphRadius, grid.cy - kGlyphRadius, side, side};
+}
+
+// A ring, plotted with the eight-way symmetry of a midpoint circle so that the
+// four quadrants are exact reflections of one another.
+//
+// This was a twenty-four-sided polygon, which is symmetric on paper and was not
+// on the grid: SDL rounds each edge's two endpoints on its own, so the clock
+// face came out six pixels wide across the top, a single stray pixel across the
+// bottom, and a row taller on one side than the other. A midpoint circle places
+// one pixel and reflects it into the other seven octants, so there is nothing
+// left for rounding to do differently on one side than another.
 void strokeCircle(SDL_Renderer* renderer, float cx, float cy, float r, SDL_Color color) {
-  constexpr int kSides = 24;
-  SDL_FPoint hull[kSides + 1];
-  for(int i = 0; i < kSides; ++i) {
-    const float angle = static_cast<float>(i) * 6.2831853f / static_cast<float>(kSides);
-    hull[i] = SDL_FPoint {cx + std::cos(angle) * r, cy + std::sin(angle) * r};
+  const int radius = static_cast<int>(std::lround(r));
+  if(radius <= 0) return;
+  // Eight points per step, and at most a step per row of the radius. The
+  // ceiling stands in for a ring far larger than anything the shell draws.
+  constexpr int kMaxRingPoints = 8 * 64;
+  SDL_FPoint ring[kMaxRingPoints];
+  int count = 0;
+  const auto plot = [&](int dx, int dy) {
+    ring[count++] = SDL_FPoint {cx + static_cast<float>(dx), cy + static_cast<float>(dy)};
+  };
+  int x = radius;
+  int y = 0;
+  int err = 1 - radius;
+  while(x >= y && count + 8 <= kMaxRingPoints) {
+    plot(x, y);
+    plot(-x, y);
+    plot(x, -y);
+    plot(-x, -y);
+    plot(y, x);
+    plot(-y, x);
+    plot(y, -x);
+    plot(-y, -x);
+    ++y;
+    if(err < 0) {
+      err += 2 * y + 1;
+    } else {
+      --x;
+      err += 2 * (y - x) + 1;
+    }
   }
-  hull[kSides] = hull[0];
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  SDL_RenderLines(renderer, hull, kSides + 1);
+  SDL_RenderPoints(renderer, ring, count);
 }
 
 // A closed outline through the given points, in the box's own coordinates.
@@ -77,14 +146,23 @@ void drawCloseGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
 
 void drawCheckGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  const float cx = std::round(box.x + box.w / 2.0f);
-  const float cy = std::round(box.y + box.h / 2.0f);
+  const auto [cx, cy] = gridFor(box);
   // Two strokes, the short arm down-right and the long one up-right. Doubled a
   // pixel apart so the tick has some weight against a row's ground; a
   // single-pixel tick disappears next to the label beside it.
+  //
+  // Both arms at forty-five degrees. The long one used to run five across
+  // against six up, which is not a slope the grid can step evenly: it came out
+  // as a stair with one tread twice the depth of the others, right where the
+  // eye follows the tick up. At forty-five degrees each arm steps once per row.
+  //
+  // The pair also sat three rows below the middle of its box and hung out of
+  // the bottom of it -- every checkbox in the shell wore a tick a pixel low.
+  // Equal arms are what let it centre: seven rows about `cy`, four of them
+  // either side of the doubling.
   for(float d = 0.0f; d <= 1.0f; d += 1.0f) {
-    SDL_RenderLine(renderer, cx - 4.0f, cy + d, cx - 1.0f, cy + 3.0f + d);
-    SDL_RenderLine(renderer, cx - 1.0f, cy + 3.0f + d, cx + 4.0f, cy - 3.0f + d);
+    SDL_RenderLine(renderer, cx - 4.0f, cy - 1.0f + d, cx - 1.0f, cy + 2.0f + d);
+    SDL_RenderLine(renderer, cx - 1.0f, cy + 2.0f + d, cx + 4.0f, cy - 3.0f + d);
   }
 }
 
@@ -104,16 +182,21 @@ void drawResetGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
 
 void drawArrowGlyph(SDL_Renderer* renderer, Rect box, ArrowDirection direction, SDL_Color color) {
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-  const float cx = std::round(box.x + box.w / 2.0f);
-  const float cy = std::round(box.y + box.h / 2.0f);
+  const auto [cx, cy] = gridFor(box);
   const bool vertical = direction == ArrowDirection::Up || direction == ArrowDirection::Down;
   // The arm is measured across the axis the arrow spans, so a wide short button
   // and a tall narrow one both get a head that fits inside them.
-  const float arm = std::max(3.0f, (vertical ? box.w : box.h) * 0.22f);
-  // Half the arm along the pointing axis: the head is a chevron a third as deep
-  // as it is wide, which is the proportion the chevron and the close cross are
+  //
+  // Rounded to whole pixels, and the tip with it. A fraction of the button's
+  // width put the two arms' ends on halves either side of the centre, and the
+  // renderer took both the same way: the find bar's arrows came out with a
+  // doubled pixel on one arm, a gap on the other and a tip split across two
+  // rows -- a blunt, lopsided head on the one glyph whose whole job is to point.
+  const float arm = std::max(3.0f, std::round((vertical ? box.w : box.h) * 0.22f));
+  // Half the arm along the pointing axis: the head is a chevron half as deep as
+  // it is wide, which is the proportion the chevron and the close cross are
   // drawn at too.
-  const float tip = arm * 0.5f;
+  const float tip = std::max(1.0f, std::round(arm * 0.5f));
   if(vertical) {
     const float dy = direction == ArrowDirection::Down ? tip : -tip;
     SDL_RenderLine(renderer, cx - arm, cy - dy, cx, cy + dy);
@@ -137,7 +220,7 @@ void drawWrapGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
   SDL_RenderLine(renderer, right, shaft, right, top);
   // The head, two strokes rather than a filled triangle: at seven pixels a fill
   // is a blob and two lines stay a point.
-  const float head = std::max(2.0f, box.h * 0.22f);
+  const float head = std::max(2.0f, std::round(box.h * 0.22f));
   SDL_RenderLine(renderer, left, shaft, left + head, shaft - head);
   SDL_RenderLine(renderer, left, shaft, left + head, shaft + head);
 }
@@ -153,25 +236,81 @@ void drawSearchGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
 }
 
 void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color color) {
-  const float cx = std::round(box.x + box.w / 2.0f);
-  const float cy = std::round(box.y + box.h / 2.0f);
-  const float r = std::max(4.0f, std::min(box.w, box.h) / 2.0f - 1.0f);
-  // Five points, alternating outer and inner radius. Built as a polygon and
-  // then either scan-filled or stroked, so the two states are the same shape --
-  // a filled star and an outline of a different star would read as two marks.
+  const auto [cx, cy] = gridFor(box);
+  // The largest whole radius that fits with the centre pixel counted in. It
+  // used to be half the box less one, which on an even box is a half -- a
+  // radius measured in half pixels from a centre measured in whole ones, so
+  // nothing about the mark landed where it was asked to.
+  const float r = std::max(4.0f, std::floor((std::min(box.w, box.h) - 1.0f) / 2.0f));
+  // Five points, alternating outer and inner radius, in exact coordinates. Both
+  // states are drawn from this one hull, so a filled star and an outline are
+  // the same star -- an outline of a different one would read as a second mark
+  // rather than as the same mark un-set.
+  //
+  // The same hull, not the same pixels: without anti-aliasing the two states
+  // have to disagree about the five tips by a pixel. A tip reaching 4.755
+  // pixels out covers a fifth of the column at 5, so the fill stops at 4 -- the
+  // last column whose middle it actually covers -- while the outline puts the
+  // tip on the nearest column, which is 5. Rounding the outline in instead
+  // would put it three quarters of a pixel short of the silhouette rather than
+  // a quarter past it.
+  //
+  // Centred on the *middle of the centre pixel*, half a pixel along from the
+  // pixel's own coordinate. That half pixel is the whole reason this mark is
+  // symmetric now. A shape centred on the coordinate is centred on the seam at
+  // the pixel's leading edge, so its two halves fall either side of that seam
+  // and reflect onto each other a pixel out of step; centred on the pixel's
+  // middle, a column and its reflection are equally far from the middle of the
+  // same pixel, and every rule below reflects exactly.
   constexpr int kPoints = 10;
+  // A waist a little over half the outer radius. It was 0.42, near the ratio a
+  // pentagram gives, which is right where a point has room to taper and is
+  // wrong here: at eleven pixels it left the top point three rows tall and one
+  // pixel wide -- a spike rather than a point -- and closed the notch between
+  // the two lower legs. Widening the waist shortens the points, which is what
+  // buys them width at a size where a point one pixel across is not a point.
+  constexpr float kWaist = 0.56f;
+  const float gx = cx + 0.5f;
+  const float gy = cy + 0.5f;
   SDL_FPoint hull[kPoints + 1];
   for(int i = 0; i < kPoints; ++i) {
-    const float radius = (i % 2 == 0) ? r : r * 0.42f;
+    const float radius = (i % 2 == 0) ? r : r * kWaist;
     // Starting at -90 degrees, so a point sits at the top where the eye looks.
     const float angle = -1.5707963f + static_cast<float>(i) * 3.14159265f / 5.0f;
-    hull[i] = SDL_FPoint {cx + std::cos(angle) * radius, cy + std::sin(angle) * radius};
+    hull[i] = SDL_FPoint {gx + std::cos(angle) * radius, gy + std::sin(angle) * radius};
   }
   hull[kPoints] = hull[0];
 
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
   if(!filled) {
-    SDL_RenderLines(renderer, hull, kPoints + 1);
+    // The hull is symmetric to the last decimal place and was not rasterised
+    // that way, for two reasons, and both are about direction.
+    //
+    // Its vertices sit between pixels, and the renderer rounds each end of each
+    // edge on its own, so a pair of edges that mirrored each other exactly
+    // rounded onto pixels that did not. So they are snapped here -- as an
+    // offset from the centre pixel, which is what keeps the pair mirrored,
+    // since `std::round` breaks its ties away from zero and so takes `+d` and
+    // `-d` opposite ways even when `d` lands on a half.
+    //
+    // Then the edges go down in mirrored pairs rather than as one walk around
+    // the hull. A polyline is travelled in one direction, so the star's left
+    // half was walked against its right -- and a line rasteriser breaks the tie
+    // on a slope passing exactly between two pixels by the direction it is
+    // travelling, not by the geometry. Reflection maps vertex `i` to vertex
+    // `kPoints - i`, so drawing each edge together with that reflection, and
+    // counting down so the reflection is travelled the reflected way, has the
+    // pair come out as mirror images.
+    SDL_FPoint outline[kPoints + 1];
+    for(int i = 0; i <= kPoints; ++i) {
+      outline[i] = SDL_FPoint {cx + std::round(hull[i].x - gx), cy + std::round(hull[i].y - gy)};
+    }
+    for(int i = 0; i < kPoints / 2; ++i) {
+      const int m = (kPoints - i) % kPoints;
+      const int n = (kPoints - i - 1) % kPoints;
+      SDL_RenderLine(renderer, outline[i].x, outline[i].y, outline[i + 1].x, outline[i + 1].y);
+      SDL_RenderLine(renderer, outline[m].x, outline[m].y, outline[n].x, outline[n].y);
+    }
     return;
   }
   // Scanline fill, even-odd: for each row, every crossing of the outline in
@@ -182,14 +321,15 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
   // two lower points were swallowed and what the favourite mark actually drew
   // was a lump. Sorting the crossings is the whole difference, and a row of a
   // five-pointed star has at most six of them.
+  //
   // Three spans a row at the star's waist, over at most the star's own height:
   // a named ceiling rather than the same `192` written at three of the four
   // places that had to agree about it.
   constexpr int kMaxSpans = 192;
   SDL_FRect spans[kMaxSpans];
   int count = 0;
-  const int top = static_cast<int>(std::floor(cy - r));
-  const int bottom = static_cast<int>(std::ceil(cy + r));
+  const int top = static_cast<int>(std::floor(gy - r));
+  const int bottom = static_cast<int>(std::ceil(gy + r));
   for(int y = top; y <= bottom && count + 3 < kMaxSpans; ++y) {
     const float row = static_cast<float>(y) + 0.5f;
     float crossings[kPoints];
@@ -221,37 +361,58 @@ void drawStarGlyph(SDL_Renderer* renderer, Rect box, bool filled, SDL_Color colo
       crossings[j + 1] = value;
     }
     for(int i = 0; i + 1 < found && count < kMaxSpans; i += 2) {
-      const float left = crossings[i];
-      const float right = crossings[i + 1];
-      // A span covering less than half a pixel is dropped rather than rounded
-      // up to one. At the very tip of a point the two edges cross inside a
-      // single row, and a rounded-up span there lands beside the tip instead of
-      // on it -- a loose speck floating off the star, which reads far worse
-      // than the blunt point that dropping it leaves.
-      if(right - left < 0.5f) continue;
-      spans[count++] = SDL_FRect {std::round(left), static_cast<float>(y),
-                                  std::max(1.0f, std::round(right - left)), 1.0f};
+      // The columns whose own middle the span covers, as a pair of columns.
+      //
+      // A left edge plus a rounded *width* was the fault here: the two roundings
+      // do not cancel, and on the star's widest row -- nine and a half pixels
+      // across -- the one they dropped was always the rightmost. So the mark
+      // leaned a pixel left at every size, with one arm two pixels longer than
+      // the other. `std::ceil` and `std::floor` about a shape centred on a
+      // pixel's middle are exact reflections of each other, where rounding a
+      // width is a reflection of nothing.
+      const float left = std::ceil(crossings[i] - 0.5f);
+      const float right = std::floor(crossings[i + 1] - 0.5f);
+      if(right < left) {
+        // Narrower than a pixel: the nearest single column rather than nothing.
+        // The star's two lower legs are thinner than a pixel for most of their
+        // length at this size, and its top point tapers to nothing inside one
+        // row; dropped, the legs go and the mark reads as a triangle with a
+        // spike on top. Rounding the span's own leading edge keeps the pixel it
+        // picks a reflection of the pixel its mirror picks.
+        const float only = std::round(crossings[i] - 0.5f);
+        spans[count++] = SDL_FRect {only, static_cast<float>(y), 1.0f, 1.0f};
+        continue;
+      }
+      spans[count++] =
+        SDL_FRect {left, static_cast<float>(y), right - left + 1.0f, 1.0f};
     }
   }
   if(count > 0) SDL_RenderFillRects(renderer, spans, count);
 }
 
 void drawFileGlyph(SDL_Renderer* renderer, Rect box, SDL_Color color) {
-  // The same 12x12 field the note marks use, so a file beside a note sits on
-  // the same baseline.
-  const float side = 12.0f;
-  const float left = std::round(box.x + (box.w - side) / 2.0f);
-  const float top = std::round(box.y + (box.h - side) / 2.0f);
-  // The sheet, with the top-right corner cut off, and the fold drawn as the
-  // two edges of the triangle that was turned over.
+  // The same eleven-pixel field the note marks use, so a file beside a note
+  // sits on the same baseline.
+  const auto [cx, cy] = gridFor(box);
+  // The sheet, with the top-right corner turned over, and the fold drawn as the
+  // two edges of the triangle that was turned.
+  //
+  // The corner cut used to run three across against three down from
+  // coordinates that were a pixel apart in one axis and three in the other, so
+  // the diagonal rasterised as a step, a stray pixel and a second step, and the
+  // fold's two strokes crossed it rather than meeting it -- at twelve pixels
+  // the corner read as a smudge instead of a fold. Three across against three
+  // down from whole pixels is one clean diagonal, and the fold's corner lands
+  // on it exactly.
   const SDL_FPoint sheet[] = {
-    {left + 2.0f, top},              {left + side - 4.0f, top},
-    {left + side - 1.0f, top + 3.0f}, {left + side - 1.0f, top + side},
-    {left + 2.0f, top + side},        {left + 2.0f, top},
+    {cx - 4.0f, cy - 5.0f}, {cx + 1.0f, cy - 5.0f}, {cx + 4.0f, cy - 2.0f},
+    {cx + 4.0f, cy + 5.0f}, {cx - 4.0f, cy + 5.0f}, {cx - 4.0f, cy - 5.0f},
   };
   strokePath(renderer, sheet, 6, color);
   const SDL_FPoint fold[] = {
-    {left + side - 4.0f, top}, {left + side - 4.0f, top + 3.0f}, {left + side - 1.0f, top + 3.0f},
+    {cx + 1.0f, cy - 5.0f},
+    {cx + 1.0f, cy - 2.0f},
+    {cx + 4.0f, cy - 2.0f},
   };
   strokePath(renderer, fold, 3, color);
 }
@@ -262,41 +423,45 @@ std::span<const NoteGlyph> noteGlyphs() {
 
 bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Color color) {
   if(id.empty()) return false;
-  // A 12x12 field centred in whatever box the caller has, so one set of
-  // coordinates below serves a 16px sidebar row and a 30px picker cell alike.
-  const float side = 12.0f;
-  const float left = std::round(box.x + (box.w - side) / 2.0f);
-  const float top = std::round(box.y + (box.h - side) / 2.0f);
-  const float cx = left + side / 2.0f;
-  const float cy = top + side / 2.0f;
-  const Rect field {left, top, side, side};
+  // An eleven-pixel field centred on one pixel, so one set of offsets below
+  // serves a 16px sidebar row and a 30px picker cell alike, and so that a mark
+  // meant to be symmetric is symmetric. See `kGlyphRadius`.
+  const auto grid = gridFor(box);
+  const float cx = grid.cx;
+  const float cy = grid.cy;
   SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
 
   if(id == "star") {
-    drawStarGlyph(renderer, field, true, color);
+    drawStarGlyph(renderer, fieldOf(grid), true, color);
     return true;
   }
   if(id == "check") {
-    drawCheckGlyph(renderer, field, color);
+    drawCheckGlyph(renderer, fieldOf(grid), color);
     return true;
   }
   if(id == "flag") {
-    // A pole with the pennant hanging off its top half, so the mark has a
-    // baseline the way a letter does.
-    SDL_RenderLine(renderer, left + 2.0f, top, left + 2.0f, top + side);
-    const SDL_FPoint pennant[] = {
-      {left + 2.0f, top + 0.5f}, {left + side - 1.0f, top + 2.5f},
-      {left + 2.0f, top + 5.5f}, {left + 2.0f, top + 0.5f},
-    };
-    strokePath(renderer, pennant, 4, color);
-    fill(renderer, {left + 3.0f, top + 1.5f, 5.0f, 3.0f}, color);
+    // A pole with the pennant on its top half, so the mark has a baseline the
+    // way a letter does.
+    SDL_RenderLine(renderer, cx - 4.0f, cy - 5.0f, cx - 4.0f, cy + 5.0f);
+    // The pennant filled row by row rather than outlined and then filled
+    // separately. Its two edges are one slope mirrored about the row the point
+    // sits on, so measuring each row's reach from that row gives the rows in
+    // mirrored pairs -- where an outline plus a fill inside it was two
+    // different shapes rounding two different ways, and the pennant came out
+    // with a step on its lower edge that its upper edge did not have.
+    for(int dy = -5; dy <= 1; ++dy) {
+      const float fromPoint = std::abs(static_cast<float>(dy) + 2.0f);
+      const float reach = std::round(7.0f * (3.0f - fromPoint) / 3.0f);
+      hLine(renderer, cx - 3.0f, cx - 3.0f + reach, cy + static_cast<float>(dy), color);
+    }
     return true;
   }
   if(id == "bookmark") {
+    // The notch cut at forty-five degrees from each bottom corner, meeting on
+    // the centre column.
     const SDL_FPoint ribbon[] = {
-      {left + 2.0f, top + side - 1.0f}, {left + 2.0f, top + 1.0f},
-      {left + side - 2.0f, top + 1.0f}, {left + side - 2.0f, top + side - 1.0f},
-      {cx, top + side - 4.0f},          {left + 2.0f, top + side - 1.0f},
+      {cx - 4.0f, cy + 5.0f}, {cx - 4.0f, cy - 5.0f}, {cx + 4.0f, cy - 5.0f},
+      {cx + 4.0f, cy + 5.0f}, {cx, cy + 1.0f},        {cx - 4.0f, cy + 5.0f},
     };
     strokePath(renderer, ribbon, 6, color);
     return true;
@@ -305,80 +470,100 @@ bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Co
     // A luggage label: square at the string end, pointed at the other, with the
     // hole the string goes through near the square end. The hole is what says
     // "tag" rather than "arrow" -- without it the shape is a chevron.
+    //
+    // The point is two forty-five degree edges meeting on the centre row, so
+    // the upper and lower halves step identically. They used to start from a
+    // half coordinate, which the renderer took the same way for both, and the
+    // point came out a row off the middle of the label it belongs to.
     const SDL_FPoint label[] = {
-      {left + 1.0f, top + 2.0f},        {left + side - 4.5f, top + 2.0f},
-      {left + side - 1.0f, cy},         {left + side - 4.5f, top + side - 2.0f},
-      {left + 1.0f, top + side - 2.0f}, {left + 1.0f, top + 2.0f},
+      {cx - 5.0f, cy - 4.0f}, {cx + 1.0f, cy - 4.0f}, {cx + 5.0f, cy},
+      {cx + 1.0f, cy + 4.0f}, {cx - 5.0f, cy + 4.0f}, {cx - 5.0f, cy - 4.0f},
     };
     strokePath(renderer, label, 6, color);
-    fill(renderer, {left + 3.0f, cy - 1.0f, 2.0f, 2.0f}, color);
+    // Three pixels square, not two: an even hole cannot sit centred on an odd
+    // field, and a hole one row off centre in a nine-row label is visible.
+    fill(renderer, {cx - 3.0f, cy - 1.0f, 3.0f, 3.0f}, color);
     return true;
   }
   if(id == "folder") {
     // The tab first, then the body under it: two rules meeting at the tab's
-    // right shoulder is what reads as a folder at this size.
+    // right shoulder is what reads as a folder at this size. The shoulder is
+    // two across against two down -- the one diagonal here that is meant to be
+    // short, and the only mark in the set that is meant to be lopsided.
     const SDL_FPoint folder[] = {
-      {left + 1.0f, top + side - 2.0f}, {left + 1.0f, top + 2.0f},
-      {left + 5.0f, top + 2.0f},        {left + 6.5f, top + 4.0f},
-      {left + side - 1.0f, top + 4.0f}, {left + side - 1.0f, top + side - 2.0f},
-      {left + 1.0f, top + side - 2.0f},
+      {cx - 5.0f, cy + 4.0f}, {cx - 5.0f, cy - 4.0f}, {cx - 1.0f, cy - 4.0f},
+      {cx + 1.0f, cy - 2.0f}, {cx + 5.0f, cy - 2.0f}, {cx + 5.0f, cy + 4.0f},
+      {cx - 5.0f, cy + 4.0f},
     };
     strokePath(renderer, folder, 7, color);
     return true;
   }
   if(id == "calendar") {
-    stroke(renderer, {left + 1.0f, top + 2.0f, side - 2.0f, side - 3.0f}, color);
+    stroke(renderer, {cx - 5.0f, cy - 3.0f, 11.0f, 9.0f}, color);
     // The filled band is the month header; the two ticks above it are the
     // rings. Without them the mark is a picture frame.
-    fill(renderer, {left + 1.0f, top + 2.0f, side - 2.0f, 3.0f}, color);
-    SDL_RenderLine(renderer, left + 3.5f, top, left + 3.5f, top + 2.0f);
-    SDL_RenderLine(renderer, left + side - 3.5f, top, left + side - 3.5f, top + 2.0f);
+    fill(renderer, {cx - 5.0f, cy - 3.0f, 11.0f, 3.0f}, color);
+    SDL_RenderLine(renderer, cx - 3.0f, cy - 5.0f, cx - 3.0f, cy - 3.0f);
+    SDL_RenderLine(renderer, cx + 3.0f, cy - 5.0f, cx + 3.0f, cy - 3.0f);
     return true;
   }
   if(id == "clock") {
-    strokeCircle(renderer, cx, cy, side / 2.0f - 1.0f, color);
-    // Hands at twelve and four, drawn as filled bars rather than as lines: a
+    strokeCircle(renderer, cx, cy, kGlyphRadius, color);
+    // Hands at twelve and three, drawn as filled bars rather than as lines: a
     // one-pixel diagonal inside a one-pixel ring is lost against the ring, and
     // a clock face with no hands on it is a circle.
-    fill(renderer, {std::round(cx), std::round(cy) - 3.0f, 1.0f, 4.0f}, color);
-    fill(renderer, {std::round(cx), std::round(cy), 3.0f, 1.0f}, color);
+    fill(renderer, {cx, cy - 3.0f, 1.0f, 4.0f}, color);
+    fill(renderer, {cx, cy, 3.0f, 1.0f}, color);
     return true;
   }
   if(id == "bolt") {
     // Two strokes down and one across, doubled sideways for weight -- a
-    // single-pixel lightning bolt reads as a scratch.
+    // single-pixel lightning bolt reads as a scratch. Asymmetric on purpose,
+    // and the one mark here where that is the shape rather than a fault.
     for(float d = 0.0f; d <= 1.0f; d += 1.0f) {
       const SDL_FPoint bolt[] = {
-        {left + 7.0f + d, top},        {left + 3.0f + d, cy + 0.5f},
-        {left + 6.0f + d, cy + 0.5f},  {left + 4.0f + d, top + side},
+        {cx + 1.0f + d, cy - 5.0f},
+        {cx - 3.0f + d, cy},
+        {cx + d, cy},
+        {cx - 2.0f + d, cy + 5.0f},
       };
       strokePath(renderer, bolt, 4, color);
     }
     return true;
   }
   if(id == "warning") {
-    // The apex is cut flat by a pixel. At twelve pixels the two sides meet
-    // inside one row and the join draws a stray dot above the triangle, which
-    // reads as a mark of its own rather than as a point.
-    const float apex = std::round(cx);
-    const SDL_FPoint triangle[] = {
-      {apex, top + 1.0f},               {left + side - 0.5f, top + side - 1.0f},
-      {left + 0.5f, top + side - 1.0f}, {apex, top + 1.0f},
-    };
-    strokePath(renderer, triangle, 4, color);
-    // The bar and its dot sit in the lower two thirds, where the triangle is
-    // wide enough for them to have air either side.
-    fill(renderer, {apex, top + 5.0f, 1.0f, 3.0f}, color);
-    fill(renderer, {apex, top + 9.0f, 1.0f, 1.0f}, color);
+    // Sides at one across for every two down. That is a slope the grid steps
+    // exactly, and both sides pass through the apex pixel, so the point comes
+    // out a point -- where the shallower join this had before drew a stray dot
+    // a row above the triangle, which had to be cut flat by a pixel to hide it.
+    // Cutting the apex is no longer needed.
+    //
+    // Three separate strokes rather than one closed path, and both sides drawn
+    // *from the apex* outward. A one-in-two slope has a tie on every other row
+    // -- the exact centre of the pixel pair it has to choose between -- and a
+    // line rasteriser breaks that tie by the direction it is travelling, not by
+    // the geometry. Walked as a loop, the right side ran apex-to-base and the
+    // left base-to-apex, so the two sides broke their ties opposite ways and
+    // the right edge stepped a row before its partner all the way down. From a
+    // common origin with the run mirrored, they break them the same way.
+    SDL_RenderLine(renderer, cx, cy - 5.0f, cx + 5.0f, cy + 5.0f);
+    SDL_RenderLine(renderer, cx, cy - 5.0f, cx - 5.0f, cy + 5.0f);
+    hLine(renderer, cx - 5.0f, cx + 5.0f, cy + 5.0f, color);
+    // The bar and its dot on the centre column, in the lower two thirds where
+    // the triangle is wide enough to leave air either side of them.
+    fill(renderer, {cx, cy - 1.0f, 1.0f, 3.0f}, color);
+    fill(renderer, {cx, cy + 3.0f, 1.0f, 1.0f}, color);
     return true;
   }
   if(id == "code") {
     // `< >`, the two chevrons the chrome already draws for a disclosure, turned
-    // outward and set either side of the centre.
-    SDL_RenderLine(renderer, left + 4.5f, top + 2.0f, left + 1.0f, cy);
-    SDL_RenderLine(renderer, left + 1.0f, cy, left + 4.5f, top + side - 2.0f);
-    SDL_RenderLine(renderer, left + side - 4.5f, top + 2.0f, left + side - 1.0f, cy);
-    SDL_RenderLine(renderer, left + side - 1.0f, cy, left + side - 4.5f, top + side - 2.0f);
+    // outward and set either side of the centre. Three across against three
+    // down, so each of the four arms steps once per row and the left pair and
+    // the right pair are the same shape reflected.
+    SDL_RenderLine(renderer, cx - 2.0f, cy - 3.0f, cx - 5.0f, cy);
+    SDL_RenderLine(renderer, cx - 5.0f, cy, cx - 2.0f, cy + 3.0f);
+    SDL_RenderLine(renderer, cx + 2.0f, cy - 3.0f, cx + 5.0f, cy);
+    SDL_RenderLine(renderer, cx + 5.0f, cy, cx + 2.0f, cy + 3.0f);
     return true;
   }
   return false;

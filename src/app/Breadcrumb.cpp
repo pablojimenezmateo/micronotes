@@ -46,7 +46,11 @@ constexpr float kCrumbIconSize = 14.0f;
 // A point under the crumb icon beside it: a five-pointed star reads larger than
 // a document glyph in the same box, so matching the box would not match the
 // weight.
-constexpr float kFavoriteGlyphSize = 13.0f;
+// Eleven, not thirteen: `drawStarGlyph` now takes the largest whole radius its
+// field allows, so thirteen would draw a thirteen-pixel star where thirteen
+// used to draw an eleven-pixel one. The mark keeps the weight this constant was
+// tuned for.
+constexpr float kFavoriteGlyphSize = 11.0f;
 
 // What a note's tags ask for beside its name.
 //
