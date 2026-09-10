@@ -1,6 +1,7 @@
 #include "app/Frame.h"
 
 #include "app/Breadcrumb.h"
+#include "app/CaptureLadder.h"
 #include "app/Chrome.h"
 #include "app/FindBar.h"
 #include "app/FrameTrace.h"
@@ -36,6 +37,11 @@ using micronotes::ui::theme;
 
 }
 
+CaptureLadder::CaptureLadder(const UiRuntime& ui)
+    : overlay_(ui.overlays.active()),
+      card_(ui.settings.visible),
+      menu_(ui.chrome.openMenu != ui::MenuId::None) {}
+
 void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiRuntime& ui, int width, int height) {
   ScopedFrame frame;
   SDL_SetRenderDrawColor(renderer, theme().windowBackground.r, theme().windowBackground.g, theme().windowBackground.b, theme().windowBackground.a);
@@ -54,41 +60,22 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   // so a frame can never end up with two tooltips resolved.
   ui.pointer.tooltip = {};
 
-  // --- the capture ladder --------------------------------------------------
-  //
-  // A modal is drawn over the panels *and* over their washed-out copy of the
-  // window, and nothing under that wash may answer the pointer: a row that
-  // lights up behind a palette is promising a click the palette is going to
-  // swallow, and a hand cursor over a tab nobody can click is the same promise
-  // in another form. ../microide draws the line the same way -- see its
-  // `MenuSurfaceCapturingMouse`, which suppresses exactly this.
-  //
-  // A ladder rather than one flag because "modal" is relative to what is being
-  // drawn. Each rung below names what is above the surface that follows it,
-  // and the order is the order of the paint, so the two cannot drift.
-  //
-  // All three capture, and they capture the same way: a palette, the Settings
-  // card and an open menu each own the press wherever it lands, so nothing
-  // under them may light up offering one. A row that highlights and a row that
-  // can be clicked have to be the same row.
-  const bool overlayUp = ui.overlays.active();
-  const bool cardUp = ui.settings.visible;
-  const bool menuUp = ui.chrome.openMenu != ui::MenuId::None;
+  // Which surfaces capture the pointer from which, read once so it cannot
+  // change under the paint. Each `above.x()` below names what is drawn over
+  // the surface it precedes; `app/CaptureLadder.h` holds the rule and why it
+  // is a type rather than three booleans recombined here.
+  const CaptureLadder above(ui);
 
   // First, above everything: it carries the menus and the window controls, and
-  // the popup drawn at the end of the frame hangs off it. Its own popup does
-  // not cover it -- sliding along the bar with a menu open is how a menu bar
-  // switches menus, and a bar that stopped highlighting would stop looking
-  // like one.
-  ui.pointer.captured = overlayUp || cardUp;
+  // the popup drawn at the end of the frame hangs off it.
+  ui.pointer.captured = above.menuBar();
   ui.chrome.menuBarRect = layout.menuBar;
   {
     const perf::ScopeTimer timer("shell.menu_bar");
     drawMenuBar(renderer, text, ui, layout.menuBar);
   }
-  // Everything from here to the status bar is a panel, and a panel is under all
-  // three.
-  ui.pointer.captured = overlayUp || cardUp || menuUp;
+  // Everything from here to the status bar is a panel.
+  ui.pointer.captured = above.panel();
   // A hidden panel is zero wide, and its rule would land on the edge of
   // whatever took its place.
   if(!ui::empty(layout.sidebar)) {
@@ -155,7 +142,7 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   }
   {
     // After every panel, so it lands on top of whichever one it hangs over.
-    ui.pointer.captured = overlayUp || cardUp;
+    ui.pointer.captured = above.openMenu();
     const perf::ScopeTimer timer("shell.menu");
     drawOpenMenu(renderer, text, ui, {0, 0, static_cast<float>(width), static_cast<float>(height)});
   }
@@ -164,13 +151,13 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
     // the library prompt -- and that prompt has to be readable over the card
     // that asked for it. The card answers the pointer itself: its rows
     // highlight and its reset buttons carry tooltips.
-    ui.pointer.captured = overlayUp;
+    ui.pointer.captured = above.settingsCard();
     const perf::ScopeTimer timer("shell.settings");
     drawSettingsSurface(renderer, text, ui, width, height);
   }
   {
     const perf::ScopeTimer timer("shell.overlays");
-    ui.pointer.captured = false;
+    ui.pointer.captured = above.overlays();
     ui.overlays.setCaretVisible(ui.caret.visible);
     ui.overlays.draw(renderer, text, width, height);
     // Last, so nothing paints over it.

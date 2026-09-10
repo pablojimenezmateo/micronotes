@@ -450,6 +450,17 @@ when the counters went in it turned out to be 70% of every frame.
   works on rather than the whole shell. And a rule about one surface's state
   belongs as a *method* on that surface's type, not as arithmetic repeated at
   each call site -- that is where this codebase's quieter bugs have come from.
+- **Which surface owns the pointer is `app/CaptureLadder.h`, not a boolean
+  recombined at each rung.** A modal is drawn over the panels and over their
+  washed-out copy of the window, and nothing under that wash may answer the
+  pointer -- a row that lights up behind a palette promises a click the
+  palette will swallow. What captures what is *relative to what is being
+  drawn*, so it is a ladder: the menu bar is under an overlay and the Settings
+  card but not under its own popup, a panel is under all three. Those
+  combinations are the rule, and written out at the five places in `drawApp`
+  that set `ui.pointer.captured` they were five places to get right, with no
+  symptom when one was wrong. Each rung is named once now, and the test states
+  each combination and the ladder property itself.
 - **A floating surface's geometry is one function, shared by the paint and the
   hit test.** `app/FindBar.h`'s `findBarLayout` and `app/StatusBar.h`'s
   placement are both written that way, and `../microide` says why in the same

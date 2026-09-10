@@ -383,6 +383,7 @@ add_executable(micronotes_tests
   tests/FrameTraceTests.cpp
   tests/FuzzyTests.cpp
   tests/InlineScanTests.cpp
+  tests/CaptureLadderTests.cpp
   tests/GlyphTests.cpp
   tests/LayoutBlockTests.cpp
   tests/LayoutQueryTests.cpp
