@@ -713,6 +713,36 @@ MICRONOTES_TEST(architecture_a_run_is_inked_once_per_surface) {
       "what your surface knows through ui::RunPaint instead");
 }
 
+// A menu row says which field it sets.
+//
+// `ui::OverlayItem` has eight fields, four of them bools, and every menu the
+// overlay backs used to be written as a braced list of all eight -- so a row's
+// meaning was carried by which trailing `false` had become a `true`, and the
+// rule between two groups was `{"", "", "", "", false, false, false, true}`
+// fifteen times over. `ui::menuItem` and `ui::menuSeparator` name them.
+//
+// Asserted on the separator, because it is the one shape that is identical at
+// every site: a reappearance of it means someone has gone back to writing the
+// aggregate out, and the four bools go with it.
+MICRONOTES_TEST(architecture_a_menu_row_names_the_field_it_sets) {
+  std::string offenders;
+  for(const auto& path : sourceFiles(repoRoot() / "src")) {
+    const std::string text = readText(path);
+    // The definition of `menuSeparator` itself sets the two fields by name and
+    // is where this shape is allowed to be spelled at all.
+    if(path.filename() == "Overlay.h") continue;
+    if(text.find("\"\", \"\", \"\", \"\", false") == std::string::npos) continue;
+    if(!offenders.empty()) offenders += ", ";
+    offenders += path.filename().string();
+  }
+  micronotes::tests::require(
+    offenders.empty(),
+    "an overlay row written as its eight fields in order: " + offenders +
+      " -- use ui::menuItem and ui::menuSeparator, so a row differs from its "
+      "neighbours in a field with a name rather than in which of four trailing "
+      "bools is set");
+}
+
 MICRONOTES_TEST(architecture_the_layers_only_point_one_way) {
   // Lowest first. A layer may include itself and anything before it.
   const std::vector<std::string> layers {"core", "doc", "library", "ui", "export", "app"};

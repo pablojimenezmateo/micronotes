@@ -21,7 +21,10 @@ namespace {
 // turn-into menu, so a new block type appears in both at once.
 std::vector<ui::OverlayItem> blockKindItems() {
   std::vector<ui::OverlayItem> items;
-  for(const auto& entry : blockKinds()) items.push_back({entry.id, entry.label, entry.detail, "", true, false});
+  for(const auto& entry : blockKinds()) {
+    items.push_back(ui::menuItem(std::string(entry.id), std::string(entry.label))
+                      .withDetail(std::string(entry.detail)));
+  }
   return items;
 }
 

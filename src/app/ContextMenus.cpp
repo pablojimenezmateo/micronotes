@@ -31,27 +31,33 @@ void openNoteMenu(UiRuntime& ui, float x, float y) {
   // pinned" makes you open the menu to find out which way it is set, which is
   // the one thing the menu could have told you without being opened.
   overlay.items = {
-    {"new", "New note", "", ui::keysFor(ui::ActionId::NewNote), true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"rename", "Rename", "", ui::keysFor(ui::ActionId::RenameNote), hasNote, false, false, false},
-    {"icon", "Set icon", "", "", hasNote, false, false, false},
-    {"tags", "Edit tags", "", ui::keysFor(ui::ActionId::EditTags), hasNote, false, false, false},
-    {"pin-note", "Pinned", "", "", hasNote, false, hasNote && ui.state.workspace().isPinned(noteId), false},
-    {"move", "Move to notebook", "", "", hasNote, false, false, false},
-    {"", "", "", "", false, false, false, true},
+    ui::menuItem("new", "New note").withKeys(ui::keysFor(ui::ActionId::NewNote)),
+    ui::menuSeparator(),
+    ui::menuItem("rename", "Rename")
+      .withKeys(ui::keysFor(ui::ActionId::RenameNote))
+      .enabledIf(hasNote),
+    ui::menuItem("icon", "Set icon").enabledIf(hasNote),
+    ui::menuItem("tags", "Edit tags")
+      .withKeys(ui::keysFor(ui::ActionId::EditTags))
+      .enabledIf(hasNote),
+    ui::menuItem("pin-note", "Pinned")
+      .enabledIf(hasNote)
+      .ticked(hasNote && ui.state.workspace().isPinned(noteId)),
+    ui::menuItem("move", "Move to notebook").enabledIf(hasNote),
+    ui::menuSeparator(),
     // A note is a file, and these are the questions a reader asks about one.
     // The ids are the action names, so the menu row, the palette row and any
     // future key binding are one entry -- which is the rule the whole action
     // table exists to keep.
-    {"show-on-disk", "Show on disk", "", "", hasNote, false, false, false},
-    {"copy-relative-path", "Copy relative path", "", "", hasNote, false, false, false},
-    {"copy-absolute-path", "Copy absolute path", "", "", hasNote, false, false, false},
+    ui::menuItem("show-on-disk", "Show on disk").enabledIf(hasNote),
+    ui::menuItem("copy-relative-path", "Copy relative path").enabledIf(hasNote),
+    ui::menuItem("copy-absolute-path", "Copy absolute path").enabledIf(hasNote),
     // With the file rows rather than in a group of its own: an export is a
     // question about the note as a document, which is what the three above it
     // are too. Ends in an ellipsis because it asks where to put it.
-    {"export-note-pdf", "Export as PDF...", "", "", hasNote, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"delete", "Delete", "", "", hasNote, true, false, false},
+    ui::menuItem("export-note-pdf", "Export as PDF...").enabledIf(hasNote),
+    ui::menuSeparator(),
+    ui::menuItem("delete", "Delete").enabledIf(hasNote).destroys(),
   };
   // A context menu shows all of itself. The default row cap is a palette's --
   // twelve, with the rest scrolled -- and once the rules above were added the
@@ -75,16 +81,16 @@ void openFileMenu(UiRuntime& ui, float x, float y) {
   // there is no icon, no tags and no pin for a file, because micronotes
   // holds nothing about a file but where it is.
   overlay.items = {
-    {"open", "Open", "", "", true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"rename", "Rename", "", "", true, false, false, false},
-    {"move", "Move to notebook", "", "", true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"show-on-disk", "Show on disk", "", "", true, false, false, false},
-    {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
-    {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"delete", "Delete", "", "", true, true, false, false},
+    ui::menuItem("open", "Open"),
+    ui::menuSeparator(),
+    ui::menuItem("rename", "Rename"),
+    ui::menuItem("move", "Move to notebook"),
+    ui::menuSeparator(),
+    ui::menuItem("show-on-disk", "Show on disk"),
+    ui::menuItem("copy-relative-path", "Copy relative path"),
+    ui::menuItem("copy-absolute-path", "Copy absolute path"),
+    ui::menuSeparator(),
+    ui::menuItem("delete", "Delete").destroys(),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
@@ -104,15 +110,15 @@ void openFilesFolderMenu(UiRuntime& ui, float x, float y) {
   // is a decision about the files, not about the rule.
   const bool anchor = library::isFilesDir(ui.sidebar.companionTarget);
   overlay.items = {
-    {"new-folder", "New folder", "", "", true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"rename", "Rename", "", "", !anchor, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"show-on-disk", "Show on disk", "", "", true, false, false, false},
-    {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
-    {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"delete", "Delete", "", "", true, true, false, false},
+    ui::menuItem("new-folder", "New folder"),
+    ui::menuSeparator(),
+    ui::menuItem("rename", "Rename").enabledIf(!anchor),
+    ui::menuSeparator(),
+    ui::menuItem("show-on-disk", "Show on disk"),
+    ui::menuItem("copy-relative-path", "Copy relative path"),
+    ui::menuItem("copy-absolute-path", "Copy absolute path"),
+    ui::menuSeparator(),
+    ui::menuItem("delete", "Delete").destroys(),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
@@ -157,12 +163,14 @@ void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
   const std::size_t toRight = haveTab ? unpinnedIn(index + 1, tabs.size()) : 0;
   const std::size_t toLeft = haveTab ? unpinnedIn(0, index) : 0;
   overlay.items = {
-    {"close", "Close", "", ui::keysFor(ui::ActionId::CloseTab), true, false},
-    {"close-others", "Close others", "", ui::keysFor(ui::ActionId::CloseOtherTabs), others > 0, false},
-    {"close-right", "Close to the right", "", "", toRight > 0, false},
-    {"close-left", "Close to the left", "", "", toLeft > 0, false},
-    {"close-all", "Close all", "", "", unpinnedIn(0, tabs.size()) > 0, false},
-    {"", "", "", "", false, false, false, true},
+    ui::menuItem("close", "Close").withKeys(ui::keysFor(ui::ActionId::CloseTab)),
+    ui::menuItem("close-others", "Close others")
+      .withKeys(ui::keysFor(ui::ActionId::CloseOtherTabs))
+      .enabledIf(others > 0),
+    ui::menuItem("close-right", "Close to the right").enabledIf(toRight > 0),
+    ui::menuItem("close-left", "Close to the left").enabledIf(toLeft > 0),
+    ui::menuItem("close-all", "Close all").enabledIf(unpinnedIn(0, tabs.size()) > 0),
+    ui::menuSeparator(),
     // Ctrl+click already pins, and nothing said so. A tab that is never
     // replaced by the next note opened is worth knowing about.
     //
@@ -170,11 +178,11 @@ void openTabMenu(UiRuntime& ui, std::string_view noteId, float x, float y) {
     // is the rule the note menu's own pin row follows and the reason the mark
     // column exists: a row whose *word* changes makes you open the menu to
     // find out which way the toggle is set.
-    {"pin", "Pinned", "", "", true, false, pinned, false},
-    {"", "", "", "", false, false, false, true},
-    {"show-on-disk", "Show on disk", "", "", note != nullptr, false},
-    {"copy-relative-path", "Copy relative path", "", "", note != nullptr, false},
-    {"copy-absolute-path", "Copy absolute path", "", "", note != nullptr, false},
+    ui::menuItem("pin", "Pinned").ticked(pinned),
+    ui::menuSeparator(),
+    ui::menuItem("show-on-disk", "Show on disk").enabledIf(note != nullptr),
+    ui::menuItem("copy-relative-path", "Copy relative path").enabledIf(note != nullptr),
+    ui::menuItem("copy-absolute-path", "Copy absolute path").enabledIf(note != nullptr),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));
@@ -199,16 +207,16 @@ void openTagMenu(UiRuntime& ui, std::string_view tag, float x, float y) {
   const bool filtering = ui.state.selection().tag == tag;
   const bool custom = ui.state.workspace().tagColors.picked(tag);
   overlay.items = {
-    {"filter", filtering ? "Clear filter" : "Filter by this tag", "", "", true, false},
-    {"color", "Set colour...", "", "", true, false},
+    ui::menuItem("filter", filtering ? "Clear filter" : "Filter by this tag"),
+    ui::menuItem("color", "Set colour..."),
     // Offered only when there is something to undo. A "reset" that resets
     // nothing is a menu item that teaches the reader the menu is decorative.
-    {"auto-color", "Automatic colour", "", "", custom, false},
-    {"", "", "", "", false, false, false, true},
+    ui::menuItem("auto-color", "Automatic colour").enabledIf(custom),
+    ui::menuSeparator(),
     // A tag has no file of its own -- it exists because notes carry it -- so
     // the only way to be rid of one was to open every note carrying it and edit
     // its front matter by hand.
-    {"delete", "Delete tag...", "", "", true, true, false, false},
+    ui::menuItem("delete", "Delete tag...").destroys(),
   };
   ui.overlays.open(std::move(overlay));
 }
@@ -225,7 +233,7 @@ void openTagColorPicker(UiRuntime& ui, std::string tag) {
   // which is why this is a picker rather than a list of colour names.
   overlay.items.reserve(ui::kTagSwatchCount);
   for(int i = 0; i < ui::kTagSwatchCount; ++i) {
-    overlay.items.push_back({std::to_string(i), std::to_string(i), "", "", true, false});
+    overlay.items.push_back(ui::menuItem(std::to_string(i), std::to_string(i)));
   }
   const auto& colors = ui.state.workspace().tagColors;
   // The swatch in force, whether it was chosen or derived -- the reader wants
@@ -262,9 +270,9 @@ void openIconPicker(UiRuntime& ui) {
   overlay.hint = "Enter  choose        Esc  cancel";
   // The first cell is the absence of one, so removing an icon is a choice on
   // the same grid rather than a second gesture to be learnt.
-  overlay.items.push_back({"", "None", "", "", true, false});
+  overlay.items.push_back(ui::menuItem("", "None"));
   for(const auto& glyph : ui::noteGlyphs()) {
-    overlay.items.push_back({std::string(glyph.id), std::string(glyph.label), "", "", true, false});
+    overlay.items.push_back(ui::menuItem(std::string(glyph.id), std::string(glyph.label)));
   }
   overlay.current = 0;
   for(std::size_t i = 0; i < overlay.items.size(); ++i) {
@@ -286,23 +294,23 @@ void openFolderMenu(UiRuntime& ui, float x, float y) {
   overlay.width = 220.0f;
   const bool hasFolder = !ui.state.selection().folder.empty();
   overlay.items = {
-    {"new-folder", "New notebook", "", ui::keysFor(ui::ActionId::NewFolder), true, false, false, false},
-    {"new-note", "New note here", "", "", hasFolder, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"rename", "Rename", "", "", hasFolder, false, false, false},
-    {"", "", "", "", false, false, false, true},
+    ui::menuItem("new-folder", "New notebook").withKeys(ui::keysFor(ui::ActionId::NewFolder)),
+    ui::menuItem("new-note", "New note here").enabledIf(hasFolder),
+    ui::menuSeparator(),
+    ui::menuItem("rename", "Rename").enabledIf(hasFolder),
+    ui::menuSeparator(),
     // A notebook is a directory, and the same three questions are worth asking
     // about it as about a note. The note menu has had them since they were
     // written; the tree's did not, so the path of a folder was the one thing in
     // the library a reader had to leave the app to find out.
-    {"show-on-disk", "Show on disk", "", "", true, false, false, false},
-    {"copy-relative-path", "Copy relative path", "", "", true, false, false, false},
-    {"copy-absolute-path", "Copy absolute path", "", "", true, false, false, false},
+    ui::menuItem("show-on-disk", "Show on disk"),
+    ui::menuItem("copy-relative-path", "Copy relative path"),
+    ui::menuItem("copy-absolute-path", "Copy absolute path"),
     // The whole notebook, its sub-notebooks included, bound into one file.
     // Offered even on the root, where it means the library.
-    {"export-folder-pdf", "Export as PDF...", "", "", true, false, false, false},
-    {"", "", "", "", false, false, false, true},
-    {"delete", "Delete", "", "", hasFolder, true, false, false},
+    ui::menuItem("export-folder-pdf", "Export as PDF..."),
+    ui::menuSeparator(),
+    ui::menuItem("delete", "Delete").enabledIf(hasFolder).destroys(),
   };
   overlay.maxRows = static_cast<int>(overlay.items.size());
   ui.overlays.open(std::move(overlay));

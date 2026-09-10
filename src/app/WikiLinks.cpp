@@ -92,7 +92,8 @@ void openWikiMenu(UiRuntime& ui, std::size_t wikiStart) {
   const auto root = ui.state.catalog().root();
   for(const auto& note : ui.state.catalog().notes()) {
     const auto folder = note.folder.generic_string();
-    overlay.items.push_back({note.title, note.title, folder.empty() ? "" : folder, "", true, false});
+    overlay.items.push_back(ui::menuItem(note.title, note.title)
+                              .withDetail(folder.empty() ? std::string() : folder));
   }
   ui.overlays.open(std::move(overlay));
 }

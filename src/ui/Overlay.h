@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace micronotes::ui {
@@ -57,7 +58,70 @@ struct OverlayItem {
   // overlay that backs every *context* menu did not, so the two kinds of menu
   // looked unrelated.
   bool separator = false;
+
+  // --- saying which field a row differs from its neighbours in ------------
+  //
+  // Every menu the overlay backs used to be written as eight-field aggregates
+  // in a braced list, so a row's meaning was carried by which of four trailing
+  // bools had become a `true`:
+  //
+  //   {"delete", "Delete", "", "", hasNote, true, false, false}
+  //
+  // Four of the eight are almost always the same, and the two that carry the
+  // meaning -- `destructive` and `checked` -- sat fifth and seventh in a row
+  // of identical-looking literals. A designated initializer would say it, and
+  // GCC 13 warns on every field such a list leaves to its default, which is
+  // the whole point of using one. So the fields are set by name, through
+  // these, and the rows read as what they are:
+  //
+  //   menuItem("delete", "Delete").enabledIf(hasNote).destroys()
+  OverlayItem&& enabledIf(bool ok) && {
+    enabled = ok;
+    return std::move(*this);
+  }
+  OverlayItem&& ticked(bool on) && {
+    checked = on;
+    return std::move(*this);
+  }
+  OverlayItem&& destroys() && {
+    destructive = true;
+    return std::move(*this);
+  }
+  OverlayItem&& withKeys(std::string chord) && {
+    shortcut = std::move(chord);
+    return std::move(*this);
+  }
+  OverlayItem&& withDetail(std::string line) && {
+    detail = std::move(line);
+    return std::move(*this);
+  }
 };
+
+// An ordinary, enabled row. Anything else about it is said by name -- see the
+// four above.
+inline OverlayItem menuItem(std::string id, std::string label) {
+  OverlayItem row;
+  row.id = std::move(id);
+  row.label = std::move(label);
+  return row;
+}
+
+// The rule between two groups of rows.
+//
+// A named function rather than the eight-field aggregate written out, which is
+// what it was at each of the fifteen places a context menu divides itself --
+// `{"", "", "", "", false, false, false, true}`, four empty strings and four
+// bools whose meaning is their position. `ui/Menus.cpp` has had `sep()` beside
+// its own table since that table was written; this is the same thing for the
+// menus the overlay backs. Every other row in those tables is a designated
+// initializer for the same reason: a row differs from its neighbours in one
+// named field, not in which of four trailing `false`s became a `true`.
+inline OverlayItem menuSeparator() {
+  OverlayItem rule;
+  rule.enabled = false;
+  rule.separator = true;
+  return rule;
+}
 
 struct Overlay {
   OverlayKind kind = OverlayKind::List;

@@ -183,8 +183,9 @@ void openCommandPalette(UiRuntime& ui) {
     if(!spec.inPalette) continue;
     // Commands that need something selected are listed but refused, rather
     // than hidden: a palette that changes shape is a palette you cannot learn.
-    overlay.items.push_back({std::string(spec.name), std::string(spec.label), "",
-                             ui::acceleratorText(spec), !spec.needsNote || hasNote, false});
+    overlay.items.push_back(ui::menuItem(std::string(spec.name), std::string(spec.label))
+                              .withKeys(ui::acceleratorText(spec))
+                              .enabledIf(!spec.needsNote || hasNote));
   }
   ui.overlays.open(std::move(overlay));
 }
@@ -205,9 +206,9 @@ void openNotePalette(UiRuntime& ui, std::string overlayId, std::string title) {
     const auto folder = note.folder.generic_string();
     // The title alone: an icon is a drawn mark now, and its id ("bookmark")
     // pasted in front of a note's name is a word the reader never chose.
-    overlay.items.push_back({note.id, note.title,
-                             folder.empty() ? root.filename().generic_string() : folder,
-                             "", true, false});
+    overlay.items.push_back(
+      ui::menuItem(note.id, note.title)
+        .withDetail(folder.empty() ? root.filename().generic_string() : folder));
   }
   if(overlay.items.empty()) {
     ui.status = "No notes to jump to";
@@ -232,11 +233,14 @@ void openFolderPalette(UiRuntime& ui, std::string overlayId, std::string title) 
   bool listedRoot = false;
   for(const auto& folder : ui.state.catalog().folders()) {
     if(folder.path.empty()) listedRoot = true;
-    overlay.items.push_back({folder.path.generic_string().empty() ? "/" : folder.path.generic_string(),
-                             folder.path.empty() ? rootLabel : folder.path.generic_string(),
-                             "", std::to_string(folder.noteCount), true, false});
+    overlay.items.push_back(
+      ui::menuItem(folder.path.generic_string().empty() ? "/" : folder.path.generic_string(),
+                   folder.path.empty() ? rootLabel : folder.path.generic_string())
+        .withKeys(std::to_string(folder.noteCount)));
   }
-  if(!listedRoot) overlay.items.insert(overlay.items.begin(), {"/", rootLabel, "", "0", true, false});
+  if(!listedRoot) {
+    overlay.items.insert(overlay.items.begin(), ui::menuItem("/", rootLabel).withKeys("0"));
+  }
   ui.overlays.open(std::move(overlay));
 }
 
@@ -254,8 +258,10 @@ void openTrashPalette(UiRuntime& ui) {
   overlay.hint = "Enter restore   Esc cancel";
   overlay.width = 460.0f;
   for(const auto& entry : entries) {
-    overlay.items.push_back({entry.name, entry.title,
-                             entry.originalRelative.parent_path().generic_string(), entry.deletedAt, true, false});
+    overlay.items.push_back(
+      ui::menuItem(entry.name, entry.title)
+        .withDetail(entry.originalRelative.parent_path().generic_string())
+        .withKeys(entry.deletedAt));
   }
   ui.overlays.open(std::move(overlay));
 }
