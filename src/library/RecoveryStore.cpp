@@ -1,5 +1,7 @@
 #include "library/RecoveryStore.h"
 
+#include "library/StatePaths.h"
+
 #include "CoreAliases.h"
 #include "core/perf/PerformanceCounters.h"
 #include "core/platform/DurableFile.h"
@@ -24,8 +26,7 @@ RecoveryStore::~RecoveryStore() {
 }
 
 std::filesystem::path RecoveryStore::pathFor(std::string_view noteId) const {
-  return root_ / ".micronotes" / "recovery" /
-         (platform::sanitizeFileStem(std::string(noteId)) + ".body");
+  return recoveryDir(root_) / (platform::sanitizeFileStem(std::string(noteId)) + ".body");
 }
 
 void RecoveryStore::setRoot(std::filesystem::path root) {

@@ -5,6 +5,7 @@
 #include "core/attachments/AttachmentService.h"
 #include "app/Shell.h"
 #include "core/AppIdentity.h"
+#include "library/StatePaths.h"
 #include "core/platform/DurableFile.h"
 #include "core/platform/PathUtils.h"
 
@@ -17,15 +18,15 @@
 namespace micronotes::app {
 
 std::filesystem::path uiStatePath(const std::filesystem::path& root) {
-  return root / ".micronotes" / "ui.state";
+  return library::stateDir(root) / "ui.state";
 }
 
 std::filesystem::path foldStatePath(const std::filesystem::path& root) {
-  return root / ".micronotes" / "folds.state";
+  return library::stateDir(root) / "folds.state";
 }
 
 std::filesystem::path treeStatePath(const std::filesystem::path& root) {
-  return root / ".micronotes" / "tree.state";
+  return library::stateDir(root) / "tree.state";
 }
 
 std::filesystem::path libraryPathConfigPath() {

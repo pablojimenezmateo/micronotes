@@ -514,6 +514,65 @@ MICRONOTES_TEST(library_writes_the_trash_index_before_it_moves_anything) {
 
 }
 
+// A restore rewrites the whole index, and the rows it keeps have to come out of
+// it with every column they went in with.
+//
+// The rewrite used to spell the six fields out for itself rather than going
+// through the writer, which is a failure with no error in it: a column added to
+// the format would reach the append and be dropped by the first restore, and
+// the entries would stay listed and quietly stop carrying it. The attachment
+// columns are the ones to check, because they are the two that were added
+// later and the two an entry may legitimately leave empty.
+MICRONOTES_TEST(library_restore_rewrites_the_index_without_losing_a_column) {
+  const micronotes::tests::TempDir rootDir("micronotes-trash-rewrite");
+  const auto& root = rootDir.path();
+  micronotes::library::Library library(root);
+
+  // One note with attachments, which is the entry that has to survive the
+  // rewrite intact, and one without, which is the entry being restored.
+  micronotes::library::NoteMetadata kept;
+  kept.id = "kept";
+  kept.title = "Kept";
+  const auto keptPath = library.createNote(kept, "body");
+  const auto attachments = root / ".micronotes" / "attachments" / kept.id;
+  std::filesystem::create_directories(attachments);
+  std::ofstream(attachments / "file.png") << "png";
+  library.deleteNote(keptPath);
+
+  micronotes::library::NoteMetadata restored;
+  restored.id = "restored";
+  restored.title = "Restored";
+  const auto restoredPath = library.createNote(restored, "body");
+  library.deleteNote(restoredPath);
+
+  const auto before = library.trashEntries();
+  MICRONOTES_REQUIRE(before.size() == 2);
+  const auto named = [](const std::vector<micronotes::library::TrashEntry>& entries,
+                        const std::string& title) {
+    const auto found = std::find_if(entries.begin(), entries.end(),
+                                    [&](const auto& entry) { return entry.title == title; });
+    MICRONOTES_REQUIRE(found != entries.end());
+    return *found;
+  };
+  const auto keptBefore = named(before, "Kept");
+  MICRONOTES_REQUIRE(!keptBefore.attachmentName.empty());
+
+  MICRONOTES_REQUIRE(library.restoreFromTrash(named(before, "Restored").name));
+
+  const auto after = library.trashEntries();
+  MICRONOTES_REQUIRE(after.size() == 1);
+  const auto keptAfter = named(after, "Kept");
+  MICRONOTES_REQUIRE(keptAfter.name == keptBefore.name);
+  MICRONOTES_REQUIRE(keptAfter.originalRelative == keptBefore.originalRelative);
+  MICRONOTES_REQUIRE(keptAfter.deletedAt == keptBefore.deletedAt);
+  MICRONOTES_REQUIRE(keptAfter.attachmentName == keptBefore.attachmentName);
+  MICRONOTES_REQUIRE(keptAfter.attachmentOriginalRelative == keptBefore.attachmentOriginalRelative);
+  // And the entry still restores with its attachments, which is what the two
+  // columns are for.
+  MICRONOTES_REQUIRE(library.restoreFromTrash(keptAfter.name));
+  MICRONOTES_REQUIRE(std::filesystem::exists(attachments / "file.png"));
+}
+
 // A folder delete files the folder and one entry per attachment directory under
 // it. They are one durable write now, and they must not collide: nothing has
 // moved yet when the names are handed out, so the filesystem check alone cannot

@@ -49,7 +49,14 @@ App-only code stays outside, in the layer that owns the concept:
   scope, trash, and which note a `[[target]]` resolves to. `NoteCatalog` is the
   library, its index and the memos over both kept in step -- every write to a
   note's file goes through it so that re-indexing what was just written is not
-  something a caller can forget.
+  something a caller can forget. Two units inside it are named rather than
+  implied. `library/Trash.h` is the trash: the index format, the name
+  reservation and the rule that the index line lands *before* the file moves --
+  `Library` keeps only which files a deletion is about. And
+  `library/StatePaths.h` is where every path under the per-library state
+  directory comes from; `ArchitectureTests` fails on a `".micronotes"` written
+  out anywhere under `src/`, because the walk that prunes that directory read it
+  from `microcore::kAppDotDir` while all six writers into it named a literal.
 - `src/ui/` -- what draws and what models a surface. Everything in here either
   paints, measures, or is state a surface keeps. A helper that only counts
   bytes belongs in `core/util/`; one that takes a `measure` belongs here.

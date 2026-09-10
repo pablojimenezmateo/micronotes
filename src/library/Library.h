@@ -4,6 +4,7 @@
 #include "CoreAliases.h"
 
 #include "library/Metadata.h"
+#include "library/Trash.h"
 
 #include <filesystem>
 #include <optional>
@@ -46,19 +47,6 @@ struct CompanionEntry {
   std::filesystem::path path;    // library-relative
   std::filesystem::path folder;  // its parent, library-relative -- carried, like NoteListItem::folder
   bool directory = false;
-};
-
-// A note or folder waiting in `.micronotes/trash/`. Deletion is a move inside
-// the library rather than a call to the system trash, because restoring has to
-// work from inside micronotes and a system trash cannot be read back portably.
-struct TrashEntry {
-  std::string name;                      // file name inside `trash/files`
-  std::filesystem::path originalRelative; // where it came from, relative to the root
-  std::string title;
-  std::string deletedAt;                 // local ISO-8601, for the restore list
-  // The note's attachment directory, moved and restored with it.
-  std::string attachmentName;
-  std::filesystem::path attachmentOriginalRelative;
 };
 
 class Library {
@@ -160,15 +148,16 @@ public:
   bool deleteCompanion(const std::filesystem::path& relative) const;
 
 private:
-  // Every row of the trash index. The two readers of it differ in what they
-  // keep, not in how they read; see the definition.
-  std::vector<TrashEntry> readTrashIndex() const;
-
   std::filesystem::path root_;
   // The same root, canonicalized once. Every path this class is handed is
   // checked against it, and resolving the root's half per call was the largest
   // single cost in reading a note -- see `platform::SafeRoot`.
   platform::SafeRoot safeRoot_;
+  // The trash is a file format with an ordering rule, and it was eight file
+  // statics and four methods in `Library.cpp`. See `library/Trash.h`: what
+  // stays here is which files a deletion is *about*, which is library
+  // knowledge; the filing is not.
+  Trash trash_;
 };
 
 }

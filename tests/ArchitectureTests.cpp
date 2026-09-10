@@ -571,6 +571,49 @@ MICRONOTES_TEST(architecture_the_ascii_case_fold_lives_in_one_place) {
   micronotes::tests::require(offenders.empty(), message);
 }
 
+// The per-library state directory is named once.
+//
+// A library root holds the person's notes and one directory of ours --
+// `microcore::kAppDotDir`, `.micronotes` here -- with the attachments, the
+// trash and the recovery queue under it. `kAppDotDir` exists so that name is a
+// compile-time constant off `MICROCORE_APP_NAME`, and it was used by exactly
+// one of the seven sites that needed it: the tree walk that prunes the
+// directory. Every site that *wrote* into it concatenated the literal.
+//
+// So the walk skipped a directory named after the app while the writers named a
+// hard-coded one, and the two agreed only because nobody had renamed the app.
+// Renaming it would not have failed a test or a build; it would have produced a
+// library whose notes list a trash the trash does not write to.
+//
+// The derived paths are `library/StatePaths.h`. Tests are exempt: a test that
+// asserts a file landed in `.micronotes/trash/files` is checking the layout
+// from outside, which is the only place that check means anything.
+MICRONOTES_TEST(architecture_the_state_directory_is_named_once) {
+  std::vector<std::string> offenders;
+  for(const auto& file : sourceFiles(repoRoot() / "src")) {
+    // Where the name is defined, and where its history is written down.
+    if(file.filename() == "AppIdentity.h" || file.filename() == "StatePaths.h") continue;
+    std::istringstream lines(readText(file));
+    std::string line;
+    int number = 0;
+    while(std::getline(lines, line)) {
+      ++number;
+      const auto code = line.substr(0, line.find("//"));
+      if(code.find("\".micronotes\"") == std::string::npos) continue;
+      offenders.push_back(file.filename().string() + ":" + std::to_string(number));
+    }
+  }
+  std::string message =
+    "the per-library state directory is spelled out as a literal instead of coming from "
+    "library/StatePaths.h (or microcore::kAppDotDir):\n";
+  for(const auto& hit : offenders) message += "  " + hit + "\n";
+  message +=
+    "use stateDir / attachmentsDir / trashFilesDir / trashIndexPath / recoveryDir. A literal "
+    "here is a path that stops matching the one the tree walk prunes the moment the app is "
+    "renamed, and nothing fails when it does.";
+  micronotes::tests::require(offenders.empty(), message);
+}
+
 // The tree is layered, and the layers only point one way.
 //
 // `core` knows about nothing; `doc` is the Markdown document; `library` is the

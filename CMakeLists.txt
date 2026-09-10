@@ -187,6 +187,7 @@ set(MICRONOTES_APP_SOURCES
   src/library/Organization.cpp
   src/library/RecoveryStore.cpp
   src/library/SearchScope.cpp
+  src/library/Trash.cpp
   src/library/WikiResolve.cpp
   src/ui/Actions.cpp
   src/ui/AppState.cpp
