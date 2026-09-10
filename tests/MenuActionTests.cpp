@@ -1,12 +1,17 @@
 #include "TestSupport.h"
 #include "ShellFixture.h"
 
+#include "app/Commands.h"
 #include "app/ContextMenus.h"
 #include "app/Notes.h"
 #include "app/OverlayRouter.h"
 #include "app/Shell.h"
 #include "app/TabStrip.h"
 #include "library/Library.h"
+#include "app/Focus.h"
+#include "ui/Actions.h"
+#include "ui/Theme.h"
+#include "ui/Menus.h"
 #include "ui/Overlay.h"
 
 #include <algorithm>
@@ -15,7 +20,8 @@
 #include <string>
 #include <vector>
 
-// Every row of every context menu does something.
+// Every row of every menu does something -- the bar's seven and the six the
+// overlay backs.
 //
 // The menu bar has had this check since it was written -- an action the bar
 // offers and nothing dispatches fails the build. The context menus had none,
@@ -54,6 +60,18 @@ std::string witnessOf(const UiRuntime& ui) {
   out += "|pinned=" + std::to_string(workspace.pinnedNotes.size());
   out += "|colours=" + std::to_string(workspace.tagColors.choices().size());
   out += "|text=" + ui.editor.text();
+  out += "|caret=" + std::to_string(ui.editor.cursor());
+  out += "|selected=" + std::to_string(ui.editor.hasSelection() ? 1 : 0);
+  out += "|focus=" + std::string(micronotes::app::focusName(ui.focus));
+  // The two surfaces that are not overlays: the settings card (which is also
+  // the About page, in its other mode) and the find bar.
+  out += "|card=" + std::to_string(ui.settings.visible ? 1 : 0);
+  out += "/" + std::to_string(static_cast<int>(ui.settings.mode));
+  out += "|find=" + std::to_string(ui.find.open ? 1 : 0);
+  out += "|panels=" + std::to_string(workspace.sidebarVisible ? 1 : 0) +
+         std::to_string(workspace.rightPanelVisible ? 1 : 0) +
+         std::to_string(static_cast<int>(workspace.rightPanelView));
+  out += "|theme=" + std::string(micronotes::ui::themeModeName(micronotes::ui::themeMode()));
   return out;
 }
 
@@ -183,4 +201,84 @@ MICRONOTES_TEST(context_menu_every_companion_folder_row_does_something) {
   ui.sidebar.companionTarget = std::filesystem::path(micronotes::library::kFilesDirName) / "diagrams";
   micronotes::app::openFilesFolderMenu(ui, 100.0f, 100.0f);
   everyRowDoesSomething(ui, "files-folder-menu", rowsOf(ui));
+}
+
+// The bar's own rows. `architecture_every_offered_action_is_dispatched` reads
+// the sources and proves a branch *exists* for each; this runs them and proves
+// the branch does something. The two are not the same check: a branch that
+// calls a function whose first line refuses is a branch, and reads as one.
+MICRONOTES_TEST(menu_bar_every_row_does_something) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch(ui, "menu-bar", "# Note\n\n- [ ] task\n\nBody\n");
+  const auto noteId = ui.state.selection().noteId;
+  // A second tab, so the two that step between them have somewhere to step.
+  micronotes::app::createNote(ui, "Second");
+  micronotes::app::selectNoteById(ui, noteId);
+
+  // Rows whose whole effect is outside the shell, so this witness cannot see
+  // them however wide it gets. Each is named rather than the list being
+  // loosened, because the point of the list is that it is short.
+  const std::vector<std::string> outsideTheShell {
+    // Write to the clipboard and to X11's primary selection. Nothing about the
+    // shell changes, deliberately: the status bar reports state and does not
+    // echo actions, and a copy is the action people take most often.
+    "copy",
+    // Read from a clipboard that a headless test has not put anything in.
+    "paste",
+    "paste-plain",
+    // Steps the find bar's matches, and with the bar shut there are none. It
+    // is listed and refused rather than hidden, which `ActionSpec::needsNote`
+    // explains, and doing nothing is what "refused" looks like here.
+    "find-next",
+    "find-previous",
+    // The one row below whose empty stack is the fixture rather than the
+    // shell: the setup makes an edit, so Undo has something and Redo cannot.
+    // Undoing first would test Redo and stop testing Undo.
+    "redo",
+  };
+
+  std::string idle;
+  for(const auto& menu : micronotes::ui::menuSpecs()) {
+    for(const auto& item : menu.items) {
+      if(item.separator) continue;
+      const auto* spec = micronotes::ui::findAction(item.action);
+      MICRONOTES_REQUIRE(spec != nullptr);
+      const std::string name(spec->name);
+      if(std::find(outsideTheShell.begin(), outsideTheShell.end(), name) != outsideTheShell.end()) {
+        continue;
+      }
+
+      // Put the shell back the way every other row sees it. A row that closed
+      // a tab, moved the caret or shut a panel must not decide what the next
+      // row is judged against.
+      while(ui.overlays.active()) ui.overlays.close();
+      ui.settings = {};
+      ui.find = {};
+      micronotes::app::selectNoteById(ui, noteId);
+      ui.focus = micronotes::app::FocusArea::Editor;
+      ui.editor.setText("# Note\n\nfirst para\n\nsecond para\n\nthird para\n");
+      // In the middle block, with a word selected and one edit behind it: what
+      // the note looks like when somebody reaches for the menu at all. Without
+      // it, half these rows are correctly refusing an empty document and the
+      // test is measuring the fixture.
+      const std::size_t caret = ui.editor.text().find("second");
+      ui.editor.moveCursor(caret);
+      ui.editor.insert("a");
+      ui.editor.selectRange(caret, caret + 3);
+      ui.status = std::string();
+      ui.status.at = 0;
+      ui.chrome.pendingWindowAction = micronotes::app::WindowAction::None;
+      const std::string before = witnessOf(ui);
+
+      micronotes::app::performCommand(ui, name);
+
+      if(witnessOf(ui) == before) idle += (idle.empty() ? "" : ", ") + name;
+    }
+  }
+  while(ui.overlays.active()) ui.overlays.close();
+  micronotes::tests::require(
+    idle.empty(),
+    "menu rows that ran and moved nothing: " + idle +
+      " -- the bar is the shell's readable surface, and a row that does nothing "
+      "when chosen teaches the reader the menu is decorative");
 }
