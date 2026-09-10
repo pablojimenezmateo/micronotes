@@ -386,30 +386,41 @@ bool drawNoteGlyph(SDL_Renderer* renderer, std::string_view id, Rect box, SDL_Co
 
 void drawWindowGlyph(SDL_Renderer* renderer, Rect box, std::size_t which, bool maximized,
                      SDL_Color color) {
-  const float cx = std::round(box.x + box.w / 2.0f);
-  const float cy = std::round(box.y + box.h / 2.0f);
+  // Inset from the button's own edges rather than stepped out from its centre.
+  // The three glyphs then scale with the button -- which is sized off the menu
+  // bar's height -- instead of staying a fixed eight pixels in the middle of
+  // it, and the restore glyph below can be two whole rectangles at any size.
+  const float left = box.x + 4.0f;
+  const float right = box.x + box.w - 4.0f;
+  const float top = box.y + 4.0f;
+  const float bottom = box.y + box.h - 4.0f;
+  const float cy = box.y + box.h / 2.0f;
   const auto line = [&](float x1, float y1, float x2, float y2) {
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
     SDL_RenderLine(renderer, x1, y1, x2, y2);
   };
   if(which == 0) {
-    hLine(renderer, cx - 4.0f, cx + 4.0f, cy, color);
+    // A shade below centre, where a minimize bar is drawn everywhere else: on
+    // the centre line it reads as a strikethrough of the empty button.
+    hLine(renderer, left, right, std::round(cy + 2.0f), color);
     return;
   }
   if(which == 1) {
     if(maximized) {
-      // Two offset outlines: the restored window in front of the space it
-      // currently fills.
-      stroke(renderer, {cx - 4.0f, cy - 1.0f, 7.0f, 7.0f}, color);
-      hLine(renderer, cx - 1.0f, cx + 3.0f, cy - 4.0f, color);
-      line(cx + 3.0f, cy - 4.0f, cx + 3.0f, cy + 1.0f);
+      // Two whole offset outlines: the window it would restore to, in front of
+      // the screen it currently fills. This used to be one outline plus two
+      // loose strokes standing in for the second -- a rectangle missing its
+      // left and bottom edges -- so at the size the bar actually draws it the
+      // glyph read as a broken box rather than as two stacked windows.
+      stroke(renderer, {left + 1.5f, top + 3.0f, box.w - 9.0f, box.h - 9.0f}, color);
+      stroke(renderer, {left - 1.0f, top + 1.0f, box.w - 9.0f, box.h - 9.0f}, color);
     } else {
-      stroke(renderer, {cx - 4.0f, cy - 4.0f, 8.0f, 8.0f}, color);
+      stroke(renderer, {left, top + 1.0f, box.w - 8.0f, box.h - 8.0f}, color);
     }
     return;
   }
-  line(cx - 4.0f, cy - 4.0f, cx + 4.0f, cy + 4.0f);
-  line(cx - 4.0f, cy + 4.0f, cx + 4.0f, cy - 4.0f);
+  line(left, top, right, bottom);
+  line(right, top, left, bottom);
 }
 
 void drawTagDot(SDL_Renderer* renderer, Rect box, SDL_Color color) {
