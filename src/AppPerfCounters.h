@@ -399,4 +399,12 @@
   /* blink, and none of those move either answer. A regression to per-frame shows */   \
   /* up here as scans climbing with time rather than with typing.                 */   \
   X(StatusTextScans, "status.text_scans")                                              \
-  X(StatusTextScanBytes, "status.text_scan_bytes")
+  X(StatusTextScanBytes, "status.text_scan_bytes")                                     \
+  /* Which of the two ways the caret's line and column were found. A `walk` is  */     \
+  /* from the place the bar already had -- an anchor for any caret in the same  */     \
+  /* buffer, and still one after an edit that did not touch a byte before its   */     \
+  /* line -- and costs the distance moved. A `rebuild` is from the note's first */     \
+  /* byte and costs the caret's offset. Typing and arrowing should be all walks; */    \
+  /* rebuilds should track opening a note and clicking somewhere far away.      */     \
+  X(StatusCaretPlaceWalks, "status.caret_place_walks")                                 \
+  X(StatusCaretPlaceRebuilds, "status.caret_place_rebuilds")

@@ -83,31 +83,60 @@ StatusPlacement placeStatusSegments(const StatusSegments& segments, const TextRe
 }
 
 CaretPlace caretPlaceIn(std::string_view text, std::size_t cursor) {
+  perf::addCounter(perf::CounterId::StatusCaretPlaceRebuilds);
+  return caretPlaceFrom(text, cursor, CaretPlace {});
+}
+
+// The walk. Forwards from the anchor's line start it counts the line breaks it
+// passes; backwards it counts the ones it passes back over and subtracts them,
+// which is the same statement read the other way and is what makes an anchor
+// useful for a caret that moved *up*.
+//
+// Through `memchr` and `rfind` rather than a byte loop with a branch in it.
+// That is not decoration: this runs once per caret move, and on a 200 KB note
+// the loop form measured 63 us against the 21 us the note page's whole layout
+// costs -- the largest single thing a keystroke did, which is exactly the shape
+// the word count was removed from the bar for being. See
+// `docs/performance.md`, "A segmented status bar, and the readout that paid
+// for it".
+CaretPlace caretPlaceFrom(std::string_view text, std::size_t cursor, const CaretPlace& anchor) {
   const std::size_t at = std::min(cursor, text.size());
-  perf::addCounter(perf::CounterId::StatusTextScans);
-  perf::addCounter(perf::CounterId::StatusTextScanBytes, at);
   CaretPlace place;
-  // One pass for the line, from the top -- a backwards scan for the last
-  // newline would give the column in one step and the line in none, and the
-  // line is the half a reader is actually after.
-  //
-  // Through `memchr` rather than a byte loop with a branch in it. That is not
-  // decoration: this runs once per caret move, and on a 200 KB note the loop
-  // form measured 63 us against the 21 us the note page's whole layout costs --
-  // the largest single thing a keystroke did, which is exactly the shape the
-  // word count was removed from the bar for being. See `docs/performance.md`,
-  // "A segmented status bar, and the readout that paid for it".
-  std::size_t lineStart = 0;
+  place.line = anchor.line;
+  place.lineStart = std::min(anchor.lineStart, text.size());
+  perf::addCounter(perf::CounterId::StatusTextScans);
+  perf::addCounter(perf::CounterId::StatusTextScanBytes,
+                   at >= place.lineStart ? at - place.lineStart : place.lineStart - at);
+
   const char* const base = text.data();
-  while(lineStart < at) {
-    const void* found = std::memchr(base + lineStart, '\n', at - lineStart);
-    if(found == nullptr) break;
-    ++place.line;
-    lineStart = static_cast<std::size_t>(static_cast<const char*>(found) - base) + 1;
+  if(at >= place.lineStart) {
+    while(place.lineStart < at) {
+      const void* found = std::memchr(base + place.lineStart, '\n', at - place.lineStart);
+      if(found == nullptr) break;
+      ++place.line;
+      place.lineStart = static_cast<std::size_t>(static_cast<const char*>(found) - base) + 1;
+    }
+  } else {
+    // Backwards. Every break between the caret and the anchor's line start is a
+    // line the caret is above, and the first break the walk finds *below* the
+    // caret is where the caret's own line begins -- so one walk answers both,
+    // and neither is a second pass.
+    std::size_t scan = place.lineStart;
+    place.lineStart = 0;
+    while(scan > 0) {
+      const std::size_t found = text.rfind('\n', scan - 1);
+      if(found == std::string_view::npos) break;
+      if(found < at) {
+        place.lineStart = found + 1;
+        break;
+      }
+      --place.line;
+      scan = found;
+    }
   }
   // Code points, not bytes: a column of 14 on a line of seven accented letters
   // is a number about the file's encoding rather than about where the caret is.
-  for(std::size_t i = lineStart; i < at; i = util::nextBoundary(text, i)) ++place.column;
+  for(std::size_t i = place.lineStart; i < at; i = util::nextBoundary(text, i)) ++place.column;
   return place;
 }
 
@@ -120,6 +149,35 @@ std::size_t codePointsIn(std::string_view text, std::size_t start, std::size_t e
   std::size_t count = 0;
   for(std::size_t i = from; i < to; i = util::nextBoundary(text, i)) ++count;
   return count;
+}
+
+namespace {
+
+// The caret's place, walked from the standing one when that is still an anchor
+// in this buffer.
+//
+// A miss on the memo is not a reason to start from the note's first byte. The
+// standing place is an anchor for any caret in the *same* buffer, which covers
+// every arrow key, every click and every drag; and after an edit it is still
+// an anchor as long as the edit did not touch a byte before its line -- which
+// covers typing, the case the bar is repainted for most. The check is the same
+// conjunction the raw pane's wrap makes, and for the same reason: only this
+// side knows what the standing value was built from.
+const CaretPlace& placeCaret(const UiRuntime& ui, const CaretPlaceKey& key) {
+  const CaretPlace& standing = ui.statusBar.caretPlace.value();
+  const CaretPlaceKey& was = ui.statusBar.caretPlace.key();
+  const editor::TextEdit edit = ui.editor.lastChange();
+  const bool sameBuffer = was.revision == key.revision;
+  const bool aboveTheEdit = edit.known() && edit.fromRevision == was.revision &&
+                            edit.toRevision == key.revision && edit.start >= standing.lineStart;
+  if(ui.statusBar.caretPlace.valid() && (sameBuffer || aboveTheEdit)) {
+    perf::addCounter(perf::CounterId::StatusCaretPlaceWalks);
+    return ui.statusBar.caretPlace.store(key,
+                                         caretPlaceFrom(ui.editor.text(), key.cursor, standing));
+  }
+  return ui.statusBar.caretPlace.store(key, caretPlaceIn(ui.editor.text(), key.cursor));
+}
+
 }
 
 StatusSegments statusSegments(const UiRuntime& ui) {
@@ -153,9 +211,7 @@ StatusSegments statusSegments(const UiRuntime& ui) {
   if(position.visible) {
     const CaretPlaceKey key {ui.editor.revision(), ui.editor.cursor()};
     const CaretPlace* place = ui.statusBar.caretPlace.get(key);
-    if(place == nullptr) {
-      place = &ui.statusBar.caretPlace.store(key, caretPlaceIn(ui.editor.text(), ui.editor.cursor()));
-    }
+    if(place == nullptr) place = &placeCaret(ui, key);
     position.text = "Ln " + std::to_string(place->line) + ", Col " + std::to_string(place->column);
     position.tooltip = "Where the caret is in the note's Markdown";
   }

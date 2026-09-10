@@ -50,13 +50,17 @@ namespace micronotes::perfharness {
 static constexpr std::uint64_t kShellEditBudgetMicros = 200;
 static constexpr std::uint64_t kShellOutlineBudgetMicros = 400;
 // The status bar. It was 50 when the bar's whole job was a word count the
-// editor already carried; the segments added one derived readout that is a pass
-// over the note -- the caret's line and column -- memoised on the buffer's
-// revision and the caret, which means a keystroke pays for it exactly once. On
-// a 200 KB note that pass is tens of microseconds, so the budget moves to cover
-// it and no further: a regression to per-frame, or to a second uncached walk,
-// shows up here rather than in the total.
-static constexpr std::uint64_t kShellStatusBudgetMicros = 250;
+// editor already carried, then 250 when the segments added the caret's line and
+// column -- a pass over the note from its first byte, memoised on the buffer's
+// revision and the caret, which means a keystroke paid for it exactly once and
+// that once was tens of microseconds.
+//
+// It is 40 now, because that pass is no longer from the first byte: the place
+// the bar already had is an anchor, and the walk costs the distance the caret
+// moved rather than the offset it sits at. The budget is back to being about
+// the *bar* rather than about the size of the note, and a regression to
+// scanning from the top puts it back over.
+static constexpr std::uint64_t kShellStatusBudgetMicros = 40;
 // The find bar's scan, which runs once per (buffer, needle, options) -- so
 // once per keystroke while the bar is open, over the whole note. Its own
 // scenario because it is the one surface whose cost the reader opts into, and

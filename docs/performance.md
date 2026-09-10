@@ -3443,3 +3443,55 @@ skipped edit that changed the size. It cannot catch one that did not, and
 `shell_raw_pane_wrap_rebuilds_when_the_edit_it_missed_kept_the_length` is the
 test that holds the revision check load-bearing for that case — it passes with
 the length guard alone and fails the moment the revision check goes.
+
+## The thirteenth pass: the bar that counted the note to say where the caret was
+
+Same pass, same shape, second surface. `shell.status_bar` was 23 us on a
+200 KB note, and 5,145,175 bytes of `status.text_scan_bytes` over the harness
+run — a pass from the note's *first byte* to the caret, once per keystroke and
+once per caret move. It is memoised on `(revision, cursor)`, which is exactly
+the pair that changes when someone types.
+
+The readout is `Ln n, Col m`. Counting the line breaks before the caret is
+O(offset) only if you insist on starting at zero, and nothing does: the place
+the bar answered with a moment ago is an **anchor**. Its `lineStart` is a real
+line start with `line - 1` breaks before it, so the line at any other offset is
+that line plus the breaks between the two, forwards, or minus the breaks
+between them, backwards. The cost becomes the distance the caret moved, which
+for typing and for arrow keys is a line.
+
+The backwards half is the interesting one and it is one walk, not two: the
+breaks passed on the way back are the lines the caret is above, and the first
+break the walk finds *below* the caret is where the caret's own line begins.
+
+| | before | after |
+|---|---:|---:|
+| `shell.status_bar` median | 23 us | **2 us** |
+| `status.text_scan_bytes`, whole run | 5,145,175 | **211,447** |
+| `shell.keystroke` in split view | 62 us | **47 us** |
+
+The budget goes from 250 us to **40**, which puts it back to being a number
+about the bar rather than about the size of the note. `status.caret_place_walks`
+and `status.caret_place_rebuilds` are what say which path ran: 48 and 2 over
+the run, and the 2 are the note opening and the first ask.
+
+### Validity is the caller's, again
+
+An anchor is only an anchor for the buffer it came from. Within one buffer that
+is free — every arrow key, click and drag reuses it. Across an edit it still
+holds as long as the edit did not touch a byte *before* the anchor's line,
+which is the common case the bar is repainted for: typing.
+
+So the check is the same conjunction the raw pane's wrap makes one pass
+earlier, and it is on the same side, for the same reason — only the caller
+knows what the standing value was built from. `Memo::key()` is what both of
+them read, and `edit.start >= standing.lineStart` is the third clause.
+Deleting that clause passes every existing status bar test and fails
+`status_bar_caret_readout_survives_editing_above_the_caret`, which is why that
+test edits above the caret rather than at it: a line number that is merely
+wrong still fits in the segment, and nothing else in the shell looks at it.
+
+The walk itself is pinned by exhaustive equality rather than by cases —
+`caretPlaceFrom` from **every** anchor to **every** caret of a small buffer
+with an empty first line, consecutive breaks, a trailing break and a multi-byte
+character in it, each against `caretPlaceIn` of the same offset.

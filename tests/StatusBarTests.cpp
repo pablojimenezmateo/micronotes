@@ -19,6 +19,7 @@ using micronotes::app::CaretPlace;
 using micronotes::app::StatusSegment;
 using micronotes::app::StatusTone;
 using micronotes::app::UiRuntime;
+using micronotes::app::caretPlaceFrom;
 using micronotes::app::caretPlaceIn;
 using micronotes::app::codePointsIn;
 using micronotes::app::statusSegments;
@@ -158,4 +159,97 @@ MICRONOTES_TEST(status_line_messages_are_transient) {
   // stops being worth showing has to be a deadline it knows about.
   MICRONOTES_REQUIRE(status.lingerMs(set) == static_cast<int>(micronotes::app::kStatusLingerMs));
   MICRONOTES_REQUIRE(status.lingerMs(set + micronotes::app::kStatusLingerMs) == -1);
+}
+
+// The walked answer, against the only oracle that matters: the full one.
+//
+// `caretPlaceFrom` is right exactly when it gives what a scan from the note's
+// first byte gives, from *every* anchor -- so the test is that equality over
+// every (anchor, caret) pair of a small buffer with the shapes that have an
+// edge in them in it: an empty first line, consecutive breaks, a trailing
+// break, and multi-byte characters, which the column counts in code points.
+MICRONOTES_TEST(status_caret_place_walked_from_any_anchor_matches_a_full_scan) {
+  const std::string text = "\nalpha\n\nbe\xC3\xA9ta\ngamma\n\n";
+  for(std::size_t anchor = 0; anchor <= text.size(); ++anchor) {
+    const CaretPlace from = caretPlaceIn(text, anchor);
+    for(std::size_t cursor = 0; cursor <= text.size(); ++cursor) {
+      const CaretPlace walked = caretPlaceFrom(text, cursor, from);
+      const CaretPlace whole = caretPlaceIn(text, cursor);
+      MICRONOTES_REQUIRE(walked.line == whole.line);
+      MICRONOTES_REQUIRE(walked.column == whole.column);
+      MICRONOTES_REQUIRE(walked.lineStart == whole.lineStart);
+    }
+  }
+}
+
+// The same over a buffer with no line breaks at all, which is the case where
+// the backwards walk finds nothing and has to leave the line where it was
+// rather than stepping past the start of the note.
+MICRONOTES_TEST(status_caret_place_walked_over_a_single_line) {
+  const std::string text = "one long line and nothing else";
+  for(std::size_t anchor = 0; anchor <= text.size(); ++anchor) {
+    const CaretPlace from = caretPlaceIn(text, anchor);
+    for(std::size_t cursor = 0; cursor <= text.size(); ++cursor) {
+      const CaretPlace walked = caretPlaceFrom(text, cursor, from);
+      MICRONOTES_REQUIRE(walked.line == 1);
+      MICRONOTES_REQUIRE(walked.column == caretPlaceIn(text, cursor).column);
+    }
+  }
+}
+
+// The bar through the shell, over a long run of caret moves and edits, against
+// the position a full scan would report.
+//
+// The walk is only sound if the standing place really is an anchor in the
+// buffer being asked about, and that check is on the bar's side: the memo can
+// only say "not this key". Get it wrong and the readout is a line number off
+// by however many breaks the edit moved -- which nothing else in the shell
+// notices, because a number that is merely wrong still fits in the segment.
+MICRONOTES_TEST(status_bar_caret_readout_survives_editing_above_the_caret) {
+  UiRuntime ui;
+  std::string body;
+  for(int i = 0; i < 200; ++i) body += "line " + std::to_string(i) + " of the note\n";
+  const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-status-anchor", body);
+  ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Editor);
+
+  const auto reported = [&] { return segment(statusSegments(ui), StatusSegment::Position).text; };
+  const auto expected = [&] {
+    const CaretPlace place = caretPlaceIn(ui.editor.text(), ui.editor.cursor());
+    return "Ln " + std::to_string(place.line) + ", Col " + std::to_string(place.column);
+  };
+
+  // Caret moves alone: the buffer does not change, so every one of these must
+  // walk from the last answer rather than rescan, and every one must agree.
+  for(const std::size_t at : {0u, 40u, 41u, 39u, 1200u, 1199u, 17u, 2400u, 0u}) {
+    ui.editor.moveCursor(at);
+    MICRONOTES_REQUIRE(reported() == expected());
+  }
+
+  // Typing on the caret's own line: the anchor survives, because the edit is
+  // above its line start.
+  ui.editor.moveCursor(1205);
+  for(int i = 0; i < 8; ++i) {
+    ui.editor.insert("x");
+    MICRONOTES_REQUIRE(reported() == expected());
+  }
+
+  // A line break typed at the caret: the caret's line number goes up by one.
+  ui.editor.insert("\n");
+  MICRONOTES_REQUIRE(reported() == expected());
+
+  // An edit *above* the caret's line, which moves every line number under it.
+  // The anchor is no longer one and the bar has to say so.
+  ui.editor.replaceRange(0, 20, "a\nb\nc\nd\ne\nf\n");
+  ui.editor.moveCursor(1400);
+  MICRONOTES_REQUIRE(reported() == expected());
+
+  // A deletion above it, the other direction.
+  ui.editor.replaceRange(0, 12, "");
+  ui.editor.moveCursor(1400);
+  MICRONOTES_REQUIRE(reported() == expected());
+
+  // And a whole-buffer replacement, which is an anchor for nothing.
+  ui.editor.setText("only\ntwo\n");
+  ui.editor.moveCursor(6);
+  MICRONOTES_REQUIRE(reported() == expected());
 }

@@ -92,6 +92,12 @@ StatusSegments statusSegments(const UiRuntime& ui);
 struct CaretPlace {
   std::size_t line = 1;
   std::size_t column = 1;
+  // Where the caret's line begins. Nothing shows it. It is here because it is
+  // what makes the *next* answer cheap: a place already known is an anchor, and
+  // the line at any other offset is this line plus or minus the line breaks
+  // between the two -- so the bar walks from where the caret was rather than
+  // from the note's first byte.
+  std::size_t lineStart = 0;
 };
 
 struct CaretPlaceKey {
@@ -113,6 +119,16 @@ struct SelectionSpanKey {
 };
 
 CaretPlace caretPlaceIn(std::string_view text, std::size_t cursor);
+
+// The same answer, walked from one already known for the same buffer.
+//
+// `anchor.lineStart` must be a real line start in `text` with `anchor.line - 1`
+// line breaks before it; the caller is what establishes that, and gets it wrong
+// by handing over a place taken from some other buffer. What this costs is the
+// distance between the anchor and the caret rather than the offset of the
+// caret, which for typing and for arrowing is a line and for the note's first
+// paint is the whole note either way.
+CaretPlace caretPlaceFrom(std::string_view text, std::size_t cursor, const CaretPlace& anchor);
 std::size_t codePointsIn(std::string_view text, std::size_t start, std::size_t end);
 
 // The bar's own memos, held by the shell because the bar is a function rather
