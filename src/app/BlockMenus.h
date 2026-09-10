@@ -19,7 +19,17 @@ namespace micronotes::app {
 struct UiRuntime;
 
 // Anchored at the pointer: turn the block under the caret into another kind.
+// Hangs under the point, for the block menu that a right click opened: the
+// list is about the block the gesture was made on, and belongs under the row
+// that was just chosen.
 void openTurnIntoMenu(UiRuntime& ui, float x, float y);
+
+// Centred, for the Edit menu and the palette. Neither is a gesture at a place,
+// and `ui.pointer` is then wherever the mouse happens to have been left -- for
+// the Edit menu, over the Edit menu, so the list dropped itself at the top of
+// the window beside a menu that had just shut. Unanchored is what `openSlash-
+// Menu` does with the same list of block types, for the same reason.
+void openTurnIntoMenu(UiRuntime& ui);
 // `slashStart` is the "/" the user typed; committing erases [slashStart, caret)
 // before the block transform runs.
 void openSlashMenu(UiRuntime& ui, std::size_t slashStart);

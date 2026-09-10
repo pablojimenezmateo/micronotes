@@ -149,7 +149,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
     if(ui.focus != FocusArea::Editor) ui.status = "Put the caret in a task first";
     else if(!applyTransform(ui, doc::toggleTodo)) ui.status = "No task to toggle here";
   }
-  else if(id == "turn-into") openTurnIntoMenu(ui, ui.pointer.x, ui.pointer.y);
+  else if(id == "turn-into") openTurnIntoMenu(ui);
   else if(id == "insert-block") openSlashMenu(ui, ui.editor.cursor());
   else if(id == "duplicate-block") performBlockCommand(ui, "duplicate");
   else if(id == "delete-block") performBlockCommand(ui, "delete");

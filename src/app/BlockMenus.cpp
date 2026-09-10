@@ -30,19 +30,32 @@ std::vector<ui::OverlayItem> blockKindItems() {
 
 }
 
-void openTurnIntoMenu(UiRuntime& ui, float x, float y) {
+namespace {
+
+ui::Overlay turnIntoOverlay() {
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::List;
   overlay.id = "turn-into";
   overlay.title = "Turn into";
-  overlay.anchored = true;
-  overlay.anchorX = x;
-  overlay.anchorY = y;
   overlay.width = 260.0f;
   overlay.filterable = true;
   overlay.placeholder = "Filter block types";
   overlay.items = blockKindItems();
+  return overlay;
+}
+
+}
+
+void openTurnIntoMenu(UiRuntime& ui, float x, float y) {
+  ui::Overlay overlay = turnIntoOverlay();
+  overlay.anchored = true;
+  overlay.anchorX = x;
+  overlay.anchorY = y;
   ui.overlays.open(std::move(overlay));
+}
+
+void openTurnIntoMenu(UiRuntime& ui) {
+  ui.overlays.open(turnIntoOverlay());
 }
 
 // `slashStart` is the "/" the user typed; committing erases [slashStart, caret)
