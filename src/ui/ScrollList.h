@@ -106,6 +106,18 @@ public:
   void scrollTo(int value);
   void scrollBy(int delta);
 
+  // An offset to be judged by the next layout rather than by the last one.
+  //
+  // Every other way in clamps against the ceiling the previous frame recorded,
+  // which is right for a wheel and wrong for restoring a remembered place: a
+  // tab switch happens while the ceiling still belongs to the note being left,
+  // so coming back to a long note from a short one clamped the offset to the
+  // short note's end and lost the place. Written past the ceiling here and
+  // clamped by `setContent` the moment the real content is known -- which is
+  // also what keeps a place remembered while the note grew shorter elsewhere
+  // from landing past its end.
+  void restore(int value);
+
   // One wheel event, in SDL's sign convention.
   void wheel(float notches, float unitsPerNotch);
 

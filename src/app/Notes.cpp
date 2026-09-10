@@ -19,14 +19,53 @@ namespace micronotes::app {
 
 namespace {
 
-// A note opens at the top of itself, in whichever pane is showing it. The
-// reading pane reset its scroll here and the live page did not, so opening a
-// note after scrolling in another one landed you at the top in one pane and
-// part-way down in the other -- the two are the same renderer, and this is the
-// last piece of state that did not know it.
+// A note opens at the top of itself, in all three panes. The raw pane's rebase
+// joined the other two here rather than being spelled beside each call: it is
+// the third surface showing the same note, and the two callers that reset a
+// view both wanted all three.
 void resetPageScroll(UiRuntime& ui) {
   ui.livePage.setScroll(0);
   ui.readingPage.setScroll(0);
+  ui.raw.list.rebase();
+}
+
+// Puts the three panes' offsets away on the tab for the note being left, and
+// takes them back out for the note being arrived at. See `NoteTab`'s scroll
+// fields for why they live on the tab.
+//
+// By note id rather than by the active tab index, because the two do not move
+// at the same moment: `AppState::selectNote` opens the tab and moves the
+// selection together, so by the time the buffer is loaded the active tab is
+// already the new one and the tab the offsets belong to is only findable by the
+// id the editor was holding.
+void rememberPageScroll(UiRuntime& ui) {
+  auto& workspace = ui.state.editWorkspace();
+  const auto index = workspace.findTab(ui.loadedNoteId);
+  if(index == std::string::npos) return;
+  workspace.tabs[index].liveScroll = ui.livePage.scroll();
+  workspace.tabs[index].readingScroll = ui.readingPage.scroll();
+  workspace.tabs[index].rawScroll = ui.raw.list.scroll();
+}
+
+void restorePageScroll(UiRuntime& ui) {
+  const auto& workspace = ui.state.workspace();
+  const auto index = workspace.findTab(ui.state.selection().noteId);
+  if(index == std::string::npos) {
+    // A note showing without a tab of its own -- there is no such state today,
+    // but a note with nowhere to have kept an offset opens at its top, which is
+    // what it did before any of this existed.
+    resetPageScroll(ui);
+    return;
+  }
+  const auto& tab = workspace.tabs[index];
+  // `restore` rather than `setScroll`: the switch happens while each pane's
+  // ceiling still belongs to the note being left, so clamping now would lose
+  // the place on any note longer than that one. The next layout clamps it,
+  // which is also what keeps a place remembered while the note grew shorter
+  // elsewhere from landing past its end.
+  ui.livePage.restoreScroll(tab.liveScroll);
+  ui.readingPage.restoreScroll(tab.readingScroll);
+  ui.raw.list.restore(tab.rawScroll);
 }
 
 // Puts the selected note into the editor, preferring the crash-recovery copy
@@ -42,10 +81,15 @@ void resetPageScroll(UiRuntime& ui) {
 // autosave retired the recovery file and the draft was gone. Two hundred lines
 // of careful durable-write machinery, defeated by the buffer being filled
 // through the wrong door.
-void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
+void loadSelectedBuffer(UiRuntime& ui) {
   const auto note = ui.state.openNote().read();
   if(!note) return;
   const std::string noteId = ui.state.selection().noteId;
+  // Whether this is a move to a different note at all. A rename and a reload
+  // come through here for the note already open, and neither has moved the
+  // reader -- so neither may touch the view.
+  const bool moved = ui.loadedNoteId != noteId;
+  if(moved) rememberPageScroll(ui);
   ui.loadedNoteId = noteId;
   const auto recovered = ui.state.openNote().recoveryBody();
   const bool unsaved = recovered && *recovered != note->body;
@@ -53,9 +97,19 @@ void loadSelectedBuffer(UiRuntime& ui, bool resetView) {
   // Marked dirty so the recovered text is treated as unsaved work rather than
   // as the file's contents -- which is what makes the next autosave commit it.
   if(unsaved) ui.editor.markDirty();
-  if(resetView) {
-    ui.raw.list.rebase();
-    resetPageScroll(ui);
+  // Only on a move, and that replaces the `resetView` flag the five callers
+  // used to pass. It meant "back to the top", which the sidebar and the
+  // keyboard cursor asked for and the tab strip did not -- so switching by tab
+  // inherited the offset of whatever note it was leaving, and switching by the
+  // sidebar threw the note's own place away. Both are the same question now,
+  // and the answer to it is on the tab.
+  //
+  // Gating on the move rather than on a flag is also what stops a *re*-load of
+  // the note already showing -- a rename, a rescan, the same row clicked twice
+  // -- from dragging the reader back to wherever they were when they arrived.
+  // Three of those fire in a row on a single sidebar click.
+  if(moved) {
+    restorePageScroll(ui);
     ui.revealEditorCursor = false;
   }
   const std::string title(ui.state.selectedTitle());
@@ -71,7 +125,7 @@ void selectNoteAt(UiRuntime& ui, int index) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   index = std::clamp(index, 0, static_cast<int>(notes.size()) - 1);
   ui.state.selectNote(notes[static_cast<std::size_t>(index)].id);
-  loadSelectedBuffer(ui, /*resetView=*/true);
+  loadSelectedBuffer(ui);
 }
 
 void selectTag(UiRuntime& ui, const std::string& tag) {
@@ -298,7 +352,7 @@ void showFolder(UiRuntime& ui, const std::filesystem::path& folder) {
 void selectNoteById(UiRuntime& ui, const std::string& noteId, ui::TabPolicy policy) {
   if(ui.editor.dirty() && !ui.state.selection().noteId.empty() && !saveCurrent(ui)) return;
   ui.state.selectNote(noteId, policy);
-  loadSelectedBuffer(ui, /*resetView=*/true);
+  loadSelectedBuffer(ui);
 }
 
 void loadSelectedIntoEditor(UiRuntime& ui) {
@@ -307,9 +361,7 @@ void loadSelectedIntoEditor(UiRuntime& ui) {
   // stays. Anything else -- a different note, or the same one with nothing
   // unsaved -- is read.
   if(ui.loadedNoteId == ui.state.selection().noteId && ui.editor.dirty()) return;
-  // The view is kept: the callers are a rename and opening a library, and in
-  // neither case has the reader's position in the note moved.
-  loadSelectedBuffer(ui, /*resetView=*/false);
+  loadSelectedBuffer(ui);
 }
 
 bool reloadSelectedIfChangedOnDisk(UiRuntime& ui) {
@@ -341,7 +393,7 @@ bool reloadSelectedIfChangedOnDisk(UiRuntime& ui) {
   // so it is an approximation -- but jumping a reader to the top of a note
   // because a sync daemon touched the file is worse than an approximate
   // position, and the layout clamps whatever no longer fits.
-  loadSelectedBuffer(ui, /*resetView=*/false);
+  loadSelectedBuffer(ui);
   ui.status = "Reloaded " + std::string(ui.state.selectedTitle()) + " from disk";
   return true;
 }
@@ -453,6 +505,12 @@ bool createNote(UiRuntime& ui, const std::string& title) {
   // above its first block, so seeding one only put the name on screen twice and
   // left the caret on the second copy; the empty page prompts for a first line
   // instead, which is where the caret already is.
+  // Before the create, which opens a tab and moves the selection: the note
+  // being left is only findable while `loadedNoteId` still names it. Creating a
+  // note is a move away from whatever was open, so coming back to it should
+  // come back to where it was -- the same rule the other paths follow, and this
+  // is the one that does not go through `loadSelectedBuffer` to get it.
+  rememberPageScroll(ui);
   auto created = ui.state.createNote(title, folder, "");
   if(!created) {
     ui.status = "Could not create the note";
@@ -460,7 +518,8 @@ bool createNote(UiRuntime& ui, const std::string& title) {
   }
   ui.loadedNoteId = created->id;
   ui.editor.setText("");
-  ui.raw.list.rebase();
+  // A note with nothing in it is at its own top, whatever its tab may have
+  // been told: it is new, so it has no place to have been left in.
   resetPageScroll(ui);
   ui.revealEditorCursor = true;
   ui.focus = FocusArea::Editor;
@@ -488,11 +547,21 @@ bool saveCurrent(UiRuntime& ui, bool quiet) {
     // did not, must not stop to open a modal over the note being written.
     createNote(ui, "Untitled");
   }
+  const std::string wasNamed = ui.state.selection().noteId;
   const auto result = ui.state.saveSelectedNote(ui.editor.text());
   if(!result.ok) {
     ui.status = quiet ? "Autosave failed" : "Save failed";
     return false;
   }
+  // The first save of a note that arrived without front matter gives it a
+  // permanent id, and `AppState::followIdChange` re-points the selection, the
+  // tabs, the favorites and the recents that named the old one. The buffer's
+  // record of *which* note is in it is the one thing outside that reach, and
+  // left stale it makes the shell believe the note on screen is a different
+  // note from the one it loaded: the guard in `loadSelectedIntoEditor` stops
+  // protecting the unsaved buffer, and the tab this note's scroll offset
+  // belongs to can no longer be found.
+  if(ui.loadedNoteId == wasNamed) ui.loadedNoteId = ui.state.selection().noteId;
   ui.editor.markSaved();
   if(!result.conflictCopy.empty()) {
     // Never quiet, however the save was triggered. Something else had rewritten

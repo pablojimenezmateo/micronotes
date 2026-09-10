@@ -119,3 +119,110 @@ MICRONOTES_TEST(tab_strip_a_bulk_close_with_nothing_to_take_changes_nothing) {
   MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 3);
 }
 
+// The complaint this fixes: leave one note half way down, go to another, come
+// back, and be where you were. It used to be wrong in two directions at once --
+// switching by the tab strip carried the offset over from the note you left,
+// and switching by the sidebar reset it to the top.
+MICRONOTES_TEST(tab_strip_each_tab_remembers_where_its_note_was_left) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "micronotes-tab-scroll", 3);
+  const auto tabs = ui.state.workspace().tabs;
+
+  const auto goTo = [&ui](const std::string& noteId) {
+    micronotes::tests::require(micronotes::app::saveCurrent(ui, true), "the note did not save");
+    ui.state.selectNote(noteId);
+    micronotes::app::loadSelectedIntoEditor(ui);
+  };
+
+  // `restoreScroll`, not `setScroll`: nothing has laid a page out here, so every
+  // pane's ceiling is still zero and the clamping way in would put every offset
+  // below straight back to the top. This is the same door the restore itself
+  // uses, and for the same reason -- see `ui::ScrollList::restore`.
+  goTo(tabs[0].noteId);
+  ui.livePage.restoreScroll(240);
+  ui.readingPage.restoreScroll(180);
+  ui.raw.list.restore(12);
+
+  goTo(tabs[1].noteId);
+  // A note arrived at for the first time opens at its own top rather than
+  // inheriting where the last one was left.
+  MICRONOTES_REQUIRE(ui.livePage.scroll() == 0);
+  MICRONOTES_REQUIRE(ui.readingPage.scroll() == 0);
+  MICRONOTES_REQUIRE(ui.raw.list.scroll() == 0);
+  ui.livePage.restoreScroll(60);
+
+  goTo(tabs[0].noteId);
+  MICRONOTES_REQUIRE(ui.livePage.scroll() == 240);
+  MICRONOTES_REQUIRE(ui.readingPage.scroll() == 180);
+  MICRONOTES_REQUIRE(ui.raw.list.scroll() == 12);
+
+  goTo(tabs[1].noteId);
+  MICRONOTES_REQUIRE(ui.livePage.scroll() == 60);
+}
+
+// A reload of the note already open is not a move, so it must not touch the
+// view: the reader has not gone anywhere.
+MICRONOTES_TEST(tab_strip_reloading_the_open_note_leaves_the_view_alone) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "micronotes-tab-scroll-reload", 2);
+  ui.livePage.restoreScroll(150);
+  micronotes::app::loadSelectedIntoEditor(ui);
+  MICRONOTES_REQUIRE(ui.livePage.scroll() == 150);
+}
+
+// Closing a tab takes its remembered place with it, so reopening the note
+// starts at its top rather than wherever it was left in a previous life.
+MICRONOTES_TEST(tab_strip_a_closed_tab_forgets_where_it_was) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "micronotes-tab-scroll-close", 2);
+  const auto tabs = ui.state.workspace().tabs;
+  const auto goTo = [&ui](const std::string& noteId) {
+    micronotes::tests::require(micronotes::app::saveCurrent(ui, true), "the note did not save");
+    ui.state.selectNote(noteId);
+    micronotes::app::loadSelectedIntoEditor(ui);
+  };
+
+  goTo(tabs[0].noteId);
+  ui.livePage.restoreScroll(200);
+  // Leaving it is what writes the offset onto its tab.
+  goTo(tabs[1].noteId);
+  // Closing everything but the second tab takes the first one, and its place
+  // with it.
+  MICRONOTES_REQUIRE(closeTabs(ui, 1, TabCloseScope::Others) == 1);
+  goTo(tabs[0].noteId);
+  MICRONOTES_REQUIRE(ui.livePage.scroll() == 0);
+}
+
+// A note that arrived without front matter gets a permanent id the first time
+// it is saved, and everything naming the old one is re-pointed. The buffer's
+// own record of which note is in it used to be missed, which left the shell
+// believing the note on screen was a different note from the one it loaded --
+// and the tab holding that note's remembered place unfindable.
+MICRONOTES_TEST(tab_strip_a_first_save_keeps_the_loaded_note_findable) {
+  UiRuntime ui;
+  const micronotes::tests::TempDir dir("micronotes-tab-adopted-id");
+  std::filesystem::create_directories(dir.path());
+  // Written by hand, so it has no front matter and so no id of its own yet.
+  {
+    std::ofstream out(dir.path() / "Handwritten.md");
+    out << "# Handwritten\n\nSome body text.\n";
+  }
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, dir.path()));
+  const auto notes = ui.state.currentNotes();
+  MICRONOTES_REQUIRE(notes.size() == 1);
+  ui.state.selectNote(notes[0].id);
+  micronotes::app::loadSelectedIntoEditor(ui);
+
+  ui.livePage.restoreScroll(300);
+  ui.editor.insert("edited");
+  MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
+  // The save gave the note a permanent id; the record of what is loaded moved
+  // with it, so the tab it names is still the tab it is in.
+  MICRONOTES_REQUIRE(ui.loadedNoteId == ui.state.selection().noteId);
+  const auto index = ui.state.workspace().findTab(ui.loadedNoteId);
+  MICRONOTES_REQUIRE(index != std::string::npos);
+
+  // Which is what lets the place it was left be put away when it is left.
+  micronotes::app::createNote(ui, "Somewhere else");
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs[index].liveScroll == 300);
+}

@@ -278,6 +278,9 @@ public:
   void revealCaret(std::size_t offset);
   int scroll() const;
   void setScroll(int value);
+  // An offset for the layout that has not happened yet; see
+  // `ui::ScrollList::restore`.
+  void restoreScroll(int value);
   int maxScroll() const;
   // One wheel event. The page owns its accumulator for the same reason it owns
   // its ceiling: a remainder kept by the caller is a remainder the caller has

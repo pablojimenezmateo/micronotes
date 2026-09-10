@@ -125,6 +125,10 @@ void PageView::setScroll(int value) {
   scroll_.scrollTo(value);
 }
 
+void PageView::restoreScroll(int value) {
+  scroll_.restore(value);
+}
+
 int PageView::maxScroll() const {
   return scroll_.maxScroll();
 }

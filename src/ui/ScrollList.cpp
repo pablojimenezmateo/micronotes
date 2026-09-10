@@ -50,6 +50,10 @@ void ScrollList::scrollBy(int delta) {
   scrollTo(scroll_ + delta);
 }
 
+void ScrollList::restore(int value) {
+  scroll_ = std::max(0, value);
+}
+
 void ScrollList::wheel(float notches, float unitsPerNotch) {
   scrollBy(wheel_.take(notches, unitsPerNotch));
 }

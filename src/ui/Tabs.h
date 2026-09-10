@@ -23,6 +23,28 @@ struct NoteTab {
   // A pinned tab is never the one evicted to make room, and never the one a
   // cursor move takes over.
   bool pinned = false;
+  // How far down each of the three surfaces this note was left.
+  //
+  // On the tab for the same reason the pane mode is: it is a fact about how you
+  // are looking at *this* note, and a window-wide scroll offset is wrong the
+  // moment two notes are open. Switching tabs used to carry the offset over
+  // from the note you left -- so leaving one note half way down and going back
+  // to a short one landed past its end -- and switching by clicking the
+  // sidebar reset it to the top instead, which is the same bug read from the
+  // other side: the offset belonged to the window rather than to the note.
+  //
+  // Three, because the three panes lay the same note out differently and two of
+  // them can be on screen at once in split view. All three count in the unit
+  // their own surface scrolls by: pixels for the live and reading panes, whole
+  // rows for the raw one.
+  //
+  // Not written to the session file, unlike the pane mode beside it. A pixel
+  // offset only means anything against a layout, and by the next run the note
+  // may have been edited by something else entirely -- so a remembered offset
+  // would put a restored session somewhere nobody had scrolled to.
+  int liveScroll = 0;
+  int readingScroll = 0;
+  int rawScroll = 0;
 
   friend bool operator==(const NoteTab&, const NoteTab&) = default;
 };
