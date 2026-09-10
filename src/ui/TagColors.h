@@ -37,7 +37,7 @@ namespace micronotes::ui {
 // checked against both grounds, so no pick can produce a dot nobody can see.
 
 // How a tag dot is drawn, wherever one is drawn: the sidebar's note rows, the
-// outline panel's tag list and the breadcrumb over the open note.
+// right panel's tag list and the breadcrumb over the open note.
 //
 // Capped, because every one of those places is one line tall and a note with
 // nine tags would push its own name out of the way. Past the cap the last dot
