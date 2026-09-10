@@ -120,7 +120,10 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::CyclePane,       "cycle-pane",     "Cycle the three views",           "Ctrl+L",       "",              S::View, false, true, "", true},
   {ActionId::ToggleTheme,     "theme",          "Toggle light and dark",           "Ctrl+Shift+L", "",              S::View, false, true, "", true},
   {ActionId::ToggleSidebar,   "toggle-sidebar", "Show or hide the sidebar",        "Ctrl+Alt+Left","",              S::View, false, true, "", true},
-  {ActionId::ToggleRightPanel,"toggle-right",   "Show or hide the outline panel",  "Ctrl+Alt+Right","",             S::View, false, true, "", true},
+  // "The outline panel" was its name when the outline was all it held. It
+  // shows the outline, the backlinks or the tags, and the row that switches
+  // between them sat directly under a row naming it after one of the three.
+  {ActionId::ToggleRightPanel,"toggle-right",   "Show or hide the right panel",    "Ctrl+Alt+Right","",             S::View, false, true, "", true},
   {ActionId::NextTab,         "next-tab",       "Next tab",                        "Ctrl+Tab",     "",              S::View, false, true, "", true},
   {ActionId::PreviousTab,     "previous-tab",   "Previous tab",                    "Ctrl+Shift+Tab","",             S::View, false, true, "", true},
   {ActionId::CloseTab,        "close-tab",      "Close this tab",                  "Ctrl+W",       "",              S::View, true,  true, "", true},
@@ -136,7 +139,7 @@ constexpr std::array<ActionSpec, static_cast<std::size_t>(ActionId::Count)> kSpe
   {ActionId::CloseAllTabs,    "close-all-tabs",   "Close all tabs",                "",             "",              S::View, true,  true, "", true},
   {ActionId::OpenInNewTab,    "new-tab",        "Open a note in a new tab...",     "Ctrl+Shift+T", "",              S::View, false, true, "", true},
   {ActionId::PinTab,          "pin-tab",        "Pin or unpin this tab",           "",             "",              S::View, true,  true, "", true},
-  {ActionId::CycleRightPanel, "cycle-right",    "Outline, links or tags",      "Ctrl+Alt+Up",  "",              S::View, false, true, "", true},
+  {ActionId::CycleRightPanel, "cycle-right",    "Right panel: outline, links or tags", "Ctrl+Alt+Up", "",       S::View, false, true, "", true},
 }};
 
 // Named keys, so a chord can say "Enter" rather than a keycode. Only the keys

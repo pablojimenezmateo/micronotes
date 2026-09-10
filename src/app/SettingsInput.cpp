@@ -60,7 +60,7 @@ void applySetting(UiRuntime& ui, const std::string& id, int direction) {
   } else if(id == "sidebar") {
     togglePanel(ui, &ui::WorkspaceModel::sidebarVisible, "Sidebar");
   } else if(id == "right-panel") {
-    togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");
+    togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Right panel");
   }
 }
 
@@ -75,7 +75,7 @@ void resetSetting(UiRuntime& ui, const std::string& id) {
   else if(id == "sidebar") {
     if(!ui.state.workspace().sidebarVisible) togglePanel(ui, &ui::WorkspaceModel::sidebarVisible, "Sidebar");
   } else if(id == "right-panel") {
-    if(ui.state.workspace().rightPanelVisible) togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");
+    if(ui.state.workspace().rightPanelVisible) togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Right panel");
   }
   ui.status = "Back to the default";
 }

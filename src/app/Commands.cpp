@@ -171,7 +171,7 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   else if(id == "find-whole-word") toggleFindOption(ui, FindToggle::WholeWord);
   else if(id == "search") focusSearchAllNotes(ui);
   else if(id == "toggle-sidebar") togglePanel(ui, &ui::WorkspaceModel::sidebarVisible, "Sidebar");
-  else if(id == "toggle-right") togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Outline panel");
+  else if(id == "toggle-right") togglePanel(ui, &ui::WorkspaceModel::rightPanelVisible, "Right panel");
   else if(id == "cycle-right") cycleRightPanel(ui);
   else if(id == "next-tab") stepTab(ui, 1);
   else if(id == "previous-tab") stepTab(ui, -1);

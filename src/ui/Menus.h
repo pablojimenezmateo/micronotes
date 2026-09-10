@@ -31,6 +31,7 @@ enum class MenuId : std::uint8_t {
   Edit,
   View,
   Go,
+  Tabs,
   Note,
   Help
 };

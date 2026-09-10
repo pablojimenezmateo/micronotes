@@ -22,7 +22,16 @@ constexpr MenuItemSpec item(ActionId action, std::string_view label = {}, bool c
 
 // The tables. Grouped the way a reader looks for things rather than the way the
 // registry is ordered: what the note *is* (File), what the text *says* (Edit),
-// how it is *shown* (View), where to *go*, and what to do to *this note*.
+// how it is *shown* (View), where to *go*, what the *strip* holds (Tabs), and
+// what to do to *this note*.
+//
+// The strip is a menu of its own because it had grown to eight of View's
+// eighteen rows -- so nearly half of "how the note is shown" was actually
+// "which note is showing", and the four bulk closes ran down the middle of it.
+// Splitting them leaves View to the three arrangements, the two panels and the
+// theme, which is a menu you can read at a glance. `Go` took the four find
+// rows off `Edit` in the same move: searching is getting somewhere, which is
+// what `Go` means and what the sibling's own `Go` menu holds.
 constexpr MenuItemSpec kFileItems[] {
   item(ActionId::NewNote),
   item(ActionId::NewFolder),
@@ -59,11 +68,6 @@ constexpr MenuItemSpec kEditItems[] {
   item(ActionId::MoveBlockUp, "Move block up"),
   item(ActionId::MoveBlockDown, "Move block down"),
   item(ActionId::DeleteBlock, "Delete block"),
-  sep(),
-  item(ActionId::FindInNote, "Find..."),
-  item(ActionId::FindNext, "Find next"),
-  item(ActionId::FindPrevious, "Find previous"),
-  item(ActionId::SearchAllNotes, "Search all notes..."),
 };
 
 constexpr MenuItemSpec kViewItems[] {
@@ -73,26 +77,37 @@ constexpr MenuItemSpec kViewItems[] {
   item(ActionId::CyclePane, "Cycle views"),
   sep(),
   item(ActionId::ToggleSidebar, "Sidebar", true),
-  item(ActionId::ToggleRightPanel, "Outline panel", true),
-  item(ActionId::CycleRightPanel, "Cycle outline panel"),
+  item(ActionId::ToggleRightPanel, "Right panel", true),
+  item(ActionId::CycleRightPanel, "Cycle the right panel"),
   sep(),
   item(ActionId::ToggleTheme, "Light theme", true),
-  sep(),
-  item(ActionId::NextTab),
-  item(ActionId::PreviousTab),
-  item(ActionId::PinTab, "Pin tab", true),
-  item(ActionId::CloseTab, "Close tab"),
-  item(ActionId::CloseOtherTabs, "Close other tabs"),
-  item(ActionId::CloseTabsToRight, "Close tabs to the right"),
-  item(ActionId::CloseTabsToLeft, "Close tabs to the left"),
-  item(ActionId::CloseAllTabs, "Close all tabs"),
 };
 
 constexpr MenuItemSpec kGoItems[] {
   item(ActionId::GoToNote, "Go to note..."),
   item(ActionId::CommandPalette, "Commands..."),
   sep(),
+  item(ActionId::FindInNote, "Find..."),
+  item(ActionId::FindNext, "Find next"),
+  item(ActionId::FindPrevious, "Find previous"),
+  item(ActionId::SearchAllNotes, "Search all notes..."),
+};
+
+constexpr MenuItemSpec kTabItems[] {
+  item(ActionId::NextTab),
+  item(ActionId::PreviousTab),
+  sep(),
   item(ActionId::OpenInNewTab, "Open in a new tab..."),
+  item(ActionId::PinTab, "Pinned", true),
+  sep(),
+  // The one close, then the four bulk ones. Ruled off from the rest because
+  // four rows that shut things are worth a moment's pause, and because the
+  // three directional ones only differ from each other in a word near the end.
+  item(ActionId::CloseTab, "Close tab"),
+  item(ActionId::CloseOtherTabs, "Close other tabs"),
+  item(ActionId::CloseTabsToRight, "Close tabs to the right"),
+  item(ActionId::CloseTabsToLeft, "Close tabs to the left"),
+  item(ActionId::CloseAllTabs, "Close all tabs"),
 };
 
 constexpr MenuItemSpec kNoteItems[] {
@@ -132,15 +147,15 @@ constexpr MenuItemSpec kHelpItems[] {
 };
 
 // The mnemonic is the initial in every case here, which is what makes the bar
-// learnable: Alt and the letter you can see. `Note` and `Go` are the only pair
-// that could have collided and do not, so nothing needs a second letter yet --
-// and `menus_have_distinct_mnemonics` fails the build if a menu added later
-// takes one that is already spoken for.
+// learnable: Alt and the letter you can see. Nothing has needed a second
+// letter yet -- and `menus_have_distinct_mnemonics` fails the build if a menu
+// added later takes one that is already spoken for.
 constexpr MenuSpec kMenus[] {
   {MenuId::File, "File", 'F', kFileItems},
   {MenuId::Edit, "Edit", 'E', kEditItems},
   {MenuId::View, "View", 'V', kViewItems},
   {MenuId::Go, "Go", 'G', kGoItems},
+  {MenuId::Tabs, "Tabs", 'T', kTabItems},
   {MenuId::Note, "Note", 'N', kNoteItems},
   {MenuId::Help, "Help", 'H', kHelpItems},
 };
