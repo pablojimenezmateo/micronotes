@@ -68,17 +68,16 @@ std::size_t searchSeed(const UiRuntime& ui) {
 // field's text change lands in `app/Fields.h`'s one router rather than here.
 //
 // Selecting rather than only scrolling, for two reasons. It is what marks the
-// match on the live and reading pages -- they draw the buffer's selection, so
-// the one the reader is on reads as picked out from the rest without a second
-// treatment. And it is what lets Esc-then-copy work: the match you walked to is
-// the selection you end up with.
+// match on the reading page -- it draws the buffer's selection, so the one the
+// reader is on reads as picked out from the rest without a second treatment.
+// And it is what lets Esc-then-copy work: the match you walked to is the
+// selection you end up with.
 void revealFindMatch(UiRuntime& ui) {
   if(!ui.find.hasMatches()) return;
   const util::TextMatch match = ui.find.matches[ui.find.active];
-  ui.blockSelection.clear();
   ui.editor.selectRange(match.start, match.end);
-  // The live surface and the raw pane both watch this; the reading pane has no
-  // caret of its own and watches the one beside it.
+  // The raw pane watches this; the reading pane has no caret of its own and
+  // watches `revealViewerSelection` instead.
   ui.revealEditorCursor = true;
   ui.revealViewerSelection = true;
 }

@@ -48,7 +48,7 @@ struct NoteRevision {
 // The open note's front matter, as the rows drawn above its first block.
 using PageHeaderMemo = ui::Memo<std::vector<ui::NoteProperty>, NoteRevision>;
 
-// md4c documents for the blocks the live surface hands off to it -- tables,
+// md4c documents for the blocks the note page hands off to it -- tables,
 // footnote definitions, anything the block scanner does not model.
 //
 // Keyed by the block's own source text, and looked up through a view, so

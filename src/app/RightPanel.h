@@ -22,7 +22,7 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
 // The outline of the open buffer, memoised on the editor's revision.
 //
 // Exposed because the thing worth testing about it is not what it draws but
-// where it gets its block partition: it borrows the one the live page splices,
+// where it gets its block partition: it borrows the one the reading page splices,
 // and that borrow only hits if the page has already laid out this revision --
 // which is why `drawApp` draws this panel after the content. That is an
 // ordering dependency between two files, and the counters are the only thing

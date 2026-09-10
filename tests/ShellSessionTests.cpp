@@ -318,14 +318,6 @@ MICRONOTES_TEST(shell_escape_undoes_one_narrowing_at_a_time) {
   MICRONOTES_REQUIRE(ui.state.selection().tag.empty());
 
   MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
-
-  // A block selection is last: it is a selection inside the page rather than a
-  // filter over the library, so it only comes off once nothing is narrowed.
-  ui.blockSelection.active = true;
-  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::BlockSelection);
-  MICRONOTES_REQUIRE(!ui.blockSelection.active);
-  MICRONOTES_REQUIRE(micronotes::app::dismissOne(ui) == Dismissed::Nothing);
-
 }
 
 // "Copy relative path" / "Copy absolute path" / "Show on disk", ported from the

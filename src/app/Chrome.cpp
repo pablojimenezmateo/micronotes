@@ -18,10 +18,9 @@ const char* paneModeName(ui::PaneMode mode) {
   switch(mode) {
     case ui::PaneMode::Editor: return "Raw Markdown";
     case ui::PaneMode::Viewer: return "Reading";
-    case ui::PaneMode::Split: return "Split";
-    case ui::PaneMode::Live: break;
+    case ui::PaneMode::Split: break;
   }
-  return "Live";
+  return "Split";
 }
 
 

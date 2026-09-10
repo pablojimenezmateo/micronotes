@@ -181,7 +181,7 @@ MICRONOTES_TEST(find_wiki_link_closes_on_the_first_double_bracket) {
   MICRONOTES_REQUIRE(span->target == "a [[b");
 }
 
-// The rule above has to agree with the scanner the live surface uses, or the
+// The rule above has to agree with the scanner the note page uses, or the
 // two panes disagree about what is a link in the same note.
 MICRONOTES_TEST(find_wiki_link_agrees_with_the_inline_scanner) {
   const std::string_view source = "a [[One]] b [[Two|second]] c [[unclosed";

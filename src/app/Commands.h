@@ -31,7 +31,7 @@ void setPaneMode(UiRuntime& ui, ui::PaneMode mode);
 void cyclePaneMode(UiRuntime& ui);
 
 // Opens a different library without restarting. The one being left is written
-// out first, so its open note, favorites and folds go with it rather than
+// out first, so its open note and favorites go with it rather than
 // following the user into the new one.
 void switchLibrary(UiRuntime& ui, const std::string& typed);
 

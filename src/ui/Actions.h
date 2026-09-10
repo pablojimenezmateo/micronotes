@@ -61,9 +61,7 @@ enum class ActionId {
   MoveBlockDown,
   InsertBlock,
   TurnInto,
-  Fold,
 
-  PaneLive,
   PaneRaw,
   PaneReading,
   PaneSplit,
@@ -149,7 +147,7 @@ struct ActionSpec {
   // Whether the key alone is enough to run it.
   //
   // Most actions mean the same thing wherever the focus is: `Ctrl+1` shows the
-  // live pane, `Ctrl+R` re-reads the library. A few do not -- `Ctrl+Z` undoes
+  // reading pane, `Ctrl+R` re-reads the library. A few do not -- `Ctrl+Z` undoes
   // in whichever of the six editable things has the keyboard, `Ctrl+K` links a
   // selection in the note and opens the note switcher outside it -- and those
   // have to be decided by the key handler, which can see the focus.

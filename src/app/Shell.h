@@ -30,7 +30,6 @@
 #include "ui/TextRenderer.h"
 #include "ui/NoteProperties.h"
 #include "ui/Outline.h"
-#include "ui/FoldState.h"
 #include "ui/Actions.h"
 #include "ui/CaretBlink.h"
 #include "ui/Menus.h"
@@ -114,18 +113,11 @@ struct UiRuntime {
   ImagePathCache imagePaths;
   WikiTargets wikiTargets;
   PageHeaderMemo pageHeader;
-  // Which toggles the reader has collapsed, per note. A view preference, so it
-  // lives beside the library rather than in the `.md` file.
-  ui::FoldState folds;
 
   // ---- the surfaces that show it -----------------------------------------
-  PageView livePage;
-  // The reading pane is the same renderer with the caret, the gutter and the
-  // toolbar off. A second instance rather than the same one because the two
-  // panes lay the note out at different widths -- in split view, at the same
-  // time -- and one block cache serving both would be swept on every frame.
+  // The note rendered as formatted, read-only content. See `app/ReadingPage.h`.
   PageView readingPage;
-  // The third: the note as a monospaced file. See `app/RawPaneState.h`.
+  // The other one: the note as a monospaced file. See `app/RawPaneState.h`.
   RawPaneState raw;
   // Where every link the panes drew this frame landed, so a click and the
   // cursor shape can find one without laying a page out again. Cleared at the
@@ -173,13 +165,11 @@ struct UiRuntime {
   PointerState pointer;
 
   // ---- what the reader is doing to the note ------------------------------
-  // See `app/EditingState.h`. Three gestures that look alike and behave
-  // differently, which is why they are three types.
+  // See `app/EditingState.h`. Two selection gestures that look alike and behave
+  // differently, which is why they are two types.
   DragSelect textSelect;
   DragSelect fieldSelect;
   ClickRun editorClicks;
-  BlockSelection blockSelection;
-  BlockDrag blockDrag;
   SlashMenu slash;
   // The first "[" of the "[[" that opened the wikilink picker, for the same
   // reason `SlashMenu::start` exists: committing replaces from there.

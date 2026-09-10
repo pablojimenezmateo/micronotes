@@ -21,10 +21,6 @@ std::filesystem::path uiStatePath(const std::filesystem::path& root) {
   return library::stateDir(root) / "ui.state";
 }
 
-std::filesystem::path foldStatePath(const std::filesystem::path& root) {
-  return library::stateDir(root) / "folds.state";
-}
-
 std::filesystem::path treeStatePath(const std::filesystem::path& root) {
   return library::stateDir(root) / "tree.state";
 }
@@ -50,7 +46,6 @@ bool writeConfiguredLibraryRoot(const std::filesystem::path& root) {
 void persistLibraryState(UiRuntime& ui) {
   if(!ui.state.catalog().isOpen()) return;
   ui.state.saveUiState(uiStatePath(ui.state.catalog().root()));
-  if(ui.folds.dirty()) ui.folds.save(foldStatePath(ui.state.catalog().root()));
   if(ui.sidebar.tree.dirty()) {
     platform::writeFileDurably(treeStatePath(ui.state.catalog().root()), ui.sidebar.tree.serialize());
   }
@@ -105,7 +100,6 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   // still there, and it is what micronotes had before this.
   ui.watcher.watch(ui.state.catalog().root(), {microcore::kAppDotDir});
   ui.state.loadUiState(uiStatePath(ui.state.catalog().root()));
-  ui.folds.load(foldStatePath(ui.state.catalog().root()));
   std::ostringstream treeBuffer;
   if(std::ifstream treeState(treeStatePath(ui.state.catalog().root())); treeState) {
     treeBuffer << treeState.rdbuf();
@@ -123,7 +117,6 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   ui.editor.markSaved();
   ui.sidebar.list.rebase();
   ui.raw.list.rebase();
-  ui.livePage.setScroll(0);
   ui.readingPage.setScroll(0);
   loadSelectedIntoEditor(ui);
   if(ui.state.selection().noteId.empty()) selectNoteAt(ui, 0);

@@ -28,8 +28,6 @@ ContentPanes contentPanes(const UiRuntime& ui, Rect content) {
     case ui::PaneMode::Viewer:
       panes.hasViewer = true;
       return panes;
-    case ui::PaneMode::Live:
-      return panes;
     case ui::PaneMode::Split:
       break;
   }
@@ -63,11 +61,6 @@ void routeWheel(UiRuntime& ui, float notches, int width, int height) {
   }
   if(contains(layout.rightPanel, ui.pointer.x, ui.pointer.y)) {
     ui.rightPanel.list.wheel(notches, kRightPanelScrollPixelsPerNotch);
-    return;
-  }
-
-  if(ui.paneMode() == ui::PaneMode::Live) {
-    ui.livePage.wheel(notches, kLiveScrollPixelsPerNotch);
     return;
   }
 

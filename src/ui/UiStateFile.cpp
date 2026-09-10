@@ -110,8 +110,8 @@ bool readUiState(const std::filesystem::path& path, WorkspaceModel& workspace,
     const auto key = line.substr(0, eq);
     const auto value = line.substr(eq + 1);
     if(key == "pane") {
-      const int mode = parseInt(value, static_cast<int>(PaneMode::Live));
-      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
+      const int mode = parseInt(value, static_cast<int>(PaneMode::Split));
+      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Split)) {
         legacyPane = static_cast<PaneMode>(mode);
       }
     }
@@ -122,8 +122,8 @@ bool readUiState(const std::filesystem::path& path, WorkspaceModel& workspace,
       const auto secondBar = firstBar == std::string::npos ? std::string::npos : value.find('|', firstBar + 1);
       if(secondBar == std::string::npos) continue;
       NoteTab tab;
-      const int mode = parseInt(value.substr(0, firstBar), static_cast<int>(PaneMode::Live));
-      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Live)) {
+      const int mode = parseInt(value.substr(0, firstBar), static_cast<int>(PaneMode::Split));
+      if(mode >= static_cast<int>(PaneMode::Editor) && mode <= static_cast<int>(PaneMode::Split)) {
         tab.paneMode = static_cast<PaneMode>(mode);
       }
       tab.pinned = parseInt(value.substr(firstBar + 1, secondBar - firstBar - 1), 0) != 0;
@@ -177,7 +177,7 @@ bool readUiState(const std::filesystem::path& path, WorkspaceModel& workspace,
   if(workspace.tabs.empty() && !selection.noteId.empty()) {
     NoteTab tab;
     tab.noteId = selection.noteId;
-    tab.paneMode = legacyPane.value_or(PaneMode::Live);
+    tab.paneMode = legacyPane.value_or(PaneMode::Split);
     workspace.tabs.push_back(std::move(tab));
   }
   workspace.activeTab = workspace.tabs.empty()

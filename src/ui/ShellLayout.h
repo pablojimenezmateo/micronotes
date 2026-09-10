@@ -88,12 +88,6 @@ Rect pageRectIn(Rect pane);
 // line, so the column is capped at the reader's chosen page width and centred
 // in whatever is left.
 //
-// `gutter` is the room the surface needs to the left of the text for its own
-// affordances -- 78 on the live page for the insert, drag and fold handles,
-// zero in the reading pane, which has none. When the page is too narrow to
-// centre a column and still clear the gutter, the column stops being centred
-// and starts at the gutter instead: the handles always have somewhere to live.
-// A surface with no gutter passes zero and never reaches that branch.
 struct PageColumn {
   float left = 0.0f;
   float width = 0.0f;
@@ -101,6 +95,6 @@ struct PageColumn {
   friend bool operator==(const PageColumn&, const PageColumn&) = default;
 };
 
-PageColumn pageColumnIn(Rect page, float gutter);
+PageColumn pageColumnIn(Rect page);
 
 }

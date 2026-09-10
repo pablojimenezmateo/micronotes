@@ -24,7 +24,6 @@ struct UiRuntime;
 
 void handleFieldKey(UiRuntime& ui, editor::TextField& field, SDL_Keycode key, bool ctrl,
                     bool shift);
-void handleBlockSelectionKey(UiRuntime& ui, SDL_Keycode key, bool shift, bool alt);
 void handleEditorKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, bool shift, bool alt);
 void handleSidebarKey(UiRuntime& ui, SDL_Keycode key);
 

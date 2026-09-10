@@ -33,14 +33,14 @@ namespace micronotes::perfharness {
 // The shape is specific and it will recur: anything memoised on
 // `ui.editor.revision()` is *by construction* recomputed on every keystroke,
 // and the memo makes it look handled. This lane is the instrument for that
-// shape. It drives a real `UiRuntime` -- a real editor, a real live page, the
-// real right-hand panel -- and stops short of the paint: no window, no
+// shape. It drives a real `UiRuntime` -- a real editor, a real reading page,
+// the real right-hand panel -- and stops short of the paint: no window, no
 // textures, no present. Everything above the paint is where all three findings
 // were.
 //
 // Order matters and is the app's. `drawApp` lays the content out and draws the
 // right panel afterwards, because the outline borrows the block partition the
-// live page splices and `blocksAt` refuses to hand over one from a revision the
+// reading page splices and `blocksAt` refuses to hand over one from a revision the
 // layout has not reached. A lane that asked in the other order would measure
 // the scan and call it the cost of the panel.
 //
@@ -62,7 +62,7 @@ static constexpr std::uint64_t kShellStatusBudgetMicros = 250;
 // because there was no lane for it at all when it was three separate scans: the
 // page's, the raw pane's and the status line's, none of which the harness saw.
 static constexpr std::uint64_t kShellFindBudgetMicros = 2000;
-// The live page over a real face, which is the one part of a keystroke that
+// The note page over a real face, which is the one part of a keystroke that
 // shapes glyphs. Loose for the reason the font lane is loose: shaping is the
 // scenario whose cost moves most with what else the machine is doing.
 static constexpr std::uint64_t kShellPageBudgetMicros = 20000;
@@ -101,7 +101,7 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
   // already answers, and is the same stand-in the font lane uses.
   micronotes::app::PageViewHooks hooks;
   hooks.measureComplex = [](const micronotes::doc::SourceBlock&, float) { return 0.0f; };
-  ui.livePage.setHooks(std::move(hooks));
+  ui.readingPage.setHooks(std::move(hooks));
 
   const micronotes::ui::Rect page {0.0f, 0.0f, 900.0f, 700.0f};
   std::size_t caret = body.find("A paragraph", body.size() / 2);
@@ -117,8 +117,8 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
     micronotes::app::PageFrame frame;
     frame.sourceRevision = ui.editor.revision();
     frame.editedSpan = ui.editor.lastChange();
-    ui.livePage.beginFrame(frame);
-    ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), page);
+    ui.readingPage.beginFrame(frame);
+    ui.readingPage.layout(text, ui.editor.text(), page);
   };
   const auto askOutline = [&] { sink += micronotes::app::outlineFor(ui).size(); };
   // Through the bar's own model rather than the two counts it used to be: the
@@ -166,7 +166,7 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
   // In the raw pane, deliberately: the bar's one expensive readout -- the
   // caret's line and column -- is shown where the note's *source* is on screen,
   // so measuring the bar in the default pane would measure the cheap half and
-  // call it the bar. `shell.keystroke` below stays in the live pane, which is
+  // call it the bar. `shell.keystroke` below stays in split view, which is
   // the honest answer to what a keystroke costs *there*.
   ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Editor);
   gate("shell.status_bar", measureIterations("shell.status_bar", 24,
@@ -175,7 +175,7 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
                                                askStatus();
                                              }),
        kShellStatusBudgetMicros + kShellEditBudgetMicros);
-  ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Live);
+  ui.state.editWorkspace().setPaneMode(micronotes::ui::PaneMode::Split);
 
   ui.fields.find.beginWith("paragraph");
   ui.find.open = true;

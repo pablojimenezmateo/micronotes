@@ -19,7 +19,6 @@ constexpr int kEditorPageLines = 20;
 
 constexpr float kEditorScrollLinesPerNotch = 3.0f;
 constexpr float kViewerScrollPixelsPerNotch = 42.0f;
-constexpr float kLiveScrollPixelsPerNotch = 42.0f;
 constexpr float kSidebarScrollPixelsPerNotch = 42.0f;
 constexpr float kRightPanelScrollPixelsPerNotch = 42.0f;
 

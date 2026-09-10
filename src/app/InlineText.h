@@ -16,7 +16,7 @@
 
 // Laying out and drawing a run of formatted inline text -- the md4c render
 // model's side of the shell, used by the reading view, the split pane, and the
-// blocks the live surface hands back to md4c.
+// blocks the note page hands back to md4c.
 //
 // It came out of Application.cpp whole. Nothing here touches the runtime, the
 // library or the layout: it takes parsed inlines and a width and produces
@@ -37,7 +37,7 @@ struct InlineRun {
   // Which one it is has to travel with the run: the two are indistinguishable
   // as strings and are followed in completely different ways.
   bool wiki = false;
-  // Inline code takes a tinted box behind it, the way the live surface draws
+  // Inline code takes a tinted box behind it, the way the note page draws
   // it. Kept as a flag rather than baked into the colour because the fill is
   // the draw's business and the runs are the model.
   bool code = false;
@@ -50,7 +50,7 @@ using WikiResolver = std::function<bool(std::string_view)>;
 
 // md4c has no notion of `[[Some Note]]`: it hands the brackets back as literal
 // text. So the runs are split on them here, by the same rule
-// `doc::InlineScan` applies on the live surface (`doc::findWikiLink`). Without
+// `doc::InlineScan` applies on the note page (`doc::findWikiLink`). Without
 // this the pane that exists for *reading* a note showed the raw markup of every
 // link between notes and offered nothing to click.
 std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines,

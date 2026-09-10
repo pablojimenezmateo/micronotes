@@ -132,7 +132,7 @@ void setMaxScroll(UiRuntime& ui, Rect rect, float contentHeight) {
 // update costs. The panel is on by default, so this was the largest thing a
 // keystroke did.
 //
-// The partition comes from the live page now, through the same `editorBlocks`
+// The partition comes from the reading page now, through the same `editorBlocks`
 // borrow the block edits take: the layout splices it during its own update, and
 // the editor's revision is what proves it describes this buffer. When there is
 // nothing to borrow -- the raw pane, the first keystroke after a note opens --

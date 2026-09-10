@@ -48,7 +48,6 @@ constexpr MenuItemSpec kEditItems[] {
   item(ActionId::ToggleTask, "Tick task"),
   item(ActionId::TurnInto, "Turn into..."),
   item(ActionId::InsertBlock, "Insert block..."),
-  item(ActionId::Fold, "Fold or unfold"),
   sep(),
   item(ActionId::DuplicateBlock, "Duplicate block"),
   item(ActionId::MoveBlockUp, "Move block up"),
@@ -62,7 +61,6 @@ constexpr MenuItemSpec kEditItems[] {
 };
 
 constexpr MenuItemSpec kViewItems[] {
-  item(ActionId::PaneLive, "Live", true),
   item(ActionId::PaneRaw, "Raw Markdown", true),
   item(ActionId::PaneReading, "Reading", true),
   item(ActionId::PaneSplit, "Split", true),

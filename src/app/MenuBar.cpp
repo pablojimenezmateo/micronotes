@@ -122,7 +122,6 @@ std::size_t stepHighlight(std::span<const MenuItemSpec> items, std::size_t from,
 bool menuItemChecked(const UiRuntime& ui, ui::ActionId action) {
   const auto& workspace = ui.state.workspace();
   switch(action) {
-    case ui::ActionId::PaneLive: return workspace.paneMode() == ui::PaneMode::Live;
     case ui::ActionId::PaneRaw: return workspace.paneMode() == ui::PaneMode::Editor;
     case ui::ActionId::PaneReading: return workspace.paneMode() == ui::PaneMode::Viewer;
     case ui::ActionId::PaneSplit: return workspace.paneMode() == ui::PaneMode::Split;
@@ -157,7 +156,6 @@ bool menuItemEnabled(const UiRuntime& ui, ui::ActionId action) {
   if(action == ui::ActionId::RenameFolder || action == ui::ActionId::DeleteFolder) {
     return !ui.state.selection().folder.empty();
   }
-  if(action == ui::ActionId::MoveBlocks) return ui.blockSelection.active;
   return !spec->needsNote || !ui.state.selection().noteId.empty();
 }
 

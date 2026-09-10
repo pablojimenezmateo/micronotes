@@ -30,7 +30,7 @@ struct OutlineEntry {
 // The partition is the expensive half. Deriving one is a pass over every byte of
 // the note plus a fresh `vector<SourceBlock>`, which on a 200 KB note is 194 us
 // of the 226 us this cost -- against the ~14 us that keystroke's own layout
-// update costs. The live surface has the partition already, spliced rather than
+// update costs. The reading page has the partition already, spliced rather than
 // rescanned, and `app::EditorBlocks` is what lends it; this is the same borrow
 // the block edits in `doc/Edits.h` take, for the same reason.
 //

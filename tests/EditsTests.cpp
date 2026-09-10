@@ -490,7 +490,7 @@ MICRONOTES_TEST(edits_turn_a_blank_line_into_a_block) {
 
 // Every operation takes the partition either as a loan or by scanning for
 // itself, and the two have to be the same operation. This is the invariant that
-// lets the live page hand its own block list over -- and the one that would
+// lets the reading page hand its own block list over -- and the one that would
 // break silently if a future edit read something from the partition that the
 // synthesised empty-last-line entry does not carry.
 //

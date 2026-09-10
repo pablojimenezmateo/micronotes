@@ -175,27 +175,24 @@ MICRONOTES_TEST(block_kind_shortcut_rows_name_the_shape_they_make) {
   }
 }
 
-// Copy and cut over a block selection.
+// Copy and cut over a selection in the note.
 //
-// These two are a pair, and they had drifted apart: copy took whole blocks and
-// cut fell through every branch and did nothing. Silently -- there is no editor
-// selection while blocks are selected, because `selectBlockAtCursor` clears it,
-// so cut's first arm was false and its second looked for a one-line field that
-// is not focused either. The clipboard cannot be read in a test, so these
-// assert on the buffer and the status line, which is what the reader sees.
+// These two are a pair, and they had drifted apart: cut used to fall through
+// every branch and do nothing on a selection copy handled. The clipboard cannot
+// be read in a test, so these assert on the buffer and the status line, which
+// is what the reader sees.
 namespace {
 
-// A shell with a note whose blocks can be selected.
+// A shell with a note and its first block selected.
 void openTwoBlocks(UiRuntime& ui) {
   ui.editor.setText("First block.\n\nSecond block.\n");
   ui.focus = FocusArea::Editor;
-  ui.editor.moveCursor(0);
-  micronotes::app::selectBlockAtCursor(ui);
+  ui.editor.selectRange(0, std::string_view("First block.").size());
 }
 
 }
 
-MICRONOTES_TEST(focused_edits_copying_a_block_selection_leaves_the_note_alone) {
+MICRONOTES_TEST(focused_edits_copying_a_selection_leaves_the_note_alone) {
   UiRuntime ui;
   openTwoBlocks(ui);
   const std::string before = ui.editor.text();
@@ -210,10 +207,10 @@ MICRONOTES_TEST(focused_edits_copying_a_block_selection_leaves_the_note_alone) {
 //
 // There usually is not, here: these run headless, so `setClipboardText` fails
 // and cut takes its refusal path. That makes this the *only* way to state the
-// invariant that matters, and it is the one that was broken -- all three arms
-// used to copy, erase unconditionally, and then report that the copy had
-// failed, so a compositor that refused the selection left the text gone from
-// the note and absent from the clipboard.
+// invariant that matters, and it is the one that was broken -- both arms used
+// to copy, erase unconditionally, and then report that the copy had failed, so
+// a compositor that refused the selection left the text gone from the note and
+// absent from the clipboard.
 //
 // Either the text went somewhere and left the note, or it did neither. Never
 // the note without the clipboard.
@@ -227,12 +224,12 @@ MICRONOTES_TEST(focused_edits_cut_never_erases_what_it_could_not_copy) {
   const bool erased = ui.editor.text() != before;
   const bool refused = ui.status.text.rfind("Cut failed", 0) == 0;
   micronotes::tests::require(erased != refused,
-                             "cut must either remove the blocks and say so, or remove nothing and "
-                             "say why -- it reported \"" + ui.status.text + "\" and " +
+                             "cut must either remove the selection and say so, or remove nothing "
+                             "and say why -- it reported \"" + ui.status.text + "\" and " +
                                (erased ? "erased anyway" : "left the note alone"));
   if(refused) {
     micronotes::tests::require(ui.editor.text() == before,
-                               "cut reported a failure and erased the blocks anyway");
+                               "cut reported a failure and erased the selection anyway");
   }
 }
 
@@ -264,11 +261,10 @@ MICRONOTES_TEST(focused_edits_copy_never_changes_the_note) {
 
 // --- block commands over a plain text selection -----------------------------
 
-// There are two ways to have several blocks in hand -- Escape into the block
-// selection, or just drag across them -- and the block commands only heard the
-// first. With three list items selected by dragging or by Shift+Down, Alt+Up
-// moved the one item the caret happened to be in and left the rest of the
-// selection where it was.
+// A block command applies to every block the selection covers. It used to
+// apply to the one block the caret happened to be in: with three list items
+// selected by dragging or by Shift+Down, Alt+Up moved one of them and left the
+// rest of the selection where it was.
 //
 // The bodies below are lists, because a block is not a line: "one\ntwo" is one
 // paragraph and moving it moves both lines together, which is correct and not
@@ -291,7 +287,7 @@ MICRONOTES_TEST(block_commands_read_a_text_selection_as_the_blocks_it_covers) {
   // "- two\n- three" -- from the start of the second item to the end of the
   // third, which is the shape a drag across two items leaves.
   ui.editor.selectRange(6, 20);
-  const auto [from, to] = micronotes::app::blockSelectionCarets(ui);
+  const auto [from, to] = micronotes::app::blockCommandRange(ui);
   MICRONOTES_REQUIRE(from == 6);
   // One byte inside the last block, not the boundary after it.
   MICRONOTES_REQUIRE(to == 19);

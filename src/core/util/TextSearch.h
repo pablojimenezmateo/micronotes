@@ -15,7 +15,7 @@
 //
 // It exists because the same scan had been written three times in the shell and
 // all three disagreed. The find bar counted matches with a `find` loop over the
-// whole note on every keystroke; the live page kept its own cached list; and the
+// whole note on every keystroke; the note page kept its own cached list; and the
 // raw pane re-scanned every visible line on every frame -- so the number in the
 // status bar, the highlights on the page and the highlights in the raw pane were
 // three independent answers to one question, and none of them could be told to

@@ -162,7 +162,6 @@ bool fontBudgets(const std::string& base) {
   gate("font.type_middle", measureIterations("font.type_middle", 24,
                                              [&](int i) {
                                                source.insert(caret + static_cast<std::size_t>(i), 1, 'x');
-                                               options.caretOffset = caret;
                                                layout.update(source, options);
                                              }),
        kFontKeystrokeBudgetMicros);

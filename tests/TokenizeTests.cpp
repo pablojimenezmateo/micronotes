@@ -127,43 +127,39 @@ MICRONOTES_TEST(tokenize_splits_at_every_change_of_inline_attribute) {
   // The comma carries no attribute, so it is a token of its own with no space
   // before it.
   LineGroup out;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, false, out);
+  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, out);
   MICRONOTES_REQUIRE(textsOf(out) == std::vector<std::string>({"ab", ","}));
   MICRONOTES_REQUIRE(out[0].style.strong);
   MICRONOTES_REQUIRE(!out[1].style.strong);
   MICRONOTES_REQUIRE(!out[0].space && !out[1].space);
 }
 
-// A marker is hidden unless the block is revealed, and hidden means "no text,
-// but still holding its offsets" -- that is what keeps the caret able to land
-// between the asterisks and the word.
-MICRONOTES_TEST(tokenize_hides_markers_unless_the_block_is_revealed) {
+// A marker is always hidden, and hidden means "no text, but still holding its
+// offsets" -- that is what keeps a click able to land between the asterisks
+// and the word, and the selection able to cover them.
+MICRONOTES_TEST(tokenize_hides_markers_while_keeping_their_offsets) {
   const std::string source = "**x**";
   std::vector<Attr> attrs(source.size());
   for(std::size_t i : {0u, 1u, 3u, 4u}) attrs[i].marker = true;
 
   LineGroup hidden;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, /*revealed=*/false, hidden);
+  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, hidden);
   MICRONOTES_REQUIRE(textsOf(hidden) == std::vector<std::string>({"<hidden>", "x", "<hidden>"}));
   // Offsets are still complete and contiguous across the hidden runs.
   MICRONOTES_REQUIRE(hidden.front().start == 0);
   MICRONOTES_REQUIRE(hidden.back().end == source.size());
-
-  LineGroup shown;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, /*revealed=*/true, shown);
-  MICRONOTES_REQUIRE(textsOf(shown) == std::vector<std::string>({"**", "x", "**"}));
-  MICRONOTES_REQUIRE(shown[0].isMarker);
+  MICRONOTES_REQUIRE(hidden.front().isMarker);
 }
 
-// A marker never carries the link index, revealed or not: clicking the
-// asterisks of a link's label must not follow it.
+// A marker never carries the link index: clicking the asterisks of a link's
+// label must not follow it.
 MICRONOTES_TEST(tokenize_never_gives_a_marker_the_link_it_marks) {
   const std::string source = "[x](y)";
   std::vector<Attr> attrs(source.size());
   for(auto& attr : attrs) attr.link = 7;
   attrs[0].marker = true;
   LineGroup out;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, /*revealed=*/true, out);
+  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, out);
   MICRONOTES_REQUIRE(!out.empty());
   MICRONOTES_REQUIRE(out.front().isMarker);
   MICRONOTES_REQUIRE(out.front().link == -1);
@@ -190,7 +186,7 @@ MICRONOTES_TEST(tokenize_plain_path_agrees_with_the_general_one_on_unmarked_text
     appendPlainTokens(source, 0, source.size(), RunStyle {}, viaPlain);
     LineGroup viaContent;
     const std::vector<Attr> attrs(source.size());
-    appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, false, viaContent);
+    appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, viaContent);
 
     micronotes::tests::require(textsOf(viaPlain) == textsOf(viaContent),
                                "the plain and general tokenizers disagree on: " + source);

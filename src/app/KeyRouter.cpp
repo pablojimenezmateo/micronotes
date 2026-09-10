@@ -13,7 +13,6 @@
 #include "app/Fields.h"
 #include "app/FindBar.h"
 #include "app/FocusedEdits.h"
-#include "app/Folds.h"
 #include "app/MenuBar.h"
 #include "app/Notes.h"
 #include "app/OverlayRouter.h"
@@ -57,9 +56,6 @@ void insertTypedText(UiRuntime& ui, const char* input) {
     field->editor.insert(input);
     syncFocusedInput(ui);
   } else if(ui.focus == FocusArea::Editor) {
-    // Typing is text editing, so it takes the caret back from a block selection
-    // rather than replacing whole blocks with a character.
-    ui.blockSelection.clear();
     ui.editor.insert(input);
     // "[] " only becomes a real task marker once the space lands, so the check
     // is cheap and runs at most once per typed space.
@@ -70,14 +66,14 @@ void insertTypedText(UiRuntime& ui, const char* input) {
     ui.revealEditorCursor = true;
     // "/" opens the block inserter, but only where a block could start: mid-word
     // slashes belong to paths and URLs.
-    if(ui.paneMode() == ui::PaneMode::Live && std::string_view(input) == "/") {
+    if(std::string_view(input) == "/") {
       const std::size_t slash = ui.editor.cursor() - 1;
       const char before = slash == 0 ? '\n' : ui.editor.text()[slash - 1];
       if(before == '\n' || before == ' ' || before == '\t') openSlashMenu(ui, slash);
     }
     // The second "[" of a "[[" offers the notes it could mean. A single bracket
     // is left alone: it is how every ordinary link and every task marker starts.
-    if(ui.paneMode() == ui::PaneMode::Live && std::string_view(input) == "[") {
+    if(std::string_view(input) == "[") {
       const std::size_t bracket = ui.editor.cursor() - 1;
       if(bracket > 0 && ui.editor.text()[bracket - 1] == '[') openWikiMenu(ui, bracket - 1);
     }
@@ -192,28 +188,19 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     // jump the plan asked for.
     if(ui.focus == FocusArea::Editor) linkEditorSelection(ui);
     else openNotePalette(ui, "jump-note", "Go to note");
-  } else if(shortcut(SDLK_PERIOD, SDL_SCANCODE_PERIOD)) {
-    if(ui.focus == FocusArea::Editor) toggleFoldAt(ui, ui.editor.cursor());
   } else if(shortcut(SDLK_D, SDL_SCANCODE_D) && shift) {
     if(ui.focus == FocusArea::Editor) performBlockCommand(ui, "delete");
   } else if(shortcut(SDLK_D, SDL_SCANCODE_D)) {
     if(ui.focus == FocusArea::Editor) performBlockCommand(ui, "duplicate");
   } else if(shift && ctrl && blockKindForChordDigit(digitPressed(key, scancode))) {
     // The digit, the shape it makes and the label it reports all come from
-    // `blockKinds()`, which is also what the block menu and the slash menu
+    // `blockKinds()`, which is also what the slash menu and the turn-into menu
     // read. This used to be seven branches naming the kind, the level and the
     // label again -- and the labels had drifted from the table's.
     performBlockCommand(ui, blockKindForChordDigit(digitPressed(key, scancode))->id);
   } else if(key == SDLK_ESCAPE) {
     // One press undoes one narrowing; `app/Dismiss.h` owns which, and why.
     const Dismissed undid = dismissOne(ui);
-    // With nothing narrowed, Esc belongs to whatever has focus: in the live
-    // surface it steps out of the text onto the block, and the press after that
-    // is the block selection `dismissOne` then finds.
-    if(undid == Dismissed::Nothing && ui.focus == FocusArea::Editor &&
-       ui.paneMode() == ui::PaneMode::Live) {
-      selectBlockAtCursor(ui);
-    }
     // Leaving a tag filter lands in the tree that has just come back; every
     // other narrowing hands focus to the page.
     ui.focus = undid == Dismissed::TagFilter ? FocusArea::Folders : FocusArea::Editor;
@@ -227,8 +214,6 @@ void handleKey(UiRuntime& ui, SDL_Keycode key, SDL_Scancode scancode, SDL_Keymod
     // field, and the option chords flip a toggle rather than typing a letter.
   } else if(auto* field = focusedField(ui)) {
     handleFieldKey(ui, *field, key, ctrl, shift);
-  } else if(ui.focus == FocusArea::Editor && ui.blockSelection.active) {
-    handleBlockSelectionKey(ui, key, shift, alt);
   } else if(ui.focus == FocusArea::Editor) {
     handleEditorKey(ui, key, ctrl, shift, alt);
   } else if(ui.focus == FocusArea::Folders) {

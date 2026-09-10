@@ -191,7 +191,7 @@
   X(MenuBarLabelMeasures, "menu.bar_label_measures")                                   \
   X(MenuPopupLayouts, "menu.popup_layouts")                                            \
   /* --- document layout ---------------------------------------------------- */      \
-  /* The live surface re-lays the note out once per frame, so everything here is */    \
+  /* The page re-lays the note out once per frame, so everything here is        */    \
   /* per-frame cost. update_calls is the rate; the rest say what each call did.  */    \
   X(LayoutUpdateCalls, "layout.update_calls")                                          \
   /* Source bytes copied into the layout's own buffer, and bytes fed through the */    \
@@ -304,20 +304,6 @@
   /* should sit near log2(runs) + log2(rows) rather than near their sum.         */   \
   X(LayoutCaretQueries, "layout.caret_queries")                                        \
   X(LayoutCaretProbes, "layout.caret_probes")                                          \
-  /* Fold predicate calls. Answered per block per update, and each answer that is */   \
-  /* not the cheap early-out builds a fold key string.                            */   \
-  X(LayoutFoldQueries, "layout.fold_queries")                                          \
-  /* Updates that resolved no folds at all, because the caller offered no fold    */   \
-  /* predicate and the standing resolution was already empty. A note with nothing */   \
-  /* collapsed -- which is most notes, most of the time -- then costs no fold     */   \
-  /* work on an edit rather than a per-block predicate call and a memcmp of the   */   \
-  /* result against itself. Read against update_calls.                            */   \
-  X(LayoutFoldResolutionsSkipped, "layout.fold_resolutions_skipped")                   \
-  /* Blocks a resolution actually walked. The resolution resumes at the seam of  */    \
-  /* an edit rather than restarting at the top of the note, so this against      */    \
-  /* layout.blocks is what the resumption is worth on a note that does have a    */    \
-  /* fold in it -- the case fold_resolutions_skipped cannot help.                */    \
-  X(LayoutFoldBlocksResolved, "layout.fold_blocks_resolved")                           \
   /* Images whose box the layout asked the renderer for. One per picture per   */      \
   /* relaid block, so on an idle frame it should be zero: a note full of       */      \
   /* photographs that measures them every frame is measuring the disk.         */      \
@@ -336,7 +322,7 @@
   X(ImageTexturesLoaded, "image.textures_loaded")                                      \
   X(ImageTextureCacheHits, "image.texture_cache_hits")                                 \
   X(ImageTexturesEvicted, "image.textures_evicted")                                    \
-  /* The md4c parse of a block the live scanner does not model: served from the */     \
+  /* The md4c parse of a block the block scanner does not model: served from the */    \
   /* cache, dropped by a sweep, and how often a sweep ran. Read `reused` against */     \
   /* `markdown.parse_calls` -- a note whose tables are re-parsed on every        */    \
   /* relayout has a cache that is being defeated rather than one that is small.  */    \
@@ -383,7 +369,7 @@
   /* mark anything up, and those are the only ones still paying the full scan for */   \
   /* an empty answer.                                                             */   \
   X(LayoutInlineScanRejects, "layout.inline_scan_rejects")                             \
-  /* --- live page surface --------------------------------------------------- */     \
+  /* --- the note page ------------------------------------------------------- */     \
   /* The draw walks every block in the document and tests each against the        */   \
   /* viewport, so blocks_visited scales with the note and blocks_drawn with the   */   \
   /* window. Their ratio is how much of each frame is spent deciding not to draw  */   \
@@ -392,12 +378,11 @@
   X(PageBlocksVisited, "page.blocks_visited")                                          \
   X(PageBlocksDrawn, "page.blocks_drawn")                                              \
   X(PageRunsDrawn, "page.runs_drawn")                                                  \
-  /* The three decoration passes, each of which is its own full walk of the       */   \
+  /* The two decoration passes, each of which is its own full walk of the         */   \
   /* block list on top of the draw's. Counted separately so a fix that gives one  */   \
   /* of them a visible range is visible here rather than lost in a total.         */   \
   X(PageDecorationBlocksVisited, "page.decoration_blocks_visited")                     \
   X(PageCodeChromeBlocksVisited, "page.code_chrome_blocks_visited")                    \
-  X(PageFoldControlBlocksVisited, "page.fold_control_blocks_visited")                  \
   /* Find matches the page builds a selection rect for. The highlighter used to    */  \
   /* build one for every match in the file, however far off screen, on top of a     */  \
   /* `std::string::find` pass over the whole note per frame -- so an open find bar   */  \

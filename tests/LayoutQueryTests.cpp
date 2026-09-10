@@ -15,7 +15,7 @@ using micronotes::doc::LayoutOptions;
 using micronotes::doc::Metrics;
 using micronotes::doc::Rect;
 using micronotes::doc::RunStyle;
-using micronotes::tests::insideOneFoldedLineEnding;
+using micronotes::tests::drawnInTheSamePlace;
 using micronotes::tests::isSpace;
 using micronotes::tests::kFixture;
 using micronotes::tests::nextBoundary;
@@ -40,13 +40,12 @@ MICRONOTES_TEST(layout_round_trips_every_offset) {
   layout.setMetrics(stubMetrics());
   LayoutOptions options;
   options.width = 320.0f;
-  options.revealAll = true;
   layout.update(source, options);
 
   for(std::size_t offset = 0; offset <= source.size(); offset = nextBoundary(source, offset)) {
     const auto caret = layout.caretRect(offset);
     const auto back = layout.offsetAt(caret.x, caret.y + caret.h / 2.0f);
-    micronotes::tests::require(back == offset || insideOneFoldedLineEnding(source, offset, back),
+    micronotes::tests::require(drawnInTheSamePlace(layout, offset, back),
                                "offset " + std::to_string(offset) + " round-tripped to " +
                                    std::to_string(back) + " via x=" + std::to_string(caret.x) +
                                    " y=" + std::to_string(caret.y));
@@ -59,32 +58,13 @@ MICRONOTES_TEST(layout_round_trips_at_a_narrow_measure) {
   layout.setMetrics(stubMetrics());
   LayoutOptions options;
   options.width = 160.0f;
-  options.revealAll = true;
   layout.update(source, options);
   for(std::size_t offset = 0; offset <= source.size(); offset = nextBoundary(source, offset)) {
     const auto caret = layout.caretRect(offset);
     const auto back = layout.offsetAt(caret.x, caret.y + caret.h / 2.0f);
-    micronotes::tests::require(back == offset || insideOneFoldedLineEnding(source, offset, back),
+    micronotes::tests::require(drawnInTheSamePlace(layout, offset, back),
                                "narrow: offset " + std::to_string(offset) + " -> " + std::to_string(back));
   }
-}
-
-MICRONOTES_TEST(layout_moves_the_caret_by_visual_rows) {
-  const std::string source = "alpha bravo charlie delta echo foxtrot golf hotel india juliet\n";
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  options.width = 120.0f;
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(layout.layout(0).lines.size() > 2);
-
-  const std::size_t down = layout.rowRelative(2, 1);
-  MICRONOTES_REQUIRE(down > 2);
-  const auto first = layout.caretRect(2);
-  const auto second = layout.caretRect(down);
-  MICRONOTES_REQUIRE(second.y > first.y);
-  MICRONOTES_REQUIRE(std::abs(second.x - first.x) < 8.0f);
-  MICRONOTES_REQUIRE(layout.rowRelative(down, -1) == 2);
 }
 
 MICRONOTES_TEST(layout_reports_selection_rectangles_per_line) {
@@ -196,10 +176,6 @@ MICRONOTES_TEST(layout_gives_complex_blocks_one_caret_position) {
     MICRONOTES_REQUIRE(layout.offsetAt(400.0f, layout.blockTop(table) + 1.0f) == block.start);
   }
 
-  options.rawOffset = block.start;
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(!layout.layout(table).complex);
-  MICRONOTES_REQUIRE(layout.layout(table).lines.size() == 4);  // three source lines plus the trailing caret line
 }
 
 MICRONOTES_TEST(layout_finds_the_block_under_a_point) {
@@ -316,58 +292,23 @@ MICRONOTES_TEST(layout_caret_lookups_binary_search_the_runs) {
 }
 
 // ...and it agrees with the walk everywhere, not only at the end of a fence:
-// every code-point boundary of the fixture, at both measures, revealed and not.
+// every code-point boundary of the fixture, at both measures.
 MICRONOTES_TEST(layout_caret_search_agrees_with_the_walk_everywhere) {
-  for(const bool reveal : {false, true}) {
-    for(const float width : {160.0f, 700.0f}) {
-      const std::string source = std::string(kFixture) + oneHugeFence(12);
-      DocumentLayout layout;
-      layout.setMetrics(stubMetrics());
-      LayoutOptions options;
-      options.width = width;
-      options.revealAll = reveal;
-      layout.update(source, options);
-      for(std::size_t offset = 0; offset <= source.size(); offset = nextBoundary(source, offset)) {
-        const Rect got = layout.caretRect(offset);
-        const Rect want = caretRectByWalking(layout, offset);
-        micronotes::tests::require(std::abs(got.x - want.x) < 0.001f &&
-                                       std::abs(got.y - want.y) < 0.001f &&
-                                       std::abs(got.h - want.h) < 0.001f,
-                                   "caret disagrees with the walk at offset " + std::to_string(offset));
-      }
+  for(const float width : {160.0f, 700.0f}) {
+    const std::string source = std::string(kFixture) + oneHugeFence(12);
+    DocumentLayout layout;
+    layout.setMetrics(stubMetrics());
+    LayoutOptions options;
+    options.width = width;
+    layout.update(source, options);
+    for(std::size_t offset = 0; offset <= source.size(); offset = nextBoundary(source, offset)) {
+      const Rect got = layout.caretRect(offset);
+      const Rect want = caretRectByWalking(layout, offset);
+      micronotes::tests::require(std::abs(got.x - want.x) < 0.001f &&
+                                     std::abs(got.y - want.y) < 0.001f &&
+                                     std::abs(got.h - want.h) < 0.001f,
+                                 "caret disagrees with the walk at offset " + std::to_string(offset));
     }
   }
 }
 
-MICRONOTES_TEST(layout_row_motion_steps_over_collapsed_blocks) {
-  const std::string source = manyBlocks(6);
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  options.width = 700.0f;
-  options.folded = [](const micronotes::doc::SourceBlock& block) {
-    return block.kind == BlockKind::Heading;
-  };
-  layout.update(source, options);
-
-  std::size_t rows = 0;
-  for(std::size_t i = 0; i < layout.blockCount(); ++i) rows += layout.layout(i).lines.size();
-  // Most blocks are inside a collapsed heading and contribute nothing.
-  MICRONOTES_REQUIRE(rows > 1);
-  MICRONOTES_REQUIRE(rows < layout.blockCount());
-
-  std::size_t offset = 0;
-  float y = layout.caretRect(0).y;
-  for(std::size_t step = 0; step + 1 < rows; ++step) {
-    const std::size_t next = layout.rowRelative(offset, 1);
-    MICRONOTES_REQUIRE(next > offset);
-    const auto rect = layout.caretRect(next);
-    MICRONOTES_REQUIRE(rect.y > y);
-    offset = next;
-    y = rect.y;
-  }
-  // And a row past the last one saturates at the end of the buffer rather than
-  // running off the index.
-  MICRONOTES_REQUIRE(layout.rowRelative(offset, 1) == source.size());
-  MICRONOTES_REQUIRE(layout.rowRelative(0, -1) == 0);
-}

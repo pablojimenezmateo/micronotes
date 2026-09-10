@@ -104,7 +104,7 @@ MICRONOTES_TEST(status_bar_reports_the_caret_and_the_selection) {
 
 // A line and a column are coordinates in the note's Markdown, so they appear
 // where the Markdown is: the raw pane and the split. The reading pane has no
-// caret at all, and in the live surface "Ln 42" names a line of a file the
+// caret at all, and in the reading pane "Ln 42" names a line of a file the
 // reader cannot see.
 MICRONOTES_TEST(status_bar_reports_the_caret_where_the_source_is_on_screen) {
   UiRuntime ui;
@@ -116,14 +116,13 @@ MICRONOTES_TEST(status_bar_reports_the_caret_where_the_source_is_on_screen) {
   MICRONOTES_REQUIRE(positionShows(micronotes::ui::PaneMode::Editor));
   MICRONOTES_REQUIRE(positionShows(micronotes::ui::PaneMode::Split));
   MICRONOTES_REQUIRE(!positionShows(micronotes::ui::PaneMode::Viewer));
-  MICRONOTES_REQUIRE(!positionShows(micronotes::ui::PaneMode::Live));
 }
 
 MICRONOTES_TEST(status_bar_names_the_view_and_offers_to_cycle_it) {
   UiRuntime ui;
   const micronotes::tests::ScratchNote scratch_ui(ui, "micronotes-status-pane", "a word or two here\n");
   const auto segments = statusSegments(ui);
-  MICRONOTES_REQUIRE(segment(segments, StatusSegment::PaneMode).text == std::string("Live"));
+  MICRONOTES_REQUIRE(segment(segments, StatusSegment::PaneMode).text == std::string("Split"));
   MICRONOTES_REQUIRE(segment(segments, StatusSegment::PaneMode).command == "cycle-pane");
   MICRONOTES_REQUIRE(segment(segments, StatusSegment::Words).text == "5 words");
   // Reporting only. A segment that lifts under the pointer and does nothing

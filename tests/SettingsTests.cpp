@@ -264,7 +264,7 @@ MICRONOTES_TEST(ui_state_ignores_the_legacy_pane_when_tabs_are_present) {
   {
     std::ofstream out(statePath);
     out << "pane=1\n";                   // the echo: reading
-    out << "tab=3|0|first\n";            // live
+    out << "tab=2|0|first\n";            // split
     out << "tab=0|1|second\n";           // raw, pinned
     out << "active_tab=1\n";
     out << "note=first\n";               // the legacy echo of the open note
@@ -275,12 +275,38 @@ MICRONOTES_TEST(ui_state_ignores_the_legacy_pane_when_tabs_are_present) {
   MICRONOTES_REQUIRE(micronotes::ui::readUiState(statePath, workspace, selection));
 
   MICRONOTES_REQUIRE(workspace.tabs.size() == 2);
-  MICRONOTES_REQUIRE(workspace.tabs[0].paneMode == micronotes::ui::PaneMode::Live);
+  MICRONOTES_REQUIRE(workspace.tabs[0].paneMode == micronotes::ui::PaneMode::Split);
   MICRONOTES_REQUIRE(workspace.tabs[1].paneMode == micronotes::ui::PaneMode::Editor);
   MICRONOTES_REQUIRE(workspace.tabs[1].pinned);
   MICRONOTES_REQUIRE(workspace.activeTab == 1);
   // The active tab is what is open, whatever the legacy `note=` line said.
   MICRONOTES_REQUIRE(selection.noteId == "second");
+}
+
+// Every session written before the live surface was removed names it: `3` was
+// its `PaneMode`, and it was the default, so most saved tabs say `3`. It is now
+// out of range, and an out-of-range pane has to fall back to the current
+// default rather than to `Editor` -- `static_cast<PaneMode>(3)` would be a
+// value no switch in the shell has a case for.
+MICRONOTES_TEST(ui_state_falls_back_to_the_default_for_a_pane_that_no_longer_exists) {
+  const auto dir = scratchDir("ui-state-retired-pane");
+  const auto statePath = dir / "ui.state";
+  {
+    std::ofstream out(statePath);
+    out << "pane=3\n";                   // the retired live surface
+    out << "tab=3|0|first\n";            // and a tab that was left in it
+    out << "tab=1|0|second\n";           // reading, which still exists
+    out << "active_tab=0\n";
+  }
+
+  micronotes::ui::WorkspaceModel workspace;
+  micronotes::ui::UiSelection selection;
+  MICRONOTES_REQUIRE(micronotes::ui::readUiState(statePath, workspace, selection));
+
+  MICRONOTES_REQUIRE(workspace.tabs.size() == 2);
+  MICRONOTES_REQUIRE(workspace.tabs[0].paneMode == micronotes::ui::PaneMode::Split);
+  MICRONOTES_REQUIRE(workspace.tabs[1].paneMode == micronotes::ui::PaneMode::Viewer);
+  MICRONOTES_REQUIRE(workspace.paneMode() == micronotes::ui::PaneMode::Split);
 }
 
 // An out-of-range active tab in a hand-edited or truncated file must clamp

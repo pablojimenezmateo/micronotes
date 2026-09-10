@@ -64,15 +64,15 @@ struct LaidOutPage {
 
   void layout(std::string_view source) {
     page.beginFrame({});
-    page.layout(text, source, micronotes::doc::DocumentLayout::kNone, {0.0f, 0.0f, 800.0f, 600.0f});
+    page.layout(text, source, {0.0f, 0.0f, 800.0f, 600.0f});
   }
 };
 
 }
 
 // The anchors an in-note `[#heading]` link lands on, which the reading pane used
-// to keep in a private map -- so the live surface could not follow one of these
-// at all, and the two panes disagreed about what a note contained.
+// to keep in a private map -- so the two panes disagreed about what a note
+// contained.
 MICRONOTES_TEST(shell_page_records_an_anchor_for_every_heading) {
   LaidOutPage page;
   if(!page.ready()) return;  // no usable face on this machine
@@ -100,33 +100,28 @@ MICRONOTES_TEST(shell_page_records_an_anchor_for_every_footnote) {
   MICRONOTES_REQUIRE(page.page.anchorScroll("fn-2") == page.page.anchorScroll("fn-beta"));
 }
 
-// A read-only page never reveals a block's markers, whatever the caret says --
-// that is the whole of what "reading" means to the layout, and it is what makes
-// the reading pane this renderer rather than a second one.
-MICRONOTES_TEST(shell_a_read_only_page_never_reveals_a_blocks_markers) {
-  const std::string source = "Body **bold** text\n";
-  const auto markerInk = [&source](bool readOnly) {
-    LaidOutPage page;
-    if(!page.ready()) return -1.0f;
-    page.page.setReadOnly(readOnly);
-    page.page.beginFrame({});
-    page.page.layout(page.text, source, 2, {0.0f, 0.0f, 800.0f, 600.0f});
-    float total = 0.0f;
-    const auto& block = page.page.document().layout(0);
-    for(const auto& line : block.lines) {
-      for(const auto& run : block.runsOf(line)) {
-        if(run.isMarker) total += run.rect.w;
-      }
+// The page never shows a block's markers as text. They keep their offsets --
+// which is what lets a selection cover them and a click land between them and
+// the word -- and take no width at all.
+MICRONOTES_TEST(shell_a_page_never_reveals_a_blocks_markers) {
+  LaidOutPage page;
+  if(!page.ready()) return;
+  page.layout("Body **bold** text\n");
+  float markerInk = 0.0f;
+  std::size_t markers = 0;
+  const auto& block = page.page.document().layout(0);
+  for(const auto& line : block.lines) {
+    for(const auto& run : block.runsOf(line)) {
+      if(!run.isMarker) continue;
+      ++markers;
+      markerInk += run.rect.w;
     }
-    return total;
-  };
-  const float editable = markerInk(false);
-  if(editable < 0.0f) return;
-  MICRONOTES_REQUIRE(editable > 0.0f);
-  MICRONOTES_REQUIRE(markerInk(true) == 0.0f);
+  }
+  MICRONOTES_REQUIRE(markers > 0);
+  MICRONOTES_REQUIRE(markerInk == 0.0f);
 }
 
-// The md4c parse of a block the live scanner does not model used to be cached
+// The md4c parse of a block the block scanner does not model used to be cached
 // behind `if(size() > 64) clear()`, so a note with more tables than that made
 // room by throwing away the parses it was in the middle of using: a hit rate of
 // exactly zero, and every relayout re-parsed the note. The sweep keeps what the
@@ -222,7 +217,7 @@ MICRONOTES_TEST(shell_an_image_that_cannot_decode_never_moves_the_generation) {
 // byte of the note plus a fresh vector, 194 us of the 226 us an outline rebuild
 // cost on a 200 KB note, against the ~14 us that keystroke's own layout costs.
 //
-// The live page splices the partition during its own update, and `editorBlocks`
+// The reading page splices the partition during its own update, and `editorBlocks`
 // lends it. But the borrow only hits if the page has already laid out *this*
 // revision -- `blocksAt` refuses to hand over a partition belonging to a buffer
 // that has moved, which is exactly what makes it safe.
@@ -246,14 +241,14 @@ MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_splice
   const auto counter = [](CounterId id) {
     return microcore::perf::captureCounters()[static_cast<std::size_t>(id)];
   };
-  // What `drawLive` does: hand the page the frame's inputs -- the editor's own
-  // revision, which the page shifts into the space where zero means "cannot
-  // say" -- and lay it out.
-  const auto layOutTheLivePage = [&] {
+  // What `drawReading` does: hand the page the frame's inputs -- the editor's
+  // own revision, which the page shifts into the space where zero means
+  // "cannot say" -- and lay it out.
+  const auto layOutThePage = [&] {
     micronotes::app::PageFrame frame;
     frame.sourceRevision = ui.editor.revision();
-    ui.livePage.beginFrame(frame);
-    ui.livePage.layout(text, ui.editor.text(), ui.editor.cursor(), {0.0f, 0.0f, 800.0f, 600.0f});
+    ui.readingPage.beginFrame(frame);
+    ui.readingPage.layout(text, ui.editor.text(), {0.0f, 0.0f, 800.0f, 600.0f});
   };
   const auto rebuildTheOutline = [&] {
     ui.rightPanel.outline.invalidate();
@@ -277,14 +272,14 @@ MICRONOTES_TEST(shell_outline_borrows_the_partition_the_live_page_already_splice
 
   // Once it has, the borrow hits -- and keeps hitting as the buffer moves,
   // which is the steady state while somebody types.
-  layOutTheLivePage();
+  layOutThePage();
   for(int i = 0; i < 5; ++i) {
     const auto [scans, borrows] = rebuildTheOutline();
     MICRONOTES_REQUIRE(scans == 0);
     MICRONOTES_REQUIRE(borrows == 1);
     ui.editor.moveTo(source.size(), false);
     ui.editor.insert(".");
-    layOutTheLivePage();
+    layOutThePage();
   }
 
   // And a buffer the page has not caught up with is refused rather than

@@ -18,7 +18,6 @@ namespace micronotes::app {
 // Which scrollbar thumb a drag has hold of.
 enum class ScrollDrag {
   None,
-  Live,
   RawPane,
   Reading,
   // The sidebar's own scrollbar. It had none: the old bar was a 3px hairline

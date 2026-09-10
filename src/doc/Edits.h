@@ -22,7 +22,7 @@ namespace micronotes::doc {
 // fresh `vector<SourceBlock>` -- 88 bytes a block, ~10,000 blocks on a 200 KB
 // note -- and it measured ~200 us against the 40 us that note's whole layout
 // update costs. Enter ran two of them (`closeFence` then `continueList`), three
-// if it landed on an empty nested list item. The live page has the exact same
+// if it landed on an empty nested list item. The note page has the exact same
 // partition sitting in `DocumentLayout`, spliced incrementally on every
 // keystroke, so the scan was re-deriving what was already in hand.
 //
@@ -109,7 +109,7 @@ Edit closeFence(std::string_view source, std::size_t caret, BlockSpan blocks = {
 Edit outdentOrUnwrap(std::string_view source, std::size_t caret, BlockSpan blocks = {});
 
 // Run after a character is typed. Only shapes Markdown cannot already express
-// live are rewritten: "[] " and "[x] " become proper task markers. Everything
+// are rewritten: "[] " and "[x] " become proper task markers. Everything
 // else ("# ", "- ", "1. ", "> ", "---", "```") is already the real syntax and
 // is left exactly as typed.
 Edit applyMarkdownShortcut(std::string_view source, std::size_t caret, BlockSpan blocks = {});

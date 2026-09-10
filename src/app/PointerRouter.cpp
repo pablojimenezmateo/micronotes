@@ -11,8 +11,6 @@
 #include "app/EditorBlocks.h"
 #include "app/Fields.h"
 #include "app/FindBar.h"
-#include "app/Folds.h"
-#include "app/LivePage.h"
 #include "app/MenuBar.h"
 #include "app/Notes.h"
 #include "app/OverlayRouter.h"
@@ -70,13 +68,6 @@ bool pastePrimaryWherePointed(TextRenderer& text, UiRuntime& ui, const ShellLayo
       // field, rather than always at the end of the string.
       ui.fields.search.editor.moveCursor(fieldOffsetAtX(text, ui.fields.search, searchTextRect(layout.sidebar, text), x));
       ui.status = pastePrimarySelectionIntoInput(ui) ? "Pasted primary selection" : "No primary selection text";
-      return true;
-    }
-    if(contains(layout.content, x, y) && ui.paneMode() == ui::PaneMode::Live) {
-      ui.focus = FocusArea::Editor;
-      ui.editor.moveCursor(ui.livePage.offsetAt(x, y));
-      ui.revealEditorCursor = true;
-      ui.status = pastePrimarySelectionText(ui) ? "Pasted primary selection" : "No primary selection text";
       return true;
     }
     if(contains(layout.content, x, y)) {
@@ -179,16 +170,6 @@ void handleMouse(TextRenderer& text, UiRuntime& ui, float x, float y, Uint8 butt
 
 void handleMouseUp(UiRuntime& ui, float x, float y, Uint8 button) {
   if(button == SDL_BUTTON_LEFT) {
-    if(ui.blockDrag.active) {
-      if(ui.blockDrag.dropOffset &&
-         applyEdit(ui, doc::moveBlocksTo(ui.editor.text(), ui.blockDrag.anchor, ui.blockDrag.focus, *ui.blockDrag.dropOffset,
-                                           editorBlocks(ui)))) {
-        syncBlockSelectionToEdit(ui);
-        ui.status = "Moved block";
-      }
-      ui.blockDrag.active = false;
-      ui.blockDrag.dropOffset.reset();
-    }
     if(ui.textSelect.active) publishEditorPrimarySelection(ui);
     if(ui.fieldSelect.active) {
       if(auto* field = focusedField(ui); field && field->editor.hasSelection()) {
@@ -272,18 +253,10 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
   // the strip and keeps the pointer until the button comes up, wherever it
   // wanders in the meantime.
   if(handleTabStripMotion(ui, x, y)) return;
-  if(ui.blockDrag.active) {
-    ui.blockDrag.dropOffset = ui.livePage.dropOffsetAt(y);
-    return;
-  }
   if(ui.textSelect.active) {
     // Through the surface the press started on, not through whatever the pane
     // mode names now. See `SelectSurface`.
     switch(ui.textSelect.surface) {
-      case SelectSurface::LivePage:
-        ui.editor.selectRange(ui.textSelect.anchor, ui.livePage.offsetAt(x, y));
-        ui.revealEditorCursor = true;
-        break;
       case SelectSurface::ReadingPage:
         // No caret to reveal: the reading pane has none, and scrolling it to a
         // caret it does not draw would move the text out from under the drag.
@@ -312,10 +285,6 @@ void handleMouseMotion(TextRenderer& text, UiRuntime& ui, float x, float y, int 
   if(ui.pointer.scrollDrag != ScrollDrag::None) {
     const ShellLayout layout = shellLayout(ui, width, height);
     switch(ui.pointer.scrollDrag) {
-      case ScrollDrag::Live:
-        ui.livePage.setScroll(
-          scrollFromThumbY(ui.livePage.pageRect(), y, ui.pointer.scrollDragOffsetY, ui.livePage.maxScroll()));
-        break;
       case ScrollDrag::Sidebar:
         ui.sidebar.list.scrollTo(scrollFromThumbY(sidebarListRect(layout.sidebar), y, ui.pointer.scrollDragOffsetY,
                                                  ui.sidebar.list.maxScroll()));

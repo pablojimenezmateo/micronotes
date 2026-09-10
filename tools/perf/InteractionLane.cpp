@@ -5,9 +5,7 @@
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
 
-#include "doc/Fold.h"
 #include "doc/Layout.h"
-#include "ui/FoldState.h"
 
 #include <iostream>
 #include <string>
@@ -31,7 +29,6 @@ namespace micronotes::perfharness {
 // relayout even though not one byte changed. It is also the single most common
 // thing a keyboard does, and nothing measured it before: every layout budget
 // here was an edit, so the arrow keys were free by assumption.
-static constexpr std::uint64_t kCaretMoveBudgetMicros = 1000;
 // Typing. The budget is the design's: one keystroke in a 200 KB note.
 static constexpr std::uint64_t kTypeBudgetMicros = 2000;
 // Laying every block of a 200 KB note out from scratch, which is what opening a
@@ -49,23 +46,22 @@ bool interactionBudgets(const std::string& base) {
   micronotes::doc::LayoutOptions options;
   options.width = 700.0f;
 
-  // The live surface stamps its buffer, so the harness has to as well or it
-  // measures a path the app never takes. The stamp moves on every mutation,
-  // which is exactly the contract LayoutOptions asks callers to keep.
+  // The page stamps its buffer, so the harness has to as well or it measures a
+  // path the app never takes. The stamp moves on every mutation, which is
+  // exactly the contract LayoutOptions asks callers to keep.
   std::uint64_t revision = 1;
   std::string source = base;
-  const auto relayout = [&](std::size_t caret) {
-    options.caretOffset = caret;
+  const auto relayout = [&] {
     options.sourceRevision = revision;
     layout.update(source, options);
   };
   const auto typeAt = [&](std::size_t caret, char c) {
     source.insert(caret, 1, c);
     ++revision;
-    relayout(caret + 1);
+    relayout();
   };
 
-  relayout(0);
+  relayout();
   const std::size_t blocks = layout.blockCount();
   std::cout << "interaction.blocks: " << blocks << "\n";
 
@@ -115,7 +111,7 @@ bool interactionBudgets(const std::string& base) {
            source.erase(caret - 1, 1);
            --caret;
            ++revision;
-           relayout(caret);
+           relayout();
          }),
          kTypeBudgetMicros);
   }
@@ -131,38 +127,25 @@ bool interactionBudgets(const std::string& base) {
     gate("newline.split_and_join", measureIterations("newline.split_and_join", 16, [&](int) {
            source.insert(caret, "\n\n");
            ++revision;
-           relayout(caret + 2);
+           relayout();
            source.erase(caret, 2);
            ++revision;
-           relayout(caret);
+           relayout();
          }),
          kTypeBudgetMicros * 2);
   }
 
-  // Arrow keys: the source stands completely still and the caret walks from
-  // block to block, revealing one set of markers and hiding another.
-  {
-    std::vector<std::size_t> stops;
-    for(std::size_t i = 0; i < layout.blockCount(); i += std::max<std::size_t>(1, blocks / 64)) {
-      stops.push_back(layout.blocks()[i].start);
-    }
-    gate("caret.block_to_block", measureIterations("caret.block_to_block", 60, [&](int i) {
-           relayout(stops[static_cast<std::size_t>(i) % stops.size()]);
-         }),
-         kCaretMoveBudgetMicros);
-  }
-
   // Scrolling. Two halves, and they fail differently.
   //
-  // The first is the relayout a scroll must NOT do: the buffer, the caret and
-  // the geometry all stand still, so the standing layout is already the answer.
-  // The second is the work a scroll genuinely does -- asking the layout which
-  // blocks are in the band that just came into view, and where the caret and a
-  // clicked point land in it. Nothing measured that side before, and it is the
-  // part that has to stay proportional to the window rather than the note.
+  // The first is the relayout a scroll must NOT do: the buffer and the geometry
+  // both stand still, so the standing layout is already the answer. The second
+  // is the work a scroll genuinely does -- asking the layout which blocks are
+  // in the band that just came into view, and where a clicked point lands in
+  // it. Nothing measured that side before, and it is the part that has to stay
+  // proportional to the window rather than the note.
   {
     gate("scroll.idle_frame",
-         measureIterations("scroll.idle_frame", 120, [&](int) { relayout(0); }), 500);
+         measureIterations("scroll.idle_frame", 120, [&](int) { relayout(); }), 500);
 
     const float total = layout.totalHeight();
     const float viewport = 1000.0f;
@@ -176,7 +159,6 @@ bool interactionBudgets(const std::string& base) {
            (void)ink;
            (void)layout.offsetAt(300.0f, top + viewport / 2.0f);
            (void)layout.blockAt(top);
-           (void)layout.rowsPerHeight(viewport);
          }),
          500);
   }
@@ -198,50 +180,6 @@ bool interactionBudgets(const std::string& base) {
          kColdBudgetMicros);
   }
 
-  // Folding and unfolding a heading. The fold predicate is asked per block, and
-  // collapsing a heading changes the height of everything below it, so this is
-  // the case a stamped fold revision is meant to keep off the idle path without
-  // making the actual toggle slower.
-  {
-    micronotes::ui::FoldState folds;
-    std::uint64_t foldRevision = 1;
-    const auto blockList = micronotes::doc::scanBlocks(source);
-    std::vector<std::string> headings;
-    for(const auto& block : blockList) {
-      if(block.kind == micronotes::doc::BlockKind::Heading) {
-        headings.push_back(micronotes::doc::foldKey(source, block));
-      }
-      if(headings.size() >= 8) break;
-    }
-    options.folded = [&](const micronotes::doc::SourceBlock& block) {
-      return folds.folded("perf", micronotes::doc::foldKey(source, block));
-    };
-    const auto foldRelayout = [&](std::size_t caret) {
-      options.caretOffset = caret;
-      options.sourceRevision = revision;
-      options.foldRevision = foldRevision;
-      layout.update(source, options);
-    };
-    foldRelayout(0);
-    if(!headings.empty()) {
-      gate("fold.toggle_heading", measureIterations("fold.toggle_heading", 16, [&](int i) {
-             folds.toggle("perf", headings[static_cast<std::size_t>(i) % headings.size()]);
-             foldRevision = folds.revision() + 1;
-             foldRelayout(0);
-           }),
-           kTypeBudgetMicros);
-      // The frame after a toggle, where nothing has moved. A stamped fold
-      // revision should make this cost nothing at all; without one it re-asks
-      // the predicate once per block and rebuilds a fold key for each ask.
-      gate("fold.idle_frame_after_toggle",
-           measureIterations("fold.idle_frame_after_toggle", 120, [&](int) { foldRelayout(0); }),
-           500);
-    }
-    options.folded = nullptr;
-    options.foldRevision = 0;
-    relayout(0);
-  }
-
   // Resizing the window. Every cached block was measured at the old column
   // width, so this one is meant to be expensive -- it is here so that "expensive"
   // stays a number somebody can watch rather than an assumption.
@@ -251,11 +189,11 @@ bool interactionBudgets(const std::string& base) {
       // edge does. Cycling a handful of widths measures the block cache instead.
       const float width = 600.0f + static_cast<float>(i) * 7.0f;
       options.width = width;
-      relayout(0);
+      relayout();
     }),
          kColdBudgetMicros);
     options.width = 700.0f;
-    relayout(0);
+    relayout();
   }
 
   return ok;

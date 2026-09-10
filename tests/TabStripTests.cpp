@@ -139,25 +139,22 @@ MICRONOTES_TEST(tab_strip_each_tab_remembers_where_its_note_was_left) {
   // below straight back to the top. This is the same door the restore itself
   // uses, and for the same reason -- see `ui::ScrollList::restore`.
   goTo(tabs[0].noteId);
-  ui.livePage.restoreScroll(240);
   ui.readingPage.restoreScroll(180);
   ui.raw.list.restore(12);
 
   goTo(tabs[1].noteId);
   // A note arrived at for the first time opens at its own top rather than
   // inheriting where the last one was left.
-  MICRONOTES_REQUIRE(ui.livePage.scroll() == 0);
   MICRONOTES_REQUIRE(ui.readingPage.scroll() == 0);
   MICRONOTES_REQUIRE(ui.raw.list.scroll() == 0);
-  ui.livePage.restoreScroll(60);
+  ui.readingPage.restoreScroll(60);
 
   goTo(tabs[0].noteId);
-  MICRONOTES_REQUIRE(ui.livePage.scroll() == 240);
   MICRONOTES_REQUIRE(ui.readingPage.scroll() == 180);
   MICRONOTES_REQUIRE(ui.raw.list.scroll() == 12);
 
   goTo(tabs[1].noteId);
-  MICRONOTES_REQUIRE(ui.livePage.scroll() == 60);
+  MICRONOTES_REQUIRE(ui.readingPage.scroll() == 60);
 }
 
 // A reload of the note already open is not a move, so it must not touch the
@@ -165,9 +162,9 @@ MICRONOTES_TEST(tab_strip_each_tab_remembers_where_its_note_was_left) {
 MICRONOTES_TEST(tab_strip_reloading_the_open_note_leaves_the_view_alone) {
   UiRuntime ui;
   const OpenNotes notes(ui, "micronotes-tab-scroll-reload", 2);
-  ui.livePage.restoreScroll(150);
+  ui.readingPage.restoreScroll(150);
   micronotes::app::loadSelectedIntoEditor(ui);
-  MICRONOTES_REQUIRE(ui.livePage.scroll() == 150);
+  MICRONOTES_REQUIRE(ui.readingPage.scroll() == 150);
 }
 
 // Closing a tab takes its remembered place with it, so reopening the note
@@ -183,14 +180,14 @@ MICRONOTES_TEST(tab_strip_a_closed_tab_forgets_where_it_was) {
   };
 
   goTo(tabs[0].noteId);
-  ui.livePage.restoreScroll(200);
+  ui.readingPage.restoreScroll(200);
   // Leaving it is what writes the offset onto its tab.
   goTo(tabs[1].noteId);
   // Closing everything but the second tab takes the first one, and its place
   // with it.
   MICRONOTES_REQUIRE(closeTabs(ui, 1, TabCloseScope::Others) == 1);
   goTo(tabs[0].noteId);
-  MICRONOTES_REQUIRE(ui.livePage.scroll() == 0);
+  MICRONOTES_REQUIRE(ui.readingPage.scroll() == 0);
 }
 
 // A note that arrived without front matter gets a permanent id the first time
@@ -213,7 +210,7 @@ MICRONOTES_TEST(tab_strip_a_first_save_keeps_the_loaded_note_findable) {
   ui.state.selectNote(notes[0].id);
   micronotes::app::loadSelectedIntoEditor(ui);
 
-  ui.livePage.restoreScroll(300);
+  ui.readingPage.restoreScroll(300);
   ui.editor.insert("edited");
   MICRONOTES_REQUIRE(micronotes::app::saveCurrent(ui));
   // The save gave the note a permanent id; the record of what is loaded moved
@@ -224,5 +221,5 @@ MICRONOTES_TEST(tab_strip_a_first_save_keeps_the_loaded_note_findable) {
 
   // Which is what lets the place it was left be put away when it is left.
   micronotes::app::createNote(ui, "Somewhere else");
-  MICRONOTES_REQUIRE(ui.state.workspace().tabs[index].liveScroll == 300);
+  MICRONOTES_REQUIRE(ui.state.workspace().tabs[index].readingScroll == 300);
 }

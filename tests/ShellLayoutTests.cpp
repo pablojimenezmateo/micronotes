@@ -235,9 +235,8 @@ MICRONOTES_TEST(shell_layout_inputs_compare_by_value) {
 }
 
 // The page inside a pane, and the measure on it. Both live here rather than in
-// each surface that draws a page because three of them do -- the live page, the
-// reading pane and the raw pane -- and the inset used to be written out seven
-// times.
+// each surface that draws a page because two of them do -- the reading pane and
+// the raw pane -- and the inset used to be written out seven times.
 MICRONOTES_TEST(page_rect_is_inset_on_all_four_sides_and_lower_at_the_foot) {
   const Rect page = micronotes::ui::pageRectIn({100.0f, 50.0f, 800.0f, 600.0f});
   MICRONOTES_REQUIRE(page.x == 100.0f + micronotes::ui::kPagePad);
@@ -259,7 +258,7 @@ MICRONOTES_TEST(page_rect_never_reports_a_negative_size) {
 
 MICRONOTES_TEST(page_column_is_centred_and_capped_at_the_reader_page_width) {
   const Rect page = micronotes::ui::pageRectIn({0.0f, 0.0f, 1400.0f, 900.0f});
-  const auto column = micronotes::ui::pageColumnIn(page, 0.0f);
+  const auto column = micronotes::ui::pageColumnIn(page);
   // Extra width becomes margin, not more characters per line.
   MICRONOTES_REQUIRE(column.width == micronotes::ui::pageWidthPx());
   const float leftMargin = column.left - page.x;
@@ -267,26 +266,12 @@ MICRONOTES_TEST(page_column_is_centred_and_capped_at_the_reader_page_width) {
   MICRONOTES_REQUIRE(std::abs(leftMargin - rightMargin) <= 1.0f);
 }
 
-MICRONOTES_TEST(page_column_gives_the_gutter_its_room_before_it_centres) {
-  // Narrow enough that a centred column would start inside the gutter. The
-  // gutter wins: the live page's insert, drag and fold handles have to land
-  // somewhere.
+// A page too narrow to hold the reader's chosen measure gives the column what
+// room there is rather than letting it run off the right edge.
+MICRONOTES_TEST(page_column_shrinks_to_a_page_narrower_than_the_reader_measure) {
   const Rect page = micronotes::ui::pageRectIn({0.0f, 0.0f, 420.0f, 900.0f});
-  const float gutter = 78.0f;
-  const auto centred = micronotes::ui::pageColumnIn(page, 0.0f);
-  MICRONOTES_REQUIRE(centred.left - page.x < gutter);
-  const auto shifted = micronotes::ui::pageColumnIn(page, gutter);
-  MICRONOTES_REQUIRE(shifted.left == page.x + gutter);
-  MICRONOTES_REQUIRE(shifted.width < centred.width);
-  // And it still ends inside the page.
-  MICRONOTES_REQUIRE(shifted.left + shifted.width <= page.x + page.w + 0.001f);
-}
-
-MICRONOTES_TEST(page_column_matches_between_a_gutterless_surface_and_a_wide_page) {
-  // The live page and the reading pane draw the same note. On any page wide
-  // enough to centre the measure clear of the gutter they must agree on it
-  // exactly, or switching panes re-wraps every line.
-  const Rect page = micronotes::ui::pageRectIn({44.0f, 30.0f, 1100.0f, 900.0f});
-  MICRONOTES_REQUIRE(micronotes::ui::pageColumnIn(page, 78.0f) ==
-                     micronotes::ui::pageColumnIn(page, 0.0f));
+  const auto column = micronotes::ui::pageColumnIn(page);
+  MICRONOTES_REQUIRE(column.width < micronotes::ui::pageWidthPx());
+  MICRONOTES_REQUIRE(column.left >= page.x);
+  MICRONOTES_REQUIRE(column.left + column.width <= page.x + page.w + 0.001f);
 }

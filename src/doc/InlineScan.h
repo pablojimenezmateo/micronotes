@@ -30,7 +30,7 @@ enum class SpanKind {
 };
 
 // Marker ranges are recorded separately from the content range: that separation
-// is what lets the live surface hide `**` without touching a byte of the file.
+// is what lets the page hide `**` without touching a byte of the file.
 struct SourceSpan {
   SpanKind kind = SpanKind::Emphasis;
   std::size_t start = 0;

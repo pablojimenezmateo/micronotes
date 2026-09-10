@@ -95,9 +95,8 @@ CalloutStyle calloutStyle(std::string_view kind);
 // author named no kind at all.
 //
 // Normalised rather than echoed, for the reason `calloutStyle` normalises its
-// input: the live surface reads the `[!KIND]` tag as written and the reading
-// pane gets it lower-cased on the way through md4c, so anything that passes
-// either through unchanged draws the same callout under two different names.
+// input: the `[!KIND]` tag is read as the author wrote it, so anything that
+// echoes it draws `[!note]` and `[!NOTE]` under two different names.
 std::string calloutLabel(std::string_view kind);
 
 const Theme& theme();

@@ -18,7 +18,7 @@ namespace micronotes::app {
 // three times when it landed on an empty nested list item. Backspace, Tab and
 // every block command paid it once.
 //
-// The live surface has the same partition already, spliced rather than
+// The reading pane has the same partition already, spliced rather than
 // rescanned, from the frame it just drew. These two hand it over.
 //
 // The editor's revision is the entire safety argument, and it is the reason this
@@ -27,8 +27,14 @@ namespace micronotes::app {
 // `blocksAt` answers only for the revision it was built from, so the borrow is
 // either exactly this buffer's partition or nothing at all. Nothing is a
 // perfectly good answer -- the caller scans, as it always did -- and it is what
-// comes back for the raw pane, for the first keystroke after a note opens, and
-// for the second of two edits inside one key handler.
+// comes back in the raw-only pane mode, where nothing lays the note out; for
+// the first keystroke after a note opens; and for the second of two edits
+// inside one key handler.
+//
+// So the borrow lands in split and reading modes, which is where the note is
+// being laid out anyway, and the scan is what the raw-only mode pays. That is
+// the same bargain as before: the surface that already holds a partition lends
+// it, and no caller has to know which it got.
 
 // The partition to lend a `doc::Edits` call, or an empty span when the page has
 // none for this revision of the buffer.

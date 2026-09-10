@@ -19,7 +19,7 @@
 
 namespace micronotes::app {
 
-// The measure and the line height the live surface lays a note out with, taken
+// The measure and the line height the page lays a note out with, taken
 // from a real font. `measureComplex` is left unset: only a caller that owns the
 // md4c render model can answer it.
 //
@@ -32,13 +32,13 @@ namespace micronotes::app {
 // the one in the app means the process.
 doc::Metrics documentMetrics(ui::TextRenderer& text);
 
-// The type scale the live surface lays out at: the reader's body and mono
+// The type scale the page lays out at: the reader's body and mono
 // sizes, the six heading sizes, and the leading ratio. Public for the same
 // reason `documentMetrics` is -- a harness measuring the real font path has to
 // measure it at the sizes the app uses.
 doc::TypeMetrics documentTypeMetrics();
 
-// The two things the live surface cannot do itself: measure and draw a block
+// The two things the page cannot do itself: measure and draw a block
 // the scanner deliberately does not model. Supplied by the application, which
 // owns the md4c render model.
 struct PageViewHooks {
@@ -75,65 +75,20 @@ struct PageSelection {
   std::size_t end = 0;
 };
 
-// Whole blocks selected as objects rather than as text. Held as source offsets,
-// not block indices, so an edit underneath cannot silently re-point it.
-struct PageBlockSelection {
-  bool active = false;
-  std::size_t anchor = 0;
-  std::size_t focus = 0;
-};
-
-// A hover affordance in the left gutter: the drag handle, or the button that
-// inserts a block below.
-struct PageGutterHit {
-  ui::Rect rect;
-  std::size_t blockIndex = 0;
-  std::size_t blockStart = 0;
-  bool insert = false;
-};
-
-// How the view learns which toggles are collapsed, and how it says it had to
-// expand one. Both talk in blocks rather than offsets, so an edit that moves a
-// heading cannot detach its fold or apply it to whatever landed there instead.
-struct PageFolds {
-  std::function<bool(const doc::SourceBlock&)> collapsed;
-  std::function<void(const doc::SourceBlock&)> expand;
-};
-
-// A toggle's disclosure control in the gutter. `folded` is its state now, so
-// the caller does not have to look it up again to know what a click means.
-struct PageFoldHit {
-  ui::Rect rect;
-  std::size_t blockIndex = 0;
-  std::size_t blockStart = 0;
-  bool folded = false;
-};
-
 // The copy button drawn on a fenced code block.
 struct PageCodeButton {
   ui::Rect rect;
   std::size_t blockStart = 0;
 };
 
-// One button on the floating formatting toolbar. `id` is what the application
-// dispatches on.
-struct PageToolbarButton {
-  ui::Rect rect;
-  std::string id;
-  std::string label;
-};
-
 // Everything a page has to be told before it can lay a frame out.
 //
-// One value handed over in one call, rather than eleven setters called in an
-// order each caller remembers for itself. `drawLive` and `drawReading` opened
-// with the same feeding sequence -- wiki revision, image revision, source
-// revision, edited span, pointer, header height -- assembled by hand at both,
-// and the failure mode when one of them fell behind was silent and asymmetric:
-// a page that is not told about a new revision does not break, it *keeps a
-// stale layout*. That is not hypothetical. The reading pane rendered
-// `[[Some Note]]` as literal brackets for as long as it did because it had not
-// been given the wikilink pass the live surface had.
+// One value handed over in one call, rather than a sequence of setters called
+// in an order each caller remembers for itself. The failure mode when one of
+// them fell behind was silent and asymmetric: a page that is not told about a
+// new revision does not break, it *keeps a stale layout*. That is not
+// hypothetical -- the reading pane rendered `[[Some Note]]` as literal brackets
+// for as long as it did because it had not been given a wikilink pass.
 //
 // The defaults are the other half of it. Every field here is a decision, and a
 // surface that does not make one gets the decision written down rather than
@@ -153,16 +108,6 @@ struct PageFrame {
   // so a stale one costs the comparison rather than the answer.
   editor::TextEdit editedSpan;
 
-  // A stamp that moves whenever the fold predicate would answer differently.
-  // Constant by default, which is exactly what tells the layout that a surface
-  // with no folds in it -- the reading pane -- never has to be re-asked.
-  std::uint64_t foldRevision = 1;
-  // Whether *this note* has anything collapsed. Per frame rather than folded
-  // into the predicate, because the layout skips resolving folds entirely when
-  // it is handed none, and that is a stronger statement than a predicate that
-  // always answers false.
-  bool foldsActive = false;
-
   // The two hooks whose answers are not in a block's own bytes, stamped: a link
   // that starts or stops resolving, a picture that finishes loading. Without
   // them a cached block keeps the colour or the height it was built with.
@@ -177,27 +122,11 @@ struct PageFrame {
   // Off the page by default: a surface nobody is pointing at has no hover.
   float pointerX = -1.0f;
   float pointerY = -1.0f;
-
-  // The four a reading pane leaves alone, and which are most of what makes the
-  // live surface live.
-  PageBlockSelection blockSelection;
-  std::optional<std::size_t> dropOffset;
-  // Suppresses the toolbar while a click is still being dragged into a
-  // selection, so it cannot land under the pointer mid-drag.
-  bool selecting = false;
-  // Whether a selection is worth offering the formatting toolbar over at all.
-  //
-  // Not every selection is one the reader made in order to do something to it.
-  // Stepping through find matches selects each one in turn, and the toolbar
-  // that followed landed over the paragraph being read and across the route
-  // back to the bar's Next button -- offering to bold a word whose only crime
-  // was matching the query.
-  bool offerToolbar = true;
-  bool caretVisible = true;
 };
 
-// Renders a note as formatted, editable content: the caret is a byte offset in
-// the buffer and every pixel maps back to one.
+// Renders a note as formatted, read-only content: every pixel maps back to a
+// byte offset in the buffer, which is what makes the text selectable and its
+// links, checkboxes and code buttons clickable.
 class PageView {
 public:
   // Installed once, not per frame. The hooks' captures -- the renderer, the
@@ -208,21 +137,15 @@ public:
   // whether it has done it yet.
   void setHooks(PageViewHooks hooks);
   bool wired() const;
-  // Reading rather than editing. The caret, the hover gutter and the selection
-  // toolbar are the whole of what an editable surface adds, and all three are
-  // already conditional on focus or on the pointer -- so the reading pane is
-  // this page with them turned off, rather than a second renderer for the same
-  // Markdown. Markers stay hidden whatever the caret says.
-  void setReadOnly(bool readOnly);
 
   // Everything this frame's layout depends on, in one call. See `PageFrame`:
-  // the sequence used to be eleven setters, assembled by hand at each of the
-  // two surfaces, and a page not told about a new revision keeps a stale layout
-  // rather than failing.
+  // the sequence used to be a run of setters assembled by hand at the call
+  // site, and a page not told about a new revision keeps a stale layout rather
+  // than failing.
   void beginFrame(const PageFrame& frame);
 
   // Lays the note out for this frame. `rect` is the whole content pane.
-  void layout(ui::TextRenderer& text, std::string_view source, std::size_t caret, ui::Rect rect);
+  void layout(ui::TextRenderer& text, std::string_view source, ui::Rect rect);
 
   // `findMatches` is the shell's match list, ascending and addressed in buffer
   // bytes -- see `app/FindState.h`. `activeMatch` indexes it, or is
@@ -234,40 +157,21 @@ public:
   // re-scanned every visible line every frame, and neither could be told to
   // match case because the toggle lived in neither of them.
   static constexpr std::size_t kNoActiveMatch = static_cast<std::size_t>(-1);
-  void draw(SDL_Renderer* renderer, ui::TextRenderer& text, std::size_t caret, const PageSelection& selection,
+  void draw(SDL_Renderer* renderer, ui::TextRenderer& text, const PageSelection& selection,
             bool focused, std::span<const microcore::util::TextMatch> findMatches = {},
             std::size_t activeMatch = kNoActiveMatch);
 
   std::size_t offsetAt(float x, float y) const;
-  std::optional<std::size_t> blockAt(float x, float y) const;
   // Empty when no link is under the point.
   std::string linkAt(float x, float y) const;
   // Start offset of the task block whose checkbox is under the point.
   std::optional<std::size_t> checkboxAt(float x, float y) const;
-  // The gutter affordance under the point, if the pointer is on one.
-  std::optional<PageGutterHit> gutterAt(float x, float y) const;
-  // Id of the toolbar button under the point, empty when there is none.
-  std::string toolbarAt(float x, float y) const;
-  // The block boundary a dragged block would drop at, as a source offset.
-  std::size_t dropOffsetAt(float y) const;
-  // The disclosure control under the point, if the pointer is on one.
-  std::optional<PageFoldHit> foldAt(float x, float y) const;
   // Start offset of the code block whose copy button is under the point.
   std::optional<std::size_t> copyButtonAt(float x, float y) const;
-
-  // Also installed once. Whether the *current* note has anything collapsed is
-  // per-frame state instead -- `PageFrame::foldsActive` -- because the layout
-  // skips resolving folds entirely when it is handed no predicate, which is a
-  // stronger statement than a predicate that always answers false. So the
-  // predicate stays installed and the frame decides whether it is passed on.
-  void setFolds(PageFolds folds);
 
   // Where the room `PageFrame::headerHeight` asked for ended up this frame, in
   // window coordinates. Moves with the scroll, which is the point.
   ui::Rect headerRect() const;
-
-  std::size_t rowRelative(std::size_t offset, int deltaRows) const;
-  std::size_t rowsPerPage() const;
 
   // Where an in-note `[#heading]` link or a footnote reference lands, as a
   // scroll offset, or nothing when the note has no anchor by that name. Built
@@ -275,7 +179,10 @@ public:
   // the slug `doc::headingAnchor` makes of them.
   std::optional<int> anchorScroll(std::string_view anchor) const;
 
-  void revealCaret(std::size_t offset);
+  // Scrolls `offset` into view. Not "the caret" -- this page has none; what
+  // gets revealed is a position in the buffer, which is what stepping through
+  // find matches needs.
+  void revealOffset(std::size_t offset);
   int scroll() const;
   void setScroll(int value);
   // An offset for the layout that has not happened yet; see
@@ -288,14 +195,9 @@ public:
   void wheel(float notches, float pixelsPerNotch);
   ui::Rect pageRect() const;
   // Where the note's own text starts: the content column, at the top of the
-  // page. What an empty note's placeholder has to line up with, so the first
-  // character typed appears exactly where the prompt was.
+  // page. What an empty note's placeholder has to line up with, so it lands
+  // where the note's first block would have been.
   ui::Rect columnRect() const;
-
-  // A `Complex` block the user clicked into is shown as raw source until the
-  // caret leaves it.
-  void setRawOffset(std::optional<std::size_t> offset);
-  std::optional<std::size_t> rawOffset() const;
 
   const doc::DocumentLayout& document() const;
   // The block partition of the note as this page last laid it out, when it still
@@ -336,10 +238,6 @@ private:
                           float ox, float oy);
   // The language label and copy button, drawn over a code block's first line.
   void drawCodeChrome(SDL_Renderer* renderer, ui::TextRenderer& text);
-  void drawFoldControls(SDL_Renderer* renderer);
-  void drawGutter(SDL_Renderer* renderer, ui::TextRenderer& text);
-  void drawDropIndicator(SDL_Renderer* renderer);
-  void drawToolbar(SDL_Renderer* renderer, ui::TextRenderer& text, const PageSelection& selection);
   void buildAnchors() const;
 
   doc::DocumentLayout document_;
@@ -357,22 +255,13 @@ private:
   // document extent all settle -- so a wheel or a scrollbar drag clamps against
   // what was actually laid out.
   ui::ScrollList scroll_;
-  std::optional<std::size_t> rawOffset_;
   std::vector<PageLink> links_;
   std::vector<PageCheckbox> checkboxes_;
-  std::vector<PageToolbarButton> toolbar_;
-  std::vector<PageGutterHit> gutter_;
-  std::vector<PageFoldHit> foldHits_;
   std::vector<PageCodeButton> codeButtons_;
-  PageFolds folds_;
   bool wired_ = false;
-  bool foldsActive_ = false;
   std::uint64_t wikiLinkRevision_ = 0;
   std::uint64_t imageRevision_ = 0;
-  bool readOnly_ = false;
-  bool caretVisible_ = true;
   std::uint64_t sourceRevision_ = 0;
-  std::uint64_t foldRevision_ = 0;
   editor::TextEdit editedSpan_;
   // The note's anchors, keyed by slug. `mutable` because resolving one is
   // logically a query; rebuilt when the buffer's stamp moves, and every frame
@@ -385,12 +274,8 @@ private:
   // free on every one of them -- for the find highlighter, one per match on
   // screen.
   mutable std::vector<doc::Rect> selectionRects_;
-  PageBlockSelection blockSelection_;
-  std::optional<std::size_t> dropOffset_;
   float pointerX_ = -1.0f;
   float pointerY_ = -1.0f;
-  bool selecting_ = false;
-  bool offerToolbar_ = true;
 };
 
 }

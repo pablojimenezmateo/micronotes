@@ -28,10 +28,9 @@ struct UiRuntime;
 // selection so a middle click elsewhere pastes it.
 void selectAllInFocus(UiRuntime& ui);
 
-// Copies the selection. In the live surface with blocks selected this is the
-// whole of those blocks; otherwise it is the selected text -- from the reading
-// pane as well as the editor, because a selection you can see and cannot copy
-// is worse than one you cannot make.
+// Copies the selected text -- from the reading pane as well as the editor,
+// because a selection you can see and cannot copy is worse than one you cannot
+// make -- or the focused field's own selection.
 void copySelectionInFocus(UiRuntime& ui);
 
 // Copies the selection and erases it.

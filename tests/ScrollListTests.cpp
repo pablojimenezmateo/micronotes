@@ -7,7 +7,7 @@ using micronotes::ui::ScrollList;
 using micronotes::ui::WheelAccumulator;
 
 // A precise pointing device delivers a stream of deltas well below one notch.
-// Truncating each one to an int is how the sidebar and the live page used to
+// Truncating each one to an int is how the sidebar and the note page used to
 // scroll nothing at all under a trackpad while the editor and the reading pane,
 // which carried a remainder, tracked the finger.
 MICRONOTES_TEST(wheel_accumulates_deltas_below_one_notch) {

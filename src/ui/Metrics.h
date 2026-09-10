@@ -228,7 +228,7 @@ inline constexpr float kScrollbarHitInflate = 4.0f;
 //
 // Here because the numbers were written out four times: twice inside
 // `ui::drawVerticalScrollbar` and its `scrollbarTrack`/`scrollbarThumb`
-// siblings, and a fourth time as a private copy in `PageView`. The live page
+// siblings, and a fourth time as a private copy in `PageView`. The note page
 // painted its scrollbar from that private copy and was hit-tested against
 // ui's, so the two agreeing was a coincidence rather than a fact.
 inline constexpr float kScrollbarThickness = 10.0f;

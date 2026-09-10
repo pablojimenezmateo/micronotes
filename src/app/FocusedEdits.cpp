@@ -3,10 +3,8 @@
 #include "app/Clipboard.h"
 #include "app/Desktop.h"
 #include "app/EditCommands.h"
-#include "app/EditorBlocks.h"
 #include "app/Fields.h"
 #include "app/Shell.h"
-#include "doc/BlockScan.h"
 
 #include <SDL3/SDL.h>
 
@@ -30,26 +28,10 @@ void selectAllInFocus(UiRuntime& ui) {
 
 namespace {
 
-// The source the selected blocks cover, whole. `blockSelectionCarets` gives two
-// offsets inside the first and last block; the text is from the start of one to
-// the end of the other, so a copy takes whole blocks rather than the fragment
-// between two carets.
-std::string_view selectedBlockText(const UiRuntime& ui) {
-  const auto [from, to] = blockSelectionCarets(ui);
-  const EditorBlocks blocks(ui);
-  const std::size_t start = blocks[doc::blockIndexAt(blocks, from)].start;
-  const std::size_t end = blocks[doc::blockIndexAt(blocks, to)].end();
-  return std::string_view(ui.editor.text()).substr(start, end - start);
-}
-
-bool blocksAreSelected(const UiRuntime& ui) {
-  return ui.focus == FocusArea::Editor && ui.blockSelection.active;
-}
-
 // Whether a cut has to stop, having reported why.
 //
-// A cut that could not reach the clipboard must not erase anything. All three
-// arms used to copy, erase unconditionally, and then *say* the copy had failed
+// A cut that could not reach the clipboard must not erase anything. Both arms
+// used to copy, erase unconditionally, and then *say* the copy had failed
 // -- so a compositor that refused the selection left the text gone from the
 // note and absent from the clipboard, recoverable only by knowing to press
 // undo. Copy has no such branch: a failed copy changes nothing by construction,
@@ -63,10 +45,7 @@ bool cutFailed(UiRuntime& ui, bool copied) {
 }
 
 void copySelectionInFocus(UiRuntime& ui) {
-  if(blocksAreSelected(ui)) {
-    ui.status = setClipboardText(selectedBlockText(ui))
-                  ? "Copied block" : "Copy failed: " + std::string(SDL_GetError());
-  } else if(readsTheNote(ui.focus) && ui.editor.hasSelection()) {
+  if(readsTheNote(ui.focus) && ui.editor.hasSelection()) {
     // `Viewer` as well as `Editor`: the reading pane makes a selection in the
     // same buffer, and a selection you can see and cannot copy is worse than
     // one you cannot make.
@@ -79,18 +58,7 @@ void copySelectionInFocus(UiRuntime& ui) {
 }
 
 void cutSelectionInFocus(UiRuntime& ui) {
-  // Blocks first, and for the same reason copy takes them first: with a block
-  // selection up there is no editor selection at all -- `selectBlockAtCursor`
-  // clears it -- so without this arm Ctrl+X fell through every branch and did
-  // nothing, silently, while Ctrl+C copied the blocks.
-  if(blocksAreSelected(ui)) {
-    if(!cutFailed(ui, setClipboardText(selectedBlockText(ui)))) {
-      // The same deletion `performBlockCommand("delete")` runs, so cut is copy
-      // and delete rather than a third opinion about what a block selection is.
-      performBlockCommand(ui, "delete");
-      ui.status = "Cut block";
-    }
-  } else if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
+  if(ui.focus == FocusArea::Editor && ui.editor.hasSelection()) {
     if(!cutFailed(ui, setClipboardText(ui.editor.selectedText()))) {
       ui.editor.eraseSelection();
       ui.markEdited();

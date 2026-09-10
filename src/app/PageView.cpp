@@ -4,7 +4,6 @@
 #include "app/FrameTrace.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
-#include "doc/Fold.h"
 #include "ui/Fonts.h"
 #include "ui/Metrics.h"
 #include "ui/Settings.h"
@@ -32,7 +31,6 @@ using micronotes::ui::stroke;
 using micronotes::ui::theme;
 
 using pageview::kContentTopPadding;
-using pageview::kGutterWidth;
 using pageview::toRect;
 using pageview::toTextStyle;
 
@@ -70,10 +68,6 @@ bool PageView::wired() const {
   return wired_;
 }
 
-void PageView::setReadOnly(bool readOnly) {
-  readOnly_ = readOnly;
-}
-
 // The whole per-frame contract, applied in one place.
 //
 // The `+ 1` on both the revision and the span is the page's "cannot say" being
@@ -83,18 +77,11 @@ void PageView::setReadOnly(bool readOnly) {
 void PageView::beginFrame(const PageFrame& frame) {
   sourceRevision_ = frame.sourceRevision + 1ull;
   editedSpan_ = frame.editedSpan.shiftedBy(1);
-  foldRevision_ = frame.foldRevision;
-  foldsActive_ = frame.foldsActive;
   wikiLinkRevision_ = frame.wikiLinkRevision;
   imageRevision_ = frame.imageRevision;
   headerHeight_ = std::max(0.0f, frame.headerHeight);
   pointerX_ = frame.pointerX;
   pointerY_ = frame.pointerY;
-  blockSelection_ = frame.blockSelection;
-  dropOffset_ = frame.dropOffset;
-  selecting_ = frame.selecting;
-  offerToolbar_ = frame.offerToolbar;
-  caretVisible_ = frame.caretVisible;
 }
 
 const doc::DocumentLayout& PageView::document() const {
@@ -144,14 +131,6 @@ void PageView::recordScrollExtent() {
   scroll_.setContent(page_.h - kContentTopPadding * 2.0f, headerHeight_ + document_.totalHeight());
 }
 
-void PageView::setRawOffset(std::optional<std::size_t> offset) {
-  rawOffset_ = offset;
-}
-
-std::optional<std::size_t> PageView::rawOffset() const {
-  return rawOffset_;
-}
-
 float PageView::originX() const {
   return columnLeft_;
 }
@@ -160,13 +139,12 @@ float PageView::originY() const {
   return contentTop_ - static_cast<float>(scroll_.scroll());
 }
 
-void PageView::layout(TextRenderer& text, std::string_view source, std::size_t caret, Rect rect) {
+void PageView::layout(TextRenderer& text, std::string_view source, Rect rect) {
   const perf::ScopeTimer timer("page.layout");
   rect_ = rect;
   page_ = ui::pageRectIn(rect);
-  // The same two functions the reading pane lays itself out with, so the same
-  // note has the same measure in both panes. See ui::pageColumnIn.
-  const ui::PageColumn column = ui::pageColumnIn(page_, kGutterWidth);
+  // The measure the note is laid out to. See ui::pageColumnIn.
+  const ui::PageColumn column = ui::pageColumnIn(page_);
   columnWidth_ = column.width;
   columnLeft_ = column.left;
   // The header is part of the scroll, not part of the viewport: the first block
@@ -195,12 +173,6 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.width = columnWidth_;
   options.fontScale = text.displayScale();
   options.type = documentTypeMetrics();
-  // A read-only page never reveals a block's markers, so it has no caret as far
-  // as the layout is concerned: that is the whole of what "reading" means to it.
-  options.caretOffset = readOnly_ ? doc::DocumentLayout::kNone : caret;
-  options.rawOffset = readOnly_ ? doc::DocumentLayout::kNone
-                                : (rawOffset_ ? *rawOffset_ : doc::DocumentLayout::kNone);
-  options.folded = foldsActive_ ? folds_.collapsed : nullptr;
   options.wikiLinkResolves = hooks_.wikiLinkResolves;
   options.wikiLinkRevision = wikiLinkRevision_;
   // A picture is fitted to the column and to a share of the page, so a note is
@@ -208,37 +180,10 @@ void PageView::layout(TextRenderer& text, std::string_view source, std::size_t c
   options.imageMaxHeight = page_.h * 0.55f;
   options.imageRevision = imageRevision_;
   options.sourceRevision = sourceRevision_;
-  options.foldRevision = foldRevision_;
   options.editedSpan = editedSpan_;
   document_.update(source, options);
 
-  // The caret must never be stranded inside something collapsed - Ctrl+End, an
-  // undone edit or a jump from find can all put it there - so the fold that
-  // swallowed it gives way. Nested folds unwind one pass at a time.
-  for(int attempt = 0; attempt < 8 && folds_.collapsed && folds_.expand; ++attempt) {
-    const auto& blocks = document_.blocks();
-    const std::size_t index = doc::blockIndexAt(blocks, std::min(caret, source.size()));
-    if(!document_.blockHidden(index)) break;
-    bool expanded = false;
-    for(std::size_t i = index; i-- > 0;) {
-      if(!folds_.collapsed(blocks[i]) || doc::foldEnd(blocks, i) <= index) continue;
-      folds_.expand(blocks[i]);
-      expanded = true;
-      break;
-    }
-    if(!expanded) break;
-    // The expand just moved the fold state, so the stamp the caller handed in
-    // no longer describes it. Withdrawing it makes the layout resolve the folds
-    // itself for this pass; the caller's next frame carries a moved stamp and
-    // the fast path picks up again from there.
-    options.foldRevision = 0;
-    document_.update(source, options);
-  }
   recordScrollExtent();
-}
-
-void PageView::setFolds(PageFolds folds) {
-  folds_ = std::move(folds);
 }
 
 Rect PageView::headerRect() const {
@@ -298,22 +243,17 @@ std::optional<int> PageView::anchorScroll(std::string_view anchor) const {
   return std::max(0, static_cast<int>(std::lround(headerHeight_ + found->second)));
 }
 
-void PageView::revealCaret(std::size_t offset) {
-  const auto caret = document_.caretRect(offset);
+void PageView::revealOffset(std::size_t offset) {
+  const auto box = document_.caretRect(offset);
   // In scroll space rather than document space: the scroll counts from the top
-  // of the header, so a caret in the first block is `headerHeight_` further
+  // of the header, so a position in the first block is `headerHeight_` further
   // down than its document coordinate says.
-  const float top = caret.y + headerHeight_;
-  scroll_.reveal(top, top + caret.h, std::max(1.0f, page_.h - kContentTopPadding * 2.0f));
+  const float top = box.y + headerHeight_;
+  scroll_.reveal(top, top + box.h, std::max(1.0f, page_.h - kContentTopPadding * 2.0f));
 }
 
 std::size_t PageView::offsetAt(float x, float y) const {
   return document_.offsetAt(x - originX(), y - originY());
-}
-
-std::optional<std::size_t> PageView::blockAt(float x, float y) const {
-  (void)x;
-  return document_.blockAt(y - originY());
 }
 
 std::string PageView::linkAt(float x, float y) const {
@@ -330,45 +270,11 @@ std::optional<std::size_t> PageView::checkboxAt(float x, float y) const {
   return std::nullopt;
 }
 
-std::optional<PageGutterHit> PageView::gutterAt(float x, float y) const {
-  for(const auto& hit : gutter_) {
-    if(ui::contains(hit.rect, x, y)) return hit;
-  }
-  return std::nullopt;
-}
-
-std::optional<PageFoldHit> PageView::foldAt(float x, float y) const {
-  for(const auto& hit : foldHits_) {
-    if(ui::contains(hit.rect, x, y)) return hit;
-  }
-  return std::nullopt;
-}
-
 std::optional<std::size_t> PageView::copyButtonAt(float x, float y) const {
   for(const auto& button : codeButtons_) {
     if(ui::contains(button.rect, x, y)) return button.blockStart;
   }
   return std::nullopt;
-}
-
-std::string PageView::toolbarAt(float x, float y) const {
-  for(const auto& button : toolbar_) {
-    if(ui::contains(button.rect, x, y)) return button.id;
-  }
-  return {};
-}
-
-std::size_t PageView::dropOffsetAt(float y) const {
-  const auto& blocks = document_.blocks();
-  const float docY = y - originY();
-  for(std::size_t i = 0; i < blocks.size(); ++i) {
-    // A block inside a collapsed fold has no height and no place on screen, so
-    // it is not somewhere the pointer can mean to drop anything.
-    if(document_.layout(i).hidden) continue;
-    const float top = document_.blockTop(i);
-    if(docY < top + document_.layout(i).height / 2.0f) return blocks[i].start;
-  }
-  return document_.source().size();
 }
 
 // The blocks whose boxes reach the viewport, widened backwards to the head of a
@@ -394,14 +300,6 @@ std::pair<std::size_t, std::size_t> PageView::visibleBlocks() const {
 ui::Rect PageView::blockRect(std::size_t index) const {
   const float top = originY() + document_.blockTop(index);
   return {columnLeft_, top, columnWidth_, document_.layout(index).height};
-}
-
-std::size_t PageView::rowRelative(std::size_t offset, int deltaRows) const {
-  return document_.rowRelative(offset, deltaRows);
-}
-
-std::size_t PageView::rowsPerPage() const {
-  return document_.rowsPerHeight(std::max(1.0f, page_.h - kContentTopPadding * 2.0f));
 }
 
 }

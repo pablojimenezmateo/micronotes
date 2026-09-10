@@ -44,8 +44,7 @@ ui::PaneMode paneModeFromOption(int value) {
   switch(value) {
     case 0: return ui::PaneMode::Editor;
     case 1: return ui::PaneMode::Viewer;
-    case 2: return ui::PaneMode::Split;
-    default: return ui::PaneMode::Live;
+    default: return ui::PaneMode::Split;
   }
 }
 

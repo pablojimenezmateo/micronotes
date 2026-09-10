@@ -81,7 +81,7 @@ public:
   // Everything outside [start, oldEnd) of the buffer at `fromRevision`, and
   // outside [start, newEnd) of the buffer at `toRevision`, is byte-for-byte
   // unchanged. That is what a consumer holding the older buffer needs in order
-  // to bound work that is otherwise a pass over the whole note: the live
+  // to bound work that is otherwise a pass over the whole note: the document
   // layout's edit window is two `memcmp` passes summing to the length of the
   // note, run to locate one typed character.
   //

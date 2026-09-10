@@ -24,9 +24,9 @@ void openWikiLink(UiRuntime& ui, std::string_view target);
 // Follows an in-note `[#heading]` link or a footnote reference: scrolls the
 // surface showing the note to the anchor, and says whether it found one.
 //
-// Whichever surface -- the live page and the reading page are the same renderer
-// now, so both can answer. The reading pane used to own a private anchor map,
-// which is why the live surface could not follow one of these at all.
+// The page owns its anchor table, built from the document it laid out. The
+// reading pane used to keep a private map of its own instead, which is how the
+// two surfaces came to disagree about what a note contained.
 //
 // Only good for an anchor in the note **already laid out**. A jump into a note
 // that is only now being opened has to wait for the layout; see

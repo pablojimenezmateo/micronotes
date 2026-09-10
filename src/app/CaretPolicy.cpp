@@ -7,7 +7,7 @@ namespace micronotes::app {
 std::uint64_t caretStateKey(const UiRuntime& ui) {
   std::uint64_t key = util::kFnvOffset;
   key = util::hashValue(key, ui.focus);
-  // The page's caret: where it is, and which revision of the buffer it is in.
+  // The note's caret: where it is, and which revision of the buffer it is in.
   key = util::hashValue(key, ui.editor.revision());
   key = util::hashValue(key, ui.editor.cursor());
   // Whichever single-line field has the keyboard. Its length stands in for its

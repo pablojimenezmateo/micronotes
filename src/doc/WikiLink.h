@@ -22,7 +22,7 @@ namespace micronotes::doc {
 // One `[[target]]`, or `[[target|what to call it here]]`, found in a run of
 // plain text.
 //
-// `doc::InlineScan` already claims these on the live surface, from the note
+// `doc::InlineScan` already claims these on the page, from the note
 // buffer with a mask over what other passes have taken. The reading pane has no
 // such structure to work from -- md4c leaves `[[Some Note]]` as literal text,
 // which is why the pane that exists for reading a note used to show the raw

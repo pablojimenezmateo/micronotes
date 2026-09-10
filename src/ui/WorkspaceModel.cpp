@@ -25,7 +25,7 @@ RightPanelView rightPanelViewFromName(std::string_view name) {
 
 PaneMode WorkspaceModel::paneMode() const {
   const auto* tab = activeTab_();
-  return tab ? tab->paneMode : PaneMode::Live;
+  return tab ? tab->paneMode : PaneMode::Split;
 }
 
 void WorkspaceModel::setPaneMode(PaneMode mode) {

@@ -4,7 +4,6 @@
 #include "app/FrameTrace.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
-#include "doc/Fold.h"
 #include "doc/LinkTarget.h"
 #include "ui/Fonts.h"
 #include "ui/Settings.h"
@@ -45,9 +44,6 @@ using micronotes::ui::stroke;
 using micronotes::ui::theme;
 
 using pageview::colorFor;
-using pageview::kFoldOffset;
-using pageview::kHandleOffset;
-using pageview::kInsertOffset;
 using pageview::toRect;
 using pageview::toTextStyle;
 
@@ -71,8 +67,8 @@ bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t
   const float left = paint.ox + layout.indent;
   const float bodyLine = layout.lines.empty() ? 0.0f : layout.lines.front().height;
 
-  // List chrome stands in for the marker text while the marker is hidden.
-  if(!layout.revealed && !layout.raw && bodyLine > 0.0f) {
+  // List chrome stands in for the marker text, which is never shown.
+  if(bodyLine > 0.0f) {
     const float markerY = top + (layout.lines.empty() ? 0.0f : layout.lines.front().y);
     if(block.kind == doc::BlockKind::Bullet) {
       ui::TextStyle style;
@@ -114,12 +110,12 @@ bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t
     return true;
   }
 
-  // A code block and a block dropped to raw text are both kept inside the
-  // column: a long line scrolls off its own right edge rather than out over
-  // the gutter. `std::optional` because the guard is the scope, and this one
-  // has to end with the block rather than with the loop body it lives in.
+  // A code block is kept inside the column: a long line scrolls off its own
+  // right edge rather than out over the gutter. `std::optional` because the
+  // guard is the scope, and this one has to end with the block rather than
+  // with the loop body it lives in.
   std::optional<ui::ClipGuard> columnClip;
-  if(block.kind == doc::BlockKind::Code || layout.raw) {
+  if(block.kind == doc::BlockKind::Code) {
     columnClip.emplace(renderer, Rect {paint.ox, std::max(page_.y + 1.0f, top), columnWidth_,
                                        std::min(layout.height, page_.y + page_.h - top)});
   }
@@ -160,7 +156,7 @@ bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t
       SDL_Color ink = colorFor(run.role, block.kind);
       // A ticked task is done being read. The layout already struck it
       // through; muting the ink is the other half of saying so.
-      if(block.kind == doc::BlockKind::Todo && block.checked && !layout.revealed &&
+      if(block.kind == doc::BlockKind::Todo && block.checked &&
          run.role == doc::TextRole::Body) {
         ink = theme().textMuted;
       }
@@ -200,16 +196,13 @@ bool PageView::drawBlock(SDL_Renderer* renderer, TextRenderer& text, std::size_t
   return true;
 }
 
-void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t caret, const PageSelection& selection,
+void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, const PageSelection& selection,
                     bool focused, std::span<const util::TextMatch> findMatches,
                     std::size_t activeMatch) {
   const perf::ScopeTimer timer("page.draw");
   perf::addCounter(perf::CounterId::PageDrawCalls);
   links_.clear();
   checkboxes_.clear();
-  toolbar_.clear();
-  gutter_.clear();
-  foldHits_.clear();
   codeButtons_.clear();
   fill(renderer, rect_, theme().editorBackground);
   // Flat, with no outline. The page used to be drawn as a bordered card that
@@ -222,23 +215,11 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
   const float oy = originY();
   const float viewTop = page_.y;
   const float viewBottom = page_.y + page_.h;
-  // Everything below is clipped to the page, and the guard scope ends before
-  // the gutter, the fold controls and the toolbar, which draw beside it.
+  // Everything below is clipped to the page; the scrollbar draws outside it.
   {
   const ui::ClipGuard pageClip(renderer, {page_.x + 1.0f, page_.y + 1.0f, page_.w - 2.0f, page_.h - 2.0f});
 
-  if(blockSelection_.active) {
-    // Whole blocks, highlighted edge to edge: a block selection is an object
-    // selection, and should not read as a run of selected text.
-    const auto& blocks = document_.blocks();
-    std::size_t first = doc::blockIndexAt(blocks, blockSelection_.anchor);
-    std::size_t last = doc::blockIndexAt(blocks, blockSelection_.focus);
-    if(last < first) std::swap(first, last);
-    for(std::size_t i = first; i <= last && i < blocks.size(); ++i) {
-      const Rect band = blockRect(i);
-      fill(renderer, {band.x - 6.0f, band.y, band.w + 12.0f, std::max(2.0f, band.h)}, theme().selectionFill);
-    }
-  } else if(selection.start != selection.end) {
+  if(selection.start != selection.end) {
     // Banded to the viewport, in document space. A selection reaching the whole
     // note is otherwise a pass over every visual row in it, per frame, to paint
     // the forty the window can show.
@@ -281,26 +262,7 @@ void PageView::draw(SDL_Renderer* renderer, TextRenderer& text, std::size_t care
     frame->addRuns(runsDrawn);
   }
 
-  if(focused && !readOnly_ && !blockSelection_.active && caretVisible_) {
-    const auto rect = document_.caretRect(caret);
-    const Rect caretRect = toRect(rect, ox, oy);
-    if(caretRect.y + caretRect.h >= viewTop && caretRect.y <= viewBottom) {
-      fill(renderer, {caretRect.x, caretRect.y + 1.0f, 2.0f, std::max(4.0f, caretRect.h - 2.0f)}, theme().accent);
-    }
-  }
   drawCodeChrome(renderer, text);
-  if(!readOnly_) drawDropIndicator(renderer);
-  }
-  // Folds are an editing affordance: a reading pane has none, and drawing a
-  // disclosure control under the pointer that toggles nothing is an invitation
-  // to a click that does not happen.
-  if(!readOnly_) drawFoldControls(renderer);
-  // The three things an editable surface adds. Nothing else about the two
-  // surfaces differs, which is why the reading pane is this page rather than a
-  // second renderer for the same Markdown.
-  if(!readOnly_) {
-    drawGutter(renderer, text);
-    if(offerToolbar_) drawToolbar(renderer, text, selection);
   }
   ui::drawVerticalScrollbar(renderer, page_, scroll_.scroll(), scroll_.maxScroll());
 }
@@ -364,7 +326,6 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
   for(std::size_t i = firstBlock; i < lastBlock; ++i) {
     const doc::SourceBlock& block = blocks[i];
     const doc::BlockLayout& layout = document_.layout(i);
-    if(layout.hidden) continue;
     const float top = oy + document_.blockTop(i);
     const float left = ox + layout.indent;
 
@@ -444,7 +405,7 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
     const doc::SourceBlock& block = blocks[i];
     if(block.kind != doc::BlockKind::Code) continue;
     const doc::BlockLayout& layout = document_.layout(i);
-    if(layout.hidden || layout.complex || layout.raw) continue;
+    if(layout.complex) continue;
     const float top = oy + document_.blockTop(i);
     if(top + layout.height < page_.y || top > page_.y + page_.h) continue;
 
@@ -472,152 +433,6 @@ void PageView::drawCodeChrome(SDL_Renderer* renderer, TextRenderer& text) {
     const std::string_view info = block.info(document_.source());
     text.draw(info, button.x - static_cast<float>(text.width(info, label)) - 10.0f, y + 3.0f,
               theme().textMuted, label);
-  }
-}
-
-void PageView::drawFoldControls(SDL_Renderer* renderer) {
-  const float oy = originY();
-  const auto& blocks = document_.blocks();
-  const auto [firstBlock, lastBlock] = visibleBlocks();
-  perf::addCounter(perf::CounterId::PageFoldControlBlocksVisited, lastBlock - firstBlock);
-  const auto hovered = document_.blockAt(pointerY_ - oy);
-  const bool onPage = pointerX_ >= page_.x && pointerX_ <= page_.x + page_.w &&
-                      pointerY_ >= page_.y && pointerY_ <= page_.y + page_.h;
-
-  for(std::size_t i = firstBlock; i < lastBlock; ++i) {
-    const doc::BlockLayout& layout = document_.layout(i);
-    if(layout.hidden) continue;
-    const float top = oy + document_.blockTop(i);
-    if(top + layout.height < page_.y || top > page_.y + page_.h) continue;
-    const bool folded = folds_.collapsed && folds_.collapsed(blocks[i]);
-    // A collapsed toggle always shows its control - it is the only sign that
-    // anything is hidden at all. An expanded one waits to be hovered.
-    if(!folded && !(onPage && hovered && *hovered == i)) continue;
-    if(!doc::foldable(blocks, i)) continue;
-
-    const float firstLine = layout.lines.empty() ? 0.0f : layout.lines.front().y;
-    const float lineHeight = layout.lines.empty() ? 20.0f : layout.lines.front().height;
-    // Beside the block it belongs to, so a nested item's control sits with the
-    // item rather than out at the page margin.
-    const Rect box {columnLeft_ + layout.indent - kFoldOffset,
-                    std::round(top + firstLine + (lineHeight - 18.0f) / 2.0f), 18.0f, 18.0f};
-    if(box.y + box.h < page_.y || box.y > page_.y + page_.h) continue;
-    foldHits_.push_back({box, i, blocks[i].start, folded});
-    const bool hot = ui::contains(box, pointerX_, pointerY_);
-    if(hot) ui::drawSurface(renderer, box, theme().surfaceRaised, theme().border);
-    drawChevron(renderer, std::round(box.x + (box.w - 8.0f) / 2.0f), box.y + box.h / 2.0f, !folded,
-                hot ? theme().textPrimary : (folded ? theme().textSecondary : theme().textMuted));
-  }
-}
-
-void PageView::drawGutter(SDL_Renderer* renderer, TextRenderer& text) {
-  (void)text;
-  if(pointerX_ < page_.x || pointerX_ > page_.x + page_.w) return;
-  if(pointerY_ < page_.y || pointerY_ > page_.y + page_.h) return;
-  const auto index = document_.blockAt(pointerY_ - originY());
-  if(!index) return;
-  const auto& blocks = document_.blocks();
-  if(*index >= blocks.size() || blocks[*index].kind == doc::BlockKind::Blank) return;
-
-  const doc::BlockLayout& layout = document_.layout(*index);
-  const float top = originY() + document_.blockTop(*index);
-  const float firstLine = layout.lines.empty() ? 0.0f : layout.lines.front().y;
-  const float lineHeight = layout.lines.empty() ? 20.0f : layout.lines.front().height;
-  const float y = std::round(top + firstLine + (lineHeight - 18.0f) / 2.0f);
-  if(y + 18.0f < page_.y || y > page_.y + page_.h) return;
-
-  const Rect insertRect {columnLeft_ - kInsertOffset, y, 18.0f, 18.0f};
-  const Rect handleRect {columnLeft_ - kHandleOffset, y, 16.0f, 18.0f};
-  gutter_.push_back({insertRect, *index, blocks[*index].start, true});
-  gutter_.push_back({handleRect, *index, blocks[*index].start, false});
-
-  const bool overInsert = ui::contains(insertRect, pointerX_, pointerY_);
-  const bool overHandle = ui::contains(handleRect, pointerX_, pointerY_);
-  if(overInsert) ui::drawSurface(renderer, insertRect, theme().surfaceRaised, theme().border);
-  if(overHandle) ui::drawSurface(renderer, handleRect, theme().surfaceRaised, theme().border);
-
-  // Drawn, not typeset: the vendored UI face has no glyph for either mark, and
-  // a missing glyph in the gutter would read as a rendering bug.
-  const SDL_Color ink = overInsert || overHandle ? theme().textPrimary : theme().textMuted;
-  SDL_SetRenderDrawColor(renderer, ink.r, ink.g, ink.b, ink.a);
-  const float cx = insertRect.x + insertRect.w / 2.0f;
-  const float cy = insertRect.y + insertRect.h / 2.0f;
-  SDL_RenderLine(renderer, cx - 4.0f, cy, cx + 4.0f, cy);
-  SDL_RenderLine(renderer, cx, cy - 4.0f, cx, cy + 4.0f);
-  for(int row = 0; row < 3; ++row) {
-    for(int column = 0; column < 2; ++column) {
-      fill(renderer, {handleRect.x + 4.0f + static_cast<float>(column) * 5.0f,
-                      handleRect.y + 4.0f + static_cast<float>(row) * 4.0f, 2.0f, 2.0f}, ink);
-    }
-  }
-}
-
-void PageView::drawDropIndicator(SDL_Renderer* renderer) {
-  if(!dropOffset_) return;
-  const auto& blocks = document_.blocks();
-  const std::size_t offset = std::min(*dropOffset_, document_.source().size());
-  float y = originY();
-  if(offset >= document_.source().size() && !blocks.empty()) {
-    y += document_.blockTop(blocks.size() - 1) + document_.layout(blocks.size() - 1).height;
-  } else {
-    y += document_.blockTop(doc::blockIndexAt(blocks, offset));
-  }
-  y = std::round(y) - 1.0f;
-  if(y < page_.y || y > page_.y + page_.h) return;
-  fill(renderer, {columnLeft_ - 6.0f, y, columnWidth_ + 12.0f, 2.0f}, theme().accent);
-}
-
-void PageView::drawToolbar(SDL_Renderer* renderer, TextRenderer& text, const PageSelection& selection) {
-  if(selecting_ || blockSelection_.active) return;
-  if(selection.start == selection.end) return;
-  // Only the two rects this actually places against, not every rect in the
-  // selection: the toolbar reads `front()` to sit above the selection's first
-  // row and `back()` to fall back to below its last, and it used to get them by
-  // building all 6,600 of a select-all's rows and throwing 6,598 away.
-  const auto ends = document_.selectionEnds(selection.start, selection.end);
-  if(!ends) return;
-
-  struct Entry { const char* id; const char* label; };
-  static constexpr std::size_t kButtons = 6;
-  static constexpr Entry entries[kButtons] = {
-    {"bold", "B"}, {"italic", "I"}, {"code", "</>"}, {"strike", "S"},
-    {"link", "Link"}, {"turn", "Turn into"},
-  };
-  ui::TextStyle style;
-  style.size = ui::type().small;
-
-  const float padding = 9.0f;
-  float width = 6.0f;
-  float widths[kButtons] = {};
-  for(std::size_t i = 0; i < kButtons; ++i) {
-    widths[i] = static_cast<float>(text.width(entries[i].label, style)) + padding * 2.0f;
-    width += widths[i];
-  }
-  const float height = 30.0f;
-
-  const Rect first = toRect(ends->first, originX(), originY());
-  float x = std::clamp(first.x - 8.0f, page_.x + 6.0f, page_.x + page_.w - width - 6.0f);
-  float y = first.y - height - 8.0f;
-  if(y < page_.y + 4.0f) {
-    // No room above: sit below the selection rather than off the page.
-    const Rect last = toRect(ends->second, originX(), originY());
-    y = last.y + last.h + 8.0f;
-  }
-  if(y + height > page_.y + page_.h - 4.0f) return;
-
-  ui::drawSurface(renderer, {x, y, width, height}, theme().overlayBackground, theme().border);
-  float cursorX = x + 3.0f;
-  for(std::size_t i = 0; i < kButtons; ++i) {
-    const Rect button {cursorX, y + 3.0f, widths[i], height - 6.0f};
-    if(ui::contains(button, pointerX_, pointerY_)) fill(renderer, button, theme().rowHighlight);
-    ui::TextStyle label = style;
-    label.strong = std::string_view(entries[i].id) == "bold";
-    label.italic = std::string_view(entries[i].id) == "italic";
-    if(std::string_view(entries[i].id) == "code") label.family = ui::FontFamily::Mono;
-    const float labelX = button.x + (button.w - static_cast<float>(text.width(entries[i].label, label))) / 2.0f;
-    text.draw(entries[i].label, labelX, y + 7.0f, theme().textPrimary, label);
-    toolbar_.push_back({button, entries[i].id, entries[i].label});
-    cursorX += widths[i];
   }
 }
 }

@@ -178,10 +178,7 @@ struct BlockLayout {
   float height = 0.0f;
   float indent = 0.0f;
   float textLeft = 0.0f;
-  bool revealed = false;   // this block's markers are shown as text
-  bool raw = false;        // laid out as plain source lines
   bool complex = false;    // drawn by the md4c render model
-  bool hidden = false;     // inside a collapsed fold: no lines, no height
   // The `> [!KIND]` line at the head of a callout, with its marker hidden. Its
   // text is the callout's title rather than the first sentence of its body,
   // which is what `[!KIND] Some title` means everywhere these files are read.
@@ -217,7 +214,7 @@ struct Metrics {
   std::function<float(const SourceBlock&, float width)> measureComplex;
   // The box `![alt](target)` takes, fitted to the column and to `maxHeight`.
   // The layout has a buffer, not a texture cache, so it asks -- exactly as it
-  // asks about folds and wikilinks. Unset means the note draws no pictures,
+  // asks about wikilinks. Unset means the note draws no pictures,
   // which is what a layout with no renderer behind it should do.
   std::function<ImageBox(std::string_view target, float column, float maxHeight)> measureImage;
 };
@@ -231,24 +228,9 @@ struct LayoutOptions {
   float quoteGutter = 18.0f;
   float blockSpacing = 4.0f;
   float headingSpaceAbove = 14.0f;
-  // Markers are revealed only in the block holding the caret. Given as a source
-  // offset so the caller never has to know the block numbering.
-  std::size_t caretOffset = static_cast<std::size_t>(-1);
-  bool revealAll = false;
-  // An offset inside a `Complex` block the user clicked into, edited as raw
-  // source until they leave it.
-  std::size_t rawOffset = static_cast<std::size_t>(-1);
-  // Asked of each block that could head a toggle; the layout resolves a "yes"
-  // to the blocks that head hides. Answering per block rather than per offset
-  // is what keeps a fold attached to its heading when an edit above moves it.
-  // A hidden block keeps its offsets and its place in the partition and gives
-  // up only its height, so nothing below it shifts and the caret has no line
-  // there to land on.
-  std::function<bool(const SourceBlock&)> folded;
   // Whether a `[[target]]` names a note that exists. The layout cannot know --
-  // it has a buffer, not a library -- so it asks, exactly as it asks about
-  // folds. Unset means "assume it does", which is what a layout with no library
-  // behind it should draw.
+  // it has a buffer, not a library -- so it asks. Unset means "assume it does",
+  // which is what a layout with no library behind it should draw.
   std::function<bool(std::string_view)> wikiLinkResolves;
   // The tallest a picture may be drawn. Part of the geometry, because a shorter
   // window makes a shorter image and so a shorter block: a note is not meant to
@@ -261,23 +243,17 @@ struct LayoutOptions {
   // block's layout that is not in the block's own bytes.
   std::uint64_t imageRevision = 0;
 
-  // Identity stamps. Both are optional, and both exist because the reuse check
+  // An identity stamp. Optional, and it exists because the reuse check
   // otherwise has to *prove* that nothing moved -- which costs a pass over the
-  // document to establish that a pass over the document is unnecessary.
+  // document to establish that a pass over the document is unnecessary. It
+  // saves a memcmp of the whole note.
   //
-  // `sourceRevision` saves a memcmp of the whole note; `foldRevision` saves
-  // asking `folded` once per block, and each of those asks builds a fold key.
-  // On a 466 KB note that was 0.13 ms of every idle frame, all of it spent
-  // re-deriving last frame's answer.
-  //
-  // Zero means "cannot say", and the layout falls back to comparing bytes and
-  // to re-resolving the folds -- which is what a caller with no revision to
-  // offer, a test for instance, should get. A caller that does supply one is
-  // promising that it moves whenever the answer would: the source stamp must
-  // change on every mutation of the buffer, and the fold stamp on every change
-  // to what is collapsed *and* on a change of which note is being folded.
+  // Zero means "cannot say", and the layout falls back to comparing bytes --
+  // which is what a caller with no revision to offer, a test for instance,
+  // should get. A caller that does supply one is promising that it moves
+  // whenever the answer would: the stamp must change on every mutation of the
+  // buffer.
   std::uint64_t sourceRevision = 0;
-  std::uint64_t foldRevision = 0;
 
   // What the caller changed, and between which two source stamps.
   //
@@ -401,10 +377,6 @@ public:
     if(index >= placed_.size() || !placed_[index].layout) return empty;
     return *placed_[index].layout;
   }
-  // True when the block sits inside a collapsed toggle.
-  bool blockHidden(std::size_t index) const {
-    return index < hidden_.size() && hidden_[index];
-  }
   float blockTop(std::size_t index) const {
     if(index >= placed_.size()) return totalHeight_;
     return placed_[index].top;
@@ -451,9 +423,6 @@ public:
   // one against the viewport is O(document) per frame no matter how little it
   // ends up drawing.
   std::pair<std::size_t, std::size_t> blockRange(float top, float bottom) const;
-  // Moves `offset` by whole visual rows, keeping the horizontal position.
-  std::size_t rowRelative(std::size_t offset, int deltaRows) const;
-  std::size_t rowsPerHeight(float height) const;
 
   // Diagnostics for the perf harness.
   std::size_t lastRelaidBlocks() const {
@@ -481,8 +450,6 @@ private:
 
   // What a block's layout depends on beyond its own bytes and the geometry.
   struct Flags {
-    bool revealed = false;      // markers shown as text
-    bool raw = false;           // laid out as plain source lines
     // The two ends of the buffer. `first` gets no space above it however much
     // its kind would otherwise ask for, and `trailingLine` owns the empty last
     // line a buffer ending in a newline has to put a caret on. Both are here
@@ -492,13 +459,11 @@ private:
     // the first one's layout, and this is the record that says so.
     bool first = false;
     bool trailingLine = false;
-    bool hidden = false;        // inside a collapsed toggle
     bool groupFirst = true;     // first line of a quote or callout run
     bool groupLast = true;      // last line of one
 
     bool operator==(const Flags& other) const {
-      return revealed == other.revealed && raw == other.raw && first == other.first &&
-             trailingLine == other.trailingLine && hidden == other.hidden &&
+      return first == other.first && trailingLine == other.trailingLine &&
              groupFirst == other.groupFirst && groupLast == other.groupLast;
     }
   };
@@ -553,16 +518,7 @@ private:
   bool sourceMatches(std::string_view source) const;
   // Whether the standing layout already answers this call exactly. Asked only
   // once the source is known to match; see the definition for the rest.
-  // `foldsMatch` is the caller's answer to the one input this cannot check for
-  // itself, since establishing it is the expensive part.
-  bool canReuse(const LayoutOptions& options, std::uint64_t geometry, bool foldsMatch) const;
-  // The fold predicate resolved over `blocks`, as a per-block "is hidden" byte,
-  // into a vector the caller owns -- so the buffer is reused between updates
-  // instead of allocated per keystroke. A byte rather than a `vector<bool>` bit
-  // because the placement patch has to *diff* two generations of this to learn
-  // which blocks a fold change moved, and a byte-wise diff is a `memcmp`.
-  // Returns whether anything came out hidden, which is the state that lets the
-  // next call skip the resolution altogether.
+  bool canReuse(const LayoutOptions& options, std::uint64_t geometry) const;
   // Everything about the shape a block would be laid out in, as one number; see
   // the definition.
   static std::uint64_t geometryKey(const LayoutOptions& options);
@@ -572,36 +528,16 @@ private:
   // and the reason it is its own function is that it is where a resize spends
   // its worst frame -- see the definition for the numbers.
   void sweepLayoutCache();
-  // The walk both resolvers share; see the definition.
-  bool hideFoldedFrom(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
-                      std::size_t from, std::vector<std::uint8_t>& hidden) const;
-  bool resolveFolds(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
-                    std::vector<std::uint8_t>* out) const;
-  // The same resolution, resumed rather than restarted, for an edit that
-  // carried `carried` blocks through unchanged at the front of the document.
-  //
-  // `hidden[j]` depends only on blocks `[0, j]`: a fold reaching `j` has to
-  // have covered every block between its head and `j`, and the scan that
-  // decides how far a head reaches stops at the first block that breaks it, so
-  // it never looks past `j` to answer for `j`. Everything before the edit
-  // therefore keeps the answer it had -- back to the head of whatever fold was
-  // open across the seam, which is where the resumed walk starts.
-  //
-  // `hidden_` is the previous generation and is read here; the result goes into
-  // `out`, which is the spare. Falls back to a full resolution when the two are
-  // not comparable, which is what `carried == 0` means.
-  bool resolveFoldsAfter(const std::vector<SourceBlock>& blocks, const LayoutOptions& options,
-                         std::size_t carried, std::vector<std::uint8_t>* out) const;
   std::size_t blockIndexFor(std::size_t offset) const;
   // The images of a block that has some, laid out down the column from `top`;
   // returns where the block's ink now ends.
   float placeImages(BlockLayout& out, float top) const;
 
   // The flags block `index` is keyed and laid out under. They depend on the
-  // block, on its neighbours' kinds, on the fold state and on where the caret
-  // and the raw block are -- and on nothing else, which is precisely what lets
-  // the placement patch bound the set of blocks a given change can have moved.
-  Flags flagsFor(std::size_t index, std::size_t caretBlock, std::size_t rawBlock) const;
+  // block and on its neighbours' kinds -- and on nothing else, which is
+  // precisely what lets the placement patch bound the set of blocks a given
+  // change can have moved.
+  Flags flagsFor(std::size_t index) const;
   // The rect one visual row of a selection paints, or nothing when that row
   // holds none of it.
   std::optional<Rect> selectionRectFor(std::size_t block, const VisualLine& line, std::size_t from,
@@ -655,9 +591,8 @@ private:
 
   BlockLayout layoutBlock(std::size_t index, const Flags& flags) const;
   const BlockLayout* layoutForOffset(std::size_t offset, std::size_t* blockIndex) const;
-  std::size_t flatLineForOffset(std::size_t offset, float* caretX) const;
-  // The visual-row index space that row-relative motion moves in, addressed
-  // through `lineStart_` rather than through a materialised table of rows.
+  // The visual-row index space, addressed through `lineStart_` rather than
+  // through a materialised table of rows.
   std::size_t flatLineCount() const;
   // The block owning row `flat`, and the row's index inside that block.
   std::pair<std::size_t, std::size_t> flatLineAt(std::size_t flat) const;
@@ -671,13 +606,6 @@ private:
   std::string source_;
   std::vector<SourceBlock> blocks_;
   std::vector<Placed> placed_;
-  std::vector<std::uint8_t> hidden_;
-  // Whether `hidden_` holds a single 1. A note with nothing folded -- which is
-  // most notes, most of the time -- can then have its fold resolution skipped
-  // outright rather than recomputed and compared against itself: an all-zero
-  // resolution of the right length is the same answer whatever the block list
-  // did, provided the caller is not offering a fold predicate at all.
-  bool anyHidden_ = false;
   // Prefix sum of visual lines: `lineStart_[i]` is how many rows the blocks
   // before `i` contribute, so `lineStart_.back()` is the document's row count
   // and a row maps back to its block by binary search. This was a materialised
@@ -693,15 +621,12 @@ private:
   // allocate a copy of it on the one frame it is already the slowest thing in.
   std::vector<std::uint64_t> liveSorted_;
   // The flags each standing block was keyed under. Half of the identity a
-  // carried-over key needs: identical bytes are not enough when the caret moved
-  // into the block and revealed its markers.
+  // carried-over key needs: identical bytes are not enough when a block stops
+  // being the first in the document, or stops ending a quote run.
   std::vector<Flags> flags_;
   // The blocks the partial rescan produced, before they are spliced into
   // `blocks_`. A member so a keystroke's rescan allocates nothing.
   std::vector<SourceBlock> scanned_;
-  // The fold resolution of the update being built, before it is swapped in. Its
-  // predecessor is what says which blocks a fold change moved.
-  std::vector<std::uint8_t> spareHidden_;
   // The blocks whose entry this update can have moved, as a few inclusive
   // ranges rather than one span: a caret at the top of a note and an edit at
   // the bottom are two blocks of work, and a single interval covering both
@@ -732,12 +657,9 @@ private:
   // What the standing layout was built from, so the next call can ask whether
   // it would produce the same thing again.
   std::uint64_t geometryHash_ = 0;
-  // The stamps the standing layout was built under, or zero when it was built
-  // by a caller that did not offer them.
+  // The stamp the standing layout was built under, or zero when it was built
+  // by a caller that did not offer one.
   std::uint64_t sourceRevision_ = 0;
-  std::uint64_t foldRevision_ = 0;
-  std::size_t caretBlock_ = kNone;
-  std::size_t rawBlock_ = kNone;
   bool built_ = false;
 };
 

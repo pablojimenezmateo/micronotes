@@ -15,7 +15,6 @@ using micronotes::doc::LayoutOptions;
 using micronotes::doc::Metrics;
 using micronotes::doc::Rect;
 using micronotes::doc::RunStyle;
-using micronotes::tests::insideOneFoldedLineEnding;
 using micronotes::tests::isSpace;
 using micronotes::tests::kFixture;
 using micronotes::tests::nextBoundary;
@@ -39,7 +38,6 @@ MICRONOTES_TEST(layout_covers_every_source_byte_with_a_run) {
   layout.setMetrics(stubMetrics());
   LayoutOptions options;
   options.width = 320.0f;
-  options.revealAll = true;
   layout.update(source, options);
 
   std::size_t expected = 0;
@@ -57,13 +55,12 @@ MICRONOTES_TEST(layout_covers_every_source_byte_with_a_run) {
   MICRONOTES_REQUIRE(expected == source.size());
 }
 
-MICRONOTES_TEST(layout_hides_markers_outside_the_caret_block) {
+MICRONOTES_TEST(layout_hides_every_marker) {
   const std::string source = "# Title\n\nBody **bold** text\n";
   DocumentLayout layout;
   layout.setMetrics(stubMetrics());
   LayoutOptions options;
   options.width = 400.0f;
-  options.caretOffset = DocumentLayout::kNone;
   layout.update(source, options);
 
   const auto markerWidth = [&](std::size_t block) {
@@ -76,12 +73,9 @@ MICRONOTES_TEST(layout_hides_markers_outside_the_caret_block) {
     }
     return total;
   };
+  // The `# ` of the heading and the `**` around the bold run: both hold their
+  // offsets and neither takes a pixel.
   MICRONOTES_REQUIRE(markerWidth(0) == 0.0f);
-  MICRONOTES_REQUIRE(markerWidth(2) == 0.0f);
-
-  options.caretOffset = 2;  // inside the heading
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(markerWidth(0) > 0.0f);
   MICRONOTES_REQUIRE(markerWidth(2) == 0.0f);
 }
 
@@ -103,23 +97,6 @@ MICRONOTES_TEST(layout_marks_only_the_head_of_a_callout_as_its_title) {
   MICRONOTES_REQUIRE(layout.layout(0).calloutTitle);
   MICRONOTES_REQUIRE(layout.blocks()[0].kind == BlockKind::Callout);
   MICRONOTES_REQUIRE(!layout.layout(1).calloutTitle);
-}
-
-// The title is drawn strong and in the callout's own colour, so while the caret
-// is inside the block -- where the `> [!NOTE]` is shown as the text it really
-// is -- it must stop being a title and go back to being source.
-MICRONOTES_TEST(layout_stops_titling_a_callout_whose_markers_are_revealed) {
-  const std::string source = "> [!TIP] Try this\n";
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(layout.layout(0).calloutTitle);
-
-  options.caretOffset = 4;
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(layout.layout(0).revealed);
-  MICRONOTES_REQUIRE(!layout.layout(0).calloutTitle);
 }
 
 // A quote with no `[!KIND]` is a quote. Titling it would put a bold coloured
@@ -252,36 +229,32 @@ MICRONOTES_TEST(layout_ends_a_line_where_the_writer_ended_one) {
 // non-decreasing in both `srcStart` and `srcEnd`, and its lines own contiguous
 // run ranges in order. If a future flow emits a run out of order the partition
 // point silently returns the wrong run, so the invariant is asserted rather
-// than assumed -- over the fixture, at a narrow measure, with markers revealed
-// and hidden, which is every shape the flow has.
+// than assumed -- over the fixture, at a narrow measure and a wide one.
 MICRONOTES_TEST(layout_runs_are_ordered_within_a_block) {
-  for(const bool reveal : {false, true}) {
-    for(const float width : {160.0f, 700.0f}) {
-      const std::string source = std::string(kFixture) + oneHugeFence(40);
-      DocumentLayout layout;
-      layout.setMetrics(stubMetrics());
-      LayoutOptions options;
-      options.width = width;
-      options.revealAll = reveal;
-      layout.update(source, options);
-      for(std::size_t i = 0; i < layout.blockCount(); ++i) {
-        const auto& block = layout.layout(i);
-        std::size_t lastStart = 0;
-        std::size_t lastEnd = 0;
-        for(const auto& run : block.runs) {
-          micronotes::tests::require(run.srcStart >= lastStart, "run srcStart went backwards");
-          micronotes::tests::require(run.srcEnd >= lastEnd, "run srcEnd went backwards");
-          micronotes::tests::require(run.srcEnd >= run.srcStart, "run ends before it starts");
-          lastStart = run.srcStart;
-          lastEnd = run.srcEnd;
-        }
-        std::uint32_t nextRun = 0;
-        for(const auto& line : block.lines) {
-          micronotes::tests::require(line.runBegin >= nextRun, "line runs are not in order");
-          micronotes::tests::require(line.runEnd >= line.runBegin, "line run range is inverted");
-          micronotes::tests::require(line.runEnd <= block.runs.size(), "line runs escape the block");
-          nextRun = line.runEnd;
-        }
+  for(const float width : {160.0f, 700.0f}) {
+    const std::string source = std::string(kFixture) + oneHugeFence(40);
+    DocumentLayout layout;
+    layout.setMetrics(stubMetrics());
+    LayoutOptions options;
+    options.width = width;
+    layout.update(source, options);
+    for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+      const auto& block = layout.layout(i);
+      std::size_t lastStart = 0;
+      std::size_t lastEnd = 0;
+      for(const auto& run : block.runs) {
+        micronotes::tests::require(run.srcStart >= lastStart, "run srcStart went backwards");
+        micronotes::tests::require(run.srcEnd >= lastEnd, "run srcEnd went backwards");
+        micronotes::tests::require(run.srcEnd >= run.srcStart, "run ends before it starts");
+        lastStart = run.srcStart;
+        lastEnd = run.srcEnd;
+      }
+      std::uint32_t nextRun = 0;
+      for(const auto& line : block.lines) {
+        micronotes::tests::require(line.runBegin >= nextRun, "line runs are not in order");
+        micronotes::tests::require(line.runEnd >= line.runBegin, "line run range is inverted");
+        micronotes::tests::require(line.runEnd <= block.runs.size(), "line runs escape the block");
+        nextRun = line.runEnd;
       }
     }
   }
@@ -299,27 +272,24 @@ MICRONOTES_TEST(layout_never_breaks_a_line_inside_a_word) {
     "Prose where **bold**, *soft*, `code`. and [link](a.md); and ~~gone~~! all\n"
     "abut punctuation, said again so the wrap has somewhere to fall: **bold**,\n"
     "*soft*, `code`. and [link](a.md); and ~~gone~~! once more for luck.\n";
-  for(const bool reveal : {false, true}) {
-    for(const float width : {200.0f, 260.0f, 317.0f, 480.0f}) {
-      DocumentLayout layout;
-      layout.setMetrics(stubMetrics());
-      LayoutOptions options;
-      options.width = width;
-      options.revealAll = reveal;
-      layout.update(source, options);
-      for(std::size_t i = 0; i < layout.blockCount(); ++i) {
-        const std::size_t base = layout.blocks()[i].start;
-        const auto& block = layout.layout(i);
-        for(std::size_t l = 1; l < block.lines.size(); ++l) {
-          const auto runs = block.runsOf(block.lines[l]);
-          if(runs.empty()) continue;
-          const std::size_t at = base + runs.front().srcStart;
-          micronotes::tests::require(at == 0 || isSpace(source[at - 1]),
-                                     "line " + std::to_string(l) + " of block " +
-                                         std::to_string(i) + " begins mid-word at offset " +
-                                         std::to_string(at) + " (width " +
-                                         std::to_string(width) + ")");
-        }
+  for(const float width : {200.0f, 260.0f, 317.0f, 480.0f}) {
+    DocumentLayout layout;
+    layout.setMetrics(stubMetrics());
+    LayoutOptions options;
+    options.width = width;
+    layout.update(source, options);
+    for(std::size_t i = 0; i < layout.blockCount(); ++i) {
+      const std::size_t base = layout.blocks()[i].start;
+      const auto& block = layout.layout(i);
+      for(std::size_t l = 1; l < block.lines.size(); ++l) {
+        const auto runs = block.runsOf(block.lines[l]);
+        if(runs.empty()) continue;
+        const std::size_t at = base + runs.front().srcStart;
+        micronotes::tests::require(at == 0 || isSpace(source[at - 1]),
+                                   "line " + std::to_string(l) + " of block " +
+                                       std::to_string(i) + " begins mid-word at offset " +
+                                       std::to_string(at) + " (width " +
+                                       std::to_string(width) + ")");
       }
     }
   }
@@ -333,7 +303,6 @@ MICRONOTES_TEST(layout_breaks_a_cluster_too_wide_for_any_line) {
   layout.setMetrics(stubMetrics());
   LayoutOptions options;
   options.width = 120.0f;
-  options.revealAll = true;
   layout.update(source, options);
   const auto& block = layout.layout(0);
   MICRONOTES_REQUIRE(block.lines.size() > 1);

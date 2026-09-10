@@ -89,7 +89,7 @@ namespace {
 
 WorkspaceModel withTabs(std::initializer_list<const char*> ids) {
   WorkspaceModel workspace;
-  for(const char* id : ids) workspace.tabs.push_back({id, micronotes::ui::PaneMode::Live, false});
+  for(const char* id : ids) workspace.tabs.push_back({.noteId = id});
   return workspace;
 }
 
@@ -244,16 +244,16 @@ MICRONOTES_TEST(workspace_pane_mode_belongs_to_the_tab) {
   workspace.setPaneMode(micronotes::ui::PaneMode::Viewer);
   MICRONOTES_REQUIRE(workspace.paneMode() == micronotes::ui::PaneMode::Viewer);
   workspace.activeTab = 1;
-  MICRONOTES_REQUIRE(workspace.paneMode() == micronotes::ui::PaneMode::Live);
+  MICRONOTES_REQUIRE(workspace.paneMode() == micronotes::ui::PaneMode::Split);
   workspace.activeTab = 0;
   MICRONOTES_REQUIRE(workspace.paneMode() == micronotes::ui::PaneMode::Viewer);
 
   // With nothing open there is still an answer, so no caller has to ask whether
   // there is a tab before asking how it is being shown.
   WorkspaceModel empty;
-  MICRONOTES_REQUIRE(empty.paneMode() == micronotes::ui::PaneMode::Live);
-  empty.setPaneMode(micronotes::ui::PaneMode::Split);
-  MICRONOTES_REQUIRE(empty.paneMode() == micronotes::ui::PaneMode::Live);
+  MICRONOTES_REQUIRE(empty.paneMode() == micronotes::ui::PaneMode::Split);
+  empty.setPaneMode(micronotes::ui::PaneMode::Editor);
+  MICRONOTES_REQUIRE(empty.paneMode() == micronotes::ui::PaneMode::Split);
 }
 
 // A new tab inherits how you were reading the last one.

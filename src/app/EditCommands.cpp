@@ -33,98 +33,31 @@ void linkEditorSelection(UiRuntime& ui) {
   if(applyEdit(ui, doc::makeLink(ui.editor.text(), start, end))) ui.status = "Link: type the destination";
 }
 
-// The blocks a command applies to: the block selection when there is one, the
-// blocks a *text* selection covers when there is one of those, and otherwise
-// the block holding the caret. Both ends are carets, not indices.
+// The blocks a command applies to: the blocks a text selection covers when
+// there is one, and otherwise the block holding the caret. Both ends are
+// carets, not indices.
 //
-// The middle case is the one that was missing, and every block command shared
-// the omission: with three lines selected by dragging or by Shift+Down, this
-// answered with the bare caret, so Alt+Up moved the one block the caret
-// happened to be in and left the rest of the selection where it was. There are
-// two ways to select several blocks -- Escape into the block selection, or just
-// drag across them -- and only one of them was being heard.
-std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui) {
-  if(ui.blockSelection.active) {
-    return {std::min(ui.blockSelection.anchor, ui.blockSelection.focus),
-            std::max(ui.blockSelection.anchor, ui.blockSelection.focus)};
-  }
+// The selection case is the one that was missing, and every block command
+// shared the omission: with three lines selected by dragging or by Shift+Down,
+// this answered with the bare caret, so Alt+Up moved the one block the caret
+// happened to be in and left the rest of the selection where it was.
+std::pair<std::size_t, std::size_t> blockCommandRange(const UiRuntime& ui) {
   if(ui.editor.hasSelection()) {
     const std::size_t start = ui.editor.selectionStart();
     const std::size_t end = ui.editor.selectionEnd();
     // One byte inside the last block selected, not the boundary after it: a
     // selection that stops exactly at a block's end -- which is what
     // Shift+Down onto the next line gives -- would otherwise reach into the
-    // block that follows and take it along. The same convention
-    // `syncBlockSelectionToEdit` uses, and for the same reason.
+    // block that follows and take it along.
     return {start, end > start ? end - 1 : start};
   }
   return {ui.editor.cursor(), ui.editor.cursor()};
 }
 
-void selectBlockAtCursor(UiRuntime& ui) {
-  const EditorBlocks blocks(ui);
-  std::size_t index = doc::blockIndexAt(blocks, ui.editor.cursor());
-  // A blank line - the empty last line included - is a separator, not something
-  // to select: step back to the nearest real block.
-  while(index > 0 && blocks[index].kind == doc::BlockKind::Blank) --index;
-  ui.blockSelection.active = true;
-  ui.blockSelection.anchor = blocks[index].start;
-  ui.blockSelection.focus = blocks[index].start;
-  ui.editor.moveCursor(blocks[index].start);
-  ui.editor.clearSelection();
-  ui.editor.breakUndoGroup();
-}
-
-// A range transform hands back its result as a text selection. A block
-// selection wants the same span expressed as blocks again.
-void syncBlockSelectionToEdit(UiRuntime& ui) {
-  if(!ui.blockSelection.active) return;
-  if(ui.editor.hasSelection()) {
-    ui.blockSelection.anchor = ui.editor.selectionStart();
-    // One byte inside the last block, not the boundary after it, so the range
-    // does not reach into whatever follows.
-    ui.blockSelection.focus = ui.editor.selectionEnd() > ui.blockSelection.anchor ? ui.editor.selectionEnd() - 1
-                                                                         : ui.blockSelection.anchor;
-    ui.editor.clearSelection();
-    ui.editor.moveCursor(ui.blockSelection.anchor);
-  } else {
-    ui.blockSelection.anchor = ui.editor.cursor();
-    ui.blockSelection.focus = ui.editor.cursor();
-  }
-}
-
-// Moves the focus end of a block selection by whole blocks. Blanks are skipped:
-// they are separators, not something a user means to select.
-void moveBlockSelection(UiRuntime& ui, int delta, bool extend) {
-  const EditorBlocks blocks(ui);
-  std::size_t next = doc::blockIndexAt(blocks, ui.blockSelection.focus);
-  bool moved = false;
-  while(true) {
-    if(delta < 0) {
-      if(next == 0) break;
-      --next;
-    } else {
-      if(next + 1 >= blocks.size()) break;
-      ++next;
-    }
-    if(blocks[next].kind != doc::BlockKind::Blank) {
-      moved = true;
-      break;
-    }
-  }
-  if(!moved) return;
-  ui.blockSelection.focus = blocks[next].start;
-  if(!extend) ui.blockSelection.anchor = ui.blockSelection.focus;
-  ui.editor.moveCursor(blocks[next].start);
-  ui.editor.clearSelection();
-  ui.revealEditorCursor = true;
-}
-
 void turnCurrentBlockInto(UiRuntime& ui, doc::BlockKind kind, int level, std::string_view label) {
   if(ui.focus != FocusArea::Editor) return;
-  const auto [from, to] = blockSelectionCarets(ui);
+  const auto [from, to] = blockCommandRange(ui);
   if(applyEdit(ui, doc::turnBlocksInto(ui.editor.text(), from, to, kind, level, editorBlocks(ui)))) {
-    syncBlockSelectionToEdit(ui);
     ui.status = std::string(label);
   } else {
     ui.status = "Already " + std::string(label);
@@ -165,60 +98,32 @@ const BlockKindEntry* blockKindFor(std::string_view id) {
 }
 
 bool moveSelectedBlocks(UiRuntime& ui, int delta) {
-  const auto [from, to] = blockSelectionCarets(ui);
+  const auto [from, to] = blockCommandRange(ui);
   if(!applyEdit(ui, doc::moveBlocks(ui.editor.text(), from, to, delta, editorBlocks(ui)))) return false;
-  syncBlockSelectionToEdit(ui);
   ui.status = delta < 0 ? "Moved block up" : "Moved block down";
   return true;
 }
 
-// Folding changes what is on screen and never the file, so it goes nowhere near
-// the editor or the undo stack.
-void toggleFoldAt(UiRuntime& ui, std::size_t caret) {
-  const std::string& source = ui.editor.text();
-  const EditorBlocks blocks(ui);
-  const std::size_t index = doc::foldHeadFor(blocks, doc::blockIndexAt(blocks, std::min(caret, source.size())));
-  if(index >= blocks.size()) {
-    ui.status = "Nothing to fold here";
-    return;
-  }
-  const bool folded = ui.folds.toggle(ui.state.selection().noteId, doc::foldKey(source, blocks[index]));
-  // A section that just collapsed must not be left holding the caret. Only the
-  // blocks it actually hides count: the caret further down the note stays put.
-  const std::size_t end = doc::foldEnd(blocks, index);
-  const std::size_t caretNow = ui.editor.cursor();
-  if(folded && caretNow >= blocks[index].end() && caretNow < blocks[end - 1].end()) {
-    ui.editor.moveCursor(blocks[index].contentEnd());
-    ui.editor.clearSelection();
-  }
-  ui.status = folded ? "Folded" : "Unfolded";
-  ui.revealEditorCursor = true;
-}
-
-// The one place block commands are dispatched, shared by the block menu, the
-// slash menu, the selection toolbar and the keyboard.
+// The one place block commands are dispatched, shared by the slash menu, the
+// palette and the keyboard.
 void performBlockCommand(UiRuntime& ui, const std::string& id) {
   if(const auto* entry = blockKindFor(id)) {
     turnCurrentBlockInto(ui, entry->kind, entry->level, entry->label);
     return;
   }
-  const auto [from, to] = blockSelectionCarets(ui);
+  const auto [from, to] = blockCommandRange(ui);
   if(id == "duplicate") {
     if(applyEdit(ui, doc::duplicateBlocks(ui.editor.text(), from, to, editorBlocks(ui)))) {
-      syncBlockSelectionToEdit(ui);
       ui.status = "Duplicated block";
     }
   } else if(id == "delete") {
     if(applyEdit(ui, doc::deleteBlocks(ui.editor.text(), from, to, editorBlocks(ui)))) {
-      syncBlockSelectionToEdit(ui);
       ui.status = "Deleted block";
     }
   } else if(id == "move-up") {
     moveSelectedBlocks(ui, -1);
   } else if(id == "move-down") {
     moveSelectedBlocks(ui, 1);
-  } else if(id == "fold") {
-    toggleFoldAt(ui, ui.editor.cursor());
   }
 }
 

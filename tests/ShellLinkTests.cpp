@@ -80,7 +80,7 @@ MICRONOTES_TEST(shell_anchor_slugs_a_heading_the_way_a_link_spells_it) {
 
 // md4c hands `[[Some Note]]` back as literal text. The pane that exists for
 // reading a note used to show the raw brackets and offer nothing to click, so
-// the runs are split here by the same rule the live surface applies.
+// the runs are split here by the same rule the note page applies.
 MICRONOTES_TEST(shell_inline_runs_split_a_wikilink_out_of_plain_text) {
   const auto runs = inlineRuns(textInlines("before [[Some Note]] after"));
   MICRONOTES_REQUIRE(joined(runs) == "before Some Note after");
@@ -107,7 +107,7 @@ MICRONOTES_TEST(shell_inline_runs_ask_whether_a_wikilink_resolves) {
   const auto present = colourOf("Here", true);
   const auto missing = colourOf("Here", false);
   // A link to a note that does not exist yet is drawn differently, the way the
-  // live surface draws it -- otherwise the pane says every name resolves.
+  // note page draws it -- otherwise the pane says every name resolves.
   MICRONOTES_REQUIRE(!sameColor(present, missing));
 }
 

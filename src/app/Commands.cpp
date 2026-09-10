@@ -7,7 +7,6 @@
 #include "app/FocusedEdits.h"
 #include "app/Fields.h"
 #include "app/FindBar.h"
-#include "app/Folds.h"
 #include "app/Notes.h"
 #include "app/Prompts.h"
 #include "app/RightPanel.h"
@@ -29,7 +28,6 @@
 namespace micronotes::app {
 
 void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
-  ui.blockSelection.clear();
   ui.state.editWorkspace().setPaneMode(mode);
   ui.focus = mode == ui::PaneMode::Viewer ? FocusArea::Viewer : FocusArea::Editor;
   ui.revealEditorCursor = true;
@@ -38,16 +36,15 @@ void setPaneMode(UiRuntime& ui, ui::PaneMode mode) {
 
 void cyclePaneMode(UiRuntime& ui) {
   switch(ui.paneMode()) {
-    case ui::PaneMode::Live: setPaneMode(ui, ui::PaneMode::Editor); break;
     case ui::PaneMode::Editor: setPaneMode(ui, ui::PaneMode::Viewer); break;
     case ui::PaneMode::Viewer: setPaneMode(ui, ui::PaneMode::Split); break;
-    case ui::PaneMode::Split: setPaneMode(ui, ui::PaneMode::Live); break;
+    case ui::PaneMode::Split: setPaneMode(ui, ui::PaneMode::Editor); break;
   }
 }
 
 
 // Opens a different library without restarting. The one being left is written
-// out first, so its open note, favorites and folds go with it rather than
+// out first, so its open note and favorites go with it rather than
 // following the user into the new one.
 void switchLibrary(UiRuntime& ui, const std::string& typed) {
   std::string value = typed;
@@ -103,15 +100,11 @@ void performCommand(UiRuntime& ui, const std::string& id) {
   // Show on disk / copy relative / copy absolute, about the note on the page.
   else if(handleNotePathCommand(ui, id, {})) {}
   else if(id == "move-note") openFolderPalette(ui);
-  else if(id == "move-blocks") {
-    if(!ui.blockSelection.active) ui.status = "Select blocks first with Esc";
-    else openNotePalette(ui, "move-blocks-target", "Move blocks to");
-  }
+  else if(id == "move-blocks") openNotePalette(ui, "move-blocks-target", "Move blocks to");
   else if(id == "delete-note") openDeleteNoteConfirm(ui);
   else if(id == "rename-folder") beginFolderRename(ui);
   else if(id == "delete-folder") openDeleteFolderConfirm(ui);
   else if(id == "restore") openTrashPalette(ui);
-  else if(id == "fold") toggleFoldAt(ui, ui.editor.cursor());
   else if(id == "theme") {
     ui::setThemeMode(ui::themeMode() == ui::ThemeMode::Light ? ui::ThemeMode::Dark : ui::ThemeMode::Light);
     ui.status = ui::themeMode() == ui::ThemeMode::Light ? "Light theme" : "Dark theme";
@@ -156,7 +149,6 @@ void performCommand(UiRuntime& ui, const std::string& id) {
     ui.state.refreshLibrary();
     ui.status = "Refreshed library";
   }
-  else if(id == "pane-live") setPaneMode(ui, ui::PaneMode::Live);
   else if(id == "pane-raw") setPaneMode(ui, ui::PaneMode::Editor);
   else if(id == "pane-reading") setPaneMode(ui, ui::PaneMode::Viewer);
   else if(id == "pane-split") setPaneMode(ui, ui::PaneMode::Split);

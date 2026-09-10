@@ -10,7 +10,7 @@
 
 namespace micronotes::doc {
 
-// The block types the live editing surface models directly. Anything else is
+// The block types this scanner models directly. Anything else is
 // tagged `Complex` and handed to the md4c render model wholesale, so the
 // scanner never has to guess at constructs it cannot round-trip.
 enum class BlockKind : std::uint8_t {

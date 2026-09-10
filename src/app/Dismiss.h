@@ -7,7 +7,7 @@
 // Escape is the key with the most claims on it: a running query, a
 // find-in-note, a half-typed notebook name, a tag filter, a block selection,
 // and -- when none of those are in force -- stepping out of the text in the
-// live surface. Every one of those was a separate `if` in `Application.cpp`'s
+// page. Every one of those was a separate `if` in `Application.cpp`'s
 // key handler, all of them fired on the same press, and one of them (the tag
 // filter) was simply missing, which is how a tag filter came to be a one-way
 // door.
@@ -22,13 +22,12 @@ namespace micronotes::app {
 // What a press of Escape undid, in the order the press considers them.
 enum class Dismissed {
   // Nothing was narrowing the view. The caller decides what Escape means in
-  // whatever has focus -- in the live surface, stepping out of the text.
+  // whatever has focus.
   Nothing,
-  Search,        // a running query, which owns the whole row list
-  Find,          // find-in-note
-  FolderName,    // a notebook being named
-  TagFilter,     // the library filtered to one tag
-  BlockSelection // the live surface's block selection
+  Search,     // a running query, which owns the whole row list
+  Find,       // find-in-note
+  FolderName, // a notebook being named
+  TagFilter   // the library filtered to one tag
 };
 
 // Undoes the innermost narrowing in force and reports which it was.

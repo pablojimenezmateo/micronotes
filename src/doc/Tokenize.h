@@ -104,7 +104,7 @@ inline void appendPlainTokens(std::string_view source, std::size_t from, std::si
 // Splits `[from, to)` into tokens that share one set of inline attributes, with
 // whitespace kept as its own token so wrapping has break opportunities.
 inline void appendContentTokens(std::string_view source, std::size_t from, std::size_t to, const std::vector<Attr>& attrs,
-                         const RunStyle& base, float monoSize, bool revealed, LineGroup& out) {
+                         const RunStyle& base, float monoSize, LineGroup& out) {
   out.reserve(out.size() + tokenEstimate(to - from));
   std::size_t i = from;
   while(i < to) {
@@ -112,7 +112,8 @@ inline void appendContentTokens(std::string_view source, std::size_t from, std::
     const bool space = isAsciiSpace(source[i]);
     std::size_t j = i + 1;
     while(j < to && attrs[j - from] == attr && isAsciiSpace(source[j]) == space) ++j;
-    const bool hidden = attr.marker && !revealed;
+    // A marker is never shown as text: `**` claims its offsets and no width.
+    const bool hidden = attr.marker;
     const RunStyle style = styleFrom(base, attr, monoSize);
     const TextRole role = attr.marker ? TextRole::Marker : attr.role;
     // A line ending inside a block takes however many bytes it took -- the
@@ -136,7 +137,7 @@ inline void appendContentTokens(std::string_view source, std::size_t from, std::
 }
 
 // Into a buffer the caller owns, for the same reason everything else on this
-// path is: a fenced code block or a block dropped to raw asked for one of these
+// path is: a fenced code block asked for one of these
 
 inline void sourceLinesInto(std::string_view source, std::size_t from, std::size_t to,
                      std::vector<std::pair<std::size_t, std::size_t>>* out) {

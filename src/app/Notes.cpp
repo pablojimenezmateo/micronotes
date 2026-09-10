@@ -19,17 +19,16 @@ namespace micronotes::app {
 
 namespace {
 
-// A note opens at the top of itself, in all three panes. The raw pane's rebase
-// joined the other two here rather than being spelled beside each call: it is
-// the third surface showing the same note, and the two callers that reset a
-// view both wanted all three.
+// A note opens at the top of itself, in both panes. The raw pane's rebase
+// joined the reading pane here rather than being spelled beside each call: it
+// is the other surface showing the same note, and the two callers that reset a
+// view both wanted both.
 void resetPageScroll(UiRuntime& ui) {
-  ui.livePage.setScroll(0);
   ui.readingPage.setScroll(0);
   ui.raw.list.rebase();
 }
 
-// Puts the three panes' offsets away on the tab for the note being left, and
+// Puts the two panes' offsets away on the tab for the note being left, and
 // takes them back out for the note being arrived at. See `NoteTab`'s scroll
 // fields for why they live on the tab.
 //
@@ -42,7 +41,6 @@ void rememberPageScroll(UiRuntime& ui) {
   auto& workspace = ui.state.editWorkspace();
   const auto index = workspace.findTab(ui.loadedNoteId);
   if(index == std::string::npos) return;
-  workspace.tabs[index].liveScroll = ui.livePage.scroll();
   workspace.tabs[index].readingScroll = ui.readingPage.scroll();
   workspace.tabs[index].rawScroll = ui.raw.list.scroll();
 }
@@ -63,7 +61,6 @@ void restorePageScroll(UiRuntime& ui) {
   // the place on any note longer than that one. The next layout clamps it,
   // which is also what keeps a place remembered while the note grew shorter
   // elsewhere from landing past its end.
-  ui.livePage.restoreScroll(tab.liveScroll);
   ui.readingPage.restoreScroll(tab.readingScroll);
   ui.raw.list.restore(tab.rawScroll);
 }
@@ -356,7 +353,6 @@ void selectNoteById(UiRuntime& ui, const std::string& noteId, ui::TabPolicy poli
 }
 
 void loadSelectedIntoEditor(UiRuntime& ui) {
-  ui.blockSelection.clear();
   // A dirty buffer for the note already showing is the newest copy of it, so it
   // stays. Anything else -- a different note, or the same one with nothing
   // unsaved -- is read.

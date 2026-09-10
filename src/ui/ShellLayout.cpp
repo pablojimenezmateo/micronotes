@@ -97,17 +97,11 @@ Rect pageRectIn(Rect pane) {
           std::max(0.0f, pane.h - kPagePad * 2.0f - kPageBottomPad)};
 }
 
-PageColumn pageColumnIn(Rect page, float gutter) {
+PageColumn pageColumnIn(Rect page) {
   PageColumn column;
   const float available = std::max(kPageMinColumn, page.w - kPageColumnPad);
   column.width = std::min(available, pageWidthPx());
   column.left = page.x + std::round((page.w - column.width) / 2.0f);
-  // Centring would put the column's left edge inside the gutter, so it stops
-  // being centred: the gutter keeps its room and the column takes the rest.
-  if(column.left < page.x + gutter) {
-    column.width = std::max(kPageMinColumn, page.w - gutter - kPageColumnPad / 2.0f);
-    column.left = page.x + gutter;
-  }
   return column;
 }
 

@@ -6,7 +6,6 @@
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
-#include "doc/Fold.h"
 
 #include "core/util/Hash.h"
 #include "core/util/StringUtil.h"
@@ -60,76 +59,6 @@ void DocumentLayout::setMetrics(Metrics metrics) {
   liveKeys_.clear();
   flags_.clear();
   totalHeight_ = 0.0f;
-}
-
-// The fold walk itself: from `from` onward, mark every block that a collapsed
-// head hides, and report whether it hid any.
-//
-// One loop, because the two resolvers differ only in where they start and what
-// they already know -- and the loop is where both the counters and the
-// nested-fold rule live, so two copies is two places for either to drift.
-bool DocumentLayout::hideFoldedFrom(const std::vector<SourceBlock>& blocks,
-                                    const LayoutOptions& options, std::size_t from,
-                                    std::vector<std::uint8_t>& hidden) const {
-  perf::addCounter(perf::CounterId::LayoutFoldBlocksResolved, blocks.size() - from);
-  bool any = false;
-  for(std::size_t i = from; i < blocks.size(); ++i) {
-    // A fold nested inside a collapsed one is already hidden, and costs
-    // nothing to resolve again.
-    if(hidden[i] || !foldableKind(blocks[i].kind)) continue;
-    perf::addCounter(perf::CounterId::LayoutFoldQueries);
-    if(!options.folded(blocks[i])) continue;
-    const std::size_t end = foldEnd(blocks, i);
-    for(std::size_t j = i + 1; j < end; ++j) hidden[j] = 1;
-    any = any || end > i + 1;
-  }
-  return any;
-}
-
-bool DocumentLayout::resolveFolds(const std::vector<SourceBlock>& blocks,
-                                  const LayoutOptions& options,
-                                  std::vector<std::uint8_t>* out) const {
-  // Fold ranges come from the block structure, so they can only be resolved
-  // once the scan is in: the caller names the heads, the layout names the
-  // blocks each head swallows.
-  std::vector<std::uint8_t>& hidden = *out;
-  hidden.assign(blocks.size(), 0);
-  if(!options.folded) return false;
-  return hideFoldedFrom(blocks, options, 0, hidden);
-}
-
-bool DocumentLayout::resolveFoldsAfter(const std::vector<SourceBlock>& blocks,
-                                       const LayoutOptions& options, std::size_t carried,
-                                       std::vector<std::uint8_t>* out) const {
-  std::vector<std::uint8_t>& hidden = *out;
-  if(!options.folded || carried == 0 || hidden_.size() < carried) {
-    return resolveFolds(blocks, options, out);
-  }
-  // Back to the last carried block nothing hides. If the block before the edit
-  // is hidden, the walk crosses the run to reach the head that hides it -- that
-  // head's reach is exactly what the edit can have changed. If it is not, the
-  // block before the edit could still *be* a head reaching into it, so the walk
-  // steps back one anyway.
-  std::size_t from = carried;
-  while(from > 0 && hidden_[from - 1] != 0) --from;
-  if(from > 0) --from;
-
-  // One pass over the array rather than three: the carried head is copied and
-  // only the tail is cleared, where `assign` would memset the whole thing and
-  // then have the head written over it.
-  hidden.resize(blocks.size());
-  if(from > 0) std::memcpy(hidden.data(), hidden_.data(), from);
-  std::memset(hidden.data() + from, 0, blocks.size() - from);
-  // Whether anything in the carried head is hidden is not asked -- that would
-  // be a scan of it, which is the pass this exists to avoid. Carrying the
-  // previous answer forward can only leave `anyHidden_` set when nothing is
-  // hidden any more, and the one thing that reads it (`foldsAbsent`) also
-  // requires the caller to have withdrawn its predicate -- at which point the
-  // resolution is a full one and answers exactly.
-  // Called first, not short-circuited: the walk *is* the work, and `||` would
-  // skip it whenever the carried answer already said something was hidden.
-  const bool hidAny = hideFoldedFrom(blocks, options, from, hidden);
-  return anyHidden_ || hidAny;
 }
 
 editor::TextEdit DocumentLayout::claimFor(const LayoutOptions& options) const {
@@ -320,10 +249,9 @@ bool DocumentLayout::sourceMatches(std::string_view source) const {
 // Whether the layout already standing is the exact answer to this call.
 //
 // "Exact" has to cover every input the block cache keys on, because the whole
-// point is to skip building those keys: the geometry hash, which block holds the
-// caret (markers are revealed per block, not per offset), which block is shown
-// raw, revealAll, and the resolved fold state. The source bytes are the caller's
-// precondition -- this is asked only once `sourceMatches` has said yes.
+// point is to skip building those keys -- which, now that a page is only ever
+// read, is the geometry hash alone. The source bytes are the caller's
+// precondition: this is asked only once `sourceMatches` has said yes.
 //
 // Two things are deliberately NOT covered, both because the block cache does not
 // cover them either, so nothing regresses by skipping them here:
@@ -332,26 +260,18 @@ bool DocumentLayout::sourceMatches(std::string_view source) const {
 //     invalidate the cached block today either. It shows up on the next edit.
 //   - `metrics_`. Installing new metrics drops the cache and clears `built_`,
 //     which is the invalidation.
-bool DocumentLayout::canReuse(const LayoutOptions& options, std::uint64_t geometry,
-                              bool foldsMatch) const {
-  if(!foldsMatch) return false;
-  if(geometry != geometryHash_) return false;
-  if(options.revealAll != options_.revealAll) return false;
-  if(blockIndexFor(options.caretOffset) != caretBlock_) return false;
-  return blockIndexFor(options.rawOffset) == rawBlock_;
+bool DocumentLayout::canReuse(const LayoutOptions& options, std::uint64_t geometry) const {
+  (void)options;
+  return geometry == geometryHash_;
 }
 
-DocumentLayout::Flags DocumentLayout::flagsFor(std::size_t index, std::size_t caretBlock,
-                                               std::size_t rawBlock) const {
+DocumentLayout::Flags DocumentLayout::flagsFor(std::size_t index) const {
   const SourceBlock& block = blocks_[index];
   Flags flags;
-  flags.revealed = options_.revealAll || index == caretBlock;
-  flags.raw = index == rawBlock;
   flags.first = index == 0;
   // A buffer ending in a newline has one more (empty) line to put a caret on.
   flags.trailingLine = index + 1 == blocks_.size() && block.end() == source_.size() &&
                        !source_.empty() && source_.back() == '\n';
-  flags.hidden = hidden_[index] != 0;
   flags.groupFirst = startsQuoteRun(blocks_, index);
   flags.groupLast = endsQuoteRun(blocks_, index);
   return flags;
@@ -373,10 +293,10 @@ const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& 
   // it: padding bytes are indeterminate, so hashing them mixes whatever the
   // stack held into a cache key -- and the failure mode is a block that hashes
   // to two keys under the same flags, which is a cache that quietly stops
-  // hitting rather than anything that looks like a bug. Seven bools have no
+  // hitting rather than anything that looks like a bug. Four bools have no
   // padding; adding a wider field to `Flags` would introduce some, and this is
   // what makes that a build error rather than a slow afternoon.
-  static_assert(sizeof(Flags) == 7 * sizeof(bool),
+  static_assert(sizeof(Flags) == 4 * sizeof(bool),
                 "Flags is hashed as raw bytes and must have no padding");
   hash = hashBytes(hash, &flags, sizeof(flags));
   *key = hash;
@@ -395,9 +315,9 @@ const BlockLayout* DocumentLayout::resolveEntry(std::size_t index, const Flags& 
 //
 // It seeds every cache key, so a layout built under a different one shares
 // nothing with this call -- which is why `patchable` requires it to match. Every
-// field of `LayoutOptions` that is not the source, the caret or the folds
-// belongs here, and forgetting one is a stale layout kept under a key that no
-// longer describes it.
+// field of `LayoutOptions` that is not the source itself belongs here, and
+// forgetting one is a stale layout kept under a key that no longer describes
+// it.
 std::uint64_t DocumentLayout::geometryKey(const LayoutOptions& options) {
   std::uint64_t geometry = kFnvOffset;
   geometry = hashValue(geometry, options.width);
@@ -501,10 +421,8 @@ DocumentLayout::BlockStyle DocumentLayout::styleForBlock(const SourceBlock& bloc
       break;
     case BlockKind::Todo:
       out.textLeft = out.indent + options_.listGutter;
-      // A ticked task is struck through. Only while its marker is hidden: with
-      // the caret in the block the `- [x] ` is text the user is editing, and a
-      // line through what you are typing is a line through your own cursor.
-      if(block.checked && !flags.revealed && !flags.raw) style.base.strike = true;
+      // A ticked task is struck through.
+      if(block.checked) style.base.strike = true;
       break;
     case BlockKind::Quote:
     case BlockKind::Callout:
@@ -516,8 +434,7 @@ DocumentLayout::BlockStyle DocumentLayout::styleForBlock(const SourceBlock& bloc
       // The head of a callout run is its title. It gets no extra height: the
       // `> [!KIND]` line already occupies one, and reserving a band above it
       // as well would leave the box with a blank row over its own name.
-      if(block.kind == BlockKind::Callout && flags.groupFirst && block.hasInfo() &&
-         !flags.revealed && !flags.raw) {
+      if(block.kind == BlockKind::Callout && flags.groupFirst && block.hasInfo()) {
         out.calloutTitle = true;
         style.base.strong = true;
       }
@@ -530,7 +447,7 @@ DocumentLayout::BlockStyle DocumentLayout::styleForBlock(const SourceBlock& bloc
       // which was invisible while a long line ran off the right of the column
       // and stopped there, and became a permanent collision the moment such a
       // line started wrapping into the column instead.
-      style.padTop = block.hasInfo() && !flags.raw ? 22.0f : 8.0f;
+      style.padTop = block.hasInfo() ? 22.0f : 8.0f;
       style.padBottom = 12.0f;
       break;
     case BlockKind::Divider:
@@ -543,13 +460,6 @@ DocumentLayout::BlockStyle DocumentLayout::styleForBlock(const SourceBlock& bloc
       break;
     default:
       break;
-  }
-  if(flags.raw) {
-    // Raw source is source: none of the above applies to it but the air.
-    style.base = RunStyle {};
-    style.base.mono = true;
-    style.base.size = type.mono;
-    out.textLeft = out.indent;
   }
   return style;
 }
@@ -567,22 +477,14 @@ std::size_t DocumentLayout::stageSourceLines(const SourceBlock& block, const Fla
   const RunStyle markerStyle = base;
   std::size_t groupCount = 0;
 
-  const bool fenced = block.kind == BlockKind::Code && !flags.raw;
+  const bool fenced = block.kind == BlockKind::Code;
   const std::size_t from = fenced ? block.contentStart() : block.start;
   const std::size_t to = fenced ? block.contentEnd() : block.end();
-  // Revealed, the opening fence is a line of its own; hidden, it rides in front
-  // of the first line of code. Deciding that before the loop rather than
-  // splicing it in afterwards is what lets the groups be filled in order.
-  if(fenced && flags.revealed) {
-    nextGroup(&groupCount)
-      .push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
-                           TextRole::Marker, true, false, -1));
-  }
   bool firstLine = true;
   sourceLinesInto(source, from, to, &sourceLines_);
   for(const auto& [lineStart, lineEnd] : sourceLines_) {
     std::vector<Token>& group = nextGroup(&groupCount);
-    if(fenced && !flags.revealed && firstLine) {
+    if(fenced && firstLine) {
       group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
                                 TextRole::Marker, true, true, -1));
     }
@@ -596,7 +498,7 @@ std::size_t DocumentLayout::stageSourceLines(const SourceBlock& block, const Fla
       group.push_back(makeToken(source, lineEnd, tail, base, TextRole::Code, false, true, -1));
     }
   }
-  if(fenced && !flags.revealed && firstLine) {
+  if(fenced && firstLine) {
     // `sourceLinesInto` always yields at least one line, so this is unreachable
     // today; it is here so that the opening fence cannot be dropped if it ever
     // yields none.
@@ -605,10 +507,11 @@ std::size_t DocumentLayout::stageSourceLines(const SourceBlock& block, const Fla
                            TextRole::Marker, true, true, -1));
   }
   if(fenced && block.end() > block.contentEnd()) {
-    Token closing = makeToken(source, block.contentEnd(), block.end(), markerStyle,
-                              TextRole::Marker, true, !flags.revealed, -1);
-    if(flags.revealed) nextGroup(&groupCount).push_back(std::move(closing));
-    else flowGroups_[groupCount - 1].push_back(std::move(closing));
+    // The closing fence takes no width but has to stay addressable, so it
+    // rides on the end of the last line rather than claiming one of its own.
+    flowGroups_[groupCount - 1]
+      .push_back(makeToken(source, block.contentEnd(), block.end(), markerStyle,
+                           TextRole::Marker, true, true, -1));
   }
   return groupCount;
 }
@@ -701,7 +604,7 @@ std::size_t DocumentLayout::stageInlineContent(const SourceBlock& block, const F
 
   if(block.contentStart() > block.start) {
     group.push_back(makeToken(source, block.start, block.contentStart(), markerStyle,
-                              TextRole::Marker, true, !flags.revealed, -1));
+                              TextRole::Marker, true, true, -1));
   }
   if(block.contentEnd() > block.contentStart()) {
     const perf::ScopeTimer inlineTimer("layout.block.inline_attrs");
@@ -723,7 +626,7 @@ std::size_t DocumentLayout::stageInlineContent(const SourceBlock& block, const F
       {
         const perf::ScopeTimer tokenTimer("layout.block.content_tokens");
         appendContentTokens(source, block.contentStart(), block.contentEnd(), attrs, base,
-                            options_.type.mono, flags.revealed, group);
+                            options_.type.mono, group);
       }
     }
   }
@@ -741,8 +644,6 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
 
   BlockLayout out;
   out.kind = block.kind;
-  out.revealed = flags.revealed;
-  out.raw = flags.raw;
 
   const BlockStyle style = styleForBlock(block, flags, out);
   const RunStyle& base = style.base;
@@ -750,7 +651,7 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
   // shapes and no third: a fenced code block or a block dropped to raw is the
   // file's own lines, and everything else is one group with the inline grammar
   // applied to it. Decided here because the wrap mark's reserve turns on it.
-  const bool asSourceLines = flags.raw || block.kind == BlockKind::Code;
+  const bool asSourceLines = block.kind == BlockKind::Code;
   const float available =
     std::max(40.0f, options_.width - out.textLeft - (asSourceLines ? kWrapMarkReserve : 0.0f));
   const float lineHeight = metrics_.lineHeight ? metrics_.lineHeight(base)
@@ -770,18 +671,9 @@ BlockLayout DocumentLayout::layoutBlock(std::size_t index, const Flags& flags) c
     return y + lineHeight;
   };
 
-  // A collapsed block gives up its height and nothing else. The one thing it
-  // may not give up is the empty last line: that is the only caret position at
-  // the end of the buffer, and losing it would strand the caret.
-  if(flags.hidden) {
-    out.hidden = true;
-    out.height = flags.trailingLine ? appendTrailingLine(0.0f) : 0.0f;
-    return out;
-  }
-
   // A block the scanner does not model reserves the height md4c will need, and
-  // exposes one caret position at its start until the user drops it to raw.
-  if(block.kind == BlockKind::Complex && !flags.raw) {
+  // exposes one addressable position at its start.
+  if(block.kind == BlockKind::Complex) {
     out.complex = true;
     const float height =
       metrics_.measureComplex ? metrics_.measureComplex(block, options_.width) : lineHeight;

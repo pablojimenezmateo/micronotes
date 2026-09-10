@@ -53,7 +53,6 @@ ApplicationOptions parseArgs(int argc, char** argv) {
       if(value == "editor" || value == "raw") options.paneMode = 0;
       else if(value == "viewer" || value == "reading") options.paneMode = 1;
       else if(value == "split") options.paneMode = 2;
-      else if(value == "live") options.paneMode = 3;
     } else if(arg == "--select" && i + 1 < argc) {
       options.selectTitle = argv[++i];
     } else if(arg == "--search" && i + 1 < argc) {

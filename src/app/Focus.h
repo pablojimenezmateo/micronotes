@@ -23,7 +23,7 @@ enum class FocusArea {
   RenameFolder
 };
 
-// Whether this focus is on the note's own text -- the live surface, the raw
+// Whether this focus is on the note's own text -- the reading pane, the raw
 // pane or the reading pane -- rather than on a prompt or the sidebar.
 //
 // The two panes that only *read* the note still hold a selection in the same

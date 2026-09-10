@@ -5,7 +5,6 @@
 #include "app/EditorBlocks.h"
 #include "app/Fields.h"
 #include "app/Notes.h"
-#include "app/PageView.h"
 #include "app/Prompts.h"
 #include "app/RawPane.h"
 #include "app/Shell.h"
@@ -38,36 +37,7 @@ void handleFieldKey(UiRuntime& ui, editor::TextField& field, SDL_Keycode key, bo
   }
 }
 
-// Selected blocks are objects: the arrows walk them, and one command acts over
-// the whole range.
-void handleBlockSelectionKey(UiRuntime& ui, SDL_Keycode key, bool shift, bool alt) {
-  if(alt && (key == SDLK_UP || key == SDLK_DOWN)) {
-    moveSelectedBlocks(ui, key == SDLK_UP ? -1 : 1);
-  } else if(key == SDLK_UP || key == SDLK_DOWN) {
-    moveBlockSelection(ui, key == SDLK_UP ? -1 : 1, shift);
-  } else if(key == SDLK_BACKSPACE || key == SDLK_DELETE) {
-    performBlockCommand(ui, "delete");
-  } else if(key == SDLK_TAB) {
-    applyTransform(ui, shift ? doc::outdent : doc::indent);
-    syncBlockSelectionToEdit(ui);
-  } else if(key == SDLK_RETURN || key == SDLK_KP_ENTER) {
-    // Enter puts the caret back into the first selected block's text.
-    const EditorBlocks blocks(ui);
-    const auto content = blocks[doc::blockIndexAt(blocks, blockSelectionCarets(ui).first)].contentStart();
-    ui.blockSelection.clear();
-    ui.editor.moveCursor(content);
-    ui.revealEditorCursor = true;
-  } else if(key == SDLK_LEFT || key == SDLK_RIGHT) {
-    ui.blockSelection.clear();
-  }
-}
-
 void handleEditorKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, bool shift, bool alt) {
-  const bool live = ui.paneMode() == ui::PaneMode::Live;
-  // One visual row up or down: the live surface wraps, the raw editor does not.
-  const auto rowStep = [&](int rows) {
-    return live ? ui.livePage.rowRelative(ui.editor.cursor(), rows) : ui.editor.cursor();
-  };
   if(key == SDLK_BACKSPACE) {
     if(ctrl) ui.editor.erasePreviousWord();
     // Against a block's first character, Backspace strips the block's marker
@@ -109,26 +79,19 @@ void handleEditorKey(UiRuntime& ui, SDL_Keycode key, bool ctrl, bool shift, bool
     ui.revealEditorCursor = true;
   } else if(key == SDLK_UP) {
     if(alt) moveSelectedBlocks(ui, -1);
-    else if(live) ui.editor.moveTo(rowStep(-1), shift);
     else ui.editor.moveLineUp(shift);
     publishEditorPrimarySelection(ui);
     ui.revealEditorCursor = true;
   } else if(key == SDLK_DOWN) {
     if(alt) moveSelectedBlocks(ui, 1);
-    else if(live) ui.editor.moveTo(rowStep(1), shift);
     else ui.editor.moveLineDown(shift);
     publishEditorPrimarySelection(ui);
     ui.revealEditorCursor = true;
   } else if(key == SDLK_PAGEUP || key == SDLK_PAGEDOWN) {
     const int direction = key == SDLK_PAGEUP ? -1 : 1;
-    if(live) {
-      const int rows = static_cast<int>(std::max<std::size_t>(1, ui.livePage.rowsPerPage()));
-      ui.editor.moveTo(rowStep(direction * rows), shift);
-    } else {
-      for(int i = 0; i < std::max(1, ui.raw.visibleRows); ++i) {
-        if(direction < 0) ui.editor.moveLineUp(shift);
-        else ui.editor.moveLineDown(shift);
-      }
+    for(int i = 0; i < std::max(1, ui.raw.visibleRows); ++i) {
+      if(direction < 0) ui.editor.moveLineUp(shift);
+      else ui.editor.moveLineDown(shift);
     }
     publishEditorPrimarySelection(ui);
     ui.revealEditorCursor = true;

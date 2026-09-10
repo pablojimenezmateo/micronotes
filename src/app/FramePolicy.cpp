@@ -18,7 +18,7 @@ FrameDeadlines frameDeadlines(UiRuntime& ui, Uint64 nowMs) {
   out.notificationMs = ui.status.lingerMs(nowMs);
   // A drag past the edge of a list has to keep scrolling while the pointer is
   // perfectly still, which produces no events at all.
-  out.hint = ui.textSelect.active || ui.sidebar.drag.active() || ui.blockDrag.active
+  out.hint = ui.textSelect.active || ui.sidebar.drag.active()
                ? IdleHint::Busy
              : out.caretBlinkMs >= 0 ? IdleHint::Blinking
                                      : IdleHint::Idle;

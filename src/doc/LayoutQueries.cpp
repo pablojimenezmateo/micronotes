@@ -26,7 +26,7 @@
 // microide` splits `TextViewport` across six files the same way, by concern
 // rather than by size, which is the shape this follows: the class is one class
 // and its state is private to it, but a reader after the caret arithmetic
-// should not have to walk past the fold resolver to reach it.
+// should not have to walk past the placement patch to reach it.
 //
 // The two searches below rest on an invariant `LayoutTests` pins over a corpus:
 // a block's runs are monotonically non-decreasing in `srcStart` and `srcEnd`.
@@ -260,8 +260,8 @@ std::optional<std::size_t> DocumentLayout::blockAt(float y) const {
   if(y < 0.0f || y > totalHeight_) return std::nullopt;
   // Same tiling argument as `blockRange` below, which was already binary
   // searching while this walked: blocks cover [top_i, top_{i+1}) in order, so
-  // the block at `y` is the last one starting at or before it. Blocks folded to
-  // zero height share their successor's top and lose the tie, which is what the
+  // the block at `y` is the last one starting at or before it. A block of zero
+  // height shares its successor's top and loses the tie, which is what the
   // linear scan's "skip anything y does not fit inside" achieved.
   const auto after = std::upper_bound(placed_.begin(), placed_.end(), y,
                                       [](float value, const Placed& placed) {
@@ -273,9 +273,9 @@ std::optional<std::size_t> DocumentLayout::blockAt(float y) const {
 
 std::pair<std::size_t, std::size_t> DocumentLayout::blockRange(float top, float bottom) const {
   if(placed_.empty() || bottom < top) return {0, 0};
-  // Blocks tile the document: block i covers [top_i, top_{i+1}), and a block
-  // hidden inside a collapsed fold has zero height and shares its neighbour's
-  // top. So the first block on screen is the last one starting at or before
+  // Blocks tile the document: block i covers [top_i, top_{i+1}), and a block of
+  // zero height shares its neighbour's top. So the first block on screen is
+  // the last one starting at or before
   // `top`, and the range ends at the first one starting after `bottom`.
   const auto byTop = [](const Placed& placed, float value) { return placed.top < value; };
   auto first = std::lower_bound(placed_.begin(), placed_.end(), top, byTop);
@@ -294,9 +294,9 @@ std::size_t DocumentLayout::flatLineCount() const {
 
 std::pair<std::size_t, std::size_t> DocumentLayout::flatLineAt(std::size_t flat) const {
   // `lineStart_` is non-decreasing and starts at zero, so the owning block is
-  // the last one whose start is at or below `flat`. A block with no rows -- one
-  // folded away -- repeats its predecessor's value, and upper_bound steps over
-  // the whole run of them in one go.
+  // the last one whose start is at or below `flat`. A block with no rows
+  // repeats its predecessor's value, and upper_bound steps over the whole run
+  // of them in one go.
   const auto after = std::upper_bound(lineStart_.begin(), lineStart_.end(),
                                       static_cast<std::uint32_t>(flat));
   const auto block = static_cast<std::size_t>(after - lineStart_.begin()) - 1;
@@ -325,31 +325,6 @@ std::size_t DocumentLayout::flatLineAtY(float y) const {
   perf::addCounter(perf::CounterId::LayoutRowIndexQueries);
   perf::addCounter(perf::CounterId::LayoutRowIndexProbes, probes);
   return lo == 0 ? 0 : lo - 1;
-}
-
-std::size_t DocumentLayout::flatLineForOffset(std::size_t offset, float* caretX) const {
-  const Rect caret = caretRect(offset);
-  if(caretX) *caretX = caret.x;
-  if(flatLineCount() == 0) return 0;
-  return flatLineAtY(caret.y + 0.5f);
-}
-
-std::size_t DocumentLayout::rowRelative(std::size_t offset, int deltaRows) const {
-  const std::size_t rows = flatLineCount();
-  if(rows == 0) return offset;
-  float caretX = 0.0f;
-  const std::size_t current = flatLineForOffset(offset, &caretX);
-  const long long target = static_cast<long long>(current) + deltaRows;
-  if(target < 0) return 0;
-  if(target >= static_cast<long long>(rows)) return source_.size();
-  const auto [block, line] = flatLineAt(static_cast<std::size_t>(target));
-  const VisualLine& visual = placed_[block].layout->lines[line];
-  return offsetAt(caretX, placed_[block].top + visual.y + visual.height / 2.0f);
-}
-
-std::size_t DocumentLayout::rowsPerHeight(float height) const {
-  const float step = std::max(1.0f, options_.type.body * options_.type.lineHeightRatio);
-  return static_cast<std::size_t>(std::max(1.0f, std::floor(height / step)));
 }
 
 

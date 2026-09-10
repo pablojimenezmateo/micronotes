@@ -4,7 +4,6 @@
 #include "app/Shell.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
-#include "doc/Fold.h"
 
 #include <cstddef>
 #include <string>
@@ -52,9 +51,10 @@ void linkEditorSelection(UiRuntime& ui);
 bool undoEditorEdit(UiRuntime& ui);
 bool redoEditorEdit(UiRuntime& ui);
 
-// The blocks a command applies to: the block selection when there is one,
-// otherwise the block holding the caret. Both ends are carets, not indices.
-std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui);
+// The blocks a command applies to: the blocks a text selection covers when
+// there is one, otherwise the block holding the caret. Both ends are carets,
+// not indices.
+std::pair<std::size_t, std::size_t> blockCommandRange(const UiRuntime& ui);
 
 // The word or the line the caret sits in, as the editor's selection.
 //
@@ -65,20 +65,10 @@ std::pair<std::size_t, std::size_t> blockSelectionCarets(const UiRuntime& ui);
 void selectWordAtCursor(UiRuntime& ui);
 void selectLineAtCursor(UiRuntime& ui);
 
-void selectBlockAtCursor(UiRuntime& ui);
-
-// A range transform hands back its result as a text selection. A block
-// selection wants the same span expressed as blocks again.
-void syncBlockSelectionToEdit(UiRuntime& ui);
-
-// Moves the focus end of a block selection by whole blocks. Blanks are skipped:
-// they are separators, not something a user means to select.
-void moveBlockSelection(UiRuntime& ui, int delta, bool extend);
-
 void turnCurrentBlockInto(UiRuntime& ui, doc::BlockKind kind, int level, std::string_view label);
 
-// Every block shape the block menu, the slash menu and the turn-into submenu
-// can produce. One table, so the three stay in step.
+// Every block shape the slash menu and the turn-into submenu can produce. One
+// table, so the two stay in step.
 struct BlockKindEntry {
   const char* id;
   const char* label;
@@ -105,12 +95,8 @@ const BlockKindEntry* blockKindForChordDigit(char digit);
 
 bool moveSelectedBlocks(UiRuntime& ui, int delta);
 
-// Folding changes what is on screen and never the file, so it goes nowhere near
-// the editor or the undo stack.
-void toggleFoldAt(UiRuntime& ui, std::size_t caret);
-
-// The one place block commands are dispatched, shared by the block menu, the
-// slash menu, the selection toolbar, the menu bar and the keyboard.
+// The one place block commands are dispatched, shared by the slash menu, the
+// turn-into menu, the palette, the menu bar and the keyboard.
 void performBlockCommand(UiRuntime& ui, const std::string& id);
 
 }

@@ -78,7 +78,6 @@ void openWikiLink(UiRuntime& ui, std::string_view target) {
 // swallowing it, which is what makes the picker feel like part of typing.
 void openWikiMenu(UiRuntime& ui, std::size_t wikiStart) {
   ui.wikiStart = wikiStart;
-  ui.blockSelection.clear();
   ui::Overlay overlay;
   overlay.kind = ui::OverlayKind::List;
   overlay.id = "wiki-menu";
@@ -117,18 +116,13 @@ void commitWikiMenu(UiRuntime& ui, const std::string& title, const std::string& 
 
 bool jumpToAnchor(UiRuntime& ui, std::string_view anchor) {
   const auto slug = doc::headingAnchor(anchor);
-  const bool live = ui.paneMode() == ui::PaneMode::Live;
-  PageView& page = live ? ui.livePage : ui.readingPage;
-  auto found = page.anchorScroll(slug);
-  if(!found) found = page.anchorScroll(anchor);
+  auto found = ui.readingPage.anchorScroll(slug);
+  // The slug first, then the heading as written: an anchor typed with the
+  // heading's own capitals and spaces should still land.
+  if(!found) found = ui.readingPage.anchorScroll(anchor);
   if(!found) return false;
-  if(live) {
-    ui.livePage.setScroll(*found);
-    ui.focus = FocusArea::Editor;
-  } else {
-    ui.readingPage.setScroll(*found);
-    ui.focus = FocusArea::Viewer;
-  }
+  ui.readingPage.setScroll(*found);
+  ui.focus = FocusArea::Viewer;
   return true;
 }
 

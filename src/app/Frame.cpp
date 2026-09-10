@@ -4,7 +4,6 @@
 #include "app/Chrome.h"
 #include "app/FindBar.h"
 #include "app/FrameTrace.h"
-#include "app/LivePage.h"
 #include "app/MenuBar.h"
 #include "app/RawPane.h"
 #include "app/ReadingPage.h"
@@ -100,9 +99,7 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
   } else {
     const perf::ScopeTimer timer("shell.content");
     const Rect content = layout.content;
-    if(ui.paneMode() == ui::PaneMode::Live) {
-      drawLive(renderer, text, images, ui, content);
-    } else if(ui.paneMode() == ui::PaneMode::Editor) {
+    if(ui.paneMode() == ui::PaneMode::Editor) {
       drawEditor(renderer, text, ui, content);
     } else if(ui.paneMode() == ui::PaneMode::Viewer) {
       drawReading(renderer, text, images, ui, content);
@@ -117,7 +114,7 @@ void drawApp(SDL_Renderer* renderer, TextRenderer& text, ImageCache& images, UiR
     // to either half of it.
     drawFindBar(renderer, text, ui, content);
   }
-  // After the content: its outline borrows the partition the live page splices.
+  // After the content: its outline borrows the partition the reading page splices.
   if(!ui::empty(layout.rightPanel)) {
     const perf::ScopeTimer timer("shell.right_panel");
     drawRightPanel(renderer, text, ui, layout.rightPanel);

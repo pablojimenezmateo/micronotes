@@ -111,7 +111,7 @@ void appendWithWikiLinks(std::vector<InlineRun>& runs, InlineRun&& run,
     link.target = span->target;
     link.wiki = true;
     // A link to a note that is not there yet is an offer, not an error -- the
-    // same distinction, and the same two colours, the live surface draws.
+    // same distinction, and the same two colours, the note page draws.
     const bool resolves = !wikiResolves || wikiResolves(span->target);
     link.color = resolves ? theme().accent : theme().linkPending;
     runs.push_back(std::move(link));
@@ -173,7 +173,7 @@ std::vector<InlineRun> inlineRuns(const std::vector<markdown::Inline>& inlines, 
       case markdown::InlineType::Code:
         run.mono = true;
         run.code = true;
-        // The ink the live surface uses. It was `theme().warn` here, which is
+        // The ink the note page uses. It was `theme().warn` here, which is
         // the colour a destructive action and an unsaved buffer are drawn in,
         // so the same `code` span read as ordinary text while being edited and
         // as a warning while being read.
@@ -276,7 +276,7 @@ float drawInlineRuns(SDL_Renderer* renderer, TextRenderer& text, std::vector<Lin
     } else {
       cursorX += static_cast<float>(spaceW);
     }
-    // The tinted box behind inline code, which the live surface draws and this
+    // The tinted box behind inline code, which the note page draws and this
     // one did not: `code` was distinguished only by being mono and orange.
     if(run.code) {
       fill(renderer, {cursorX - 2.0f, cursorY + 1.0f, static_cast<float>(wordW) + 4.0f,

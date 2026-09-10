@@ -19,7 +19,7 @@
 // This was declared twice, once as `MarkdownEditor::TextChange` and once as
 // `editor::TextEdit`, with the same five fields and the same
 // contract described in two places -- and the conversion between them written
-// out at two more, in the live page and the reading page, each of them applying
+// out at two more, in the note page and the raw pane, each of them applying
 // the same `+1` shift. Five identical fields in two structs is a struct that
 // wants a name.
 namespace microcore::editor {

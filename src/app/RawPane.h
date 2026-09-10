@@ -15,7 +15,7 @@ namespace micronotes::app {
 
 struct UiRuntime;
 
-// The raw-Markdown pane: the escape hatch for anything the live surface does
+// The raw-Markdown pane: the escape hatch for anything the note page does
 // not model. It is the older of the two presentation layers -- it soft-wraps
 // the buffer itself and draws through the bool-flag text API -- and is kept
 // apart so that replacing it is a matter of deleting one file.

@@ -8,7 +8,7 @@ namespace microcore::markdown {
 // Where a bare `http://` or `https://` URL written straight into prose ends.
 //
 // Two pipelines have to answer that: `MarkdownParser`, which md4c hands text
-// runs to, and the live document scanner in `doc/InlineScan` that the page
+// runs to, and the document scanner in `doc/InlineScan` that the page
 // lays out from. They had better agree -- a URL that is a link in the reading
 // view and plain text in the editor is the app appearing to forget -- so the
 // rule is written once here rather than twice at either end.

@@ -11,7 +11,7 @@
 //
 // Four askers -- the paint, the hit test, the cursor shape and the drag that
 // moves it -- and one answer, which is the whole point: `PageView` used to
-// carry a private copy of these numbers, paint the live page's bar from it and
+// carry a private copy of these numbers, paint the note page's bar from it and
 // be hit-tested against this one, so the two agreeing was a coincidence rather
 // than a fact.
 namespace micronotes::ui {
@@ -24,7 +24,7 @@ namespace micronotes::ui {
 // One function, asked by the paint, by the hit test, by the cursor shape and by
 // the drag that moves it -- so what is drawn and what responds cannot drift.
 // They did: `PageView` carried a private copy of these numbers, painted the
-// live page's scrollbar from it, and was hit-tested against ui's, so the two
+// note page's scrollbar from it, and was hit-tested against ui's, so the two
 // agreeing was a coincidence rather than a fact.
 struct ScrollbarGeometry {
   Rect track;

@@ -126,15 +126,6 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
 
   if(!contains(layout.content, x, y)) return CursorKind::Default;
 
-  if(ui.paneMode() == ui::PaneMode::Live) {
-    if(scrollbarHit(ui.livePage.pageRect(), ui.livePage.scroll(), ui.livePage.maxScroll(), x, y)) return CursorKind::Pointer;
-    if(!ui.livePage.linkAt(x, y).empty()) return CursorKind::Pointer;
-    if(ui.livePage.gutterAt(x, y) || !ui.livePage.toolbarAt(x, y).empty()) return CursorKind::Pointer;
-    if(ui.livePage.foldAt(x, y) || ui.livePage.copyButtonAt(x, y)) return CursorKind::Pointer;
-    if(ui.livePage.checkboxAt(x, y)) return CursorKind::Pointer;
-    return contains(ui.livePage.pageRect(), x, y) ? CursorKind::Text : CursorKind::Default;
-  }
-
   const ContentPanes panes = contentPanes(ui, layout.content);
   const Rect editorRect = panes.editor;
   const Rect viewerRect = panes.viewer;
@@ -155,10 +146,9 @@ CursorKind classifyCursor(TextRenderer& text, UiRuntime& ui, int width, int heig
       return CursorKind::Pointer;
     }
     if(ui.readingPage.copyButtonAt(x, y)) return CursorKind::Pointer;
-    // A task is a control here as much as on the live surface, and the text is
-    // selectable here as much as there. Both were silent: the pane answered
-    // every pointer with the default arrow, which is what a picture of a
-    // document looks like rather than a document.
+    // A task is a control here, and the text is selectable. Both were silent:
+    // the pane answered every pointer with the default arrow, which is what a
+    // picture of a document looks like rather than a document.
     if(ui.readingPage.checkboxAt(x, y)) return CursorKind::Pointer;
     // After the links below would be wrong -- a link is asked for across the
     // whole frame -- so this is deliberately the last thing the pane claims,

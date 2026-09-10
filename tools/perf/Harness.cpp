@@ -41,7 +41,7 @@ std::string heavyMarkdown(int seed, int sections) {
   return out.str();
 }
 
-// The live surface has no fonts in the core library, so the budget runs against
+// The note page has no fonts in the core library, so the budget runs against
 // a fixed-advance stand-in. It exercises the same scan, cache and flow work.
 doc::Metrics stubMetrics() {
   doc::Metrics metrics;

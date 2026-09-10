@@ -652,7 +652,7 @@ static Document parsePreservingBlankLines(std::string_view source) {
 // GitHub writes an alert as a blockquote whose first line is `[!KIND]`, which
 // md4c has no reason to know about: it reports an ordinary quote. The reading
 // view already draws admonitions, so retagging is all it takes for a callout to
-// look the same here as it does on the live surface.
+// look the same here as it does on the note page.
 void promoteAlerts(Document& document) {
   for(auto& block : document.blocks) {
     if(block.type != BlockType::Quote || block.inlines.empty()) continue;

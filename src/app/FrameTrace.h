@@ -28,7 +28,7 @@ struct FrameSample {
   std::size_t runsDrawn = 0;
 };
 
-// Rolling frame statistics for the live app.
+// Rolling frame statistics for the running app.
 //
 // Frame time is the one number that decides whether the app feels fast, and it
 // was the one number nothing in this repo measured: the counters said how many

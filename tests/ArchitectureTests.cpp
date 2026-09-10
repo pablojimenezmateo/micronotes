@@ -342,7 +342,7 @@ MICRONOTES_TEST(architecture_no_source_in_the_tree_is_a_catch_all) {
 // The right panel is drawn after the content, and that is a performance
 // contract rather than a matter of taste.
 //
-// The panel's outline borrows the block partition the live page splices during
+// The panel's outline borrows the block partition the reading page splices during
 // its own layout. `blocksAt` hands it over only for the revision it was built
 // from -- which is what makes the borrow safe -- so if the panel is drawn ahead
 // of the content it asks one revision early, is correctly refused, and rescans
@@ -363,7 +363,7 @@ MICRONOTES_TEST(architecture_the_right_panel_is_drawn_after_the_content) {
                              "drawApp no longer has both a content and a right-panel scope");
   micronotes::tests::require(
     rightPanel > content,
-    "drawApp draws the right panel before the content. Its outline then asks the live page for a "
+    "drawApp draws the right panel before the content. Its outline then asks the reading page for a "
     "block partition the page has not laid out yet, is refused, and rescans the whole note on "
     "every keystroke -- with identical pixels and a green suite. Draw it after the content.");
 }

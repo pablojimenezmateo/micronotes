@@ -21,7 +21,6 @@ struct UiRuntime;
 // than spread across a three-thousand-line file.
 
 std::filesystem::path uiStatePath(const std::filesystem::path& root);
-std::filesystem::path foldStatePath(const std::filesystem::path& root);
 std::filesystem::path treeStatePath(const std::filesystem::path& root);
 
 // The library the app opens when it is started with no `--library`. Kept in the

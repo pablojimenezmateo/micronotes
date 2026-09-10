@@ -6,9 +6,7 @@
 #include "core/perf/PerformanceCounters.h"
 
 #include "doc/Edits.h"
-#include "doc/Fold.h"
 #include "doc/Layout.h"
-#include "ui/FoldState.h"
 
 #include <iostream>
 #include <optional>
@@ -52,7 +50,6 @@ bool layoutBudgets(std::string* out) {
   std::vector<std::uint64_t> samples;
   for(int i = 0; i < 24; ++i) {
     source.insert(caret + static_cast<std::size_t>(i), 1, 'x');
-    options.caretOffset = caret;
     samples.push_back(timeMicros([&] { layout.update(source, options); }));
   }
   std::sort(samples.begin(), samples.end());
@@ -62,30 +59,6 @@ bool layoutBudgets(std::string* out) {
   recordMicros("layout.keystroke_relayout_worst", worst);
   std::cout << "layout.keystroke_relaid_blocks: " << layout.lastRelaidBlocks() << "\n";
 
-  // Folding puts a predicate on every block of every relayout, so it belongs
-  // under the same keystroke budget as the layout it runs inside.
-  {
-    micronotes::ui::FoldState folds;
-    folds.toggle("perf", micronotes::doc::foldKey(source, micronotes::doc::scanBlocks(source).front()));
-    options.folded = [&folds, &source](const micronotes::doc::SourceBlock& block) {
-      return folds.folded("perf", micronotes::doc::foldKey(source, block));
-    };
-    std::vector<std::uint64_t> folded;
-    for(int i = 0; i < 12; ++i) {
-      source.insert(caret + static_cast<std::size_t>(i), 1, 'y');
-      options.caretOffset = caret;
-      folded.push_back(timeMicros([&] { layout.update(source, options); }));
-    }
-    std::sort(folded.begin(), folded.end());
-    const std::uint64_t foldedMedian = folded[folded.size() / 2];
-    recordMicros("layout.keystroke_relayout_folded_median", foldedMedian);
-    options.folded = nullptr;
-    if(foldedMedian > kKeystrokeBudgetMicros) {
-      std::cerr << "BUDGET FAILED: layout.keystroke_relayout_folded_median " << foldedMedian
-                << "us exceeds " << kKeystrokeBudgetMicros << "us\n";
-      ok = false;
-    }
-  }
   if(out) *out = source;
   if(median > kKeystrokeBudgetMicros) {
     std::cerr << "BUDGET FAILED: layout.keystroke_relayout_median " << median
@@ -116,10 +89,9 @@ bool scrollBudgets(const std::string& source) {
   layout.setMetrics(stubMetrics());
   micronotes::doc::LayoutOptions options;
   options.width = 700.0f;
-  options.caretOffset = 0;
   layout.update(source, options);
 
-  // 120 frames: two seconds of a scroll, which is what the live app's rolling
+  // 120 frames: two seconds of a scroll, which is what the running app's rolling
   // frame window reports on.
   constexpr int kFrames = 120;
   const auto before = microcore::perf::captureCounters();
@@ -208,7 +180,7 @@ bool selectionBudgets(const std::string& source) {
 // critical path.
 static constexpr std::uint64_t kTransformBudgetMicros = 4000;
 
-// What the app actually pays, now that the live page lends its partition rather
+// What the app actually pays, now that the reading page lends its partition rather
 // than each edit deriving one. Far tighter than the budget above, because a
 // borrowed partition leaves an edit with no pass over the document in it at all.
 static constexpr std::uint64_t kLentTransformBudgetMicros = 40;

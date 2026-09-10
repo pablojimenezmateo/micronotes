@@ -15,7 +15,6 @@ using micronotes::doc::LayoutOptions;
 using micronotes::doc::Metrics;
 using micronotes::doc::Rect;
 using micronotes::doc::RunStyle;
-using micronotes::tests::insideOneFoldedLineEnding;
 using micronotes::tests::isSpace;
 using micronotes::tests::kFixture;
 using micronotes::tests::nextBoundary;
@@ -54,7 +53,7 @@ MICRONOTES_TEST(layout_reuses_cached_blocks_across_a_keystroke) {
                              "a keystroke re-laid " + std::to_string(layout.lastRelaidBlocks()) + " blocks");
 }
 
-// The live surface re-lays the note out once per frame whether or not anything
+// The page re-lays the note out once per frame whether or not anything
 // happened, so a scroll is a frame with nothing to do. It used to copy, rescan,
 // re-hash and re-flatten the whole note anyway -- about 70% of the frame on a
 // 235 KB one, and every bit of it reproducing the layout already in hand.
@@ -111,145 +110,20 @@ MICRONOTES_TEST(layout_update_rebuilds_when_an_input_moves) {
   narrower.width = 500.0f;
   MICRONOTES_REQUIRE(rebuilds(narrower, source));
 
-  LayoutOptions caret = narrower;
-  caret.caretOffset = source.size() / 2;
-  MICRONOTES_REQUIRE(rebuilds(caret, source));
-
-  LayoutOptions revealed = caret;
-  revealed.revealAll = true;
-  MICRONOTES_REQUIRE(rebuilds(revealed, source));
-
   const std::string edited = source + "\nA new paragraph.\n";
-  MICRONOTES_REQUIRE(rebuilds(revealed, edited));
+  MICRONOTES_REQUIRE(rebuilds(narrower, edited));
 
   // Same length, different bytes: a length check alone would miss this, and the
   // screen would keep the old text.
   std::string swapped = edited;
   swapped[swapped.size() / 2] = swapped[swapped.size() / 2] == 'x' ? 'y' : 'x';
-  MICRONOTES_REQUIRE(rebuilds(revealed, swapped));
+  MICRONOTES_REQUIRE(rebuilds(narrower, swapped));
 
   // New faces mean every cached block was measured with the wrong ones, and
   // neither the source nor the geometry says so.
-  layout.update(swapped, revealed);
+  layout.update(swapped, narrower);
   layout.setMetrics(stubMetrics());
-  MICRONOTES_REQUIRE(rebuilds(revealed, swapped));
-}
-
-// The stamps are the caller saying "nothing moved" so the layout does not have
-// to prove it. Proving it costs a memcmp of the whole note and a fold query per
-// block, which on a 466 KB note was the entire cost of an idle frame.
-MICRONOTES_TEST(layout_stamped_reuse_asks_the_fold_predicate_nothing) {
-  const std::string source = manyBlocks(200);
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  options.width = 700.0f;
-  options.sourceRevision = 7;
-  options.foldRevision = 3;
-  int asked = 0;
-  options.folded = [&asked](const micronotes::doc::SourceBlock&) {
-    ++asked;
-    return false;
-  };
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(asked > 0);  // the first pass has to resolve them
-
-  asked = 0;
-  const auto before = microcore::perf::captureCounters();
-  for(int frame = 0; frame < 10; ++frame) layout.update(source, options);
-  const auto after = microcore::perf::captureCounters();
-  using microcore::perf::CounterId;
-  const auto delta = [&](CounterId id) {
-    return after[static_cast<std::size_t>(id)] - before[static_cast<std::size_t>(id)];
-  };
-  MICRONOTES_REQUIRE(delta(CounterId::LayoutUnchangedUpdates) == 10);
-  MICRONOTES_REQUIRE(delta(CounterId::LayoutFoldQueries) == 0);
-  MICRONOTES_REQUIRE(asked == 0);
-}
-
-// A note that *does* have a fold in it cannot skip the resolution, and the
-// resolution used to be O(blocks) on every edit. It resumes at the seam now:
-// `hidden[j]` depends only on blocks `[0, j]`, so an edit at the bottom leaves
-// everything above the fold that spans the seam already answered.
-MICRONOTES_TEST(layout_a_fold_resolution_resumes_at_the_edit) {
-  std::string source = manyBlocks(400);
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  options.width = 700.0f;
-  options.sourceRevision = 1;
-  options.foldRevision = 1;
-  // The first heading in the note, collapsed, so the resolution has real work
-  // in it and cannot take the "nothing is folded" early-out.
-  std::size_t firstHeading = DocumentLayout::kNone;
-  options.folded = [&firstHeading](const micronotes::doc::SourceBlock& block) {
-    return block.kind == BlockKind::Heading && block.start == firstHeading;
-  };
-  {
-    const auto blocks = micronotes::doc::scanBlocks(source);
-    for(const auto& block : blocks) {
-      if(block.kind != BlockKind::Heading) continue;
-      firstHeading = block.start;
-      break;
-    }
-  }
-  MICRONOTES_REQUIRE(firstHeading != DocumentLayout::kNone);
-  layout.update(source, options);
-  const std::size_t blocks = layout.blockCount();
-  MICRONOTES_REQUIRE(blocks > 100);
-
-  using microcore::perf::CounterId;
-  const auto resolvedBy = [&](std::size_t at) {
-    const auto before = microcore::perf::captureCounters();
-    source.insert(at, 1, 'x');
-    options.sourceRevision += 1;
-    options.caretOffset = at;
-    layout.update(source, options);
-    const auto after = microcore::perf::captureCounters();
-    return after[static_cast<std::size_t>(CounterId::LayoutFoldBlocksResolved)] -
-           before[static_cast<std::size_t>(CounterId::LayoutFoldBlocksResolved)];
-  };
-
-  // An edit at the very end walks only what follows the fold that spans the
-  // seam, which here is nothing above the last few blocks.
-  const std::uint64_t atEnd = resolvedBy(source.size());
-  micronotes::tests::require(atEnd < blocks / 4,
-                             "an edit at the end resolved " + std::to_string(atEnd) +
-                               " of " + std::to_string(blocks) + " blocks");
-  // And one at the top still walks the note, which is the case that cannot be
-  // resumed and is written down as such.
-  const std::uint64_t atTop = resolvedBy(0);
-  micronotes::tests::require(atTop >= blocks - 4,
-                             "an edit at the top resolved only " + std::to_string(atTop) +
-                               " of " + std::to_string(blocks) + " blocks");
-}
-
-// A stamp that moves has to invalidate, or a collapsed heading stays open and
-// the screen is simply wrong.
-MICRONOTES_TEST(layout_a_moved_fold_stamp_re_resolves_the_folds) {
-  const std::string source = manyBlocks(8);
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  options.width = 700.0f;
-  options.sourceRevision = 1;
-  options.foldRevision = 1;
-  bool collapsed = false;
-  options.folded = [&collapsed](const micronotes::doc::SourceBlock& block) {
-    return collapsed && block.kind == BlockKind::Heading;
-  };
-  layout.update(source, options);
-  const float open = layout.totalHeight();
-
-  collapsed = true;
-  options.foldRevision = 2;
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(layout.totalHeight() < open);
-
-  collapsed = false;
-  options.foldRevision = 3;
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(layout.totalHeight() == open);
+  MICRONOTES_REQUIRE(rebuilds(narrower, swapped));
 }
 
 // A caller with no stamp to offer must get exactly the behaviour it had before
@@ -270,34 +144,12 @@ MICRONOTES_TEST(layout_an_unstamped_caller_still_compares_bytes) {
   MICRONOTES_REQUIRE(counter(microcore::perf::CounterId::LayoutUnchangedUpdates) == before + 1);
 }
 
-// A fold collapses without the source, the geometry or the caret moving, so it
-// is the one input the reuse check has to resolve rather than compare.
-MICRONOTES_TEST(layout_update_rebuilds_when_a_fold_closes) {
-  const std::string source = manyBlocks(8);
-  DocumentLayout layout;
-  layout.setMetrics(stubMetrics());
-  LayoutOptions options;
-  options.width = 700.0f;
-  bool collapsed = false;
-  options.folded = [&collapsed](const micronotes::doc::SourceBlock& block) {
-    return collapsed && block.kind == BlockKind::Heading;
-  };
-  layout.update(source, options);
-  const float open = layout.totalHeight();
-
-  collapsed = true;
-  const auto before = counter(microcore::perf::CounterId::LayoutUnchangedUpdates);
-  layout.update(source, options);
-  MICRONOTES_REQUIRE(counter(microcore::perf::CounterId::LayoutUnchangedUpdates) == before);
-  MICRONOTES_REQUIRE(layout.totalHeight() < open);
-}
-
 // The reuse machinery is an optimisation, and the only thing that makes an
 // optimisation safe is that it cannot be observed. This walks a document
 // through the edits a person makes -- typing at each end and in the middle,
-// deleting, splitting a block, moving the caret, folding, resizing -- and after
-// every one of them asserts that the incrementally updated layout is
-// indistinguishable from one built from scratch for the same inputs.
+// deleting, splitting a block, resizing -- and after every one of them asserts
+// that the incrementally updated layout is indistinguishable from one built
+// from scratch for the same inputs.
 //
 // It is written as one long sequence rather than a test per edit on purpose:
 // the incremental path carries state from the previous update, so the bugs it
@@ -320,7 +172,6 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
     fresh.setMetrics(stubMetrics());
     LayoutOptions freshOptions = options;
     freshOptions.sourceRevision = 0;
-    freshOptions.foldRevision = 0;
     freshOptions.editedSpan = {};
     fresh.update(source, freshOptions);
 
@@ -342,20 +193,17 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
   for(int i = 0; i < 4; ++i) {
     source.insert(top, 1, 'x');
     ++revision;
-    options.caretOffset = top + 1;
     settle("typing near the top");
   }
   std::size_t middle = source.find("A paragraph", source.size() / 2) + 2;
   for(int i = 0; i < 4; ++i) {
     source.insert(middle, 1, 'y');
     ++revision;
-    options.caretOffset = middle + 1;
     settle("typing in the middle");
   }
   for(int i = 0; i < 4; ++i) {
     source.push_back('z');
     ++revision;
-    options.caretOffset = source.size();
     settle("typing at the end");
   }
 
@@ -363,7 +211,6 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
   for(int i = 0; i < 4; ++i) {
     source.erase(middle, 1);
     ++revision;
-    options.caretOffset = middle;
     settle("backspace in the middle");
   }
 
@@ -371,52 +218,18 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
   // block below shifts by an index as well as by an offset.
   source.insert(middle, "\n\n");
   ++revision;
-  options.caretOffset = middle + 2;
   settle("splitting a paragraph");
   source.erase(middle, 2);
   ++revision;
-  options.caretOffset = middle;
   settle("joining it again");
 
-  // Moving the caret with no edit at all: the source stands still and two
-  // blocks change which of their markers are shown.
-  for(std::size_t i = 0; i < incremental.blockCount(); i += 7) {
-    options.caretOffset = incremental.blocks()[i].start;
-    settle("moving the caret");
-  }
-
-  // Into and out of a fenced block, whose opening marker moves between being a
-  // line of its own and riding in front of the first line of code.
+  // Editing inside a fenced block, whose opening marker rides in front of the
+  // first line of code rather than claiming a line of its own.
   const std::size_t fence = source.find("```cpp");
   MICRONOTES_REQUIRE(fence != std::string::npos);
-  options.caretOffset = fence + 2;
-  settle("caret inside a fence");
-  options.rawOffset = fence + 2;
-  settle("fence dropped to raw");
-  options.rawOffset = DocumentLayout::kNone;
-  options.caretOffset = 0;
-  settle("back out of the fence");
-
-  // Folding a heading, which hides everything under it and moves every top
-  // below, then unfolding it.
-  std::uint64_t foldRevision = 1;
-  bool folded = false;
-  const std::size_t foldedHeading = source.find("## Section 12");
-  MICRONOTES_REQUIRE(foldedHeading != std::string::npos);
-  options.folded = [&](const micronotes::doc::SourceBlock& block) {
-    return folded && block.start == foldedHeading;
-  };
-  options.foldRevision = foldRevision;
-  settle("fold predicate installed");
-  folded = true;
-  options.foldRevision = ++foldRevision;
-  settle("heading folded");
-  settle("idle frame while folded");
-  folded = false;
-  options.foldRevision = ++foldRevision;
-  settle("heading unfolded");
-  options.folded = nullptr;
-  options.foldRevision = 0;
+  source.insert(fence + 6, 1, 'q');
+  ++revision;
+  settle("typing on a fence's info line");
 
   // Breaking a table's delimiter row and putting it back. A table is the one
   // construct here whose kind is decided by a line other than its first, and it
@@ -426,11 +239,9 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
   MICRONOTES_REQUIRE(delimiter != std::string::npos);
   source.replace(delimiter, 1, "x");
   ++revision;
-  options.caretOffset = delimiter + 1;
   settle("table delimiter broken");
   source.replace(delimiter, 1, "|");
   ++revision;
-  options.caretOffset = delimiter + 1;
   settle("table delimiter restored");
 
   // Resizing, which invalidates every cached block at once, and then typing
@@ -440,11 +251,10 @@ MICRONOTES_TEST(layout_incremental_updates_match_a_layout_built_from_scratch) {
     settle("resized");
     source.insert(middle, 1, 'w');
     ++revision;
-    options.caretOffset = middle + 1;
     settle("typing after a resize");
   }
 
-  MICRONOTES_REQUIRE(checked > 30);
+  MICRONOTES_REQUIRE(checked > 20);
 }
 
 MICRONOTES_TEST(layout_incremental_updates_match_under_a_random_edit_sequence) {
@@ -482,7 +292,6 @@ MICRONOTES_TEST(layout_uses_the_callers_edited_span_instead_of_comparing_the_not
   const std::size_t at = source.size() / 2;
   source.insert(at, "z");
   options.sourceRevision = 8;
-  options.caretOffset = at + 1;
   options.editedSpan = {7, 8, at, at, at + 1};
   layout.update(source, options);
   const std::uint64_t used = counter(CounterId::LayoutEditSpansUsed) - usedBefore;
@@ -581,7 +390,6 @@ MICRONOTES_TEST(layout_an_edit_rescans_and_replaces_only_what_it_touched) {
   MICRONOTES_REQUIRE(at != std::string::npos);
   source.insert(at, 1, 'x');
   options.sourceRevision = 2;
-  options.caretOffset = at + 1;
 
   const auto before = microcore::perf::captureCounters();
   layout.update(source, options);
@@ -611,7 +419,6 @@ MICRONOTES_TEST(layout_an_edit_rescans_and_replaces_only_what_it_touched) {
 
   // Moving the caret between two blocks touches those two and nothing else --
   // the source does not move at all, so nothing is rescanned or copied.
-  options.caretOffset = layout.blocks()[blocks / 4].start;
   const auto beforeCaret = microcore::perf::captureCounters();
   layout.update(source, options);
   const auto afterCaret = microcore::perf::captureCounters();
@@ -693,7 +500,6 @@ MICRONOTES_TEST(layout_answers_as_empty_between_new_metrics_and_the_next_update)
   MICRONOTES_REQUIRE(range.first == 0 && range.second == 0);
   MICRONOTES_REQUIRE(layout.caretRect(20).h > 0.0f);
   MICRONOTES_REQUIRE(layout.selectionRects(0, 40).empty());
-  MICRONOTES_REQUIRE(layout.rowRelative(20, 1) == 20);
 
   // And it comes back whole on the next update.
   layout.update(source, options);

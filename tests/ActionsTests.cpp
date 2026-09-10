@@ -218,7 +218,7 @@ MICRONOTES_TEST(actions_a_chord_answers_to_its_physical_key_too) {
   // And Ctrl+3 alone still is the pane switch.
   const auto* pane = findActionForKey(SDLK_3, SDL_SCANCODE_3, true, false, false);
   MICRONOTES_REQUIRE(pane != nullptr);
-  MICRONOTES_REQUIRE(pane->id == ActionId::PaneReading);
+  MICRONOTES_REQUIRE(pane->id == ActionId::PaneSplit);
 
   // Nothing to fall back to for a key that is already physical.
   MICRONOTES_REQUIRE(findActionForKey(SDLK_UNKNOWN, SDL_SCANCODE_UNKNOWN, true, false, false) == nullptr);

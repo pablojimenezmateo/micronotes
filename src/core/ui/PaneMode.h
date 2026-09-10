@@ -9,9 +9,8 @@ namespace microcore::ui {
 // widths, the tabs) imports it rather than restating it.
 enum class PaneMode {
   Editor,   // raw Markdown source
-  Viewer,   // read-only md4c rendering
-  Split,    // source beside rendering
-  Live      // formatting rendered in place, and editable
+  Viewer,   // read-only rendering
+  Split     // source beside rendering
 };
 
 }

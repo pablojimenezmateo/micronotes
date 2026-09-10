@@ -226,8 +226,8 @@ ThemeMode& activeMode() {
 
 CalloutStyle calloutStyle(std::string_view rawKind) {
   const bool light = activeMode() == ThemeMode::Light;
-  // The live surface reads the tag as written and the reading view lowercases
-  // it on the way through md4c; both must land on the same colour.
+  // The tag is read as the author wrote it, so `[!note]` and `[!NOTE]` have to
+  // land on the same colour.
   const std::string kind = util::toUpperAscii(rawKind);
   // GitHub's five alert kinds, which is what `> [!NOTE]` already means
   // everywhere else these files are read. The hues are pulled toward the
@@ -274,16 +274,11 @@ ThemeMode themeModeFromName(std::string_view name) {
 
 
 std::string calloutLabel(std::string_view kind) {
-  // Normalised from the kind, not echoed from the source. The two scanners
-  // hand this function different bytes for the same callout: `doc::BlockScan`
-  // keeps `[!WARNING]` verbatim, md4c lower-cases it on the way through. The
-  // old version only lower-cased the *tail*, so the live surface headed that
-  // callout "Warning" and the reading pane headed it "warning" -- the same
-  // note, the same block, two labels, which is exactly the drift `calloutStyle`
-  // beside this already normalises its input to avoid.
-  //
-  // It also made the label depend on how the author typed the tag: `[!note]`
-  // read as "note" and `[!NOTE]` as "Note" in the same pane, in the same note.
+  // Normalised from the kind, not echoed from the source. `doc::BlockScan`
+  // keeps `[!WARNING]` verbatim, so an echoed label depends on how the author
+  // typed the tag: `[!note]` read as "note" and `[!NOTE]` as "Note", the same
+  // note and the same block under two names. That is exactly the drift
+  // `calloutStyle` beside this already normalises its input to avoid.
   if(kind.empty()) return "Note";
   std::string name(kind);
   name[0] = util::toUpperAscii(name[0]);

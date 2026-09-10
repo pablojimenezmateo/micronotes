@@ -93,7 +93,7 @@ CaretPlace caretPlaceIn(std::string_view text, std::size_t cursor) {
   //
   // Through `memchr` rather than a byte loop with a branch in it. That is not
   // decoration: this runs once per caret move, and on a 200 KB note the loop
-  // form measured 63 us against the 21 us the live page's whole layout costs --
+  // form measured 63 us against the 21 us the note page's whole layout costs --
   // the largest single thing a keystroke did, which is exactly the shape the
   // word count was removed from the bar for being. See `docs/performance.md`,
   // "A segmented status bar, and the readout that paid for it".
@@ -141,7 +141,7 @@ StatusSegments statusSegments(const UiRuntime& ui) {
   // Only where the *source* is on screen, which is the raw pane and the split.
   //
   // A line and a column are coordinates in the note's Markdown. In the reading
-  // pane there is no caret to have them; in the live surface there is one, but
+  // pane there is no caret to have them; in the raw pane there is one, but
   // what the reader is looking at is the rendered text and "Ln 42" names a line
   // of a file they cannot see -- a number that moves for reasons that are not
   // on screen. It also costs something: the line is a pass over the note up to

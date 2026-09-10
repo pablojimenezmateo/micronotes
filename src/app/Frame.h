@@ -12,7 +12,7 @@
 // surface:
 //
 //   * the right panel is drawn *after* the content, because its outline borrows
-//     the block partition the live page splices during its own layout, and
+//     the block partition the reading page splices during its own layout, and
 //     asking one revision early costs a whole-note rescan per keystroke with
 //     identical pixels. `ArchitectureTests` pins the order.
 //   * the caret's phase is settled before anything draws one, and recorded, so

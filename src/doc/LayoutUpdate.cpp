@@ -3,11 +3,9 @@
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
-#include "doc/Fold.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <utility>
 
@@ -24,21 +22,6 @@
 namespace micronotes::doc {
 namespace {
 
-// The first and last index at which two byte spans differ, or `{kNone, kNone}`
-// when they are equal. The equality case is what happens on every keystroke, so
-// it is one `memcmp` rather than a loop; the scan runs only when a fold really
-// did move.
-static std::pair<std::size_t, std::size_t> diffSpan(const std::uint8_t* a, const std::uint8_t* b,
-                                                    std::size_t count) {
-  constexpr std::size_t kNone = DocumentLayout::kNone;
-  if(count == 0 || std::memcmp(a, b, count) == 0) return {kNone, kNone};
-  std::size_t low = 0;
-  while(a[low] == b[low]) ++low;
-  std::size_t high = count - 1;
-  while(a[high] == b[high]) --high;
-  return {low, high};
-}
-
 }
 
 // One call of `update`, with the five phases as its methods.
@@ -47,7 +30,7 @@ static std::pair<std::size_t, std::size_t> diffSpan(const std::uint8_t* a, const
 // partition still describes the source, absorb the edit, align the placement to
 // the new indexing, walk the dirty ranges, carry the outstanding shift down.
 // Each phase read and wrote locals the next one depended on -- `head`, `tail`,
-// `patchable`, `geometry`, `caretBlock`, `rawBlock`, `count`, `previousCount`,
+// `patchable`, `geometry`, `count`, `previousCount`,
 // `shift`, `pendingTop`, `pendingRows`, `settled` -- which is exactly the shape
 // that says a function is one algorithm rather than several: extracting a phase
 // meant passing eight or nine of them.
@@ -55,7 +38,7 @@ static std::pair<std::size_t, std::size_t> diffSpan(const std::uint8_t* a, const
 // So the state is the carrier and the phases are its methods. What made getting
 // this right delicate is the ownership, and the rule is one line: **the pass
 // owns nothing.** The standing arrays are the layout's -- `placed_`, `flags_`,
-// `liveKeys_`, `lineStart_`, `hidden_`, `dirty_` are patched in place through
+// `liveKeys_`, `lineStart_`, `dirty_` are patched in place through
 // `doc_`, never copied in and back out -- and what lives here is only the
 // bookkeeping that was on the stack before. A carrier holding a generation of
 // the document would be the function it replaced with a copy of the note added.
@@ -79,17 +62,13 @@ public:
                      opts_.sourceRevision == doc_.sourceRevision_;
     // Whether the standing placement can be *patched* rather than rebuilt. The
     // geometry seeds every cache key, so a layout built under a different one
-    // shares nothing with this call; and the four parallel arrays have to
+    // shares nothing with this call; and the three parallel arrays have to
     // describe the blocks standing now, or there is nothing to patch.
     patchable_ = doc_.built_ && geometry_ == doc_.geometryHash_ &&
                  doc_.flags_.size() == previousCount_ &&
                  doc_.liveKeys_.size() == previousCount_ &&
                  doc_.placed_.size() == previousCount_ &&
-                 doc_.hidden_.size() == previousCount_ &&
                  doc_.lineStart_.size() == previousCount_ + 1;
-    // Read before `options_` is overwritten below: a `revealAll` flip changes
-    // every block's flags at once, which is the one change with no local extent.
-    revealAllChanged_ = doc_.built_ && opts_.revealAll != doc_.options_.revealAll;
 
     // The blocks whose entry this call can have moved. Collected as ranges,
     // sorted and merged below; everything outside them is provably identical to
@@ -107,8 +86,6 @@ public:
       tail_ = 0;
     }
     shift_ = static_cast<std::ptrdiff_t>(count_) - static_cast<std::ptrdiff_t>(previousCount_);
-
-    markMovedBlocks();
 
     const perf::ScopeTimer placeTimer("layout.update.place_blocks");
     alignPlacement();
@@ -130,39 +107,16 @@ private:
   // would have reproduced what is already sitting in `placed_`.
   bool absorbSource() {
     // Identical bytes mean an identical partition, so `blocks_` still describes
-    // this source and the fold state can be resolved against it directly. That
-    // is the common case by a wide margin: the live surface re-lays the note out
-    // once per frame whether or not anything happened, and a scroll is every
-    // frame with nothing happening.
+    // this source. That is the common case by a wide margin: the page re-lays
+    // the note out once per frame whether or not anything happened, and a
+    // scroll is every frame with nothing happening.
     if(sourceStamped_ || doc_.sourceMatches(incoming_)) return absorbUnchangedSource();
     absorbEdit();
     return true;
   }
 
   bool absorbUnchangedSource() {
-    // Same bytes means the same partition, so the standing fold resolution
-    // describes this call too -- if nothing about the folds has moved. A stamped
-    // caller says so directly; an unstamped one has to be asked block by block.
-    const bool foldsStamped =
-      opts_.foldRevision != 0 && opts_.foldRevision == doc_.foldRevision_;
-    // A caller offering no predicate is saying nothing is folded. If nothing was
-    // folded last time either, the resolution is the same all-zero array it
-    // already is -- so there is nothing to build and nothing to compare it to.
-    const bool foldsAbsent =
-      !opts_.folded && !doc_.anyHidden_ && doc_.hidden_.size() == doc_.blocks_.size();
-    std::pair<std::size_t, std::size_t> foldDiff {kNone, kNone};
-    if(foldsAbsent) {
-      perf::addCounter(perf::CounterId::LayoutFoldResolutionsSkipped);
-    } else if(!foldsStamped) {
-      const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
-      doc_.anyHidden_ = doc_.resolveFolds(doc_.blocks_, opts_, &doc_.spareHidden_);
-      foldDiff = diffSpan(doc_.spareHidden_.data(), doc_.hidden_.data(),
-                          std::min(doc_.spareHidden_.size(), doc_.hidden_.size()));
-      if(doc_.spareHidden_.size() != doc_.hidden_.size()) {
-        foldDiff = {0, doc_.spareHidden_.size()};
-      }
-    }
-    if(doc_.canReuse(opts_, geometry_, foldDiff.first == kNone)) {
+    if(doc_.canReuse(opts_, geometry_)) {
       // Before this returned early it was the single largest cost in a frame,
       // and on a scroll -- where by definition only the viewport moved -- it was
       // the whole frame's work.
@@ -174,16 +128,9 @@ private:
       doc_.lastRelaid_ = 0;
       return false;
     }
-    // Something else moved -- the caret, the width, a fold -- so the blocks have
-    // to be placed again. The scan and the copy do not: those are the document,
-    // and the document is what did not change. Every block maps to itself.
-    // When the folds are stamped unchanged, `hidden_` already describes them.
-    if(foldDiff.first != kNone) {
-      // Which blocks a fold change moved, rather than all of them: a fold hides
-      // a run, and the run is exactly where the flags differ.
-      markDirty(foldDiff.first, foldDiff.second);
-      doc_.hidden_.swap(doc_.spareHidden_);
-    }
+    // The width moved, so the blocks have to be placed again. The scan and the
+    // copy do not: those are the document, and the document is what did not
+    // change. Every block maps to itself.
     head_ = doc_.blocks_.size();
     return true;
   }
@@ -201,38 +148,11 @@ private:
       doc_.rescan(window, previousBytes, &head_, &tail_);
     }
     perf::addCounter(perf::CounterId::LayoutBlocksScanned, doc_.blocks_.size());
-    // Same question on the unchanged path, where the block count moved: an
-    // all-zero resolution of the new length is still the same answer, so only
-    // the array has to be resized, and neither diff below can find anything.
-    const bool foldsAbsent = !opts_.folded && !doc_.anyHidden_;
-    if(foldsAbsent) {
-      perf::addCounter(perf::CounterId::LayoutFoldResolutionsSkipped);
-      doc_.spareHidden_.assign(doc_.blocks_.size(), 0);
-    } else {
-      const perf::ScopeTimer foldTimer("layout.update.resolve_folds");
-      // Resumed at the seam rather than restarted at the top: an edit at the
-      // bottom of a folded note re-resolves the blocks after it, not the note.
-      doc_.anyHidden_ = doc_.resolveFoldsAfter(doc_.blocks_, opts_, patchable_ ? head_ : 0,
-                                               &doc_.spareHidden_);
-    }
     const std::size_t count = doc_.blocks_.size();
     // The blocks between the two carried-over ends are the edit itself, and the
     // block either side of them can have changed which quote run it belongs to
     // -- that is the one flag decided by a neighbour rather than by the block.
     markDirty(head_ > 0 ? head_ - 1 : 0, std::min(count - tail_, count - 1));
-    if(patchable_ && !foldsAbsent) {
-      // The fold state has to be diffed across the edit's index shift: the
-      // blocks before it kept their index, the ones after it moved by the change
-      // in block count, and the ones between are being rebuilt anyway.
-      const auto headDiff = diffSpan(doc_.spareHidden_.data(), doc_.hidden_.data(), head_);
-      markDirty(headDiff.first, headDiff.second);
-      const auto tailDiff = diffSpan(doc_.spareHidden_.data() + count - tail_,
-                                     doc_.hidden_.data() + previousCount_ - tail_, tail_);
-      if(tailDiff.first != kNone) {
-        markDirty(count - tail_ + tailDiff.first, count - tail_ + tailDiff.second);
-      }
-    }
-    doc_.hidden_.swap(doc_.spareHidden_);
   }
 
   // The layout keeps its own copy of the buffer because every run of every
@@ -264,38 +184,7 @@ private:
     }
   }
 
-  // --- phase two: which blocks did the caret and the raw block move? --------
-
-  // Where a block that stood at old index `index` sits now, or `kNone` when the
-  // edit rebuilt it -- in which case it is inside the dirty middle already.
-  std::size_t nowAt(std::size_t index) const {
-    if(index == kNone || index >= previousCount_) return kNone;
-    if(index < head_) return index;
-    if(index + tail_ >= previousCount_) {
-      return static_cast<std::size_t>(static_cast<std::ptrdiff_t>(index) + shift_);
-    }
-    return kNone;
-  }
-
-  void markMovedBlocks() {
-    caretBlock_ = doc_.blockIndexFor(opts_.caretOffset);
-    rawBlock_ = doc_.blockIndexFor(opts_.rawOffset);
-    if(revealAllChanged_) {
-      // Every block reveals or hides its markers at once. Nothing local about it.
-      markDirty(0, count_ - 1);
-    } else if(nowAt(doc_.caretBlock_) != caretBlock_) {
-      // Two blocks: the one the caret left stops showing its markers, and the
-      // one it arrived at starts.
-      markDirty(caretBlock_ == kNone ? kNone : caretBlock_, kNone);
-      markDirty(nowAt(doc_.caretBlock_), kNone);
-    }
-    if(nowAt(doc_.rawBlock_) != rawBlock_) {
-      markDirty(rawBlock_ == kNone ? kNone : rawBlock_, kNone);
-      markDirty(nowAt(doc_.rawBlock_), kNone);
-    }
-  }
-
-  // --- phase three: align the standing arrays to the new indexing -----------
+  // --- phase two: align the standing arrays to the new indexing -------------
 
   void alignPlacement() {
     if(!patchable_) {
@@ -346,7 +235,7 @@ private:
     doc_.lineStart_.resize(count_ + 1);
   }
 
-  // --- phase four: walk what moved, and carry the shift down ---------------
+  // --- phase three: walk what moved, and carry the shift down ---------------
 
   void walkDirtyRanges() {
     doc_.lastRelaid_ = 0;
@@ -380,7 +269,7 @@ private:
     std::int64_t rows =
       low == 0 ? 0 : static_cast<std::int64_t>(doc_.lineStart_[low]) + pendingRows_;
     for(std::size_t i = low; i <= high; ++i) {
-      const Flags flags = doc_.flagsFor(i, caretBlock_, rawBlock_);
+      const Flags flags = doc_.flagsFor(i);
       const BlockLayout* layout = nullptr;
       // A block from one of the carried-over ends is at the index its entry is
       // already filed under -- the alignment above moved the tail's entries to
@@ -434,7 +323,7 @@ private:
     doc_.totalHeight_ += pendingTop_;
   }
 
-  // --- phase five: post what happened, and stamp what it happened to --------
+  // --- phase four: post what happened, and stamp what it happened to --------
 
   void publish() {
     perf::addCounter(perf::CounterId::LayoutBlocksWalked, walked_);
@@ -449,9 +338,6 @@ private:
 
     doc_.geometryHash_ = geometry_;
     doc_.sourceRevision_ = opts_.sourceRevision;
-    doc_.foldRevision_ = opts_.foldRevision;
-    doc_.caretBlock_ = caretBlock_;
-    doc_.rawBlock_ = rawBlock_;
     doc_.built_ = true;
 
     doc_.sweepLayoutCache();
@@ -467,7 +353,6 @@ private:
   std::size_t previousCount_ = 0;
   bool sourceStamped_ = false;
   bool patchable_ = false;
-  bool revealAllChanged_ = false;
 
   // How many blocks came through this call unchanged at each end of the
   // document. Everything between them is the extent of what moved, and the two
@@ -476,8 +361,6 @@ private:
   std::size_t tail_ = 0;
   std::size_t count_ = 0;
   std::ptrdiff_t shift_ = 0;
-  std::size_t caretBlock_ = kNone;
-  std::size_t rawBlock_ = kNone;
 
   // What the walk found, posted once by `publish`.
   Tally tally_;

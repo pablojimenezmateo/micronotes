@@ -172,7 +172,6 @@ set(MICRONOTES_APP_SOURCES
   src/app/FrameTrace.cpp
   src/doc/BlockScan.cpp
   src/doc/Edits.cpp
-  src/doc/Fold.cpp
   src/doc/InlineScan.cpp
   src/doc/LinkTarget.cpp
   src/doc/WikiLink.cpp
@@ -192,7 +191,6 @@ set(MICRONOTES_APP_SOURCES
   src/ui/Actions.cpp
   src/ui/AppState.cpp
   src/ui/OpenNoteRecord.cpp
-  src/ui/FoldState.cpp
   src/ui/CaretBlink.cpp
   src/ui/NoteProperties.cpp
   src/ui/Menus.cpp
@@ -252,14 +250,12 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/Fields.cpp
   src/app/FindBar.cpp
   src/app/FocusedEdits.cpp
-  src/app/Folds.cpp
   src/app/EventRouter.cpp
   src/app/Frame.cpp
   src/app/InlineText.cpp
   src/app/KeyRouter.cpp
   src/app/Layout.cpp
   src/app/KeySurfaces.cpp
-  src/app/LivePage.cpp
   src/app/MarkdownBlocks.cpp
   src/app/MenuBar.cpp
   src/app/NoteCaches.cpp
@@ -276,7 +272,6 @@ set(MICRONOTES_SHELL_SOURCES
   src/app/PointerRouter.cpp
   src/app/Prompts.cpp
   src/app/RawPane.cpp
-  src/app/PageSurface.cpp
   src/app/ReadingPage.cpp
   src/app/RightPanel.cpp
   src/app/Screenshot.cpp
@@ -344,7 +339,6 @@ add_executable(micronotes_tests
   tests/EditsTests.cpp
   tests/FlowTests.cpp
   tests/FocusedEditsTests.cpp
-  tests/FoldTests.cpp
   tests/TokenizeTests.cpp
   tests/FramePolicyTests.cpp
   tests/FrameTraceTests.cpp

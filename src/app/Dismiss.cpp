@@ -32,12 +32,6 @@ Dismissed dismissOne(UiRuntime& ui) {
   // *under* a query -- choosing a tag clears the query, and typing a query
   // leaves the tag in force -- so a reader who did both gets two presses.
   if(clearTagFilter(ui)) return Dismissed::TagFilter;
-  // Last, because it is a selection inside the page rather than a filter over
-  // the library: with nothing narrowed, Esc belongs to whatever has focus.
-  if(ui.blockSelection.active) {
-    ui.blockSelection.clear();
-    return Dismissed::BlockSelection;
-  }
   return Dismissed::Nothing;
 }
 
