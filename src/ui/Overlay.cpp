@@ -98,6 +98,19 @@ const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) con
   return overlay.filterCache;
 }
 
+// The hint's band, resting on the panel's own foot. Empty when there is no
+// hint, which is what an empty `Rect` means everywhere in a `Layout`.
+//
+// Two of the three places a hint is placed want exactly this, and wrote it out
+// as the same five terms each; the third is a Confirm, where the hint is the
+// *consequence* of the button beside it and so has to be read above the
+// buttons rather than under them. One expression and one exception is easier
+// to keep right than two expressions that happen to agree.
+Rect hintAtFoot(const Rect& panel, float hint) {
+  if(hint <= 0.0f) return {};
+  return {panel.x + kPadding, panel.y + panel.h - kPadding - hint, panel.w - kPadding * 2.0f, hint};
+}
+
 float OverlayStack::PanelBands::total() const {
   return kPadding * 2.0f + title + field + list + grid + gridHintGap + confirm + hint;
 }
@@ -229,10 +242,7 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
       layout.itemIndices.push_back(indices[i]);
     }
     cursorY += bands.grid;
-    if(bands.hint > 0.0f) {
-      layout.hint = {x + kPadding, y + height - kPadding - bands.hint, width - kPadding * 2.0f,
-                     bands.hint};
-    }
+    layout.hint = hintAtFoot(layout.panel, bands.hint);
     return layout;
   }
   RowCursor rows(x, width, cursorY);
@@ -257,9 +267,8 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
     layout.itemIndices.push_back(-2);  // cancel
     layout.itemRects.push_back({confirmX, cursorY, kButtonWidth, kRowHeight});
     layout.itemIndices.push_back(-1);  // confirm
-  } else if(bands.hint > 0.0f) {
-    layout.hint = {x + kPadding, y + height - kPadding - bands.hint, width - kPadding * 2.0f,
-                   bands.hint};
+  } else {
+    layout.hint = hintAtFoot(layout.panel, bands.hint);
   }
   return layout;
 }

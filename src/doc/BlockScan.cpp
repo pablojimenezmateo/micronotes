@@ -226,6 +226,17 @@ Continuation absorbContinuation(std::string_view source, const Line& line) {
   return {contentEnd, scan};
 }
 
+// A payload that ends at a line break does not include it.
+//
+// Both `Complex` arms below reach the end of their block by scanning to the
+// next line and so land one past a newline; the block's *content* stops before
+// it, or every complex block reports a trailing blank the source does not
+// have. Written out twice, once per arm, with the guard against `from`
+// spelled slightly differently each time.
+std::size_t withoutTrailingNewline(std::string_view source, std::size_t from, std::size_t to) {
+  return to > from && source[to - 1] == '\n' ? to - 1 : to;
+}
+
 SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
   {
     const Line line = lineAt(source, pos);
@@ -282,7 +293,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       }
       blockEnd = lastContentEnd;
       payloadStart = line.start;
-      payloadEnd = lastContentEnd > line.start && source[lastContentEnd - 1] == '\n' ? lastContentEnd - 1 : lastContentEnd;
+      payloadEnd = withoutTrailingNewline(source, line.start, lastContentEnd);
       return finish();
     }
 
@@ -343,7 +354,7 @@ SourceBlock scanOneBlock(std::string_view source, std::size_t pos) {
       }
       blockEnd = scan;
       payloadStart = line.start;
-      payloadEnd = scan > line.start && source[scan - 1] == '\n' ? scan - 1 : scan;
+      payloadEnd = withoutTrailingNewline(source, line.start, scan);
       return finish();
     }
 
