@@ -101,7 +101,15 @@ void drawTabStrip(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
   const auto& workspace = ui.state.workspace();
   ui.tabStrip.rect = rect;
   ui.tabStrip.titles = tabTitles(ui);
-  ui.tabStrip.layout = ui::layoutTabs(ui.tabStrip.titles, rect, tabMeasure(text), workspace.activeTab);
+  // Follow the reader to a tab they just opened, and only then: asking on
+  // every frame would put the strip back where the active tab is the moment
+  // after a wheel moved it. See `TabStripState::revealed`.
+  if(workspace.activeTab != ui.tabStrip.revealed) {
+    ui.tabStrip.scroll = ui::tabScrollShowing(ui.tabStrip.titles, rect, tabMeasure(text),
+                                              ui.tabStrip.scroll, workspace.activeTab);
+    ui.tabStrip.revealed = workspace.activeTab;
+  }
+  ui.tabStrip.layout = ui::layoutTabs(ui.tabStrip.titles, rect, tabMeasure(text), ui.tabStrip.scroll);
   const auto& titles = ui.tabStrip.titles;
   const auto& layout = ui.tabStrip.layout;
   const ui::StripTabColors colors = ui::stripTabColors();
@@ -191,14 +199,16 @@ bool handleTabStripClick(UiRuntime& ui, float x, float y, Uint8 button, bool ctr
   if(!ui::contains(ui.tabStrip.rect, x, y)) return false;
   const auto& layout = ui.tabStrip.layout;
   // The chevrons first: they are drawn over the tabs that reach under them, so
-  // they are clicked before them too. Each steps the active tab one along,
-  // which is what scrolls the derived window -- there is no scroll to set.
+  // they are clicked before them too. Each scrolls the strip one tab along and
+  // leaves the active one alone -- they used to step the active tab, because
+  // that was the only thing that could move a window derived from it, so
+  // pressing one to see a neighbour opened it instead.
   if(ui::contains(layout.scrollLeft, x, y)) {
-    if(layout.hiddenLeft > 0 && button == SDL_BUTTON_LEFT) stepTab(ui, -1);
+    if(layout.hiddenLeft > 0 && button == SDL_BUTTON_LEFT) ui.tabStrip.scrollBy(-1);
     return true;
   }
   if(ui::contains(layout.scrollRight, x, y)) {
-    if(layout.hiddenRight > 0 && button == SDL_BUTTON_LEFT) stepTab(ui, 1);
+    if(layout.hiddenRight > 0 && button == SDL_BUTTON_LEFT) ui.tabStrip.scrollBy(1);
     return true;
   }
   for(const auto& slot : layout.slots) {

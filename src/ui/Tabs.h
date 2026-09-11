@@ -108,23 +108,59 @@ inline constexpr float kTabScrollButtonWidth = 28.0f;
 // responds and the region that looks like it will can never drift apart.
 inline constexpr float kTabCloseHitInflate = 3.0f;
 
-// Lays a strip of tabs out left to right, scrolled to keep `activeTab` on
-// screen.
+// Lays a strip of tabs out left to right, starting at `firstVisible`.
 //
-// A pure function of the titles, the room available and which tab is active, so
-// the geometry the strip is painted with is the same geometry a click is tested
-// against -- and so both can be checked without a window. `measure` gives the
-// width of a title in the strip's own font, and it is load-bearing: the widths
-// depend on it, so a caller that omits it lays out a *different* strip.
+// A pure function of the titles, the room available and where the strip is
+// scrolled to, so the geometry the strip is painted with is the same geometry
+// a click is tested against -- and so both can be checked without a window.
+// `measure` gives the width of a title in the strip's own font, and it is
+// load-bearing: the widths depend on it, so a caller that omits it lays out a
+// *different* strip.
 //
-// The scroll is derived rather than stored. A strip with more tabs than fit
-// shows the window of them ending at the active tab, which needs no state to
-// keep in step and cannot drift between the draw and the hit test. Tabs opened
-// past the right edge used to be laid out and then simply not drawn, so they
-// existed, were unreachable by mouse, and could only be got to with Ctrl+Tab.
+// **The scroll is stored, and clamped here.** It used to be derived -- the
+// window was whatever ended at the active tab -- which needed no state and so
+// could not drift, and which also meant the strip had no scroll of its own to
+// move: a wheel over the tabs did nothing at all, because the only thing that
+// could move the window was changing which note you were reading (TD-45).
+// `../microide` settled that question for its own two strips and it is the
+// answer taken here: the wheel scrolls, and never changes which tab is active.
+//
+// What kept the old shape honest is kept by two other things instead. The
+// clamp is *in here*, so a stored offset that has gone stale -- tabs closed
+// under it, the window narrowed -- cannot produce a strip that starts past its
+// own end; every caller gets the same corrected answer from the same input.
+// And there is still exactly one caller under `src/app/`, which
+// `ArchitectureTests` holds: one call, one stored result, nothing to disagree
+// with.
+//
+// Tabs opened past the right edge used to be laid out and then simply not
+// drawn, so they existed, were unreachable by mouse, and could only be got to
+// with Ctrl+Tab.
 TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
                           const std::function<int(std::string_view)>& measure,
-                          std::size_t activeTab = 0);
+                          std::size_t firstVisible = 0);
+
+// The offset that brings `activeTab` on screen, moving as little as possible.
+//
+// The replacement for deriving the window from the active tab: a strip with a
+// scroll of its own still has to follow the reader when they *open* something,
+// or a note opened from the sidebar lands in a tab nobody can see. Returns
+// `firstVisible` unchanged when the tab is already showing, which is what makes
+// it safe to ask on every frame.
+std::size_t tabScrollShowing(const std::vector<std::string>& titles, Rect strip,
+                             const std::function<int(std::string_view)>& measure,
+                             std::size_t firstVisible, std::size_t activeTab);
+
+// One step of the strip, in whole tabs. Negative scrolls towards the start.
+//
+// Stops at what is still *hidden* on that side rather than at the raw index,
+// which is the mistake `../microide` records making: clamping on the index ran
+// its strip to the last tab and left most of it empty, "a state the buttons
+// cannot produce". The chevrons and the wheel both come through here, so they
+// cannot stop in different places.
+std::size_t tabScrollStepped(const std::vector<std::string>& titles, Rect strip,
+                             const std::function<int(std::string_view)>& measure,
+                             std::size_t firstVisible, int steps);
 
 // The close button of `slot`, grown by the hit inflate. Used by the hit test;
 // the paint uses `slot.close` itself.

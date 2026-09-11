@@ -5,7 +5,9 @@
 #include "app/PageView.h"
 #include "app/SessionState.h"
 #include "app/Shell.h"
+#include "app/Scroll.h"
 #include "app/TabStrip.h"
+#include "ui/TextRenderer.h"
 
 #include <filesystem>
 #include <fstream>
@@ -301,4 +303,86 @@ MICRONOTES_TEST(tab_strip_a_bulk_close_still_runs_from_a_tab_whose_note_is_gone)
   MICRONOTES_REQUIRE(closeTabs(ui, active, TabCloseScope::Others) == 2);
   MICRONOTES_REQUIRE(ui.state.workspace().tabs.size() == 1);
   MICRONOTES_REQUIRE(!std::filesystem::exists(path));
+}
+
+// --- the wheel over the strip (TD-45) ----------------------------------------
+
+// A wheel over the tabs scrolls the strip and does not change the note.
+//
+// It used to do nothing at all. The strip's window was derived from the active
+// tab, so there was no scroll to set -- the chevrons moved the window only by
+// moving the *selection*, which is why pressing one to look at a neighbouring
+// tab opened it. `../microide` settled which of the two a wheel should mean for
+// its own strips and this is that answer: the strip scrolls, the selection
+// stays put.
+MICRONOTES_TEST(a_wheel_over_the_tab_strip_scrolls_it_and_leaves_the_note_alone) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "tab-wheel", micronotes::ui::kMaxTabs);
+  micronotes::ui::TextRenderer text(nullptr);
+
+  // Draw once so the strip has a rect and a layout to answer from -- which is
+  // what the running app has by the time a wheel arrives.
+  const micronotes::ui::Rect strip {0.0f, 0.0f, 900.0f, 34.0f};
+  micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+  MICRONOTES_REQUIRE(ui.tabStrip.layout.hiddenLeft > 0);
+
+  const std::string noteBefore = ui.state.selection().noteId;
+  const std::size_t activeBefore = ui.state.workspace().activeTab;
+  const std::size_t scrollBefore = ui.tabStrip.scroll;
+
+  // Towards the start.
+  ui.pointer.x = strip.x + strip.w / 2.0f;
+  ui.pointer.y = strip.y + strip.h / 2.0f;
+  micronotes::app::routeWheel(ui, 1.0f, 1600, 1000);
+  micronotes::tests::require(ui.tabStrip.scroll < scrollBefore,
+                             "the wheel did not scroll the strip");
+  micronotes::tests::require(ui.state.selection().noteId == noteBefore,
+                             "the wheel changed which note is open");
+  micronotes::tests::require(ui.state.workspace().activeTab == activeBefore,
+                             "the wheel changed which tab is active");
+
+  // And it stops at the start rather than running off it.
+  for(int i = 0; i < 60; ++i) {
+    micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+    micronotes::app::routeWheel(ui, 1.0f, 1600, 1000);
+  }
+  MICRONOTES_REQUIRE(ui.tabStrip.scroll == 0);
+  micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+  MICRONOTES_REQUIRE(ui.tabStrip.layout.hiddenLeft == 0);
+  micronotes::tests::require(ui.state.selection().noteId == noteBefore,
+                             "scrolling to the start changed which note is open");
+}
+
+// Opening a note scrolls its tab into view even after the wheel has taken the
+// strip somewhere else -- and does not otherwise move it.
+MICRONOTES_TEST(opening_a_note_brings_its_tab_back_into_view) {
+  UiRuntime ui;
+  const OpenNotes notes(ui, "tab-wheel-reveal", micronotes::ui::kMaxTabs);
+  micronotes::ui::TextRenderer text(nullptr);
+  const micronotes::ui::Rect strip {0.0f, 0.0f, 900.0f, 34.0f};
+
+  // Scroll away from the active tab, which is the last one opened.
+  micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+  ui.pointer.x = strip.x + strip.w / 2.0f;
+  ui.pointer.y = strip.y + strip.h / 2.0f;
+  for(int i = 0; i < 60; ++i) {
+    micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+    micronotes::app::routeWheel(ui, 1.0f, 1600, 1000);
+  }
+  micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+  MICRONOTES_REQUIRE(ui.tabStrip.scroll == 0);
+  MICRONOTES_REQUIRE(!ui.tabStrip.layout.slots[ui.state.workspace().activeTab].visible);
+
+  // Now step to another tab: the strip follows.
+  stepTab(ui, 1);
+  micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+  const std::size_t active = ui.state.workspace().activeTab;
+  micronotes::tests::require(ui.tabStrip.layout.slots[active].visible,
+                             "the strip did not follow the tab that was opened");
+
+  // And a redraw with nothing changed leaves it exactly where it is.
+  const std::size_t settled = ui.tabStrip.scroll;
+  micronotes::app::drawTabStrip(nullptr, text, ui, strip);
+  micronotes::tests::require(ui.tabStrip.scroll == settled,
+                             "the strip moved on a redraw with nothing changed");
 }

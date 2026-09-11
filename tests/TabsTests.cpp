@@ -211,9 +211,18 @@ MICRONOTES_TEST(tabs_hit_test_agrees_with_the_layout_it_was_drawn_from) {
 // with more than about ten notes open, the newest tab existed, was active, and
 // could not be seen or clicked; only Ctrl+Tab reached it.
 //
-// The window is derived from the active tab rather than stored, so there is no
-// scroll state for the draw and the hit test to disagree about.
-MICRONOTES_TEST(tabs_scroll_to_keep_the_active_tab_on_screen) {
+// The window is *stored* now rather than derived from the active tab, so that
+// the strip has a scroll a wheel can move (TD-45). What that costs is the
+// "nothing to disagree about" property the derived form had for free, and it
+// is bought back two ways: `layoutTabs` clamps the offset at the point of use,
+// so a stale one cannot make a broken strip, and `ArchitectureTests` holds the
+// strip to one caller, so there is one call and one stored result.
+//
+// This checks the window's own shape over every offset. That the *active* tab
+// is brought on screen is `tabScrollShowing`'s job now, and has its own test
+// below -- asserting it here would be asserting nothing, because the first tab
+// of the window is visible by construction.
+MICRONOTES_TEST(tabs_lay_out_a_contiguous_window_from_any_offset) {
   const auto names = titles(30);
   const auto visibleIndices = [](const std::vector<TabSlot>& slots) {
     std::vector<std::size_t> out;
@@ -223,11 +232,11 @@ MICRONOTES_TEST(tabs_scroll_to_keep_the_active_tab_on_screen) {
     return out;
   };
 
-  // Whichever tab is active, it is on screen.
-  for(std::size_t active = 0; active < names.size(); ++active) {
-    const auto slots = slotsOf(layoutTabs(names, kStrip, measure, active));
+  // From every offset, including ones past the end that the clamp has to pull
+  // back, the strip is a window: contiguous, in order, tiled from the edge.
+  for(std::size_t first = 0; first < names.size() + 4; ++first) {
+    const auto slots = slotsOf(layoutTabs(names, kStrip, measure, first));
     MICRONOTES_REQUIRE(slots.size() == names.size());
-    MICRONOTES_REQUIRE(slots[active].visible);
 
     const auto shown = visibleIndices(slots);
     MICRONOTES_REQUIRE(!shown.empty());
@@ -253,6 +262,14 @@ MICRONOTES_TEST(tabs_scroll_to_keep_the_active_tab_on_screen) {
     }
   }
 
+  // Scrolled fully to the right, the strip still shows a full window rather
+  // than the single last tab: the offset is clamped to the furthest that keeps
+  // the strip filled. That is the clamp `../microide` had to add after its own
+  // wheel "ran on to the last tab and left most of the strip empty".
+  const auto full = slotsOf(layoutTabs(names, kStrip, measure, names.size() - 1));
+  MICRONOTES_REQUIRE(visibleIndices(full).size() > 1);
+  MICRONOTES_REQUIRE(visibleIndices(full).back() == names.size() - 1);
+
   // A tab scrolled off to the left is not merely undrawn: its rect is outside
   // the strip, so a hit test that forgot to check `visible` misses it rather
   // than quietly matching a tab nobody can see.
@@ -271,8 +288,8 @@ MICRONOTES_TEST(tabs_grow_overflow_chevrons_only_when_they_overflow) {
   MICRONOTES_REQUIRE(micronotes::ui::empty(fits.scrollLeft));
   MICRONOTES_REQUIRE(micronotes::ui::empty(fits.scrollRight));
 
-  // Thirty notes in a 900px strip: the active tab is the last, so everything
-  // before the window is hidden to the left and the chevron says how many.
+  // Thirty notes in a 900px strip, scrolled to the end: everything before the
+  // window is hidden to the left and the chevron says how many.
   const auto names = titles(30);
   const auto scrolled = layoutTabs(names, kStrip, measure, names.size() - 1);
   MICRONOTES_REQUIRE(scrolled.hiddenLeft > 0);
@@ -280,7 +297,7 @@ MICRONOTES_TEST(tabs_grow_overflow_chevrons_only_when_they_overflow) {
   MICRONOTES_REQUIRE(scrolled.scrollLeft.x == kStrip.x);
   MICRONOTES_REQUIRE(scrolled.hiddenRight == 0);
 
-  // And from the first tab, the hidden ones are all to the right.
+  // And from offset zero, the hidden ones are all to the right.
   const auto atStart = layoutTabs(names, kStrip, measure, 0);
   MICRONOTES_REQUIRE(atStart.hiddenLeft == 0);
   MICRONOTES_REQUIRE(atStart.hiddenRight > 0);
@@ -469,4 +486,93 @@ MICRONOTES_TEST(tabs_the_carried_tab_keeps_its_grip_and_stays_in_the_strip) {
   const Rect sliver {10.0f, 0.0f, 40.0f, 34.0f};
   MICRONOTES_REQUIRE(draggedTabX(sliver, 132.0f, 5000.0f, 0.0f) == sliver.x);
   MICRONOTES_REQUIRE(draggedTabX(sliver, 132.0f, -5000.0f, 0.0f) == sliver.x);
+}
+
+// --- the scroll the strip now owns -------------------------------------------
+
+// Opening a note still brings its tab on screen.
+//
+// This is what the derived window gave for free and a stored one has to be
+// asked for: a note opened from the sidebar landing in a tab nobody can see
+// would be a worse bug than the dead wheel that storing the offset fixes.
+MICRONOTES_TEST(tab_scroll_brings_the_active_tab_on_screen_from_anywhere) {
+  const auto names = titles(30);
+  for(std::size_t active = 0; active < names.size(); ++active) {
+    for(std::size_t from : {std::size_t {0}, std::size_t {7}, std::size_t {29}, std::size_t {99}}) {
+      const std::size_t scrolled =
+        micronotes::ui::tabScrollShowing(names, kStrip, measure, from, active);
+      const auto slots = slotsOf(layoutTabs(names, kStrip, measure, scrolled));
+      micronotes::tests::require(slots[active].visible,
+                                 "tab " + std::to_string(active) + " is off screen after scrolling "
+                                 "from " + std::to_string(from) + " to " +
+                                 std::to_string(scrolled));
+    }
+  }
+}
+
+// And it moves as little as possible: a tab already on screen does not move the
+// strip at all. Without this, every frame would snap the strip back and the
+// wheel would be undone as fast as it was used.
+MICRONOTES_TEST(tab_scroll_holds_still_when_the_active_tab_is_already_showing) {
+  const auto names = titles(30);
+  for(std::size_t first = 0; first < 12; ++first) {
+    const auto slots = slotsOf(layoutTabs(names, kStrip, measure, first));
+    for(const auto& slot : slots) {
+      if(!slot.visible) continue;
+      const std::size_t after =
+        micronotes::ui::tabScrollShowing(names, kStrip, measure, first, slot.index);
+      micronotes::tests::require(after == first,
+                                 "the strip moved from " + std::to_string(first) + " to " +
+                                   std::to_string(after) + " for tab " +
+                                   std::to_string(slot.index) + ", which was already showing");
+    }
+  }
+}
+
+// Stepping stops at what is still hidden on that side, never at the raw index.
+//
+// `../microide` records the bug this avoids in its own words: clamping on the
+// index "ran on to the last tab and left most of the strip empty -- a state the
+// buttons cannot produce, because they disappear the moment nothing is hidden".
+// So the invariant is exactly that -- the strip can never reach a state the
+// chevrons could not have produced, which means: if it cannot step further,
+// nothing is hidden that way.
+MICRONOTES_TEST(tab_scroll_steps_only_while_something_is_hidden_that_way) {
+  const auto names = titles(30);
+  std::size_t first = 0;
+  // All the way right, one step at a time, and past where it can go.
+  for(int step = 0; step < 60; ++step) {
+    const std::size_t next =
+      micronotes::ui::tabScrollStepped(names, kStrip, measure, first, 1);
+    const auto layout = layoutTabs(names, kStrip, measure, first);
+    if(next == first) {
+      micronotes::tests::require(layout.hiddenRight == 0,
+                                 "the strip stopped scrolling right with " +
+                                   std::to_string(layout.hiddenRight) + " tabs still hidden there");
+      break;
+    }
+    micronotes::tests::require(layout.hiddenRight > 0,
+                               "the strip scrolled right with nothing hidden that way");
+    first = next;
+  }
+  // The end of the strip is a full window, not a lone last tab.
+  const auto atEnd = layoutTabs(names, kStrip, measure, first);
+  MICRONOTES_REQUIRE(atEnd.hiddenRight == 0);
+  MICRONOTES_REQUIRE(atEnd.hiddenLeft > 0);
+  std::size_t shown = 0;
+  for(const auto& slot : atEnd.slots) {
+    if(slot.visible) ++shown;
+  }
+  micronotes::tests::require(shown > 1, "the strip scrolled to its end shows " +
+                                          std::to_string(shown) + " tabs");
+
+  // And back again, symmetrically.
+  for(int step = 0; step < 60; ++step) {
+    const std::size_t next =
+      micronotes::ui::tabScrollStepped(names, kStrip, measure, first, -1);
+    if(next == first) break;
+    first = next;
+  }
+  MICRONOTES_REQUIRE(first == 0);
+  MICRONOTES_REQUIRE(layoutTabs(names, kStrip, measure, first).hiddenLeft == 0);
 }

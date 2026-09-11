@@ -1,4 +1,6 @@
 #include "app/Scroll.h"
+
+#include "app/TabStrip.h"
 #include "app/Layout.h"
 
 #include "app/RawPane.h"
@@ -56,6 +58,22 @@ void routeWheel(UiRuntime& ui, float notches, int width, int height) {
   if(ui.chrome.openMenu != ui::MenuId::None) return;
 
   const ShellLayout layout = shellLayout(ui, width, height);
+
+  // The tab strip, before the panels: it is a band across the top of the
+  // content column, so the pointer is inside the content's rect while it is
+  // over the tabs.
+  //
+  // It scrolls the strip and never changes which tab is active -- the one
+  // gesture everybody tries on a row of tabs, dead until now because the strip
+  // had no scroll of its own to move (TD-45). `../microide` settled which of
+  // the two a wheel should mean for its own two strips and this is that
+  // answer. Swallowed even when the strip cannot move any further, because a
+  // wheel that runs off the end of the tabs and starts scrolling the note
+  // underneath is worse than one that stops.
+  if(!ui::empty(ui.tabStrip.rect) && contains(ui.tabStrip.rect, ui.pointer.x, ui.pointer.y)) {
+    ui.tabStrip.scrollBy(notches > 0.0f ? -1 : 1);
+    return;
+  }
 
   // Then whichever panel the pointer is in. The tree and the outline can both
   // be taller than the window, so the pointer's column decides before the pane

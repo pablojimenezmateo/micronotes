@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -69,6 +70,41 @@ struct TabStripState {
   // which is how a hidden strip answers nothing.
   ui::Rect rect;
   ui::TabStripLayout layout;
+  // Where the strip is scrolled to, as the index of its first visible tab.
+  //
+  // The strip used to derive this from the active tab, which meant it had no
+  // scroll for a wheel to move (TD-45). It is stored now, and deliberately
+  // *not* clamped here: `ui::layoutTabs` clamps at the point of use, so a tab
+  // closing under this offset is nobody's job to notice.
+  std::size_t scroll = 0;
+  // Which tab was active when the strip last followed it. A strip with a
+  // scroll of its own must still follow the reader when they *open* something
+  // -- a note opened from the sidebar landing in a tab nobody can see is worse
+  // than the dead gesture this replaced -- but following it every frame would
+  // undo the wheel on the next one. So it follows on the frames the active tab
+  // changed, and holds still otherwise.
+  std::size_t revealed = 0;
+
+  // Scrolls by whole tabs, without changing which tab is active. Negative
+  // scrolls towards the start. Reports whether anything moved, so a wheel that
+  // has reached the end of the strip can be passed on rather than swallowed.
+  //
+  // Stops at what is still *hidden* on that side, read from the layout the
+  // strip was last drawn with -- the same counts the chevrons are drawn from,
+  // so a chevron that is showing always has somewhere to go. Stopping on the
+  // raw tab index instead is the mistake `../microide` records making: it ran
+  // the strip to its last tab and left most of it empty, "a state the buttons
+  // cannot produce".
+  bool scrollBy(int steps) {
+    if(steps == 0) return false;
+    const std::size_t wanted = static_cast<std::size_t>(steps < 0 ? -steps : steps);
+    const std::size_t room =
+      steps < 0 ? std::min(layout.hiddenLeft, scroll) : layout.hiddenRight;
+    const std::size_t move = wanted < room ? wanted : room;
+    if(move == 0) return false;
+    scroll = steps < 0 ? scroll - move : scroll + move;
+    return true;
+  }
   // Kept beside the slots because a slot names its tab by index, and both the
   // tooltip and the close button's label need the title itself.
   std::vector<std::string> titles;

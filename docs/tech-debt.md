@@ -84,54 +84,6 @@ somebody minds the last 50 KB.
 
 ---
 
-## TD-45 — The wheel does nothing over the tab strip
-
-A strip with more tabs than fit scrolls, and the only way to scroll it is the
-overflow chevrons at either end — each of which steps the *active tab* one
-along, because the strip has no scroll of its own to set: the window it shows
-is derived from which tab is active (`ui::layoutTabs`). `routeWheel` in
-`app/Scroll.cpp` routes the wheel to the sidebar, the right panel and the two
-panes by where the pointer is, and the strip is not among them, so a wheel over
-the tabs has never done anything at all.
-
-**What it costs.** The one gesture everybody tries on a row of tabs is dead,
-and dead silently — there is no feedback that says the chevrons are the way.
-Reported as part of "I cannot use the tab strip anymore": the strip really was
-broken at the time for an unrelated reason, and the wheel was assumed to be the
-same breakage rather than the thing it is, which is a gesture that was never
-wired.
-
-**Why it has not been paid.** Not because it is hard but because it is not
-clear what it should do. Scrolling the strip means changing the active tab,
-which means a wheel over the tabs switches the note being read — surprising in
-a way the chevrons are not, since those were pressed on purpose. Doing it
-without that means giving the strip a scroll offset of its own and deriving the
-visible window from two things instead of one, which is the layout's whole
-simplification undone for a gesture.
-
-**What the sibling settled, and what it costs here.** `../microide` has both a
-project tab strip and a per-group editor strip, and
-`WorkspaceTabMouseCoordinator::HandleWheel` answers the question one way: the
-wheel *scrolls the strip* and never changes which tab is active. It also
-carries the bug that decision cost, in its own words — "the wheel used to
-bypass that and clamp on the raw index instead, so it ran on to the last tab
-and left most of the strip empty, a state the buttons cannot produce" — and
-the fix was to stop at what is still *hidden* on that side, which is the same
-stop its overflow buttons use.
-
-That is the answer to "which of the two", and it is the expensive one here.
-microide can do it because its strip has a stored scroll; micronotes' does not,
-by a documented decision (`ui/Tabs.h`: "The scroll is derived rather than
-stored... needs no state to keep in step and cannot drift between the draw and
-the hit test"). Taking microide's semantics means storing an offset, clamping
-it against what is hidden, changing what the chevrons mean, re-deriving the
-drag-and-drop pinning that reads "what is visible", and replacing the
-cannot-drift property with something that checks it. That is a feature, not a
-gesture — and it is *undoing a deliberate design*, which is the part that needs
-a person rather than a reference implementation.
-
----
-
 ## TD-47 — The find bar rescans the whole note on every keystroke
 
 `refreshFindMatches` in `app/FindBar.cpp` memoises the match list on

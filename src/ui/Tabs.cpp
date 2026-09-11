@@ -7,18 +7,16 @@
 
 namespace micronotes::ui {
 
-TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
-                          const std::function<int(std::string_view)>& measure,
-                          std::size_t activeTab) {
-  TabStripLayout layout;
-  if(titles.empty() || strip.w <= 0.0f) return layout;
+namespace {
 
-  // Each tab is as wide as its own title asks for, clamped.
-  //
-  // It used to be one width for every tab, taken from the widest title or from
-  // an even share of the strip -- whichever was smaller -- which meant a single
-  // long title stretched every tab beside it, and opening a note could resize
-  // every tab on screen. Per-tab widths are what a browser and an IDE both do.
+// Each tab as wide as its own title asks for, clamped.
+//
+// It used to be one width for every tab, taken from the widest title or from
+// an even share of the strip -- whichever was smaller -- which meant a single
+// long title stretched every tab beside it, and opening a note could resize
+// every tab on screen. Per-tab widths are what a browser and an IDE both do.
+std::vector<float> tabWidths(const std::vector<std::string>& titles,
+                             const std::function<int(std::string_view)>& measure) {
   std::vector<float> widths;
   widths.reserve(titles.size());
   for(const auto& title : titles) {
@@ -26,48 +24,59 @@ TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
       measure ? static_cast<float>(measure(title)) + kTabPadding : kMinTabWidth;
     widths.push_back(std::clamp(measured, kMinTabWidth, kMaxTabWidth));
   }
+  return widths;
+}
 
-  // The window of tabs to show, ending at the active one. Whole tabs only --
-  // half a tab at the edge is a click target you cannot judge -- and at least
-  // one however narrow the strip, because a strip showing none of them is worse
-  // than one showing a cramped one.
-  //
-  // Derived rather than stored, so it needs no state to keep in step and cannot
-  // drift between the draw and the hit test.
-  const std::size_t active = std::min(activeTab, titles.size() - 1);
-  const bool overflows = [&] {
-    float total = 0.0f;
-    for(const float width : widths) total += width;
-    return total > strip.w;
-  }();
+bool stripOverflows(const std::vector<float>& widths, float room) {
+  float total = 0.0f;
+  for(const float width : widths) total += width;
+  return total > room;
+}
+
+// The furthest the strip may be scrolled: the offset that puts the last tab at
+// the trailing edge with nothing hidden behind it.
+//
+// This is what "stop at what is hidden" means, computed once so the clamp, the
+// chevrons and the wheel all read the same limit. Walking back from the end
+// rather than forward from the start, because the widths differ per tab and
+// the question is how many of the *last* ones fit.
+std::size_t lastTabScroll(const std::vector<float>& widths, float room) {
+  if(widths.empty()) return 0;
+  std::size_t first = widths.size() - 1;
+  float used = widths[first];
+  while(first > 0 && used + widths[first - 1] <= room) {
+    --first;
+    used += widths[first];
+  }
+  return first;
+}
+
+}
+
+TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
+                          const std::function<int(std::string_view)>& measure,
+                          std::size_t firstVisible) {
+  TabStripLayout layout;
+  if(titles.empty() || strip.w <= 0.0f) return layout;
+
+  const std::vector<float> widths = tabWidths(titles, measure);
+  const bool overflows = stripOverflows(widths, strip.w);
   // An overflowing strip keeps a chevron at each end, and they come off the
   // room the tabs have rather than sitting on top of the outermost one.
   const float rightReserve = overflows ? kTabScrollButtonWidth : 0.0f;
 
-  // Where the window starts, for a given amount of room taken at the left.
-  const auto windowStart = [&](float leftReserve) {
-    const float room = std::max(kMinTabWidth, strip.w - leftReserve - rightReserve);
-    std::size_t first = active;
-    float used = widths[active];
-    while(first > 0 && used + widths[first - 1] <= room) {
-      --first;
-      used += widths[first];
-    }
-    return first;
-  };
+  // The stored offset, corrected here so a stale one cannot make a broken
+  // strip: tabs close under it, the window narrows, and an offset that was
+  // right a frame ago now starts past the last tab that can fill the strip.
+  // Clamping at the point of use rather than at the point of change is what
+  // lets every writer of the offset be careless and every reader be right.
+  std::size_t first = std::min(firstVisible, lastTabScroll(widths, std::max(kMinTabWidth, strip.w - rightReserve)));
 
   // The left chevron is only *drawn* when tabs are hidden behind it, so it may
   // only *take room* when they are. Reserving it unconditionally left an empty
   // button's width between the strip's edge and the first tab whenever the
   // strip overflowed to the right only -- which is every strip scrolled to its
   // start, the common case.
-  //
-  // One pass answers it. Assume the chevron is there, find the window, and if
-  // that window already reaches tab 0 then nothing is hidden to the left and
-  // the reserve goes. Widening the room cannot pull more tabs in, because the
-  // walk left has nowhere further to go, so the answer does not change under
-  // its own correction and there is no second pass to run.
-  std::size_t first = windowStart(rightReserve);
   const float leftReserve = first == 0 ? 0.0f : rightReserve;
 
   float x = strip.x + leftReserve;
@@ -110,6 +119,49 @@ TabStripLayout layoutTabs(const std::vector<std::string>& titles, Rect strip,
                           kTabScrollButtonWidth, strip.h};
   }
   return layout;
+}
+
+std::size_t tabScrollShowing(const std::vector<std::string>& titles, Rect strip,
+                             const std::function<int(std::string_view)>& measure,
+                             std::size_t firstVisible, std::size_t activeTab) {
+  if(titles.empty()) return 0;
+  const std::vector<float> widths = tabWidths(titles, measure);
+  const float rightReserve = stripOverflows(widths, strip.w) ? kTabScrollButtonWidth : 0.0f;
+  const std::size_t active = std::min(activeTab, titles.size() - 1);
+  std::size_t first = std::min(firstVisible, lastTabScroll(widths, std::max(kMinTabWidth, strip.w - rightReserve)));
+  // Above the window: scroll back just far enough to put it at the left edge.
+  if(active < first) return active;
+  // Below it: walk back from the active tab exactly as the layout walks back
+  // from `first`, so "the last tab that fits" means the same thing in both.
+  const float leftReserve = first == 0 ? 0.0f : rightReserve;
+  const float room = std::max(kMinTabWidth, strip.w - leftReserve - rightReserve);
+  std::size_t fits = active;
+  float used = widths[active];
+  while(fits > 0 && used + widths[fits - 1] <= room) {
+    --fits;
+    used += widths[fits];
+  }
+  return std::max(first, fits);
+}
+
+std::size_t tabScrollStepped(const std::vector<std::string>& titles, Rect strip,
+                             const std::function<int(std::string_view)>& measure,
+                             std::size_t firstVisible, int steps) {
+  if(titles.empty() || steps == 0) return 0;
+  const std::vector<float> widths = tabWidths(titles, measure);
+  const float rightReserve = stripOverflows(widths, strip.w) ? kTabScrollButtonWidth : 0.0f;
+  const std::size_t limit = lastTabScroll(widths, std::max(kMinTabWidth, strip.w - rightReserve));
+  std::size_t first = std::min(firstVisible, limit);
+  for(int step = 0; step < std::abs(steps); ++step) {
+    if(steps < 0) {
+      if(first == 0) break;
+      --first;
+    } else {
+      if(first >= limit) break;
+      ++first;
+    }
+  }
+  return first;
 }
 
 float draggedTabX(Rect strip, float tabWidth, float pointerX, float grabOffsetX) {
