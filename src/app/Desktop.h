@@ -57,6 +57,25 @@ bool clipboardHoldsOwnText();
 // timeout and posts it to a background executor to get the same property.
 bool spawnDetached(const std::vector<std::string>& command);
 
+// Everything above that reaches outside this process goes through one
+// function pointer, and a test replaces it.
+//
+// Not a convenience. `MenuActionTests` runs every row of every context menu to
+// prove none of them is dead, and five of those menus carry "Show on disk" --
+// so `ctest` forked `xdg-open` five or six times a run and left that many file
+// manager windows open on the developer's desktop. Nothing in the suite was
+// wrong; the hole was that a test *could* do this at all, and the failure is
+// invisible from inside the test binary, which passes either way.
+//
+// So the test binary installs a recorder in `main` before a single test runs,
+// and opting back in has to be deliberate. A test that wants to assert what
+// would have been launched reads the recorder, which is a better check than
+// the launch ever was.
+using SpawnFn = bool (*)(const std::vector<std::string>& command);
+// Replaces the launcher and returns the one it replaced, so a caller can put
+// it back. Passing nullptr restores the real one.
+SpawnFn setSpawnForTesting(SpawnFn spawn);
+
 // Hands `target` -- a URL, or a path -- to whatever the desktop opens it with.
 bool openWithDesktop(std::string_view target);
 

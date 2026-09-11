@@ -74,9 +74,34 @@ bool spawnDetached(const std::vector<std::string>& command) {
   return true;
 }
 
+namespace {
+
+// The launcher in force. `spawnDetached` above is the real one; a test points
+// this at a recorder. A plain function pointer rather than a `std::function`
+// so there is nothing to construct before `main` and nothing to allocate.
+SpawnFn tSpawn = nullptr;
+
+}
+
+SpawnFn setSpawnForTesting(SpawnFn spawn) {
+  const SpawnFn was = tSpawn;
+  tSpawn = spawn;
+  return was;
+}
+
+namespace {
+
+// Every outward launch goes through here, so replacing the launcher replaces
+// all of them rather than the one a test happened to think of.
+bool launch(const std::vector<std::string>& command) {
+  return tSpawn != nullptr ? tSpawn(command) : spawnDetached(command);
+}
+
+}
+
 bool openWithDesktop(std::string_view target) {
   if(target.empty()) return false;
-  return spawnDetached({"xdg-open", std::string(target)});
+  return launch({"xdg-open", std::string(target)});
 }
 
 bool revealInFileManager(const std::filesystem::path& path) {
@@ -90,7 +115,7 @@ bool revealInFileManager(const std::filesystem::path& path) {
   // the app should report a failure the reader can see, not fork a process that
   // fails where nobody is looking.
   if(!std::filesystem::exists(containing, ec) || ec) return false;
-  return spawnDetached({"xdg-open", containing.string()});
+  return launch({"xdg-open", containing.string()});
 }
 
 }

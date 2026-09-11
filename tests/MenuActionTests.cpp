@@ -369,3 +369,39 @@ MICRONOTES_TEST(the_three_path_commands_are_told_apart_by_type_not_by_spelling) 
   micronotes::tests::require(shown.rfind("Copied", 0) != 0,
                              "show-on-disk copied something: '" + shown + "'");
 }
+
+// "Show on disk" asks the desktop for the *containing directory*, and asks it
+// through the seam rather than by forking.
+//
+// Both halves matter and the second is why the seam exists. This suite runs
+// every row of every context menu, and five of them carry this command -- so
+// before the launcher could be replaced, `ctest` forked `xdg-open` five or six
+// times a run and left that many file manager windows open on the developer's
+// desktop. Nothing failed. Asserting on the recorder is what turns a side
+// effect nobody could see into the thing being checked.
+MICRONOTES_TEST(show_on_disk_asks_the_desktop_for_the_containing_directory) {
+  UiRuntime ui;
+  const micronotes::tests::ScratchNote scratch(ui, "menu-reveal", "# Note\n\nBody\n");
+  auto& launches = micronotes::tests::desktopLaunches();
+  const std::size_t before = launches.size();
+
+  micronotes::app::performCommand(ui, "show-on-disk");
+
+  micronotes::tests::require(launches.size() == before + 1,
+                             "show-on-disk asked the desktop " +
+                               std::to_string(launches.size() - before) + " times, not once");
+  const auto& command = launches.back();
+  MICRONOTES_REQUIRE(command.size() == 2);
+  MICRONOTES_REQUIRE(command[0] == "xdg-open");
+  // The directory the note is in, not the note: `xdg-open` on a `.md` launches
+  // a text editor on it, which is the one thing the reader already has.
+  micronotes::tests::require(command[1] == scratch.root().string(),
+                             "show-on-disk opened '" + command[1] + "' rather than the folder '" +
+                               scratch.root().string() + "'");
+
+  // And copying a path asks the desktop for nothing at all.
+  const std::size_t after = launches.size();
+  micronotes::app::performCommand(ui, "copy-absolute-path");
+  micronotes::tests::require(launches.size() == after,
+                             "copy-absolute-path launched something");
+}
