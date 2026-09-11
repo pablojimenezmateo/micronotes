@@ -3592,3 +3592,65 @@ sweep's own regression test had to be rewritten: it drove the sweep by changing
 the width fourteen times, which no longer reaches the sweep at all. It edits at
 a fixed width now, which is the shape that still overflows the cache -- and
 that it had to be rewritten is the clearest statement of what changed.
+
+## The fifteenth pass: the instrument was allocating inside what it measured
+
+`layout.block.flow` is the largest non-fixture row in the harness's table and
+has been for every pass in this file. Looking at *why* turned up something
+about the table rather than about the flow.
+
+`TraceScope` copied its label into a `std::string` when the channel was armed.
+The comment above that copy was about production -- an unconditional copy on a
+per-block path would make the tracer the reason the app is slow -- and it was
+right about that, and it had stopped looking one step further. A label longer
+than fifteen characters does not fit `std::string`'s small buffer, and the
+three longest on the hottest path in the app are 17, 25 and 27 characters:
+
+```
+layout.block.flow              157,519 scopes
+layout.block.inline_attrs      157,451 scopes
+layout.block.content_tokens     31,169 scopes
+```
+
+So an armed run made about 350,000 malloc/free pairs **inside the regions
+whose times it was reporting**, concentrated exactly where the profile is
+hottest. Every label in the tree is a string literal, so the scope borrows it
+now and the contract -- the label must outlive the scope -- is stated on the
+class.
+
+| | before | after |
+|---|---:|---:|
+| `open.cold_layout` allocations | 28,883 | **17,132** |
+| `resize.width_step` allocations | 10,285 | **4** |
+| `font.open_cold_layout` allocations | 28,887 | **17,135** |
+| `font.open_unique_words` allocations | 2,616 | **1,672** |
+| `shell.keystroke` allocations | 24 | **19** |
+| `type.at_end` allocations | 8 | **4** |
+
+### The row that corrects an earlier pass
+
+The fourteenth pass took a width step from 25,241 allocations to 10,285 and
+said of the remainder: "that's ~1.07 per block, which must be the run
+strings." It was not. It was this, and a width step allocates **four** times
+now -- four, for nine thousand six hundred blocks. The conclusion was drawn
+from a number the instrument was contributing most of, which is the specific
+way a self-measuring tool goes wrong.
+
+Worth stating as a rule, because nothing in the three-instrument description
+at the top of this file covers it: **a counter is deterministic, but that does
+not make it neutral.** The scope timers are armed only when something is being
+measured, so their cost lands on nothing but the measurements, and it lands
+hardest on whatever is asked about most often. The allocation counts beside
+each lane were the only reason this was visible at all -- the timings could
+not have shown it, since the distortion scales with the same thing the
+measurement does.
+
+### What is not claimed
+
+The timing half. A `dotnet` job was saturating a core throughout, and both
+sides moved more between runs than any change could account for:
+`font.open_cold_layout` read 7.6 ms in one hour and 11.9 ms in the next with
+every counter byte-identical. `tools/perf-compare.py`'s 2-sigma band reported
+noise on every row, correctly. The allocation counts are deterministic and
+they are the measurement; the clock will have to be asked again on a quiet
+machine.
