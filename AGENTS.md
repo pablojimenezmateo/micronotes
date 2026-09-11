@@ -461,10 +461,16 @@ when the counters went in it turned out to be 70% of every frame.
   symptom when one was wrong. Each rung is named once now, and the test states
   each combination and the ladder property itself.
 - **A floating surface's geometry is one function, shared by the paint and the
-  hit test.** `app/FindBar.h`'s `findBarLayout` and `app/StatusBar.h`'s
-  placement are both written that way, and `../microide` says why in the same
-  words: two copies of a button's rect is a button that moves out from under the
-  pointer. Nothing about either is recorded as it is drawn, so a press works on
+  hit test.** `app/FindBar.h`'s `findBarLayout`, `app/StatusBar.h`'s placement
+  and `ui::OverlayStack::layoutFor` are all written that way, and `../microide`
+  says why in the same words: two copies of a button's rect is a button that
+  moves out from under the pointer. Public and pure, so the geometry can be
+  *tested* rather than looked at -- which for the overlay means three
+  properties, because the obvious one is not enough on its own: every rect
+  inside the panel, no two bands on top of each other, and every band wide
+  enough for the text it carries. The third is the one that catches a panel
+  sized to the wrong thing, because a band's rect is derived from the panel's
+  box and so is inside it however wrong the box is. Nothing about either is recorded as it is drawn, so a press works on
   a frame the surface has not been painted on yet -- which is the opposite rule
   from `app/ChromeState.h`, and that header explains the one constraint that
   forces the exception.
