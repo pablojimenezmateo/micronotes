@@ -98,6 +98,10 @@ const std::vector<int>& OverlayStack::visibleIndices(const Overlay& overlay) con
   return overlay.filterCache;
 }
 
+float OverlayStack::PanelBands::total() const {
+  return kPadding * 2.0f + title + field + list + grid + gridHintGap + confirm + hint;
+}
+
 OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const {
   Layout layout;
   // A reference into the standing answer: the layout only reads it, and nothing
@@ -110,20 +114,21 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
   // A titled *band* rather than a line of text with a gap under it, so its
   // height is the band's and not the type's plus a fudge. An anchored context
   // menu keeps no header: it is a list of commands, not a question.
-  const float titleH = overlay.title.empty()
-                         ? 0.0f
-                         : std::max(kTitleBandHeight,
-                                    static_cast<float>(text.lineHeight(titleFace())) + kSpace2);
-  const float fieldH = field ? kFieldHeight + kPadding : 0.0f;
-  const float hintProbe = overlay.hint.empty() ? 0.0f
-                                               : static_cast<float>(text.lineHeight(hintFace())) + kSpace2;
+  PanelBands bands;
+  bands.title = overlay.title.empty()
+                  ? 0.0f
+                  : std::max(kTitleBandHeight,
+                             static_cast<float>(text.lineHeight(titleFace())) + kSpace2);
+  bands.field = field ? kFieldHeight + kPadding : 0.0f;
+  bands.hint = overlay.hint.empty() ? 0.0f
+                                    : static_cast<float>(text.lineHeight(hintFace())) + kSpace2;
   // What is left of the window below where the panel starts, once its own
   // chrome is paid for. Measured from the top the panel will actually take, or
   // a tall list would be laid out past the bottom of the window.
   const float panelTop =
     overlay.anchored ? kCardWindowInset : std::max(60.0f, static_cast<float>(windowHeight) * 0.18f);
   const float room = static_cast<float>(windowHeight) - panelTop - kCardWindowInset
-                   - titleH - (field ? kFieldHeight + kPadding : 0.0f) - hintProbe - kPadding * 2.0f;
+                   - bands.title - bands.field - bands.hint - kPadding * 2.0f;
   // How much of the list fits, walked rather than divided.
   //
   // A separator's row is shorter than a real one, so `room / kRowHeight` both
@@ -150,18 +155,17 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
     }
   }
   const int rowsShown = static_cast<int>(fit.placed());
-  const float listH = fit.height();
+  bands.list = fit.height();
   // Rows the panel actually held, which is what scrolling has to agree with.
   overlay.rows.fitted(fit.placed());
   // The grid's own height, from how many rows the swatches fill.
   const int swatchRows = overlay.isGrid()
                            ? static_cast<int>((indices.size() + kSwatchColumns - 1) / kSwatchColumns)
                            : 0;
-  const float gridH = swatchRows > 0
-                        ? static_cast<float>(swatchRows) * (kSwatchCell + kSwatchGap) - kSwatchGap
-                        : 0.0f;
-  const float confirmH = overlay.hasConfirmButtons() ? kRowHeight + kPadding : 0.0f;
-  const float hintH = hintProbe;
+  bands.grid = swatchRows > 0
+                 ? static_cast<float>(swatchRows) * (kSwatchCell + kSwatchGap) - kSwatchGap
+                 : 0.0f;
+  bands.confirm = overlay.hasConfirmButtons() ? kRowHeight + kPadding : 0.0f;
 
   // A grid asks for exactly the width its columns need, rather than being
   // stretched to whatever the caller guessed: a swatch grid with a ragged right
@@ -183,8 +187,8 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
   // A hint under a grid needs the gap a hint under a list does not: a list row
   // carries its own vertical padding and a swatch is a hard-edged block, so
   // without it the hint sat directly against the bottom row of colours.
-  const float gridHintGap = gridH > 0.0f && hintH > 0.0f ? kPadding : 0.0f;
-  const float height = kPadding * 2.0f + titleH + fieldH + listH + gridH + gridHintGap + confirmH + hintH;
+  bands.gridHintGap = bands.grid > 0.0f && bands.hint > 0.0f ? kPadding : 0.0f;
+  const float height = bands.total();
 
   float x = 0.0f;
   float y = 0.0f;
@@ -205,11 +209,11 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
 
   // The band spans the panel, so the title reads as chrome across the top of
   // the card rather than as text inset into it.
-  if(titleH > 0.0f) layout.title = {x, y, width, titleH};
-  float cursorY = y + titleH + kPadding;
+  if(bands.title > 0.0f) layout.title = {x, y, width, bands.title};
+  float cursorY = y + bands.title + kPadding;
   if(field) {
     layout.field = {x + kPadding, cursorY, width - kPadding * 2.0f, kFieldHeight};
-    cursorY += fieldH;
+    cursorY += bands.field;
   }
   if(overlay.isGrid()) {
     // Centred, because the panel is as wide as the *wider* of the grid and the
@@ -224,9 +228,10 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
                                   kSwatchCell, kSwatchCell});
       layout.itemIndices.push_back(indices[i]);
     }
-    cursorY += gridH;
-    if(hintH > 0.0f) {
-      layout.hint = {x + kPadding, y + height - kPadding - hintH, width - kPadding * 2.0f, hintH};
+    cursorY += bands.grid;
+    if(bands.hint > 0.0f) {
+      layout.hint = {x + kPadding, y + height - kPadding - bands.hint, width - kPadding * 2.0f,
+                     bands.hint};
     }
     return layout;
   }
@@ -243,17 +248,18 @@ OverlayStack::Layout OverlayStack::layoutFor(Overlay& overlay, TextRenderer& tex
     // the buttons went here and the hint was drawn at the panel's foot -- so
     // "This cannot be undone." sat *below* the Delete button that could not be
     // undone, which is the one order in which nobody reads it in time.
-    if(hintH > 0.0f) {
-      layout.hint = {x + kPadding, cursorY, width - kPadding * 2.0f, hintH};
-      cursorY += hintH;
+    if(bands.hint > 0.0f) {
+      layout.hint = {x + kPadding, cursorY, width - kPadding * 2.0f, bands.hint};
+      cursorY += bands.hint;
     }
     const float confirmX = x + width - kPadding - kButtonWidth;
     layout.itemRects.push_back({confirmX - kSpace2 - kButtonWidth, cursorY, kButtonWidth, kRowHeight});
     layout.itemIndices.push_back(-2);  // cancel
     layout.itemRects.push_back({confirmX, cursorY, kButtonWidth, kRowHeight});
     layout.itemIndices.push_back(-1);  // confirm
-  } else if(hintH > 0.0f) {
-    layout.hint = {x + kPadding, y + height - kPadding - hintH, width - kPadding * 2.0f, hintH};
+  } else if(bands.hint > 0.0f) {
+    layout.hint = {x + kPadding, y + height - kPadding - bands.hint, width - kPadding * 2.0f,
+                   bands.hint};
   }
   return layout;
 }

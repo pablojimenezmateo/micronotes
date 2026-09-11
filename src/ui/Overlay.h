@@ -298,11 +298,28 @@ public:
   // in the same phase.
   void setCaretVisible(bool visible) { caretVisible_ = visible; }
 
-private:
-  // Shutting the top overlay: Escape and a click outside are the same event
-  // here, and the order of what it does matters. See the definition.
-  std::optional<OverlayResult> dismissTop();
+  // The horizontal bands a panel is made of, top to bottom, in pixels. Zero
+  // for a band this overlay does not have.
+  //
+  // One list, and that is the point. The panel's height is the *sum* of these
+  // and the placement below it is a *walk* down them, and those were two
+  // expressions naming the same eight things. A band in one and not the other
+  // is a panel whose box and whose contents disagree, which is a hint drawn
+  // over the last row or a row drawn past the panel's foot.
+  struct PanelBands {
+    float title = 0.0f;
+    float field = 0.0f;
+    float list = 0.0f;
+    float grid = 0.0f;
+    // A hint under a grid needs a gap a hint under a list does not: a list row
+    // carries its own vertical padding and a swatch is a hard-edged block, so
+    // without it the hint sat against the bottom row of colours.
+    float gridHintGap = 0.0f;
+    float confirm = 0.0f;
+    float hint = 0.0f;
 
+    float total() const;
+  };
 
   struct Layout {
     Rect panel;
@@ -321,9 +338,26 @@ private:
     std::vector<int> itemIndices;  // into Overlay::items
   };
 
-  // Not const: the layout is the only thing that knows how many rows the panel
-  // held, and that count belongs to the overlay whose list it counted.
+  // Where every part of the panel goes, for the window it is drawn in.
+  //
+  // Public, and a pure function of the overlay and the window: this is the
+  // floating-surface rule every other one of these follows -- `findBarLayout`
+  // and the status bar's placement are the same shape -- and it is what lets
+  // the geometry be tested rather than looked at. Nothing outside composes a
+  // `Layout`; the drawing helpers stay members.
+  //
+  // Not const in `overlay`: the layout is the only thing that knows how many
+  // rows the panel held, and that count belongs to the overlay whose list it
+  // counted.
   Layout layoutFor(Overlay& overlay, TextRenderer& text, int windowWidth, int windowHeight) const;
+
+private:
+  // Shutting the top overlay: Escape and a click outside are the same event
+  // here, and the order of what it does matters. See the definition.
+  std::optional<OverlayResult> dismissTop();
+
+
+
 
   // The three pieces `draw` paints, defined in `OverlayPaint.cpp`. Members
   // rather than free helpers because `Layout` is private: the geometry is the
