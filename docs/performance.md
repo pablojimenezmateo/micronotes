@@ -3645,12 +3645,34 @@ each lane were the only reason this was visible at all -- the timings could
 not have shown it, since the distortion scales with the same thing the
 measurement does.
 
-### What is not claimed
+### What the clock said, asked twice
 
-The timing half. A `dotnet` job was saturating a core throughout, and both
-sides moved more between runs than any change could account for:
+Nothing, and that is the answer rather than a deferral.
+
+The first attempt was worthless: a `dotnet` job was saturating a core, and both
+sides moved more between runs than any change could account for --
 `font.open_cold_layout` read 7.6 ms in one hour and 11.9 ms in the next with
-every counter byte-identical. `tools/perf-compare.py`'s 2-sigma band reported
-noise on every row, correctly. The allocation counts are deterministic and
-they are the measurement; the clock will have to be asked again on a quiet
-machine.
+every counter byte-identical.
+
+Asked again on an idle machine, six runs a side, every row on the layout path
+moved the right way and not one of them cleared the band:
+
+| | before | after | |
+|---|---:|---:|---|
+| `layout.block` | 42.5 ms | 38.6 ms | −9.3%, noise |
+| `open.cold_layout` | 7.76 ms | 7.17 ms | −7.7%, noise |
+| `resize.width_step` | 6.75 ms | 6.33 ms | −6.3%, noise |
+| `layout.block.inline_attrs` | 55.2 ms | 52.9 ms | −4.0%, noise |
+| `layout.block.flow` | 504.5 ms | 490.8 ms | −2.7%, noise |
+
+Six rows agreeing on a sign is suggestive and is not a measurement; on the
+same run `fixture.large_library.create_1000_notes` moved +6.7% in the other
+direction, which is what the spread on this machine looks like. It is the
+floor described in "the instrument itself" -- nothing under about 5% is
+resolvable here -- and 350,000 fewer malloc/free pairs spread across 157,000
+scopes is comfortably under it.
+
+So the allocation counts are the claim, and the clock is recorded as unable to
+confirm or deny it. That is worth writing down rather than retrying: the next
+person to wonder whether this mattered should not spend the afternoon finding
+out that the question cannot be answered with this instrument.
