@@ -107,8 +107,28 @@ which means a wheel over the tabs switches the note being read — surprising in
 a way the chevrons are not, since those were pressed on purpose. Doing it
 without that means giving the strip a scroll offset of its own and deriving the
 visible window from two things instead of one, which is the layout's whole
-simplification undone for a gesture. Worth doing when somebody decides which of
-those two a wheel over the tabs should mean.
+simplification undone for a gesture.
+
+**What the sibling settled, and what it costs here.** `../microide` has both a
+project tab strip and a per-group editor strip, and
+`WorkspaceTabMouseCoordinator::HandleWheel` answers the question one way: the
+wheel *scrolls the strip* and never changes which tab is active. It also
+carries the bug that decision cost, in its own words — "the wheel used to
+bypass that and clamp on the raw index instead, so it ran on to the last tab
+and left most of the strip empty, a state the buttons cannot produce" — and
+the fix was to stop at what is still *hidden* on that side, which is the same
+stop its overflow buttons use.
+
+That is the answer to "which of the two", and it is the expensive one here.
+microide can do it because its strip has a stored scroll; micronotes' does not,
+by a documented decision (`ui/Tabs.h`: "The scroll is derived rather than
+stored... needs no state to keep in step and cannot drift between the draw and
+the hit test"). Taking microide's semantics means storing an offset, clamping
+it against what is hidden, changing what the chevrons mean, re-deriving the
+drag-and-drop pinning that reads "what is visible", and replacing the
+cannot-drift property with something that checks it. That is a feature, not a
+gesture — and it is *undoing a deliberate design*, which is the part that needs
+a person rather than a reference implementation.
 
 ---
 
