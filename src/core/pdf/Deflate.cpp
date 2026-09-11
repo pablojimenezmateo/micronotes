@@ -1,5 +1,7 @@
 #include "core/pdf/Deflate.h"
 
+#include "core/pdf/ByteOrder.h"
+
 #include <algorithm>
 #include <cstdint>
 
@@ -21,13 +23,6 @@ std::uint32_t adler32Of(std::string_view data) {
     b = (b + a) % 65521u;
   }
   return (b << 16) | a;
-}
-
-void appendBigEndian32(std::string& out, std::uint32_t value) {
-  out.push_back(static_cast<char>((value >> 24) & 0xFF));
-  out.push_back(static_cast<char>((value >> 16) & 0xFF));
-  out.push_back(static_cast<char>((value >> 8) & 0xFF));
-  out.push_back(static_cast<char>(value & 0xFF));
 }
 
 // Deflate's stored block type wrapped in a zlib header: no compression, but a
@@ -53,7 +48,7 @@ std::string storedStream(std::string_view data) {
     out.append(data.substr(at, take));
     at += take;
   } while(at < data.size());
-  appendBigEndian32(out, adler32Of(data));
+  appendU32(out, adler32Of(data));
   return out;
 }
 

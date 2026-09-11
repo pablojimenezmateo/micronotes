@@ -1,6 +1,7 @@
 #include "core/pdf/SfntSubset.h"
 
 #include "core/pdf/CffSubset.h"
+#include "core/pdf/ByteOrder.h"
 #include "core/pdf/SfntRead.h"
 
 #include <algorithm>
@@ -61,25 +62,6 @@ std::uint32_t checksum(std::string_view data) {
   return sum;
 }
 
-void appendU16(std::string& out, std::uint16_t value) {
-  out.push_back(static_cast<char>((value >> 8) & 0xFF));
-  out.push_back(static_cast<char>(value & 0xFF));
-}
-
-void appendU32(std::string& out, std::uint32_t value) {
-  out.push_back(static_cast<char>((value >> 24) & 0xFF));
-  out.push_back(static_cast<char>((value >> 16) & 0xFF));
-  out.push_back(static_cast<char>((value >> 8) & 0xFF));
-  out.push_back(static_cast<char>(value & 0xFF));
-}
-
-void writeU32At(std::string& out, std::size_t at, std::uint32_t value) {
-  if(at + 4 > out.size()) return;
-  out[at] = static_cast<char>((value >> 24) & 0xFF);
-  out[at + 1] = static_cast<char>((value >> 16) & 0xFF);
-  out[at + 2] = static_cast<char>((value >> 8) & 0xFF);
-  out[at + 3] = static_cast<char>(value & 0xFF);
-}
 
 // A whole sfnt built from the tables given: the directory, in the tag order
 // the format asks for, with every table padded to a four-byte boundary.
