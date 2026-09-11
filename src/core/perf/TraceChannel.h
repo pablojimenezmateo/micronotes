@@ -134,7 +134,23 @@ private:
 };
 
 // RAII timer for one region on one channel. Costs a single predictable branch
-// when its channel is off: the label is not copied and nothing is allocated.
+// when its channel is off, and allocates nothing on either path.
+//
+// **The label is borrowed, and must outlive the scope.** Every call site
+// passes a string literal, which has static storage duration and so satisfies
+// this for free; the one other way to get a label is `ScopeLabel`, whose
+// `view()` says what it needs.
+//
+// It used to be copied, on the armed path only, on the reasoning that a copy
+// in production would make the tracer the reason the app is slow. That was the
+// right worry and the wrong conclusion: the copy in *production* was already
+// gone, and what was left was a copy on exactly the runs being measured. A
+// label longer than fifteen characters does not fit a `std::string`'s small
+// buffer, and the three longest on the hottest path -- `layout.block.flow`,
+// `layout.block.inline_attrs`, `layout.block.content_tokens` -- are 17, 25 and
+// 27. So an armed run made about 350,000 malloc/free pairs *inside the regions
+// whose times it was reporting*, which is a measurement distorting the thing
+// it measures, and distorting it worst exactly where the profile is hottest.
 class TraceScope {
 public:
   TraceScope(TraceChannel& channel, std::string_view label);
@@ -151,7 +167,8 @@ private:
   // destructor, which resets the slot to a sentinel -- indexing the thread-local
   // table with that would be an out-of-bounds write rather than a no-op.
   std::size_t slot_ = 0;
-  std::string label_;
+  // Borrowed. See the note above the class.
+  std::string_view label_;
   std::chrono::steady_clock::time_point start_ {};
   double childMs_ = 0.0;
   int depth_ = 0;

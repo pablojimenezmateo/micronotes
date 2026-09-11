@@ -77,6 +77,10 @@ public:
 
   // Empty when the channel is off: TraceScope ignores the label in that case,
   // so there is nothing to build.
+  //
+  // A view into this object, and `TraceScope` borrows its label -- so the
+  // `ScopeLabel` has to be a named local that outlives the timer, never a
+  // temporary in the timer's own argument.
   std::string_view view();
 
 private:

@@ -298,11 +298,9 @@ void TraceChannel::dumpOnce() {
 TraceScope::TraceScope(TraceChannel& channel, std::string_view label) {
   if(!channel.enabled()) return;
 
-  // The label is copied only on the enabled path. These scopes sit on per-block
-  // and per-run paths, so an unconditional copy here would be a heap allocation
-  // per scope in production with tracing off -- the tracer would then be the
-  // reason the app is slow.
-  label_.assign(label);
+  // Borrowed, not copied, on either path. See `TraceScope` for why copying it
+  // on the armed path was worse than it looked.
+  label_ = label;
   channel_ = &channel;
   slot_ = channel.slot_;
   parent_ = tActiveScope[slot_];
@@ -325,8 +323,10 @@ TraceScope::~TraceScope() {
   if(!channel_->streamEnabled() || totalMs < channel_->minimumMs()) return;
 
   const double elapsedMs = durationMs(end - channel_->origin());
-  std::fprintf(stderr, "[%s] %8.2f ms in | %8.2f ms | %*s%s\n", channel_->prefix_, elapsedMs,
-               totalMs, depth_ * 2, "", label_.c_str());
+  // `%.*s` rather than `%s`: the label is a view and is not required to be
+  // terminated, even though every one of them is today.
+  std::fprintf(stderr, "[%s] %8.2f ms in | %8.2f ms | %*s%.*s\n", channel_->prefix_, elapsedMs,
+               totalMs, depth_ * 2, "", static_cast<int>(label_.size()), label_.data());
   std::fflush(stderr);
 }
 
