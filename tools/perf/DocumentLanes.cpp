@@ -6,6 +6,7 @@
 #include "core/perf/PerformanceCounters.h"
 
 #include "doc/Edits.h"
+#include "doc/TypingEdits.h"
 #include "doc/Layout.h"
 
 #include <iostream>

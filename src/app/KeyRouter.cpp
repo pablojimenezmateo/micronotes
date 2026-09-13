@@ -26,6 +26,7 @@
 #include "core/util/StringUtil.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
+#include "doc/TypingEdits.h"
 #include "ui/Actions.h"
 #include "ui/Theme.h"
 

@@ -93,7 +93,7 @@ constexpr int kShellFileLineBudget = 1000;
 // green the whole way. Sizes rather than one number because these are ratchets
 // at what the tree measures today, not targets: a change that moves behaviour
 // into a named unit lowers them in the same commit, and nothing raises them.
-constexpr int kTreeFileLineBudget = 845;
+constexpr int kTreeFileLineBudget = 826;
 
 MICRONOTES_TEST(architecture_application_cpp_stays_under_its_budget) {
   const auto path = repoRoot() / "src" / "app" / "Application.cpp";

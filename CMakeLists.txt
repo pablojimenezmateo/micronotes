@@ -198,6 +198,8 @@ set(MICRONOTES_APP_SOURCES
   src/app/FrameTrace.cpp
   src/doc/BlockScan.cpp
   src/doc/Edits.cpp
+  src/doc/EditContext.cpp
+  src/doc/TypingEdits.cpp
   src/doc/InlineScan.cpp
   src/doc/LinkTarget.cpp
   src/doc/WikiLink.cpp

@@ -12,6 +12,7 @@
 #include "core/editor/TextField.h"
 #include "doc/BlockScan.h"
 #include "doc/Edits.h"
+#include "doc/TypingEdits.h"
 
 #include <algorithm>
 #include <cstddef>

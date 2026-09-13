@@ -95,25 +95,6 @@ Edit wrapSelection(std::string_view source, std::size_t start, std::size_t end,
 // parentheses when `target` is empty.
 Edit makeLink(std::string_view source, std::size_t start, std::size_t end, std::string_view target = "");
 
-// Enter inside a list, quote or callout: continues the block with a fresh
-// marker, or strips the marker when the item is empty. Invalid elsewhere, which
-// means the caller should insert a plain newline.
-Edit continueList(std::string_view source, std::size_t caret, BlockSpan blocks = {});
-
-// Enter on the opening line of an unterminated fence: adds the closing fence
-// and leaves the caret on the blank line between them.
-Edit closeFence(std::string_view source, std::size_t caret, BlockSpan blocks = {});
-
-// Backspace at the first content byte of a block: outdents a nested list item,
-// otherwise removes the block's marker.
-Edit outdentOrUnwrap(std::string_view source, std::size_t caret, BlockSpan blocks = {});
-
-// Run after a character is typed. Only shapes Markdown cannot already express
-// are rewritten: "[] " and "[x] " become proper task markers. Everything
-// else ("# ", "- ", "1. ", "> ", "---", "```") is already the real syntax and
-// is left exactly as typed.
-Edit applyMarkdownShortcut(std::string_view source, std::size_t caret, BlockSpan blocks = {});
-
 // The marker text a block of this shape is written with, indentation included.
 // `listMarker` is the punctuation a list item carries -- `SourceBlock::listMarker`
 // -- so a marker written next to an existing item can match it; zero asks for

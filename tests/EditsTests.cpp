@@ -2,6 +2,7 @@
 #include "TestSupport.h"
 
 #include "doc/Edits.h"
+#include "doc/TypingEdits.h"
 #include "core/editor/MarkdownEditor.h"
 
 #include "doc/BlockScan.h"
