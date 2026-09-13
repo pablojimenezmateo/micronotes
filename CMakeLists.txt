@@ -210,6 +210,7 @@ set(MICRONOTES_APP_SOURCES
   src/library/Library.cpp
   src/library/LibraryIndex.cpp
   src/library/LibraryIndexSearch.cpp
+  src/library/LibraryIndexSchema.cpp
   src/library/Metadata.cpp
   src/library/NoteCatalog.cpp
   src/library/Organization.cpp
