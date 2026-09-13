@@ -1,5 +1,8 @@
 #pragma once
 
+#include "core/perf/PerformanceCounters.h"
+
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
@@ -48,5 +51,15 @@ namespace micronotes::tests {
 // better assertion than "did something happen" -- see
 // `show_on_disk_asks_the_desktop_for_the_containing_directory`.
 std::vector<std::vector<std::string>>& desktopLaunches();
+
+// A perf counter's value now, so a test can assert on the difference across a
+// call. Here rather than in a fixture: four test files read counters and only
+// one of them is about the layout, which is where this used to live.
+//
+// The counters are what makes a "did it do the work" assertion deterministic --
+// a timing cannot be one. See `core/perf/PerformanceCounters.h`.
+inline std::uint64_t counter(microcore::perf::CounterId id) {
+  return microcore::perf::readCounter(id);
+}
 
 }

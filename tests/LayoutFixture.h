@@ -118,10 +118,6 @@ inline std::string manyBlocks(int sections) {
   return out;
 }
 
-inline std::uint64_t counter(microcore::perf::CounterId id) {
-  return microcore::perf::readCounter(id);
-}
-
 // One fenced block thousands of rows long: the shape that made `caretRect` walk
 // row by row. It is a single `SourceBlock`, so no amount of block-level
 // searching helps -- the search has to be inside the block's runs.
