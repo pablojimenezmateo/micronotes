@@ -1,7 +1,10 @@
 #include "TestSupport.h"
 
+#include "core/perf/PerformanceCounters.h"
 #include "core/util/TextSearch.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -13,6 +16,7 @@ using microcore::util::matchAfter;
 using microcore::util::matchAtOrAfter;
 using microcore::util::matchBefore;
 using microcore::util::standsAlone;
+using micronotes::tests::counter;
 
 namespace {
 
@@ -117,4 +121,160 @@ MICRONOTES_TEST(text_search_steps_from_where_the_reader_is) {
 
   MICRONOTES_REQUIRE(matchAfter({}, 4) == 0);
   MICRONOTES_REQUIRE(matchBefore({}, 4) == 0);
+}
+
+// --- the incremental update -------------------------------------------------
+
+namespace {
+
+using microcore::editor::TextEdit;
+using microcore::util::findAllInto;
+using microcore::util::findAllUpdate;
+
+// One splice, applied to the buffer and to the match list, checked against a
+// cold scan of the result. Returns whether the update was taken -- a decline is
+// a correct answer too, and the caller counts how often it is not taken.
+bool spliceAndCheck(std::string& text, std::vector<TextMatch>& matches, bool& truncated,
+                    std::vector<TextMatch>& scratch, std::string_view needle,
+                    SearchOptions options, std::size_t start, std::size_t removed,
+                    std::string_view inserted, std::uint64_t revision) {
+  text.replace(start, removed, inserted);
+  const TextEdit edit {revision, revision + 1, start, start + removed, start + inserted.size()};
+  const bool updated =
+    findAllUpdate(&matches, &scratch, &truncated, text, needle, options, edit);
+  if(!updated) findAllInto(text, needle, options, &matches, &truncated);
+
+  std::vector<TextMatch> cold;
+  bool coldTruncated = false;
+  findAllInto(text, needle, options, &cold, &coldTruncated);
+  MICRONOTES_REQUIRE(matches == cold);
+  MICRONOTES_REQUIRE(truncated == coldTruncated);
+  return updated;
+}
+
+std::uint64_t nextRandom(std::uint64_t& state) {
+  state ^= state << 13;
+  state ^= state >> 7;
+  state ^= state << 17;
+  return state;
+}
+
+}
+
+// A splice is only worth having if it is the same answer as the scan it
+// replaces, and the cases it gets wrong are the ones nobody writes by hand: a
+// needle whose prefix overlaps itself, an edit landing inside a match, a
+// whole-word hit whose separator is the byte that was typed. So the update is
+// driven against a cold scan over a random walk, the way the layout's increment
+// and the editor's are.
+//
+// The alphabet is deliberately tiny, which is what makes matches dense and
+// makes overlap, adjacency and mid-match edits common rather than rare.
+MICRONOTES_TEST(text_search_update_matches_a_cold_scan_under_a_random_edit_walk) {
+  const std::vector<std::string> needles {"a", "aa", "aba", "ab", " a ", "b"};
+  std::size_t updates = 0;
+  std::size_t steps = 0;
+  for(const std::string& needle : needles) {
+    for(const SearchOptions options :
+        {SearchOptions {}, SearchOptions {true, false}, SearchOptions {false, true},
+         SearchOptions {true, true}}) {
+      std::uint64_t state = 0x9E3779B97F4A7C15ull + needle.size() * 31 +
+                            (options.matchCase ? 7 : 0) + (options.wholeWord ? 13 : 0);
+      std::string text;
+      for(int i = 0; i < 400; ++i) text.push_back("aAb  \n"[nextRandom(state) % 6]);
+
+      std::vector<TextMatch> matches;
+      bool truncated = false;
+      std::vector<TextMatch> scratch;
+      findAllInto(text, needle, options, &matches, &truncated);
+
+      for(std::uint64_t revision = 1; revision <= 300; ++revision) {
+        const std::size_t start = text.empty() ? 0 : nextRandom(state) % text.size();
+        const std::size_t removed = std::min(nextRandom(state) % 4, text.size() - start);
+        std::string inserted;
+        for(std::size_t i = nextRandom(state) % 4; i > 0; --i) {
+          inserted.push_back("aAb  \n"[nextRandom(state) % 6]);
+        }
+        ++steps;
+        if(spliceAndCheck(text, matches, truncated, scratch, needle, options, start, removed,
+                          inserted, revision)) {
+          ++updates;
+        }
+      }
+    }
+  }
+  // The point of the exercise is that the splice is taken, not merely that the
+  // fallback is correct: a change that quietly stopped taking it would pass
+  // every assertion above.
+  MICRONOTES_REQUIRE(steps == 7200);
+  MICRONOTES_REQUIRE(updates > steps * 9 / 10);
+}
+
+// The window the update reads is bounded by the edit, not by the buffer. That is
+// the whole of TD-47, and the counters are how it is asserted: a keystroke in a
+// large note must not put the note's size through the scanner again.
+MICRONOTES_TEST(text_search_update_reads_the_edit_rather_than_the_note) {
+  using microcore::perf::CounterId;
+  std::string text;
+  while(text.size() < 200000) text += "the quick brown fox jumps over the lazy dog\n";
+
+  std::vector<TextMatch> matches;
+  std::vector<TextMatch> scratch;
+  bool truncated = false;
+  findAllInto(text, "fox", {}, &matches, &truncated);
+  MICRONOTES_REQUIRE(matches.size() > 4000);
+
+  const auto scanBytesBefore = counter(CounterId::TextSearchScanBytes);
+  const auto updatesBefore = counter(CounterId::TextSearchUpdates);
+  const auto updateBytesBefore = counter(CounterId::TextSearchUpdateBytes);
+
+  const std::size_t at = text.size() / 2;
+  text.insert(at, "z");
+  const TextEdit edit {1, 2, at, at, at + 1};
+  MICRONOTES_REQUIRE(findAllUpdate(&matches, &scratch, &truncated, text, "fox", {}, edit));
+
+  MICRONOTES_REQUIRE(counter(CounterId::TextSearchUpdates) - updatesBefore == 1);
+  // Nothing went through the cold scanner at all.
+  MICRONOTES_REQUIRE(counter(CounterId::TextSearchScanBytes) == scanBytesBefore);
+  // And the window is a handful of bytes, not 200 KB. It is not zero: the walk
+  // has to reach a boundary the old list also had, which is the next match.
+  const std::uint64_t windowBytes = counter(CounterId::TextSearchUpdateBytes) - updateBytesBefore;
+  MICRONOTES_REQUIRE(windowBytes < 200);
+
+  std::vector<TextMatch> cold;
+  findAllInto(text, "fox", {}, &cold, nullptr);
+  MICRONOTES_REQUIRE(matches == cold);
+}
+
+// A list that hit the cap cannot be spliced: an insertion before the cut-off
+// moves what fell off the end, and the update has no record of it. It declines,
+// which is what leaves `truncated` honest.
+MICRONOTES_TEST(text_search_update_declines_a_truncated_list) {
+  std::string text(microcore::util::kMaxMatches + 10, 'a');
+  std::vector<TextMatch> matches;
+  std::vector<TextMatch> scratch;
+  bool truncated = false;
+  findAllInto(text, "a", {}, &matches, &truncated);
+  MICRONOTES_REQUIRE(truncated);
+  MICRONOTES_REQUIRE(matches.size() == microcore::util::kMaxMatches);
+
+  text.insert(0, "a");
+  const TextEdit edit {1, 2, 0, 0, 1};
+  MICRONOTES_REQUIRE(!findAllUpdate(&matches, &scratch, &truncated, text, "a", {}, edit));
+  MICRONOTES_REQUIRE(truncated);
+}
+
+// An edit with no stamps -- a test, the harness, the first frame after a note
+// opens -- is not an edit this can place, and it says so rather than assuming
+// the buffer it is holding is the one before it.
+MICRONOTES_TEST(text_search_update_declines_an_edit_it_cannot_place) {
+  std::string text = "one two one";
+  std::vector<TextMatch> matches = findAll(text, "one", {});
+  std::vector<TextMatch> scratch;
+  bool truncated = false;
+  MICRONOTES_REQUIRE(!findAllUpdate(&matches, &scratch, &truncated, text, "one", {}, TextEdit {}));
+  // An edit reaching past the end of the buffer it was given is not one either.
+  MICRONOTES_REQUIRE(
+    !findAllUpdate(&matches, &scratch, &truncated, text, "one", {}, TextEdit {1, 2, 0, 0, 900}));
+  MICRONOTES_REQUIRE(matches.size() == 2);
 }

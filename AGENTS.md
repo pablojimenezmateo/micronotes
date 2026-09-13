@@ -8,11 +8,10 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Four entries are open: one about selecting inside a block the live scanner
+  Three entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
-  writing a CFF writer, one about the find bar rescanning the whole note per
-  keystroke, and one about autosave re-tokenising the whole note into the
-  search index once a second. So
+  writing a CFF writer, and one about autosave re-tokenising the whole note
+  into the search index once a second. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.
@@ -339,7 +338,8 @@ when the counters went in it turned out to be 70% of every frame.
 - Before writing a helper, look for it. `core/util/StringUtil.h` has `trim`,
   the ASCII case fold, `isAsciiSpace`, `splitLines` and `ellipsize`;
   `core/util/TextSearch.h` is the one literal search over a buffer -- every
-  match, the whole-word predicate and the three "which match comes next" walks
+  match, the whole-word predicate, the three "which match comes next" walks and
+  the edit-bounded splice that keeps a per-keystroke rescan off the whole note
   -- and it exists because the find bar, the note page and the raw pane each had
   a scan of their own and so gave three answers to one question;
   `core/editor/SoftWrap.h` is the one wrap of a buffer to a column that keeps

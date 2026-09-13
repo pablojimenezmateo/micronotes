@@ -3676,3 +3676,86 @@ So the allocation counts are the claim, and the clock is recorded as unable to
 confirm or deny it. That is worth writing down rather than retrying: the next
 person to wonder whether this mattered should not spend the afternoon finding
 out that the question cannot be answered with this instrument.
+
+## The sixteenth pass: the find bar that scanned the note to count what it already knew
+
+Third surface, same shape as the twelfth and thirteenth, and the last of the
+three the eleventh pass's table left standing. With the bar open,
+`shell.find_scan` was **106 us** per keystroke against a `shell.keystroke` of
+44 — the largest single thing a keystroke did above the layout, twice the note
+page and twenty-five times the raw pane, and it was a `util::findAllInto` over
+the whole buffer every time.
+
+It was already memoised, on `(revision, needle, options)`, which is exactly the
+trap this file's ninth pass names: **anything keyed on the editor's revision is
+by construction recomputed on every keystroke, and the memo makes it look
+handled.** The reader most likely to have the bar open is the one editing what
+they just found, so the memo hit precisely never in the shape that matters.
+
+`search.text_scan_bytes` is the deterministic half of the same statement: over
+one harness run, 5,124,575 bytes — twenty-five whole-note scans.
+
+**The fix is the one the other two surfaces had.** `util::findAllUpdate` takes
+the previous match list and an `editor::TextEdit` and reads only the window the
+edit can have changed. The find bar makes the same three-way conjunction the
+raw pane's wrap and the status bar's caret make — same needle, same options,
+and an edit leading from the revision the list was built at to this one — and
+falls back to a cold scan for anything else, a needle that grew by a character
+included.
+
+| | before | after |
+|---|---:|---:|
+| `shell.find_scan` median | 106 us | **2 us** |
+| `search.text_scans` per harness run | 25 | **1** |
+| `search.text_scan_bytes` per harness run | 5,124,575 | **204,971** |
+| allocations per keystroke | 0 | **0** |
+
+The budget went from 2,000 us to **100**, for the reason the raw pane's did.
+
+### Why this one is not a transcription of the other two
+
+A wrap and a caret walk both resume at a point they can *compute* — the start
+of the logical line the edit landed in. A match list cannot: the rescan can
+emit a match that runs past wherever the old list resumes, and the old list
+de-overlapped, so an offset in it is not a position a fresh scan would stop at.
+
+So the far edge of the window is **found rather than computed**. The rescan is
+walked forward one match at a time until its cursor lands on a boundary the old
+scan also had — past the edit, at or before some old match's start, and at or
+after the previous one's end. From there the two buffers are byte-identical and
+a greedy walk over them is the same walk, so the remainder of the old list is
+the remainder of the answer with `newEnd - oldEnd` added to each end. On the
+200 KB fixture that costs 504 bytes of rescan for 24 keystrokes — 21 bytes a
+keystroke, against 200 KB.
+
+The near edge takes the needle's whole length back from `edit.start` rather
+than `length - 1`, which looks like an off-by-one and is not: the whole-word
+predicate reads the byte *after* a match, so a candidate ending exactly where
+the edit begins was judged on a byte the edit rewrote and has to be re-judged.
+
+### What `truncated` means under an increment, which is what the entry was waiting on
+
+TD-47 said the fix was worth doing "after somebody decides what `truncated`
+means under an increment", and the honest answer turned out to be that it
+cannot mean anything: `kMaxMatches` is a cut-off at a *position*, an insertion
+before it moves what fell off the end, and the list has no record of what that
+was. So a truncated list is not spliced — it is rescanned whole, which is what
+leaves the flag honest. A result that would cross the cap declines the same
+way. Both are pathological (a one-character needle in a very large note) and
+both are one full scan, which is what they cost before.
+
+### The proof
+
+The same proof the twelfth pass used, and for the same reason: an incremental
+anything is only worth having if it is *exactly* the full computation. The test
+is that equality, asserted after every one of 7,200 random splices — six
+needles, four option combinations, 300 edits each — against a cold scan of the
+same buffer, over a six-character alphabet chosen to make matches dense and
+overlap, adjacency and mid-match edits common rather than rare. It also asserts
+that the splice was actually *taken* on more than nine steps in ten, because a
+change that quietly stopped taking it would pass every equality above.
+
+`text_search_update_reads_the_edit_rather_than_the_note` is the second half and
+is about the counters rather than the answer: one keystroke in a 200 KB note
+must leave `search.text_scan_bytes` untouched and read under 200 bytes of
+window. That is the entry's claim stated as an assertion.

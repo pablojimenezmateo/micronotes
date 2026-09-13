@@ -81,6 +81,15 @@ namespace microcore::perf {
   /* Scans that hit the retained-match cap, so a count shown to the reader is a  */    \
   /* floor rather than a total. Should be zero in any ordinary session.          */    \
   X(TextSearchTruncated, "search.text_truncated")                                      \
+  /* Rescans bounded by an edit rather than by the buffer: `updates` is how many */     \
+  /* of the scans above were spliced, and `update_bytes` the window they read.   */     \
+  /* The pair is the whole claim -- a rising `updates` against a `scan_bytes`    */     \
+  /* that stays flat is the find bar no longer paying for the note's size on     */     \
+  /* every keystroke. `update_declines` is the fallback taken: a cap already     */     \
+  /* hit, a needle changed, or an edit that cannot be placed.                    */     \
+  X(TextSearchUpdates, "search.text_scan_updates")                                     \
+  X(TextSearchUpdateBytes, "search.text_scan_update_bytes")                            \
+  X(TextSearchUpdateDeclines, "search.text_scan_update_declines")                      \
   /* --- persistence ------------------------------------------------------ */        \
   X(SqliteConnectionOpens, "sqlite.connection_opens")                                  \
   X(SqliteStatementsPrepared, "sqlite.statements_prepared")                            \

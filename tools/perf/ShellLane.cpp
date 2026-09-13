@@ -62,11 +62,17 @@ static constexpr std::uint64_t kShellOutlineBudgetMicros = 400;
 // scanning from the top puts it back over.
 static constexpr std::uint64_t kShellStatusBudgetMicros = 40;
 // The find bar's scan, which runs once per (buffer, needle, options) -- so
-// once per keystroke while the bar is open, over the whole note. Its own
-// scenario because it is the one surface whose cost the reader opts into, and
-// because there was no lane for it at all when it was three separate scans: the
-// page's, the raw pane's and the status line's, none of which the harness saw.
-static constexpr std::uint64_t kShellFindBudgetMicros = 2000;
+// once per keystroke while the bar is open. Its own scenario because it is the
+// one surface whose cost the reader opts into, and because there was no lane
+// for it at all when it was three separate scans: the page's, the raw pane's
+// and the status line's, none of which the harness saw.
+//
+// It was 2000 while the scan was the whole note; the scan is bounded by the
+// edit now, so this is 100 for the reason the raw pane's is (TD-47, the
+// sixteenth pass). At 2000 it was a ceiling on a number nobody was pleased
+// with; at 100 it is the thing that fails when the scan goes back to being
+// whole-note, which is the only way this number moves by an order of magnitude.
+static constexpr std::uint64_t kShellFindBudgetMicros = 100;
 // The note page over a real face, which is the one part of a keystroke that
 // shapes glyphs. Loose for the reason the font lane is loose: shaping is the
 // scenario whose cost moves most with what else the machine is doing.

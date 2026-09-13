@@ -84,40 +84,6 @@ somebody minds the last 50 KB.
 
 ---
 
-## TD-47 — The find bar rescans the whole note on every keystroke
-
-`refreshFindMatches` in `app/FindBar.cpp` memoises the match list on
-`(editor revision, needle, options)` and rebuilds it whole on a miss. Typing in
-the *note* while the bar is open changes the revision, so every keystroke is a
-`util::findAllInto` over the buffer: `shell.find_scan` is 101 us on the 200 KB
-fixture, which after the twelfth and thirteenth passes makes it the largest
-single thing a keystroke does above the layout — twice the note page and
-twenty-five times the raw pane.
-
-**What it costs.** 101 us per keystroke, on top of the 47 us the rest of a
-split-view keystroke costs, whenever the find bar is open. It is not visible on
-a small note and it is the whole of the cost on a large one, and the shape it
-has is the one the reader is most likely to be in: find-as-you-type, editing
-what was found.
-
-**Why it has not been paid.** The two passes beside it — the raw pane's wrap
-and the status bar's caret — bound their work by `editor::TextEdit`, and the
-same is available here: matches wholly before the edit are unchanged, matches
-wholly after it shift by `newEnd - oldEnd`, and only the window
-`[start - needle.size() + 1, newEnd + needle.size() - 1)` has to be rescanned.
-What makes it more than a transcription of those two is that the *result* is
-not just a partition to splice. `find.active` is an index into the list and has
-to survive the splice pointing at the same match; `find.truncated` is a
-`kMaxMatches` cut-off whose position moves when matches are inserted before it,
-so an incremental update can flip a note from truncated to not without
-rescanning enough to know; and a needle that matches nothing is the common case
-while a query is being typed, which the current scan already handles in one
-pass with no allocation (`search.query_matches_nothing`, `docs/performance.md`,
-the eleventh pass). Worth doing, and worth doing after somebody decides what
-`truncated` means under an increment.
-
----
-
 ## TD-48 — Autosave re-stores and re-tokenises the whole note, once a second
 
 Every save goes through `LibraryIndex::refreshWrittenFile`, which upserts the

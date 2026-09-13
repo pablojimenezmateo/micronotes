@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/editor/TextEdit.h"
+
 #include <cstddef>
 #include <string_view>
 #include <vector>
@@ -121,17 +123,38 @@ std::size_t matchAtOrAfter(const std::vector<TextMatch>& matches, std::size_t of
 std::size_t matchAfter(const std::vector<TextMatch>& matches, std::size_t offset);
 std::size_t matchBefore(const std::vector<TextMatch>& matches, std::size_t offset);
 
-// There is deliberately no incremental "refine the previous match set" path
-// here, though ../microide has one and this engine is otherwise its port.
+// Brings a match list from the buffer before `edit` to the buffer after it,
+// reading only the window the edit can have changed. `text` is the buffer
+// *after*; `matches` and `truncated` are the previous scan's, updated in place.
+// Returns whether the update was made -- false means nothing was touched and the
+// caller must rescan whole.
 //
-// The refinement it performs is over *lines that held a hit*, rescanned in full.
-// The offset-addressed analogue -- treat the previous match starts as the
-// candidate set for the longer needle -- is unsound, because the previous scan
-// de-overlapped: `aa` in `aaab` matches only at 0, so 1 is not a candidate, and
-// yet `aab` matches at 1. Every scan here is therefore a cold one, and the cost
-// is kept off the frame by the caller memoising on (revision, needle, options)
-// instead. Do not add the candidate-set version; it drops matches, and only for
-// needles whose own prefix overlaps itself, which is exactly the case nobody
-// tests by hand.
+// This is the same shape as `editor::softWrapUpdate` and the status bar's caret
+// walk, and it is bound the same way: matches wholly before the edit keep their
+// offsets, matches wholly after it shift by `newEnd - oldEnd`, and only the
+// window between the two is read. What makes it more than those is that the
+// splice point on the far side has to be *found* rather than computed -- a
+// rescan can emit a match that runs past where the old list resumes -- so the
+// window keeps widening by one match until the new scan's cursor lands on a
+// boundary the old list also had. See the definition.
+//
+// `scratch` is the window's matches, held across calls so a per-keystroke update
+// reuses the capacity rather than taking and freeing one. It may be any vector
+// the caller keeps; its contents are not read.
+//
+// **It declines rather than guesses**, and the two cases worth knowing are a
+// list that had already hit `kMaxMatches` -- where the cap's position moves with
+// an insertion and an increment cannot know what fell off the end -- and a
+// result that would cross the cap. Both are a full scan, which is what sets
+// `truncated` honestly.
+//
+// What is *not* here is the candidate-set refinement ../microide performs when a
+// needle grows, and this engine is otherwise its port. Refining over the
+// previous match starts is unsound for an offset-addressed buffer, because the
+// previous scan de-overlapped: `aa` in `aaab` matches only at 0, so 1 is not a
+// candidate, and yet `aab` matches at 1. A needle that changed is a cold scan.
+bool findAllUpdate(std::vector<TextMatch>* matches, std::vector<TextMatch>* scratch,
+                   bool* truncated, std::string_view text, std::string_view needle,
+                   SearchOptions options, const editor::TextEdit& edit);
 
 }

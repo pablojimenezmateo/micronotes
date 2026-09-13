@@ -72,6 +72,11 @@ struct FindState {
   FindMatchKey key;
   bool valid = false;
 
+  // The window `util::findAllUpdate` rescans, held across keystrokes so the
+  // incremental path takes no allocation at all. Not part of the answer: it is
+  // scratch the way `RawPaneState::wrapScratch` is.
+  std::vector<util::TextMatch> scratch;
+
   bool hasMatches() const { return !matches.empty(); }
 
   // The active match, or nothing to highlight. `npos` rather than an optional
@@ -85,6 +90,7 @@ struct FindState {
   // the new note.
   void forget() {
     matches.clear();
+    scratch.clear();
     active = 0;
     truncated = false;
     valid = false;

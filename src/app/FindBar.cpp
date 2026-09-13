@@ -321,7 +321,21 @@ void refreshFindMatches(UiRuntime& ui) {
   if(find.valid && find.key == key) return;
 
   const perf::ScopeTimer timer("shell.find_scan");
-  util::findAllInto(ui.editor.text(), key.needle, key.options, &find.matches, &find.truncated);
+  // Typing in the *note* with the bar open moves the revision and nothing else,
+  // and that is the shape the reader is most often in -- find-as-you-type,
+  // editing what was found. The same three-way conjunction the raw pane's wrap
+  // and the status bar's caret make: same needle, same options, and an edit that
+  // leads from the revision the list was built at to this one. Anything else,
+  // including a needle that grew by a character, is a cold scan.
+  const editor::TextEdit edit = ui.editor.lastChange();
+  const bool updatable = find.valid && find.key.needle == key.needle &&
+                         find.key.options == key.options && edit.known() &&
+                         edit.fromRevision == find.key.revision && edit.toRevision == key.revision;
+  if(!updatable ||
+     !util::findAllUpdate(&find.matches, &find.scratch, &find.truncated, ui.editor.text(),
+                          key.needle, key.options, edit)) {
+    util::findAllInto(ui.editor.text(), key.needle, key.options, &find.matches, &find.truncated);
+  }
   find.key = key;
   find.valid = true;
   // The one at or after where the reader is, wrapping to the top. Searching
