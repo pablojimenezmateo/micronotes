@@ -363,6 +363,8 @@ add_executable(micronotes_tests
   tests/AppStateTests.cpp
   tests/RecoveryStoreTests.cpp
   tests/ArchitectureTests.cpp
+  tests/RegistryTests.cpp
+  tests/RenderCacheTests.cpp
   tests/AttachmentTests.cpp
   tests/BlockScanTests.cpp
   tests/ClipGuardTests.cpp
