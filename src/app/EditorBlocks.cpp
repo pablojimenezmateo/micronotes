@@ -3,11 +3,7 @@
 namespace micronotes::app {
 
 doc::BlockSpan editorBlocks(const UiRuntime& ui) {
-  // `+ 1` because `PageView::beginFrame` stamps the layout with the editor's
-  // revision plus one: zero means "cannot say" to the layout's reuse check, so
-  // the stamps are shifted by one to keep a fresh editor's revision 0 from
-  // meaning that.
-  return ui.readingPage.blocksAt(ui.editor.revision() + 1ull);
+  return ui.readingPage.blocksAt(layoutRevision(ui.editor.revision()));
 }
 
 EditorBlocks::EditorBlocks(const UiRuntime& ui) : lent_(editorBlocks(ui)) {

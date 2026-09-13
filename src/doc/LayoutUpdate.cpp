@@ -55,6 +55,11 @@ public:
   void run() {
     geometry_ = geometryKey(opts_);
     previousCount_ = doc_.blocks_.size();
+    // Both taken before anything below can move them: the relay published at
+    // the end is a claim about the partition that was standing when this call
+    // started, and `publish` is where `sourceRevision_` stops being it.
+    hadPartition_ = doc_.built_;
+    previousRevision_ = doc_.sourceRevision_;
     // A caller that stamps its buffer is believed; one that does not gets the
     // memcmp. The stamp is checked first so the common case -- an idle frame
     // over an unedited note -- does not touch the document at all.
@@ -131,6 +136,11 @@ private:
       // call through a capture that has gone.
       doc_.options_ = opts_;
       doc_.lastRelaid_ = 0;
+      // `relay_` is deliberately left alone. Nothing moved, so the partition is
+      // still the one the standing relay described and the standing relay is
+      // still true of it -- and `sourceRevision_` is not advanced on this path
+      // either, so the two agree. Clearing it here would turn every idle frame
+      // into a false miss for every consumer that keeps one.
       return false;
     }
     // The width moved, so the blocks have to be placed again. The scan and the
@@ -147,6 +157,8 @@ private:
     // are all carried forward through it instead of rebuilt.
     const EditWindow window = matchEdges(doc_.source_, incoming_, doc_.claimFor(opts_));
     const std::size_t previousBytes = doc_.source_.size();
+    byteShift_ = static_cast<std::ptrdiff_t>(incoming_.size()) -
+                 static_cast<std::ptrdiff_t>(previousBytes);
     spliceSource(window, previousBytes);
     {
       const perf::ScopeTimer scanTimer("layout.update.scan_blocks");
@@ -366,11 +378,36 @@ private:
     perf::addCounter(patchable_ ? perf::CounterId::LayoutPlacementPatches
                                 : perf::CounterId::LayoutPlacementRebuilds);
 
+    publishRelay();
+
     doc_.geometryHash_ = geometry_;
     doc_.sourceRevision_ = opts_.sourceRevision;
     doc_.built_ = true;
 
     doc_.sweepLayoutCache();
+  }
+
+  // What this call did to the *partition*, for a consumer keeping something
+  // derived from it. `head_` and `tail_` are the splice `rescan` performed and
+  // were thrown away here until the outline needed them; see `doc/BlockRelay.h`
+  // and TD-50.
+  //
+  // "Cannot say" is the answer whenever nothing carried, and that is the safe
+  // direction: a consumer told nothing rebuilds, a consumer told the wrong
+  // thing is silently wrong about a note it is showing.
+  void publishRelay() {
+    doc_.relay_ = BlockRelay {};
+    if(!hadPartition_ || previousRevision_ == 0 || opts_.sourceRevision == 0) return;
+    if(head_ == 0 && tail_ == 0) return;
+    BlockRelay relay;
+    relay.fromRevision = previousRevision_;
+    relay.toRevision = opts_.sourceRevision;
+    relay.headBlocks = head_;
+    relay.tailBlocks = tail_;
+    relay.byteShift = byteShift_;
+    relay.headEnd = head_ < count_ ? doc_.blocks_[head_].start : doc_.source_.size();
+    relay.tailStart = tail_ == 0 ? doc_.source_.size() : doc_.blocks_[count_ - tail_].start;
+    doc_.relay_ = relay;
   }
 
   DocumentLayout& doc_;
@@ -388,6 +425,9 @@ private:
   // How many blocks came through this call unchanged at each end of the
   // document. Everything between them is the extent of what moved, and the two
   // numbers together are what used to be a `size_t` per block.
+  bool hadPartition_ = false;
+  std::uint64_t previousRevision_ = 0;
+  std::ptrdiff_t byteShift_ = 0;
   std::size_t head_ = 0;
   std::size_t tail_ = 0;
   std::size_t count_ = 0;

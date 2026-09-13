@@ -187,6 +187,14 @@
   /* the note's block count until the rebuild is bounded by the edit. See       */   \
   /* TD-50.                                                                      */   \
   X(RightPanelOutlineBlocksWalked, "right_panel.outline_blocks_walked")                \
+  /* Rebuilds that were spliced against the layout's block relay rather than   */   \
+  /* read off the whole note. Against outline_builds this is the hit rate of   */   \
+  /* the bound, and blocks_walked divided by it is how much of the note a      */   \
+  /* keystroke still reads -- three blocks rather than nine thousand when the  */   \
+  /* splice is taken. A splice count that falls while builds stay flat is the  */   \
+  /* relay being refused, which is what a reordered frame or a second edit     */   \
+  /* inside one key handler looks like.                                         */   \
+  X(RightPanelOutlineSplices, "right_panel.outline_splices")                          \
   X(RightPanelLibraryBuilds, "right_panel.library_builds")                             \
   X(RightPanelLibraryReused, "right_panel.library_reused")                             \
   /* The palette's filter: runs against calls served from the standing answer,  */    \

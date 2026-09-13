@@ -380,6 +380,31 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
               static_cast<unsigned long long>(at(CounterId::RightPanelOutlineBlocksBorrowed)),
               static_cast<unsigned long long>(at(CounterId::RightPanelOutlineScans)),
               static_cast<unsigned long long>(at(CounterId::RightPanelOutlineReused)));
+  // And the bound on top of the borrow. The borrow removed the *scan*; this is
+  // what removed the walk, and it is the only one of the two a counter can see
+  // -- both look like "the outline was rebuilt" from outside. A splice reads
+  // the blocks the edit re-derived, which is three for a typed character, so
+  // the walk should be a rounding error against the note's block count. See
+  // TD-50, closed.
+  std::printf("%-40s %12llu splices %12llu builds %12llu blocks walked\n",
+              "shell.outline_panel.splices",
+              static_cast<unsigned long long>(at(CounterId::RightPanelOutlineSplices)),
+              static_cast<unsigned long long>(at(CounterId::RightPanelOutlineBuilds)),
+              static_cast<unsigned long long>(at(CounterId::RightPanelOutlineBlocksWalked)));
+  // One cold build is expected -- the first has nothing to splice from -- so
+  // the allowance is that build's blocks plus a handful per splice.
+  if(at(CounterId::RightPanelOutlineBuilds) > 1) {
+    const auto builds = at(CounterId::RightPanelOutlineBuilds);
+    const auto cold = at(CounterId::RightPanelOutlineBlocksWalked) / builds;
+    if(at(CounterId::RightPanelOutlineSplices) + 1 < builds || cold > 400) {
+      std::cerr << "BUDGET FAILED: the outline is walking " << cold
+                << " blocks per build against " << at(CounterId::RightPanelOutlineSplices)
+                << " splices over " << builds
+                << " builds -- the block relay is being refused and the rebuild is back to "
+                   "costing the note rather than the edit\n";
+      ok = false;
+    }
+  }
   if(at(CounterId::RightPanelOutlineScans) > at(CounterId::RightPanelOutlineBlocksBorrowed)) {
     std::cerr << "BUDGET FAILED: shell.outline_panel scanned the note more often than it borrowed "
                  "the page's partition -- the right panel is being asked before the content is "

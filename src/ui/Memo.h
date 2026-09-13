@@ -83,6 +83,24 @@ public:
   // measured on one line and paints on the next. A reader that has not asked
   // whether it is current should be asking `get`.
   const Value& value() const { return value_; }
+
+  // The same, to be carried forward *in place* by a producer that can update it
+  // rather than rebuild it. The key deliberately does not move: while the
+  // update runs, the value is still the one built at the standing key, which is
+  // what the producer is checking against. Say `rekey` once it has been taken.
+  Value& value() { return value_; }
+
+  // Says the value in hand now stands for `key`, without touching the value.
+  // The counterpart of `rebuild`, which says the same thing about a value about
+  // to be filled -- and the reason both exist rather than one `store` is that
+  // an incremental update and a rebuild differ in exactly this: whether the
+  // value is produced or carried.
+  const Value& rekey(Key key) {
+    key_ = std::move(key);
+    valid_ = true;
+    return value_;
+  }
+
   bool valid() const { return valid_; }
 
 private:

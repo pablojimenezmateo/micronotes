@@ -4,6 +4,7 @@
 
 #include "core/editor/TextEdit.h"
 
+#include "doc/BlockRelay.h"
 #include "doc/BlockScan.h"
 #include "doc/InlineScan.h"
 
@@ -466,6 +467,13 @@ public:
   // ends up drawing.
   std::pair<std::size_t, std::size_t> blockRange(float top, float bottom) const;
 
+  // What the last `update` did to the partition, for a consumer that keeps
+  // something derived from it. See `doc/BlockRelay.h`; the outline is the
+  // first reader and the reason it exists.
+  const BlockRelay& blockRelay() const {
+    return relay_;
+  }
+
   // Diagnostics for the perf harness.
   std::size_t lastRelaidBlocks() const {
     return lastRelaid_;
@@ -710,6 +718,10 @@ private:
   mutable std::vector<Attr> attrs_;
   float totalHeight_ = 0.0f;
   std::size_t lastRelaid_ = 0;
+  // Filled by every `update`, and reset to "cannot say" by the ones that carry
+  // nothing. A stale relay answering for an update it did not describe is the
+  // one way this can be wrong, so nothing is allowed to leave it alone.
+  BlockRelay relay_;
   // What the standing layout was built from, so the next call can ask whether
   // it would produce the same thing again.
   std::uint64_t geometryHash_ = 0;

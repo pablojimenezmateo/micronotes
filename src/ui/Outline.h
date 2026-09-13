@@ -1,8 +1,10 @@
 #pragma once
 
+#include "doc/BlockRelay.h"
 #include "doc/BlockScan.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +40,30 @@ struct OutlineEntry {
 // caller with no layout behind it, a test for instance, should get.
 void outlineInto(std::string_view source, doc::BlockSpan blocks,
                  std::vector<OutlineEntry>* out);
+
+// The same outline, bounded by the edit rather than by the note.
+//
+// `outlineInto` reads every block to find the ones that are headings, and the
+// memo it sits behind is keyed on the editor's revision -- so it misses on every
+// keystroke by construction, and a 200 KB note streams 845 KB of
+// `doc::SourceBlock` per typed character to read one enum field per block. That
+// was 30% of what a keystroke cost, and it was TD-50.
+//
+// `relay` says what the layout's last update did to the partition. When it leads
+// from the revision `entries` was built at, this keeps the headings above the
+// edit exactly as they are, shifts the offsets of the ones below it, and reads
+// only the blocks the edit actually re-derived -- three, for a typed character.
+//
+// Returns false when it could not be taken, having changed nothing: no relay, a
+// relay from another revision, or a partition that does not match the one the
+// relay describes. **A false answer is not a failure**, it is the caller being
+// told to call `outlineInto`, and the caller must.
+//
+// The validity check is the caller's for the reason `doc::DocumentLayout`,
+// `editor::softWrapUpdate` and the status bar's caret walk all put it there:
+// only the caller knows what its standing value was built from.
+bool outlineUpdate(std::string_view source, doc::BlockSpan blocks, const doc::BlockRelay& relay,
+                   std::uint64_t builtAtRevision, std::vector<OutlineEntry>* entries);
 
 // The same, allocating its own vector and its own partition.
 //

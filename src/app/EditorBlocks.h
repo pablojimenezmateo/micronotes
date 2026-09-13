@@ -36,6 +36,20 @@ namespace micronotes::app {
 // the same bargain as before: the surface that already holds a partition lends
 // it, and no caller has to know which it got.
 
+// An editor revision as the *layout* stamps it.
+//
+// `PageView::beginFrame` stamps the layout with the editor's revision plus one,
+// because zero means "cannot say" to the layout's reuse check and a fresh
+// editor's revision is zero. Every shell caller that asks the layout a question
+// about a revision -- the block borrow below, and the outline's check on the
+// block relay -- has to apply that shift, and it is written here once for the
+// same reason the borrow itself is: a revision compared in the wrong space does
+// not fail, it silently never matches, and an incremental path that silently
+// never runs is indistinguishable from one that is merely slow.
+inline std::uint64_t layoutRevision(std::uint64_t editorRevision) {
+  return editorRevision + 1ull;
+}
+
 // The partition to lend a `doc::Edits` call, or an empty span when the page has
 // none for this revision of the buffer.
 doc::BlockSpan editorBlocks(const UiRuntime& ui);

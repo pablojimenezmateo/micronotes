@@ -152,10 +152,30 @@ const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui) {
     return *entries;
   }
   perf::addCounter(perf::CounterId::RightPanelOutlineBuilds);
-  auto& entries = ui.rightPanel.outline.rebuild(revision);
   const doc::BlockSpan blocks = editorBlocks(ui);
   perf::addCounter(blocks.empty() ? perf::CounterId::RightPanelOutlineScans
                                   : perf::CounterId::RightPanelOutlineBlocksBorrowed);
+
+  // Bounded by the edit when the layout can say what its last update did to the
+  // partition and the standing entries were built from the revision that relay
+  // leads from. `ui.rightPanel.outline.key()` is what says the second half, and
+  // asking the memo rather than keeping a second copy of the revision beside it
+  // is the whole reason `Memo::key()` exists -- a value plus a separately
+  // remembered key is the drift this file's memos were written to stop.
+  //
+  // The relay comes from the page the borrow above came from, so the two
+  // describe the same partition by construction; `outlineUpdate` checks that
+  // anyway, because "by construction" is an argument about today's call order.
+  if(!blocks.empty() && ui.rightPanel.outline.valid()) {
+    auto& standing = ui.rightPanel.outline.value();
+    if(ui::outlineUpdate(ui.editor.text(), blocks, ui.readingPage.document().blockRelay(),
+                         layoutRevision(ui.rightPanel.outline.key()), &standing)) {
+      perf::addCounter(perf::CounterId::RightPanelOutlineSplices);
+      return ui.rightPanel.outline.rekey(revision);
+    }
+  }
+
+  auto& entries = ui.rightPanel.outline.rebuild(revision);
   ui::outlineInto(ui.editor.text(), blocks, &entries);
   return entries;
 }

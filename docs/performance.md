@@ -3928,3 +3928,123 @@ carrying two revisions and every memo picking the right one, which is a new
 thing to get wrong per memo with no symptom when it is wrong. The difference
 this time is that the counters exist and say so, which is what TD-48 spent eight
 passes not having.
+
+---
+
+## The eighteenth pass: the panel that read the whole note to indent a list of headings
+
+The fourth surface to get the twelfth pass's treatment, and the one that needed
+something from `doc::` that nothing had asked for before.
+
+The ninth pass took the outline panel from 226 us a keystroke to about 43 by
+having it *borrow* the block partition the reading page had already spliced
+instead of scanning for one. What that left is the walk. `ui::outlineInto`
+reads every block of the note to find the ones that are headings, and the memo
+it sits behind is keyed on `editor.revision()` — which moves with every typed
+character, so the memo misses by construction and the walk runs on every
+keystroke.
+
+Nothing counted it, so its cost was a subtraction between two scope timers and
+vanished whenever the machine was busy. The pass opened by fixing that:
+`right_panel.outline_blocks_walked` read **480,600 over 50 builds** — 9,612 a
+build, exactly the 200 KB fixture's block count. A `doc::SourceBlock` is 88
+bytes, so a keystroke streamed 845 KB to read one enum field per block, and
+845 KB at this machine's rate is about the 43 us the clock was saying.
+
+### The layout knew, and threw it away
+
+`DocumentLayout::rescan` has spliced since the fifth pass: it re-derives the
+blocks around the edit and slides the rest, which is why a keystroke in a 200 KB
+note re-scans three blocks rather than nine thousand. It computes exactly the
+shape of that splice — `carried` at the front, the middle it re-derived, the
+tail it slid — and then reduced it to `lastRelaidBlocks()`, a *count*. So every
+other reader of the partition had to walk all of it to find out what the layout
+already knew.
+
+`doc::BlockRelay` is that shape as a value, and it is deliberately the same
+contract as `editor::TextEdit`: two revision stamps, so a consumer can **check**
+that the relay leads from the state it is holding rather than trust it. Three
+bands — the head that did not move at all, the middle that was re-derived, the
+tail that kept its content and moved by `byteShift`.
+
+`ui::outlineUpdate` is the consumer. It keeps the headings above the edit
+untouched, adds `byteShift` to the offsets of the ones below it, and reads only
+the blocks in the middle band.
+
+### What it measures
+
+Deterministically, which for this pass is the whole argument — the box has been
+carrying a load average between six and twenty-three all evening, and the same
+scenario read 8.7 ms and 22 ms an hour apart:
+
+| | before | after |
+|---|---:|---:|
+| `right_panel.outline_blocks_walked` | 480,600 | **9,759** |
+| `right_panel.outline_builds` | 50 | 50 |
+| `right_panel.outline_splices` | — | 49 |
+
+Forty-nine of the fifty builds were spliced; the fiftieth is the first, which
+has nothing to splice from and accounts for 9,612 of the 9,759. **The other
+forty-nine walked three blocks each.**
+
+On the clock, taken back to back so the machine is at least the same machine:
+`shell.outline_panel` less `shell.live_page` went from 43–54 us to about 21, and
+`shell.keystroke` from 138–182 us to 103–105.
+
+### Two things the equality test found
+
+The proof is the twelfth pass's and for the same reason — an incremental
+anything is only worth having if it is *exactly* the full computation — so
+`outline_update_equals_a_cold_outline_over_a_long_edit_sequence` asserts
+equality with a cold `outlineInto` after every one of 600 random splices, over a
+five-character alphabet (`#`, newline, space, two letters) chosen to make
+headings dense and to keep edits landing on and around them. It also asserts the
+splice was actually *taken* on more than eight steps in ten, because a change
+that quietly stopped taking it would pass every equality above.
+
+It failed on step 50, and the bug is worth writing down because it is the shape
+these splices fail in. **A band of zero blocks is not the same as a band that
+starts at the end of the buffer.** With nothing carried at the back, the relay
+reports `tailStart` as the end of the new buffer — and the end of the new buffer
+less `byteShift` is the end of the old one, which every offset in the last block
+is below. So a heading in the final block read as "in the carried tail", was
+kept and shifted, when the block it came from had just been re-derived out of
+existence. The count has to be tested, not the offset; nothing about a byte
+offset can say "nothing".
+
+The second thing was not a bug but a cost the first version added: the tail was
+copied out to a scratch vector and copied back, which on this fixture's five
+hundred headings is 25 KB allocated and freed per typed character to add one
+integer to each offset. It moves in place now — `erase`/`insert` over the middle
+band alone, which for a type holding a `std::string` is a pointer swap per
+entry and no allocation at all, and the middle is empty for any keystroke that
+did not touch a heading. `shell.outline_panel`'s allocated bytes went 32.5 KB
+back to 7.7 KB, which is where they were before the splice existed.
+
+The depth pass is skipped outright when the middle neither added nor removed a
+heading: every level in the list is then the one it already had, in the order it
+already had.
+
+### The shift that would have failed silently
+
+`PageView::beginFrame` stamps the layout with the editor's revision **plus one**,
+because zero means "cannot say" to the layout's reuse check. `editorBlocks` knew
+that; the outline's relay check needed it too, and a second hand-written `+ 1`
+is exactly the kind of thing that ends up being `+ 0` in one of the two places.
+It would not have failed: a revision compared in the wrong space never matches,
+the splice would simply never be taken, and an incremental path that silently
+never runs looks precisely like one that is merely slow — with the counter
+above as the only thing that could tell the difference. `app::layoutRevision` is
+that shift, written once.
+
+### Open: three surfaces have a relay now, and each wrote its own splice
+
+`doc::DocumentLayout`, `editor::softWrapUpdate`, the status bar's caret walk,
+the find bar's match list and now the outline are five bounded readouts, and
+each carries its own "keep the head, shift the tail, redo the middle" loop over
+a different element type. The loops are not identical — the find bar's list is
+byte ranges, the outline's is entries with strings, the wrap's is rows — but the
+*banding* is the same three questions each time, and this pass's bug was in the
+banding rather than in anything about headings. Whether that is one algorithm
+over a concept or five instances of a pattern is worth deciding before a sixth
+one is written, and the honest answer today is that nobody has looked.
