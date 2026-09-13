@@ -160,12 +160,10 @@ const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui) {
   return entries;
 }
 
-namespace {
-
 // The two views that come from the library rather than from the buffer. Both are
 // filled together because both turn on the same key, and asking for either is
 // what says the note or the library has moved.
-const RightPanelState::LibraryViews& libraryViews(UiRuntime& ui) {
+const RightPanelState::LibraryViews& libraryViewsFor(UiRuntime& ui) {
   const NoteRevision key {ui.state.selection().noteId, ui.state.catalog().revision()};
   if(const auto* views = ui.rightPanel.library.get(key)) {
     perf::addCounter(perf::CounterId::RightPanelLibraryReused);
@@ -182,8 +180,6 @@ const RightPanelState::LibraryViews& libraryViews(UiRuntime& ui) {
   // revision moves on every save.
   views.tags = ui.state.openNote().metadata().tags;
   return views;
-}
-
 }
 
 namespace {
@@ -252,7 +248,7 @@ void drawOutlineView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& 
 
 void drawBacklinksView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
                        const PanelFrame& frame) {
-  const auto& views = libraryViews(ui);
+  const auto& views = libraryViewsFor(ui);
   const auto& backlinks = views.backlinks;
   if(backlinks.empty()) {
     drawEmptyState(renderer, text, ui, frame, "Nothing links here",
@@ -297,7 +293,7 @@ void drawBacklinksView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime
 
 void drawTagsView(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& ui,
                   const PanelFrame& frame) {
-  const auto& views = libraryViews(ui);
+  const auto& views = libraryViewsFor(ui);
   const auto& tags = views.tags;
   if(tags.empty()) {
     drawEmptyState(renderer, text, ui, frame, "No tags", "This note carries none yet.", ui::keysFor(ui::ActionId::EditTags) + "  edit tags");

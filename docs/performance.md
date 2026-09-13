@@ -3759,3 +3759,172 @@ change that quietly stopped taking it would pass every equality above.
 is about the counters rather than the answer: one keystroke in a 200 KB note
 must leave `search.text_scan_bytes` untouched and read under 200 bytes of
 window. That is the entry's claim stated as an assertion.
+
+---
+
+## The seventeenth pass: the reader that cannot forget, and the entry that was waiting on it
+
+TD-48 had been open since the eighth pass and its number never moved. Every
+save went through `LibraryIndex::refreshWrittenFile`, which upserted the note's
+row — `notes.body` holds the whole buffer — and then deleted and re-inserted
+its `notes_fts` entry, tokenising the same bytes again. Both halves scale with
+the *note* and neither scales with the edit, and autosave runs once a second
+for as long as somebody keeps typing. On the 200 KB fixture in a 1,000-note
+library that was `library_index.write_fts` at 1.02 ms plus `write_rows` at
+1.19 ms plus the `COMMIT` those two filled, about half of what a save cost.
+
+The entry did not say the fix was unknown. It said the opposite: write the
+row's list fields eagerly and the body and its FTS entry lazily, flushed before
+a search reads them. What it said was that the *contract* would stop being
+"current after every write" and become "current before every read", and that
+
+> every reader has to be one that flushes: the search, the backlinks panel, the
+> tag list, the external-change watcher, and whatever is added next.
+
+That is the real cost, and it is not a CPU cost. A contract a caller has to
+remember is one a caller will eventually forget, and the way this one fails is
+silent — a search stops finding a word that is on screen, once, until something
+else happens to read the index.
+
+### The answer is that there is no caller
+
+The entry ended by naming its own condition: worth doing when "the flush points
+can be made structural rather than remembered — a reader that cannot forget,
+the way `NoteCatalog` is the one path a note's file is written through."
+
+They already were, and nobody had looked. Every read of those tables is a
+*method on `LibraryIndex`*: `search`, `backlinks`, `notes`, `size`. The
+connection is private, the schema is private, and nothing outside that class
+has ever held a `sqlite3*` for the index. So the flush does not go at the call
+sites at all — it goes on the inside of the only door there is, and the list of
+places to get right is four lines in one file rather than every panel that ever
+asks the library a question.
+
+`flushDeferred()` is `const`, which is the whole shape in one word: it is
+called by the reads, not by the writes.
+
+### What a save does now
+
+`refreshWrittenFile` builds the row exactly as before, answers
+`listFieldsChanged` and `rowsWritten` exactly as before — the sidebar, the
+folder counts and the tag list are told the same thing at the same moment — and
+then *takes* the write instead of running it. One `std::string` copy of the
+body, and the caller's stat and front matter beside it.
+
+A second save of the same note replaces the standing one rather than queueing
+behind it, which is where the win actually comes from: sixty keystroke-driven
+saves of one note are one transaction, not sixty. At most one is held, and that
+is a decision rather than a simplification — the deferral exists for the note
+somebody is typing into and there is one of those. A save of a second note
+flushes the first, which is the same one transaction per note the eager path
+ran.
+
+Two "before"s had to be separated to make this work, and conflating them is the
+bug the split exists to avoid. What the tables will say once everything taken
+has run is what a change is measured against — so a second save compares
+against the standing row, not against sqlite's, or every field of the previous
+save is reported as changed all over again. What sqlite *actually holds right
+now* is the only thing an `erase` can address, and it is what the deferred
+write carries as `priorId` and `priorRowId`, for the case where a note's
+front-matter id changed and its old row is still sitting under the same path.
+
+### Crash safety is not a new question
+
+It was the first one asked and it answers itself. The note's own file is
+written durably — two `fsync` barriers — *before* the index is told anything,
+and the index has always been a cache of what is on disk. A deferred write lost
+to a kill leaves that note's row carrying the mtime and size it had before,
+which is exactly what "not yet indexed" looks like, and the next
+`refreshChangedFiles` re-reads the file for the ordinary reason. Nothing is
+lost and nothing has to notice. The destructor flushes anyway, because there is
+no reason to make the next start do that work.
+
+`rebuild()` is the one place that *drops* the standing write rather than
+running it: it empties the three tables and reads every note off the disk
+again, so running the write first would put a row into a table the next line
+deletes.
+
+### What it measures
+
+Deterministic first, because the machine was busy and the clock could not be
+believed. Over one harness run, the bytes the index stored and tokenised:
+
+| | before | after |
+|---|---:|---:|
+| `library.index_body_bytes_stored` | 5,193,890 | 1,915,954 |
+| `library.index_body_bytes_indexed` | 5,193,890 | 1,915,954 |
+
+— and the after column includes sixty saves the before column never made,
+because this pass added a lane for them. Like for like it is 5.19 MB to
+1.71 MB: the fixture's own build is 1.9 MB of it and is unchanged, and the
+sixteen autosaves that used to put 3.3 MB through both tables now put through
+one note's worth, once.
+
+The new lane is `save.minute_of_typing`, and it is a *rate* rather than a
+duration, which is why it is a counter readout and not a budget in
+microseconds:
+
+```
+save.minute_of_typing    60 saves    60 deferred    60 coalesced    1 transactions    0.20 MB tokenised
+```
+
+Sixty saves is a minute of continuous typing. It fails if that minute turns
+into more than one index transaction, which is the shape this would regress
+into: something starts reading the index once per save, and the deferral buys
+nothing while every counter still looks plausible. The lane's search at the end
+is deliberate — the note list would not do, because it is memoised on the
+library revision and answers without reaching the index at all.
+
+On the clock, with the caveat that the box was carrying a load average of
+thirteen and the numbers are ratios rather than absolutes: `save.autosave_note`
+1,923 us against `save.durable_write_200kb` at 1,587. An autosave used to be
+3.7× the note's own durable write and is now 1.2× it — which is the arithmetic
+statement that what is left of a save is the file, and the index has stopped
+being half of it.
+
+### The rule, and the test that is the rule
+
+Two tests, and neither of them is about a duration.
+
+`library_index_every_public_read_sees_a_deferred_save` asks each public read
+the question with a save standing unwritten, each on its own index, because the
+first read of any of them runs the write and the next would pass for free.
+
+`architecture_a_library_index_read_cannot_skip_the_flush` is the other end, and
+it is the one that makes this maintainable rather than merely correct today. It
+reads `LibraryIndex.h`, takes every public declaration ending in `const;`, and
+requires each to be either a read this file says flushes — *checked against the
+definition*, not merely listed — or one it says reaches no table at all. Adding
+a public `const` method to `LibraryIndex` fails the build until it has been put
+in one of the two. That is the "reader that cannot forget" the entry was
+waiting on, written down.
+
+### Open: with the Links panel showing, a save is still a query
+
+`save.minute_of_typing` proves the coalescing under a workload where nothing
+reads the index between saves, which is the default arrangement — the right
+panel opens on the Outline, and an outline is a function of the buffer.
+
+Switch it to Links and the coalescing is gone, and this pass measured that
+rather than leaving it as a worry. `RightPanelState::library` is keyed on the
+library's revision and a save bumps that revision, so a save misses the memo and
+runs `LibraryIndex::backlinks` — which is now also what runs the write that save
+deferred. The new `shell.links_panel_over_a_save` scenario types and saves
+twenty-four times with the view on screen:
+
+```
+shell.links_panel.views     26 builds     24 reused     25 index transactions
+```
+
+Twenty-four saves, twenty-five transactions. The keystrokes are free — that is
+the twenty-four reuses — and every save misses. So a reader with the Links panel
+open is back to one whole-note store and tokenise per save, which is the number
+TD-48's entry opened with.
+
+That is **TD-49**, and the reason it is an entry rather than a fix is the same
+shape as TD-48's own: the narrow truth (a body-only save of the selected note
+cannot change who links to it) is available, but acting on it means the catalog
+carrying two revisions and every memo picking the right one, which is a new
+thing to get wrong per memo with no symptom when it is wrong. The difference
+this time is that the counters exist and say so, which is what TD-48 spent eight
+passes not having.

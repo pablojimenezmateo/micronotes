@@ -61,6 +61,12 @@ static constexpr std::uint64_t kShellOutlineBudgetMicros = 400;
 // the *bar* rather than about the size of the note, and a regression to
 // scanning from the top puts it back over.
 static constexpr std::uint64_t kShellStatusBudgetMicros = 40;
+// One keystroke and one save with the Links view showing, which is a SQLite
+// query and -- since TD-48 -- the note's deferred index write with it. Loose,
+// because most of it is the save's two `fsync` barriers rather than anything
+// the panel does; it is here for the counters beside it, which say how many of
+// the panel's reads actually reached the index. See TD-49.
+static constexpr std::uint64_t kShellLinksPanelBudgetMicros = 20000;
 // The find bar's scan, which runs once per (buffer, needle, options) -- so
 // once per keystroke while the bar is open. Its own scenario because it is the
 // one surface whose cost the reader opts into, and because there was no lane
@@ -325,6 +331,41 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
                                               askStatus();
                                             }),
        kShellKeystrokeBudgetMicros);
+
+  // The panel's *other* view, and the reason it is measured rather than argued
+  // about. The outline is a function of the buffer; the backlinks and the tags
+  // are a function of the library, so their memo is keyed on the library's
+  // revision -- and a save bumps that revision. So with the Links view showing,
+  // a keystroke is free and a *save* costs a SQLite query, which since TD-48 is
+  // also what runs the note's deferred index write.
+  //
+  // A keystroke and a save, in that order, twenty-four times: the counters
+  // afterwards say how many of those forty-eight steps reached the index.
+  const auto saveNote = [&] { sink += ui.state.saveSelectedNote(ui.editor.text()).ok ? 1 : 0; };
+  ui.state.editWorkspace().rightPanelView = micronotes::ui::RightPanelView::Backlinks;
+  const auto linksBefore = microcore::perf::captureCounters();
+  gate("shell.links_panel_over_a_save", measureIterations("shell.links_panel_over_a_save", 24,
+                                                          [&](int) {
+                                                            type();
+                                                            sink += micronotes::app::libraryViewsFor(ui).backlinks.size();
+                                                            saveNote();
+                                                            sink += micronotes::app::libraryViewsFor(ui).backlinks.size();
+                                                          }),
+       kShellLinksPanelBudgetMicros);
+  {
+    using microcore::perf::CounterId;
+    const auto linksAfter = microcore::perf::captureCounters();
+    const auto delta = [&](CounterId id) {
+      const auto at = static_cast<std::size_t>(id);
+      return linksAfter[at] - linksBefore[at];
+    };
+    std::printf("%-40s %12llu builds %12llu reused %12llu index transactions\n",
+                "shell.links_panel.views",
+                static_cast<unsigned long long>(delta(CounterId::RightPanelLibraryBuilds)),
+                static_cast<unsigned long long>(delta(CounterId::RightPanelLibraryReused)),
+                static_cast<unsigned long long>(delta(CounterId::LibraryIndexFlushes)));
+  }
+  ui.state.editWorkspace().rightPanelView = micronotes::ui::RightPanelView::Outline;
 
   // The diagnosis behind the outline number: it is a borrow when the page has
   // already laid this revision out, and a whole-note block scan when it has

@@ -430,3 +430,148 @@ MICRONOTES_TEST(library_index_stores_the_terms_rather_than_the_text) {
   MICRONOTES_REQUIRE(index.search("blorple").size() == 1);
   MICRONOTES_REQUIRE(index.search("zarquon").empty());
 }
+
+// TD-48's fix, and the two halves of the claim it makes.
+//
+// The first half is that a save no longer writes the note into sqlite: it hands
+// the write over and the index holds it. Sixty keystroke-driven saves of one
+// note are therefore sixty deferrals, fifty-nine coalesced away and one
+// transaction -- and the bytes counters, which are deterministic, say the same
+// thing without a clock.
+MICRONOTES_TEST(library_index_coalesces_repeated_saves_of_one_note) {
+  const micronotes::tests::TempDir rootDir("micronotes-index-coalesce");
+  const auto& root = rootDir.path();
+  micronotes::tests::ScopedXdgDataHome xdg(root / "xdg");
+
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "n1";
+  metadata.title = "Typed into";
+  const auto path = library.createNote(metadata, "body 0\n");
+
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+
+  constexpr int kSaves = 20;
+  microcore::perf::resetCounters();
+  for(int i = 0; i < kSaves; ++i) {
+    // A distinct body each time, and a distinct size, so no save is answered by
+    // the stat check rather than by the deferral.
+    const std::string body = "body " + std::to_string(i) + std::string(i, 'x') + " needle\n";
+    MICRONOTES_REQUIRE(library.saveNote(path, metadata, body));
+    MICRONOTES_REQUIRE(index.refreshWrittenFile(path, metadata, body).ok);
+  }
+  using microcore::perf::CounterId;
+  using microcore::perf::readCounter;
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexWritesDeferred) == kSaves);
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexWritesCoalesced) == kSaves - 1);
+  // Nothing has read the tables, so nothing has run.
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexFlushes) == 0);
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexBodyBytesIndexed) == 0);
+
+  // The read runs it, once, and sees the last save rather than the first.
+  const auto hits = index.search("needle");
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexFlushes) == 1);
+  MICRONOTES_REQUIRE(hits.size() == 1);
+  MICRONOTES_REQUIRE(index.search("body 19").size() == 1);
+  MICRONOTES_REQUIRE(index.search("body 18").empty());
+  // One note's bytes went through the tokeniser, not twenty notes' worth.
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexBodyBytesIndexed) ==
+                     std::string("body 19" + std::string(19, 'x') + " needle\n").size());
+  // And a second read does not run it again.
+  MICRONOTES_REQUIRE(index.search("needle").size() == 1);
+  MICRONOTES_REQUIRE(readCounter(CounterId::LibraryIndexFlushes) == 1);
+}
+
+// The second half, and the one the entry actually turned on: the flush is not
+// something a reader has to remember. Each public read of the index is asked
+// the question with a save standing unwritten, and has to answer for the save.
+//
+// `architecture_a_library_index_read_cannot_skip_the_flush` is the other end of
+// this: it fails on a public read this test does not cover.
+MICRONOTES_TEST(library_index_every_public_read_sees_a_deferred_save) {
+  const micronotes::tests::TempDir rootDir("micronotes-index-read-flushes");
+  const auto& root = rootDir.path();
+  micronotes::tests::ScopedXdgDataHome xdg(root / "xdg");
+
+  micronotes::library::Library library(root);
+  micronotes::library::NoteMetadata target;
+  target.id = "target";
+  target.title = "Target";
+  library.createNote(target, "the note being linked to\n");
+
+  micronotes::library::NoteMetadata source;
+  source.id = "source";
+  source.title = "Source";
+  const auto sourcePath = library.createNote(source, "nothing here yet\n");
+
+  // Each read gets its own index and its own deferred save, because the first
+  // read of any of them runs the write and the next would pass for free.
+  const std::string body = "a needle, and a [[Target]] link\n";
+  const auto defer = [&](micronotes::library::LibraryIndex& index) {
+    MICRONOTES_REQUIRE(index.open(root));
+    MICRONOTES_REQUIRE(index.refreshChangedFiles());
+    MICRONOTES_REQUIRE(library.saveNote(sourcePath, source, body));
+    MICRONOTES_REQUIRE(index.refreshWrittenFile(sourcePath, source, body).ok);
+  };
+
+  {
+    micronotes::library::LibraryIndex index;
+    defer(index);
+    MICRONOTES_REQUIRE(index.search("needle").size() == 1);
+  }
+  {
+    micronotes::library::LibraryIndex index;
+    defer(index);
+    // The links table is rewritten by the same deferred write, and the link is
+    // one the save added.
+    MICRONOTES_REQUIRE(index.backlinks("Target", "Target").size() == 1);
+  }
+  {
+    micronotes::library::LibraryIndex index;
+    defer(index);
+    MICRONOTES_REQUIRE(index.notes().size() == 2);
+  }
+  {
+    micronotes::library::LibraryIndex index;
+    defer(index);
+    MICRONOTES_REQUIRE(index.size() == 2);
+  }
+  {
+    micronotes::library::LibraryIndex index;
+    defer(index);
+    // Asks sqlite about the table's shape rather than its rows, so it has
+    // nothing to get wrong -- and flushes anyway, which is the rule this test
+    // is about. What it must not do is leave the write standing.
+    index.ftsStoresBodies();
+    MICRONOTES_REQUIRE(microcore::perf::readCounter(
+                         microcore::perf::CounterId::LibraryIndexFlushes) > 0);
+  }
+}
+
+// A note created and then deleted with the creating save still unwritten. The
+// erase has nothing to address -- the row it would name never reached sqlite --
+// and the index has to come out empty rather than carrying a row for a file
+// that is not there.
+MICRONOTES_TEST(library_index_drops_a_deferred_write_for_a_deleted_file) {
+  const micronotes::tests::TempDir rootDir("micronotes-index-deferred-delete");
+  const auto& root = rootDir.path();
+  micronotes::tests::ScopedXdgDataHome xdg(root / "xdg");
+
+  micronotes::library::Library library(root);
+  micronotes::library::LibraryIndex index;
+  MICRONOTES_REQUIRE(index.open(root));
+  MICRONOTES_REQUIRE(index.refreshChangedFiles());
+
+  micronotes::library::NoteMetadata metadata;
+  metadata.id = "gone";
+  metadata.title = "Gone";
+  const auto path = library.createNote(metadata, "a needle here\n");
+  MICRONOTES_REQUIRE(index.refreshWrittenFile(path, metadata, "a needle here\n").ok);
+  std::filesystem::remove(path);
+  MICRONOTES_REQUIRE(index.refreshFile(path).ok);
+
+  MICRONOTES_REQUIRE(index.size() == 0);
+  MICRONOTES_REQUIRE(index.search("needle").empty());
+}

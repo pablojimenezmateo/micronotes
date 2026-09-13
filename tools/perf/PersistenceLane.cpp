@@ -9,6 +9,7 @@
 #include "ui/AppState.h"
 
 #include <filesystem>
+#include <cstdio>
 #include <iostream>
 #include <string>
 
@@ -68,6 +69,55 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
          (void)state.saveSelectedNote(text);
        }),
        kAutosaveBudgetMicros);
+
+  // The deterministic half of TD-48's answer, and the reason it is here rather
+  // than in the counter dump at the end: a *rate*. Sixty saves is a minute of
+  // continuous typing, and what matters is how many index transactions and how
+  // many tokenised bytes that minute turns into -- which used to be sixty and
+  // sixty notes' worth, and is now one and one. Counters, so the numbers are
+  // byte-identical on a busy machine and an idle one.
+  //
+  // Read as deltas rather than around a `resetCounters()`: the dump at the end
+  // of the harness is a statement about the whole run, and a lane that zeroes
+  // the table in the middle of it makes every row above this one a lie.
+  {
+    using microcore::perf::CounterId;
+    using microcore::perf::readCounter;
+    const auto deferredBefore = readCounter(CounterId::LibraryIndexWritesDeferred);
+    const auto coalescedBefore = readCounter(CounterId::LibraryIndexWritesCoalesced);
+    const auto flushesBefore = readCounter(CounterId::LibraryIndexFlushes);
+    const auto indexedBefore = readCounter(CounterId::LibraryIndexBodyBytesIndexed);
+
+    constexpr int kMinuteOfTyping = 60;
+    for(int i = 0; i < kMinuteOfTyping; ++i) {
+      text.push_back(static_cast<char>('a' + (i % 26)));
+      (void)state.saveSelectedNote(text);
+    }
+    // A search, standing in for whatever eventually asks the index a question
+    // -- and the thing that runs the one write those sixty saves came to. The
+    // note list would not do: it is memoised on the library revision, so it
+    // answers without reaching the index at all, which is itself the point.
+    sink = state.catalog().search("needle", micronotes::library::SearchScope::All).size();
+
+    const auto deferred = readCounter(CounterId::LibraryIndexWritesDeferred) - deferredBefore;
+    const auto coalesced = readCounter(CounterId::LibraryIndexWritesCoalesced) - coalescedBefore;
+    const auto flushes = readCounter(CounterId::LibraryIndexFlushes) - flushesBefore;
+    const auto indexed = readCounter(CounterId::LibraryIndexBodyBytesIndexed) - indexedBefore;
+    std::printf("%-30s %5d saves %5llu deferred %5llu coalesced %4llu transactions %7.2f MB "
+                "tokenised\n",
+                "save.minute_of_typing", kMinuteOfTyping,
+                static_cast<unsigned long long>(deferred),
+                static_cast<unsigned long long>(coalesced),
+                static_cast<unsigned long long>(flushes),
+                static_cast<double>(indexed) / (1024.0 * 1024.0));
+    if(flushes > 1) {
+      std::cerr << "BUDGET FAILED: save.minute_of_typing turned " << kMinuteOfTyping
+                << " saves into " << flushes
+                << " index transactions -- something is reading the index once per save and the "
+                   "deferral in LibraryIndex is buying nothing\n";
+      ok = false;
+    }
+  }
 
   // The UI thread's half of recovery: the queue absorbs the disk, so this is a
   // copy and a notify however busy the writer is.

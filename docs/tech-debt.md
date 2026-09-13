@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-48 have been used. Closing an entry means deleting it and saying so in the
+TD-49 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -84,46 +84,40 @@ somebody minds the last 50 KB.
 
 ---
 
-## TD-48 — Autosave re-stores and re-tokenises the whole note, once a second
+## TD-49 — The Links panel's memo turns on the library revision, so a save is a query
 
-Every save goes through `LibraryIndex::refreshWrittenFile`, which upserts the
-note's row -- `notes.body` holds the entire buffer -- and then deletes and
-re-inserts its `notes_fts` entry, which tokenises the same bytes again. Both
-halves scale with the *note*, not with the edit, and autosave runs once a
-second for as long as somebody keeps typing.
+`RightPanelState::library` holds the panel's backlinks and tags, and its key is
+`{noteId, catalog().revision()}`. Every save bumps that revision — deliberately,
+because the things derived from a note's *body* do change on a save that touches
+none of the five fields the note list is built from. So while the Links view is
+showing, a save misses that memo and runs `LibraryIndex::backlinks`, which is a
+SQLite query and, since TD-48 was paid, is also what runs the note's deferred
+index write.
 
-**What it costs.** Measured on the 200 KB fixture in a 1,000-note library,
-with the split timers this entry was opened alongside:
+**What it costs.** Measured by `shell.links_panel_over_a_save`, which types a
+character and saves, twenty-four times, with the Links view on screen:
 
-| | per save |
-|---|---:|
-| `library_index.write_fts` (tokenise) | 1.02 ms |
-| `library_index.write_rows` (store the body) | 1.19 ms worst |
-| `library_index.refresh_file` self (the `COMMIT` those two fill) | 0.63 ms |
-| `library_index.refresh_file` total | **1.24 ms** |
-| `save.autosave_note`, the whole path | 2.73 ms |
+| | builds | reused | index transactions |
+|---|---:|---:|---:|
+| Links view showing, 24 saves | 26 | 24 | **25** |
+| Outline view showing, 60 saves (`save.minute_of_typing`) | — | — | **1** |
 
-So the index is about half of what an autosave costs, and the note's own
-durable file write is the other half. `library.index_body_bytes_stored` and
-`library.index_body_bytes_indexed` are the deterministic half of the same
-statement: a minute of typing in a 200 KB note puts 12 MB through each.
+The keystrokes are free either way; it is the saves that miss. So TD-48's
+coalescing — sixty saves into one whole-note store and tokenise — is undone
+entirely for a reader with the Links panel open, and a minute of typing goes
+back to putting the note through `notes.body` and `notes_fts` sixty times. On
+the 200 KB fixture that is 12 MB through each, once a second, which is the
+number TD-48's entry opened with.
 
-It is not a dropped frame -- 2.7 ms once a second against a 16.7 ms frame --
-so this is CPU and battery rather than stutter, which is why it is an entry
-rather than a fix. It is also the *floor* the eighth pass left: that one took
-a save from 18.7 ms to here by removing a whole-library tree walk and three
-whole-file reads, and what is left is genuinely the note being written twice.
-
-**Why it has not been paid.** The obvious shape is to write the row's list
-fields eagerly and the body and its FTS entry lazily -- flushed before a search
-reads them, or when the editor goes idle -- which coalesces sixty index writes
-into one. The cost is that `LibraryIndex`'s contract stops being "current after
-every write" and becomes "current before every read", and every reader has to
-be one that flushes: the search, the backlinks panel, the tag list, the
-external-change watcher, and whatever is added next. This tree's stated
-priority order is speed, then correctness, then low CPU, and buying CPU with
-correctness surface is the wrong way round for a cost that is not a dropped
-frame. Worth doing when either the number moves (a bigger note, a slower disk)
-or the flush points can be made structural rather than remembered -- a reader
-that cannot forget, the way `NoteCatalog` is the one path a note's file is
-written through.
+**Why it has not been paid.** The key is honest about what it is keyed on. The
+narrower truth is that a *body-only save of the selected note* cannot change who
+links to it: a backlink is another note's `links` row, and the only row the
+selected note's own save rewrites is its own. Acting on that means the catalog
+carrying two revisions — "the library changed" and "the library changed by
+something other than the open note's own body" — and every memo picking the
+right one. That is a new thing to get right per memo, and getting it wrong is a
+panel showing a stale list with nothing failing to compile, which is the failure
+mode this tree has spent several passes removing rather than adding. It is worth
+doing when a second memo wants the same distinction, so the split pays for more
+than one caller; until then the honest statement is that the Links panel costs
+a query per save and the counters say so.

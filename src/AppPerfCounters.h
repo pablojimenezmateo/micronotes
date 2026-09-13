@@ -30,6 +30,17 @@
   /* of these. Two counters because the two are separately avoidable.           */     \
   X(LibraryIndexBodyBytesStored, "library.index_body_bytes_stored")                    \
   X(LibraryIndexBodyBytesIndexed, "library.index_body_bytes_indexed")                  \
+  /* The two halves of TD-48's answer. A save *takes* the note's index write   */     \
+  /* and runs it later, so writes_deferred counts saves and index_flushes      */     \
+  /* counts the transactions they turned into; writes_coalesced is the         */     \
+  /* difference, the saves that never reached sqlite at all because a later    */     \
+  /* save of the same note replaced them. Typing for a minute should show      */     \
+  /* sixty deferred, one flushed and fifty-nine coalesced. flushes climbing    */     \
+  /* with deferred means something is reading the index once per keystroke and */     \
+  /* the deferral is buying nothing.                                           */     \
+  X(LibraryIndexWritesDeferred, "library.index_writes_deferred")                       \
+  X(LibraryIndexWritesCoalesced, "library.index_writes_coalesced")                     \
+  X(LibraryIndexFlushes, "library.index_flushes")                                      \
   X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \
   X(LibraryDirectoryEntriesVisited, "library.directory_entries_visited")               \

@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -81,8 +82,29 @@ struct Backlink {
   std::string line;
 };
 
+// One note's index write, taken by a save and not yet run. Opaque here: the row
+// it carries is `LibraryIndex.cpp`'s, and nothing outside that file has any
+// business knowing what a row is.
+struct DeferredNoteWrite;
+
+// The index of a library's notes, and the only door onto its tables.
+//
+// **A save defers the half of its write that scales with the note** -- the body
+// stored in `notes` and the same bytes tokenised into `notes_fts` -- and a read
+// runs it first. That was TD-48, and the reason the entry stood open for so
+// long is that "current before every read" is a contract a *caller* can forget.
+// It cannot be forgotten here, because there is no caller: every read of these
+// tables is a method on this class, so the flush is on the inside of the only
+// door there is. `architecture_a_library_index_read_cannot_skip_the_flush`
+// enumerates the public reads and fails on one this file has not accounted for,
+// which is what stops the next reader being added past the flush.
 class LibraryIndex {
 public:
+  LibraryIndex();
+  ~LibraryIndex();
+  LibraryIndex(const LibraryIndex&) = delete;
+  LibraryIndex& operator=(const LibraryIndex&) = delete;
+
   bool open(const std::filesystem::path& libraryRoot);
   bool migrate();
   bool rebuild();
@@ -180,6 +202,14 @@ private:
   };
   FileRefresh refreshPath(const std::filesystem::path& absolutePath, const WrittenNote* written);
 
+  // Runs whatever a save left standing, if anything. Const because every read
+  // is const and every read has to call it; that is the whole point of it.
+  void flushDeferred() const;
+  // The deferred write for `relative`, or null. A second save of the same note
+  // replaces it rather than queueing behind it -- sixty keystroke-driven saves
+  // of one note are one transaction, not sixty.
+  DeferredNoteWrite* deferredFor(std::string_view relative) const;
+
   std::filesystem::path root_;
   std::filesystem::path dbPath_;
   // Filled by every walk this class makes, so `directories()` never causes one.
@@ -193,6 +223,12 @@ private:
   // statement cache; the database is an implementation detail, not part of the
   // index's logical value.
   mutable persistence::SqliteDb db_;
+  // At most one, and that is a decision rather than a simplification: the
+  // deferral exists for the note somebody is typing into, and there is one of
+  // those. A save of a second note flushes the first, which is the same one
+  // transaction per note the eager path ran -- no coalescing, and no regression
+  // either.
+  mutable std::unique_ptr<DeferredNoteWrite> deferred_;
 };
 
 }

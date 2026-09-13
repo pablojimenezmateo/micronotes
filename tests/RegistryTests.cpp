@@ -398,3 +398,92 @@ MICRONOTES_TEST(architecture_a_menu_row_names_the_field_it_sets) {
       "neighbours in a field with a name rather than in which of four trailing "
       "bools is set");
 }
+
+// A read of the note index cannot skip the flush a save left for it.
+//
+// `LibraryIndex` defers the half of a save that scales with the note -- the
+// body stored in `notes`, the same bytes tokenised into `notes_fts`, the links
+// -- and runs it before the next read (TD-48). That contract has one failure
+// mode and it is silent: a *new* public read, added past the flush, answers
+// from tables that are one save behind. Nothing crashes; a search stops finding
+// a word that is on screen, once, until something else reads the index.
+//
+// So the public read surface is enumerated here, and every name on it is either
+// one this file says flushes -- checked against the source, not just listed --
+// or one it says reaches no table at all. Adding a public `const` method to
+// `LibraryIndex` fails this test until it has been put in one of the two.
+// `library_index_every_public_read_sees_a_deferred_save` is the other end: it
+// asks each of the flushing reads the question with a save standing.
+MICRONOTES_TEST(architecture_a_library_index_read_cannot_skip_the_flush) {
+  const auto header = repoRoot() / "src/library/LibraryIndex.h";
+  const std::string text = readText(header);
+  const auto classAt = text.find("class LibraryIndex {");
+  micronotes::tests::require(classAt != std::string::npos,
+                             "src/library/LibraryIndex.h no longer declares class LibraryIndex, so "
+                             "this test would scan nothing and pass forever");
+  const auto privateAt = text.find("\nprivate:", classAt);
+  micronotes::tests::require(privateAt != std::string::npos,
+                             "class LibraryIndex has no private section; this test reads the "
+                             "public one as everything before it");
+  // Comments stripped first: this class documents itself heavily and prose
+  // about "one `count(*)` over the primary key" parses as a declaration.
+  const std::string publicSection = withoutLineComments(text.substr(classAt, privateAt - classAt));
+
+  // Every public declaration that ends in `const;` -- which for this class is
+  // exactly its reads, because nothing const about a library index is anything
+  // else.
+  std::set<std::string> reads;
+  const std::regex declaration(R"(\b(\w+)\s*\([^;{]*\)\s*const\s*;)");
+  for(std::sregex_iterator it(publicSection.begin(), publicSection.end(), declaration), last;
+      it != last; ++it) {
+    reads.insert((*it)[1].str());
+  }
+
+  // Reads that go to the tables, and so must run what a save deferred.
+  const std::set<std::string> flushes {"search", "backlinks", "size", "notes", "ftsStoresBodies"};
+  // Reads that touch no table: `isOpen` asks the connection, and the other two
+  // hand back vectors the last tree walk filled.
+  const std::set<std::string> tableless {"isOpen", "directories", "companions"};
+
+  std::string unaccounted;
+  for(const auto& name : reads) {
+    if(flushes.count(name) || tableless.count(name)) continue;
+    unaccounted += (unaccounted.empty() ? "" : ", ") + name;
+  }
+  micronotes::tests::require(
+    unaccounted.empty(),
+    "these public reads of LibraryIndex are not accounted for: " + unaccounted +
+      " -- a save defers the note-sized half of its index write and a read runs it "
+      "first, so a read added past flushDeferred() answers from tables one save "
+      "behind. Call flushDeferred() and list it in this test's `flushes`, or, if it "
+      "genuinely reaches no table, in `tableless`");
+
+  // Listed is not wired. Each flushing read is checked against its own
+  // definition, because the way this contract actually breaks is a name that
+  // was added to the list above and to nothing else.
+  const std::filesystem::path sources[] = {repoRoot() / "src/library/LibraryIndex.cpp",
+                                           repoRoot() / "src/library/LibraryIndexSearch.cpp"};
+  std::string bodies;
+  for(const auto& source : sources) bodies += readText(source);
+  std::string missing;
+  for(const auto& name : flushes) {
+    micronotes::tests::require(reads.count(name) == 1,
+                               "this test lists `" + name +
+                                 "` as a flushing read of LibraryIndex, but the header declares no "
+                                 "such public const method -- the list has outlived the method");
+    const auto at = bodies.find("LibraryIndex::" + name + "(");
+    micronotes::tests::require(at != std::string::npos,
+                               "no definition of LibraryIndex::" + name + " under src/library/");
+    // As far as the function's closing brace, which for this file's style is a
+    // `}` alone at the start of a line.
+    const auto end = bodies.find("\n}\n", at);
+    const std::string body = bodies.substr(at, end == std::string::npos ? end : end - at);
+    if(body.find("flushDeferred()") == std::string::npos) {
+      missing += (missing.empty() ? "" : ", ") + name;
+    }
+  }
+  micronotes::tests::require(missing.empty(),
+                             "these LibraryIndex reads are listed as flushing but do not call "
+                             "flushDeferred(): " +
+                               missing);
+}

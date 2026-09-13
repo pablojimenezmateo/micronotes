@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/PanelState.h"
 #include "ui/TextRenderer.h"
 #include "ui/Outline.h"
 #include "ui/Rect.h"
@@ -28,6 +29,17 @@ void drawRightPanel(SDL_Renderer* renderer, ui::TextRenderer& text, UiRuntime& u
 // ordering dependency between two files, and the counters are the only thing
 // that can see it, so it needs a test that can reach in and read them.
 const std::vector<ui::OutlineEntry>& outlineFor(UiRuntime& ui);
+
+// The panel's other two views -- the backlinks and the tags -- memoised on the
+// note and the library's revision.
+//
+// Exposed for the same kind of reason as the outline above, and it is again
+// about a *key* rather than about what is drawn. A save bumps the library
+// revision, so this memo misses once per save while the Links view is showing,
+// and the miss runs a SQLite query -- which since TD-48 is also what runs the
+// note's deferred index write. That is a cost nothing could see from outside
+// this file, and the shell lane reads it here.
+const RightPanelState::LibraryViews& libraryViewsFor(UiRuntime& ui);
 
 // Returns whether the click landed on something the panel owns.
 // Whether the pointer is over something in the panel that answers a click: one

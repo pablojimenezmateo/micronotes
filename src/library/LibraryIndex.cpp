@@ -26,6 +26,60 @@ namespace micronotes::library {
 using persistence::SqliteDb;
 using persistence::Statement;
 
+// One note as every table here holds it.
+//
+// The body is either ours or the caller's, and `body()` says which without a
+// copy either way. A save already holds the bytes it wrote and they outlive the
+// transaction, so handing sqlite a view of them saves two copies of a whole
+// note per save: one into this row, and one more inside sqlite.
+//
+// `body()` rather than a `string_view` member, which is what the first attempt
+// used and what made the search tests fail: a row is *move-assigned* into place
+// by both refreshes, and a view of our own `owned` string dangles the moment
+// that string moves. Deriving it on read cannot get that wrong.
+//
+// At namespace scope rather than in the anonymous namespace below, because
+// `DeferredNoteWrite` holds one and that type is named in the header. A member
+// with internal linkage inside one with external linkage is what
+// `-Wsubobject-linkage` is about.
+struct NoteRow {
+  std::string id;
+  std::string relative;   // library-relative, generic form; the `path` column
+  std::string title;
+  std::string tags;       // joined, space separated
+  std::string icon;
+  long long mtime = 0;
+  long long size = 0;
+  // Exactly one of these carries the body, and `lends` says which.
+  std::string owned;      // the read path's own copy
+  std::string_view lent;  // the write path's view of the caller's buffer
+  bool lends = false;
+
+  std::string_view body() const { return lends ? lent : std::string_view(owned); }
+  void ownBody(std::string text) {
+    owned = std::move(text);
+    lends = false;
+  }
+  void lendBody(std::string_view text) {
+    lent = text;
+    lends = true;
+  }
+};
+
+// One note's index write, taken by a save and not yet run.
+//
+// It carries the row to write *and* what sqlite said about that note before the
+// first save that deferred -- which is not the same thing as what the row says
+// now, and both are needed. The row is what lands; the prior id and rowid are
+// what the landing has to clean up after, because a note whose front-matter id
+// changed leaves its old row behind under the same path.
+struct DeferredNoteWrite {
+  NoteRow row;
+  bool hadRow = false;
+  std::string priorId;
+  sqlite3_int64 priorRowId = 0;
+};
+
 namespace {
 
 // Writes one row per wikilink the note carries. Duplicates collapse on the
@@ -70,41 +124,6 @@ void recordLinks(sqlite3_stmt* stmt, const std::string& noteId, std::string_view
     sqlite3_step(stmt);
   }
 }
-
-// One note as every table here holds it.
-//
-// The body is either ours or the caller's, and `body()` says which without a
-// copy either way. A save already holds the bytes it wrote and they outlive the
-// transaction, so handing sqlite a view of them saves two copies of a whole
-// note per save: one into this row, and one more inside sqlite.
-//
-// `body()` rather than a `string_view` member, which is what the first attempt
-// used and what made the search tests fail: a row is *move-assigned* into place
-// by both refreshes, and a view of our own `owned` string dangles the moment
-// that string moves. Deriving it on read cannot get that wrong.
-struct NoteRow {
-  std::string id;
-  std::string relative;   // library-relative, generic form; the `path` column
-  std::string title;
-  std::string tags;       // joined, space separated
-  std::string icon;
-  long long mtime = 0;
-  long long size = 0;
-  // Exactly one of these carries the body, and `lends` says which.
-  std::string owned;      // the read path's own copy
-  std::string_view lent;  // the write path's view of the caller's buffer
-  bool lends = false;
-
-  std::string_view body() const { return lends ? lent : std::string_view(owned); }
-  void ownBody(std::string text) {
-    owned = std::move(text);
-    lends = false;
-  }
-  void lendBody(std::string_view text) {
-    lent = text;
-    lends = true;
-  }
-};
 
 // The five fields the note list is built from. Deliberately not the body and
 // not the stat: a save changes both of those and neither is visible in the
@@ -264,7 +283,56 @@ private:
 
 }
 
+LibraryIndex::LibraryIndex() = default;
+
+LibraryIndex::~LibraryIndex() {
+  // The last save's write, run on the way out. Losing it would lose no data --
+  // the note's own file is written durably *before* the index is told about it
+  // -- but the next start would have to read that file back to discover as
+  // much, and there is no reason to make it.
+  flushDeferred();
+}
+
+DeferredNoteWrite* LibraryIndex::deferredFor(std::string_view relative) const {
+  if(!deferred_) return nullptr;
+  return deferred_->row.relative == relative ? deferred_.get() : nullptr;
+}
+
+// The half of a save that scales with the note, run now.
+//
+// Every read of these tables calls this first, which is what makes "current
+// before every read" a property of the class rather than a rule its callers
+// have to remember -- see the header, and TD-48's entry for the four years the
+// difference cost.
+void LibraryIndex::flushDeferred() const {
+  if(!deferred_) return;
+  // Taken before it is attempted. A write that fails must not stay standing to
+  // be retried by every read after it: the file on disk is the truth, its stat
+  // no longer matches the row, and the next refresh of that file will index it
+  // again for the ordinary reason.
+  const std::unique_ptr<DeferredNoteWrite> pending = std::move(deferred_);
+  if(!db_.isOpen()) return;
+  perf::ScopeTimer timer("library_index.flush_deferred");
+  perf::addCounter(perf::CounterId::LibraryIndexFlushes);
+  SqliteDb& db = db_;
+  if(!db.exec("BEGIN IMMEDIATE;")) return;
+  NoteWriter writer(db);
+  bool ok = writer.ready() && writer.write(pending->row, /*intoEmptyTables=*/false);
+  // A note whose front-matter id changed left its old row behind under the same
+  // path -- the upsert keys on id, so it inserted rather than updated. The id
+  // and rowid are the ones sqlite held before the *first* save that deferred,
+  // which is the row that is actually still there.
+  if(ok && pending->hadRow && pending->priorId != pending->row.id) {
+    ok = writer.erase(pending->row.relative, pending->priorId, pending->priorRowId);
+  }
+  if(!ok || !db.exec("COMMIT;")) db.exec("ROLLBACK;");
+}
+
 bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
+  // Whatever the library being left had taken, before the connection under it
+  // is replaced. A deferred write is addressed by a library-relative path and
+  // means nothing against another root.
+  flushDeferred();
   root_ = libraryRoot;
   std::filesystem::create_directories(root_ / microcore::kAppDotDir);
   dbPath_ = root_ / microcore::kAppDotDir / "index.sqlite";
@@ -307,6 +375,9 @@ bool LibraryIndex::open(const std::filesystem::path& libraryRoot) {
 static constexpr int kSchemaVersion = 5;
 
 bool LibraryIndex::migrate() {
+  // A migration may drop and rebuild the very tables a save has taken a write
+  // for, so the write has to land under the old shape or not at all.
+  flushDeferred();
   if(!db_.isOpen()) return false;
   SqliteDb& db = db_;
   // No PRAGMA statements here: journal_mode, synchronous and foreign_keys are
@@ -365,6 +436,12 @@ bool LibraryIndex::migrate() {
 bool LibraryIndex::rebuild() {
   perf::ScopeTimer timer("library_index.rebuild");
   perf::addCounter(perf::CounterId::LibraryIndexRebuilds);
+  // Dropped rather than flushed, and this is the one place that is the right
+  // answer: a rebuild empties the three tables and reads every note off the
+  // disk again, and the note a save took a write for was written durably to
+  // that disk before the index was told. Running the write first would put a
+  // row into a table this line is about to delete.
+  deferred_.reset();
   if(!db_.isOpen()) return false;
   SqliteDb& db = db_;
   if(!db.exec("BEGIN IMMEDIATE; DELETE FROM notes; DELETE FROM notes_fts; DELETE FROM links;")) {
@@ -424,38 +501,74 @@ LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path&
   const auto relative = absolutePath.lexically_relative(root_).generic_string();
   if(relative.empty() || relative.starts_with("..")) return result;
 
+  // A write taken for this same note is the one thing that does not have to be
+  // run first -- it is about to be replaced. One taken for any *other* note is
+  // in the way: the statements below read and write the same tables, and they
+  // have to see what the last save said.
+  DeferredNoteWrite* standing = deferredFor(relative);
+  if(!standing) flushDeferred();
+
   // The row as it stands, by path. `notes_path` is what makes this a lookup
-  // rather than a scan of the whole table.
-  NoteRow before;
-  bool hadRow = false;
-  sqlite3_int64 rowId = 0;
-  if(Statement stmt = db.prepare("SELECT id,title,tags,icon,mtime,size,rowid FROM notes WHERE path=?;");
-     stmt) {
-    persistence::bindText(stmt, 1, relative);
-    if(sqlite3_step(stmt) == SQLITE_ROW) {
-      hadRow = true;
-      before.id = persistence::columnText(stmt, 0);
-      before.title = persistence::columnText(stmt, 1);
-      before.tags = persistence::columnText(stmt, 2);
-      before.icon = persistence::columnText(stmt, 3);
-      before.mtime = sqlite3_column_int64(stmt, 4);
-      before.size = sqlite3_column_int64(stmt, 5);
-      before.relative = relative;
-      rowId = sqlite3_column_int64(stmt, 6);
+  // rather than a scan of the whole table. Read only when nothing is standing:
+  // a deferred write already *is* the answer to this query, one memcpy away,
+  // and asking sqlite would get the row underneath it -- which would report
+  // every field of the last save as changed all over again, and would fail the
+  // stat check the last save has already passed.
+  NoteRow stored;
+  bool hadStoredRow = false;
+  sqlite3_int64 storedRowId = 0;
+  if(!standing) {
+    if(Statement stmt =
+         db.prepare("SELECT id,title,tags,icon,mtime,size,rowid FROM notes WHERE path=?;");
+       stmt) {
+      persistence::bindText(stmt, 1, relative);
+      if(sqlite3_step(stmt) == SQLITE_ROW) {
+        hadStoredRow = true;
+        stored.id = persistence::columnText(stmt, 0);
+        stored.title = persistence::columnText(stmt, 1);
+        stored.tags = persistence::columnText(stmt, 2);
+        stored.icon = persistence::columnText(stmt, 3);
+        stored.mtime = sqlite3_column_int64(stmt, 4);
+        stored.size = sqlite3_column_int64(stmt, 5);
+        stored.relative = relative;
+        storedRowId = sqlite3_column_int64(stmt, 6);
+      }
     }
   }
+
+  // Two different "before"s, and conflating them is the bug this split exists
+  // to avoid. `before` is what the tables will say once everything taken has
+  // run, and is what a change is measured against. `prior*` is what sqlite
+  // actually holds right now, and is the only thing an `erase` can address.
+  const NoteRow& before = standing ? standing->row : stored;
+  const bool knownBefore = standing != nullptr || hadStoredRow;
+  const bool hadPriorRow = standing ? standing->hadRow : hadStoredRow;
+  const std::string priorId = standing ? standing->priorId : stored.id;
+  const sqlite3_int64 priorRowId = standing ? standing->priorRowId : storedRowId;
 
   const auto disk = platform::statFile(absolutePath);
   if(!disk.exists) {
     // Gone. Nothing to do unless the index still thinks it is there, which is
-    // what a delete and the vacated end of a move both look like.
-    if(!hadRow) {
+    // what a delete and the vacated end of a move both look like. A write taken
+    // for a file that no longer exists is dropped rather than run: writing the
+    // row back and erasing it again in one transaction is the same end state
+    // for twice the work.
+    deferred_.reset();
+    if(!knownBefore) {
       result.ok = true;
+      return result;
+    }
+    if(!hadPriorRow) {
+      // Never reached sqlite at all: the note was created and deleted between
+      // two reads. Nothing to erase, and the note list still has to be told.
+      result.ok = true;
+      result.listFieldsChanged = true;
+      result.rowsWritten = true;
       return result;
     }
     if(!db.exec("BEGIN IMMEDIATE;")) return result;
     NoteWriter writer(db);
-    const bool ok = writer.ready() && writer.erase(relative, before.id, rowId);
+    const bool ok = writer.ready() && writer.erase(relative, priorId, priorRowId);
     result.ok = ok && db.exec("COMMIT;");
     if(!result.ok) db.exec("ROLLBACK;");
     // A row that went away is a row the note list was showing.
@@ -466,45 +579,76 @@ LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path&
 
   // Unchanged since the row was written: this is the common answer when the
   // watcher reports our own write back to us, and it costs one stat.
-  if(hadRow && before.mtime == static_cast<long long>(disk.mtimeNanos) &&
+  if(knownBefore && before.mtime == static_cast<long long>(disk.mtimeNanos) &&
      before.size == static_cast<long long>(disk.size)) {
     result.ok = true;
     return result;
   }
 
-  NoteRow row;
   if(written) {
-    row = noteRowFrom(*written->metadata, absolutePath, relative,
-                      static_cast<long long>(disk.mtimeNanos), static_cast<long long>(disk.size));
-    // A view of the caller's bytes. Nothing is read, nothing is parsed, and
-    // nothing is copied: the body reaches sqlite straight from the buffer the
-    // save wrote, which outlives the transaction below.
-    row.lendBody(written->body);
-  } else {
+    NoteRow row =
+      noteRowFrom(*written->metadata, absolutePath, relative,
+                  static_cast<long long>(disk.mtimeNanos), static_cast<long long>(disk.size));
+    result.listFieldsChanged = !knownBefore || !sameListFields(before, row);
+    result.rowsWritten = true;
+    result.ok = true;
+    // The one copy this path makes, and the reason it is worth making: the
+    // caller lends its buffer for the length of the call and the write is not
+    // going to happen inside it. A 200 KB memcpy stands in for storing 200 KB
+    // in `notes` and tokenising the same 200 KB into `notes_fts` -- and for
+    // fifty-nine saves out of sixty it stands in for them permanently, because
+    // the next keystroke's save replaces this row before anything reads it.
+    row.ownBody(std::string(written->body));
+    auto pending = std::make_unique<DeferredNoteWrite>();
+    pending->row = std::move(row);
+    pending->hadRow = hadPriorRow;
+    pending->priorId = priorId;
+    pending->priorRowId = priorRowId;
+    perf::addCounter(perf::CounterId::LibraryIndexWritesDeferred);
+    if(standing) perf::addCounter(perf::CounterId::LibraryIndexWritesCoalesced);
+    // `standing` -- and `before` with it -- dies here, which is why every
+    // answer above was taken before this line.
+    deferred_ = std::move(pending);
+    return result;
+  }
+
+  // Read off the disk, so this is not a save and there is nothing to coalesce
+  // with: whatever was taken for this note has been overtaken by the file
+  // itself. Written straight through, the way every refresh used to be.
+  NoteRow row;
+  {
     perf::addCounter(perf::CounterId::LibraryIndexFilesReread);
     perf::ScopeTimer readTimer("library_index.refresh_file.read");
     Library library(root_);
     row = readNoteRow(library, absolutePath, relative, static_cast<long long>(disk.mtimeNanos),
                       static_cast<long long>(disk.size));
   }
+  // Before the drop below, which takes `before` with it.
+  const bool changed = !knownBefore || !sameListFields(before, row);
+  deferred_.reset();
 
   if(!db.exec("BEGIN IMMEDIATE;")) return result;
   NoteWriter writer(db);
   bool ok = writer.ready() && writer.write(row, /*intoEmptyTables=*/false);
   // A note whose front-matter id changed leaves its old row behind under the
   // same path -- the upsert keys on id, so it inserted rather than updated.
-  if(ok && hadRow && before.id != row.id) ok = writer.erase(relative, before.id, rowId);
+  if(ok && hadPriorRow && priorId != row.id) ok = writer.erase(relative, priorId, priorRowId);
   result.ok = ok && db.exec("COMMIT;");
   if(!result.ok) {
     db.exec("ROLLBACK;");
     return result;
   }
-  result.listFieldsChanged = !hadRow || !sameListFields(before, row);
+  result.listFieldsChanged = changed;
   result.rowsWritten = true;
   return result;
 }
 
 bool LibraryIndex::refreshChangedFiles() {
+  // This walk decides what to re-read by comparing each file's stat against its
+  // row, and a row a save has taken a write for is behind its file by exactly
+  // that write -- so without this the whole point of deferring would be undone
+  // here, by re-reading the note off the disk to write what is already held.
+  flushDeferred();
   perf::ScopeTimer timer("library_index.refresh_changed_files");
   perf::addCounter(perf::CounterId::LibraryIndexRefreshCalls);
   if(!db_.isOpen()) return false;
@@ -621,6 +765,7 @@ bool LibraryIndex::refreshChangedFiles() {
 }
 
 std::size_t LibraryIndex::size() const {
+  flushDeferred();
   if(!db_.isOpen()) return 0;
   Statement stmt = db_.prepare("SELECT count(*) FROM notes;");
   if(!stmt || sqlite3_step(stmt) != SQLITE_ROW) return 0;
@@ -632,6 +777,11 @@ bool LibraryIndex::isOpen() const {
 }
 
 bool LibraryIndex::ftsStoresBodies() const {
+  // Reads `sqlite_master` and nothing a save writes, so this one does not need
+  // it -- but the rule is worth more than the transaction it saves: every
+  // public read of this class flushes, so there is no per-method judgement for
+  // the next one to get wrong. A flush with nothing taken is a null check.
+  flushDeferred();
   if(!db_.isOpen()) return false;
   // Read off the table's own DDL, not probed by querying it: a contentless
   // table still *declares* every column and answers NULL for it rather than
@@ -646,6 +796,7 @@ bool LibraryIndex::ftsStoresBodies() const {
 
 std::vector<IndexedNote> LibraryIndex::notes() const {
   perf::ScopeTimer timer("library_index.notes");
+  flushDeferred();
   std::vector<IndexedNote> notes;
   if(!db_.isOpen()) return notes;
   Statement stmt = db_.prepare("SELECT id,path,title,tags,icon FROM notes;");

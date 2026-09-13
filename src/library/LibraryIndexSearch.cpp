@@ -161,6 +161,9 @@ static void collectRows(sqlite3_stmt* stmt, std::vector<SearchResult>& out,
 }
 
 std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchScope scope) const {
+  // What the last save took. `notes_fts` is the table it defers, so this is
+  // the read that would be wrong without it.
+  flushDeferred();
   perf::ScopeTimer timer("library_index.search");
   perf::addCounter(perf::CounterId::LibrarySearchCalls);
   std::vector<SearchResult> out;
@@ -222,6 +225,8 @@ std::vector<SearchResult> LibraryIndex::search(std::string_view query, SearchSco
 }
 
 std::vector<Backlink> LibraryIndex::backlinks(std::string_view title, std::string_view stem) const {
+  // `links` is rewritten by the same deferred write.
+  flushDeferred();
   std::vector<Backlink> found;
   if(!db_.isOpen() || (title.empty() && stem.empty())) return found;
   // NOCASE so a link written in a different case still counts, which is the

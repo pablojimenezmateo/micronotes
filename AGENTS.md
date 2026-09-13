@@ -10,8 +10,8 @@ First-stop operating guide for agents working in this repository.
   something is unaccounted for, and add to it rather than leaving a `TODO`.
   Three entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
-  writing a CFF writer, and one about autosave re-tokenising the whole note
-  into the search index once a second. So
+  writing a CFF writer, and one about the Links panel running a query on every
+  save because its memo turns on the library's revision. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.
