@@ -179,6 +179,14 @@
   /* could stop working with nothing to show it.                                */    \
   X(RightPanelOutlineBlocksBorrowed, "right_panel.outline_blocks_borrowed")            \
   X(RightPanelOutlineScans, "right_panel.outline_scans")                              \
+  /* Blocks the outline walked to find the note's headings. The borrow above    */   \
+  /* removed the *scan*; this is what is left, and it is still the whole        */   \
+  /* partition every keystroke -- 9,612 blocks of 88 bytes on the 200 KB        */   \
+  /* fixture, which is 845 KB streamed to read one enum field per block. Read   */   \
+  /* against outline_builds: the ratio is the note's block count, and it stays  */   \
+  /* the note's block count until the rebuild is bounded by the edit. See       */   \
+  /* TD-50.                                                                      */   \
+  X(RightPanelOutlineBlocksWalked, "right_panel.outline_blocks_walked")                \
   X(RightPanelLibraryBuilds, "right_panel.library_builds")                             \
   X(RightPanelLibraryReused, "right_panel.library_reused")                             \
   /* The palette's filter: runs against calls served from the standing answer,  */    \

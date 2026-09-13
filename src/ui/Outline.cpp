@@ -2,6 +2,8 @@
 
 #include "doc/BlockScan.h"
 
+#include "core/perf/PerformanceCounters.h"
+
 #include <algorithm>
 #include <limits>
 
@@ -15,6 +17,10 @@ void buildOutline(std::string_view source, doc::BlockSpan blocks,
   // The block scan already knows the difference between a heading and a line
   // that starts with a hash inside a fence, so the outline asks it rather than
   // scanning for "#" itself and getting that wrong in a second place.
+  // Tallied in one go rather than per block: the counter is a relaxed atomic
+  // add and this loop is the thing being counted.
+  microcore::perf::addCounter(microcore::perf::CounterId::RightPanelOutlineBlocksWalked,
+                              blocks.size());
   for(const auto& block : blocks) {
     if(block.kind != doc::BlockKind::Heading) continue;
     OutlineEntry entry;

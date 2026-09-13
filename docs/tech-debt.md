@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-49 have been used. Closing an entry means deleting it and saying so in the
+TD-50 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -121,3 +121,61 @@ mode this tree has spent several passes removing rather than adding. It is worth
 doing when a second memo wants the same distinction, so the split pays for more
 than one caller; until then the honest statement is that the Links panel costs
 a query per save and the counters say so.
+
+---
+
+## TD-50 — The outline rebuild is bounded by the note, not by the edit
+
+`ui::outlineInto` walks the whole block partition on every keystroke. The ninth
+pass removed the *scan* -- the outline borrows the partition the reading page
+already spliced rather than deriving one, which took it from 226 us to about
+43 -- but what is left still reads every block of the note to find the ones that
+are headings, and the memo it sits behind is keyed on `editor.revision()`, which
+moves with every typed character. That is the shape `docs/performance.md` names
+over and over: a memo on the editor's revision misses by construction, so the
+question on a miss is not "recompute it" but "how much of it".
+
+**What it costs.** Deterministically, `right_panel.outline_blocks_walked` over
+one harness run is 480,600 against `right_panel.outline_builds` of 50 — 9,612
+blocks a build, which is exactly the 200 KB fixture's block count. A
+`doc::SourceBlock` is 88 bytes, so a keystroke streams 845 KB to read one enum
+field per block, and the arithmetic matches the clock: 845 KB at this machine's
+streaming rate is about 42 us.
+
+On the clock, over three runs of the shell lane:
+
+| | median |
+|---|---:|
+| `shell.live_page` (the edit and the page's own relayout) | 46–55 us |
+| `shell.outline_panel` (the same, plus the outline) | 89–109 us |
+| `shell.keystroke` (everything) | 138–182 us |
+
+So the outline is 43–54 us of a keystroke and roughly **30% of what typing
+costs** with the right panel showing — which is the default arrangement, because
+Outline is the default view. It is the largest single thing a keystroke does
+above the layout now that the status bar, the raw pane and the find bar have all
+been bounded.
+
+**Why it has not been paid.** Two shapes would fix it and they are not the same
+size, which is the thing to decide before starting.
+
+The one that matches the twelfth and thirteenth passes is an
+`outlineUpdate(previous, edit)`: keep the standing entries, shift the offsets of
+those past the edit by its byte delta, and rebuild only the entries whose blocks
+fall in the window the edit touched. That is the established pattern and it
+proves the same way — equality with the unbounded computation over a long random
+sequence of edits. It needs something `doc::DocumentLayout` does not expose
+today: the *range* of block indices the last update rescanned. `lastRelaidBlocks()`
+is a count, not a range, and `UpdatePass` computes `head_`/`tail_` and throws
+them away.
+
+The smaller one is to have the partition carry the answer: `DocumentLayout`
+already rescans a window on every update and could keep the indices of the
+blocks that came out `Heading`, so the outline walks the headings rather than
+the note. That is less code and no new incremental algorithm to prove, at the
+cost of a derived list inside `doc::` that has to be kept in step — the failure
+mode this tree has spent several passes removing rather than adding.
+
+Neither is a dropped frame at 43 us against 16.7 ms, which is why this is an
+entry rather than a commit; it is the next thing worth doing on the keystroke
+path, and the counter above is what will say whether it worked.
