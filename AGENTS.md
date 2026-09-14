@@ -22,6 +22,10 @@ First-stop operating guide for agents working in this repository.
   made `ui` and `library` a cycle without anything failing.
 - Build with `cmake`, test with `ctest`, and prefer `tools/run-checks.sh` so output lands in a readable log.
 - Performance work is measured, not guessed: `docs/performance.md` explains the three instruments and the harness.
+- Releases go through `tools/release.sh`, never by hand: see **Releases** below
+  and `docs/release-checklist.md`. A `.deb` is not releasable until
+  `scripts/ci/verify-deb-runtime.sh` has shown it starts on a machine that is
+  not this one.
 
 ## The Core Rule
 
@@ -171,6 +175,7 @@ tools/run-checks.sh perf    # -> /tmp/micronotes-perf.log (Release harness)
 tools/run-checks.sh asan    # -> /tmp/micronotes-asan.log
 tools/run-checks.sh ubsan   # -> /tmp/micronotes-ubsan.log
 tools/run-checks.sh tsan    # -> /tmp/micronotes-tsan.log
+tools/run-checks.sh release # ctest + doc-version gate on an ALREADY-BUILT tree
 tools/run-checks.sh all     # all four in sequence
 ```
 
@@ -188,6 +193,52 @@ is not. Check `uptime` before believing a number.
 
 Extra CMake arguments (a hand-pointed SQLite, for instance) go through
 `CMAKE_EXTRA_ARGS` and apply to every configure the script performs.
+
+## Releases
+
+`docs/release-checklist.md` is the canonical procedure; `tools/release.sh` is
+that procedure as one command. **Local-only by default** -- bump, build, test
+gate, package, clean-system verification, checksum, sign, then stop with the
+artifacts staged and git untouched:
+
+```bash
+tools/release.sh 0.7.0                  # staged; nothing committed or pushed
+tools/release.sh 0.7.0 --publish        # + commit, signed tag, push, gh release
+tools/release.sh 0.7.0 --publish --changelog-file notes.md   # curated section body
+```
+
+Three things about it are not negotiable, and each exists because skipping it
+shipped something broken:
+
+- **`CMakeLists.txt` is the only source of truth for the version.**
+  `tools/check-doc-versions.sh` asserts that every public surface -- the README
+  status line, the README install examples, the newest `CHANGELOG.md` entry --
+  states it. It is a hard gate in `release.sh` (run after the bump *and* again
+  before publishing) and rides along in the ordinary `tests` lane, so drift is
+  found in the local loop rather than mid-release. Add a new public surface that
+  names the version and add it to that script in the same change.
+
+- **A package is not releasable until it has been shown to start on a machine
+  that is not this one.** `scripts/ci/verify-deb-runtime.sh` extracts the
+  `.deb`, resolves every `NEEDED` soname against the package's own RUNPATH and
+  the *stock* system directories -- `/usr/local` deliberately excluded, since
+  that is where this machine's hand-built SDL3 lives -- and then launches the
+  packaged binary with the ld.so cache inhibited. `release.sh` runs it *before*
+  signing and refuses to sign a package that fails. No distro packages SDL3, so
+  `dpkg-shlibdeps` emits no dependency for it and every other check stays green
+  over the hole; see the runtime-library bundling block in `CMakeLists.txt`.
+  microide published that package twenty times before anyone installed one.
+
+- **The release build carries no LTO**, for the reason in
+  `docs/performance.md` ("The tenth pass"): it was measured and came out mixed
+  rather than a win, and the hot per-token/per-block/per-frame units are defined
+  in headers instead. Adding it to the release build would ship codegen no perf
+  run has ever measured.
+
+`micronotes --version` prints the compiled-in version, and `release.sh` asserts
+the built binary reports the version that was just baked in -- a release that
+says 0.7.0 everywhere except in the artifact is the one failure mode a version
+bump has.
 
 ## Performance Instrumentation
 

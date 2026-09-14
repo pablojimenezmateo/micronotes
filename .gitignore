@@ -6,8 +6,16 @@ build/
 build-*/
 _CPack_Packages/
 
-# Packaged artifacts
+# Packaged artifacts. The release driver stages the .deb and its detached
+# signatures and checksum in the repo root before uploading them to the GitHub
+# release, and `release.sh --publish` runs `git add -A` -- without these an
+# 11 MB package would be committed on every release. The exported PUBLIC signing
+# key (micronotes-signing-key.asc) is deliberately NOT matched: it is tracked,
+# because a user verifying a download needs it from somewhere they can trust.
 *.deb
+/micronotes_*_amd64.deb.asc
+/micronotes_*_amd64.deb.sha256
+/micronotes_*_amd64.deb.sha256.asc
 
 # Agent worktrees. `session-compare.sh` and the parity work both build a
 # baseline in a git worktree under here; a worktree's `.git` file makes it look

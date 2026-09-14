@@ -11,6 +11,7 @@
 #   tools/run-checks.sh asan         # AddressSanitizer + ctest   -> /tmp/<app>-asan.log
 #   tools/run-checks.sh ubsan        # UndefinedBehavior + ctest  -> /tmp/<app>-ubsan.log
 #   tools/run-checks.sh tsan         # ThreadSanitizer + ctest    -> /tmp/<app>-tsan.log
+#   tools/run-checks.sh release      # test an already-built Release tree
 #   tools/run-checks.sh all          # every lane above, in sequence
 #
 # The full console output (build + test) is tee'd to the log; the exit status is
@@ -66,6 +67,9 @@ check_tests() {
     cmake -S . -B build "$@"
     cmake --build build -j'"$JOBS"'
     ctest --test-dir build --output-on-failure
+    # Cheap, and it is the difference between finding version drift now and
+    # finding it with a half-cut release on the machine.
+    bash tools/check-doc-versions.sh
   ' _ "${EXTRA_CMAKE_ARGS[@]}"
   local rc=$?
   echo "run-checks: tests finished (exit $rc); log at $log"
@@ -204,9 +208,38 @@ check_clang_build() {
   return $rc
 }
 
+# The release gate.
+#
+# Unlike every other lane this one does NOT configure or build: it runs ctest
+# against a tree tools/release.sh has already built as Release, so the artifact
+# that gets signed is the artifact that was tested. Reconfiguring here would
+# silently retest a Debug tree and report green for a package nobody ran.
+#
+# The build directory comes from MICRONOTES_RELEASE_BUILD_DIR (release.sh sets
+# it); `build` is the default so the lane is still usable by hand.
+check_release() {
+  local build_dir="${MICRONOTES_RELEASE_BUILD_DIR:-build}"
+  local log="${LOG_DIR}/${APP}-release.log"
+
+  if [[ ! -f "$build_dir/CMakeCache.txt" ]]; then
+    echo "run-checks: '$build_dir' is not a configured build tree; release.sh builds it first" >&2
+    return 2
+  fi
+
+  run_logged "$log" bash -c '
+    set -e
+    bash tools/check-doc-versions.sh
+    ctest --test-dir '"$build_dir"' --output-on-failure
+  '
+  local rc=$?
+  echo "run-checks: release finished (exit $rc); log at $log"
+  return $rc
+}
+
 TARGET="${1:-tests}"
 case "$TARGET" in
   tests) check_tests ;;
+  release) check_release ;;
   perf) check_perf ;;
   clang-build) check_clang_build ;;
   asan|ubsan|tsan) check_sanitizer "$TARGET" ;;
@@ -223,7 +256,7 @@ case "$TARGET" in
     exit $rc
     ;;
   *)
-    echo "usage: run-checks.sh [tests|perf|clang-build|asan|ubsan|tsan|all]" >&2
+    echo "usage: run-checks.sh [tests|release|perf|clang-build|asan|ubsan|tsan|all]" >&2
     exit 2
     ;;
 esac

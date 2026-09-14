@@ -66,6 +66,34 @@ keystroke away.
 - Light and dark, HiDPI, and it stays fast: re-layout after a keystroke in a
   200 KB note is budgeted and measured, not hoped for.
 
+## Install
+
+Tagged `v0.5.0`. micronotes ships as a signed Debian package for x86_64 Linux;
+it bundles the SDL3 libraries no Debian-family distro packages yet, so it needs
+nothing hand-built to start.
+
+Download the `.deb`, its checksum, and their signatures from the
+[latest release](https://github.com/pablojimenezmateo/micronotes/releases/latest),
+then check both before installing anything:
+
+```sh
+# The checksum says the download is intact.
+sha256sum -c micronotes_0.5.0_amd64.deb.sha256
+
+# The signature says it is the package the maintainer built. Import the key
+# once -- it is attached to every release as micronotes-signing-key.asc.
+gpg --import micronotes-signing-key.asc
+gpg --verify micronotes_0.5.0_amd64.deb.asc micronotes_0.5.0_amd64.deb
+
+sudo apt install ./micronotes_0.5.0_amd64.deb
+```
+
+The release key is `0E32 39B7 1B0F 9598 B71A FB7B 6D33 9CCB FC51 5D70`
+(Pablo Jimenez Mateo). `micronotes --version` reports the installed version.
+
+Building from source instead is a first-class path and is what
+[docs/build.md](docs/build.md) covers.
+
 See [docs/build.md](docs/build.md) for the required Linux toolchain, SDL3-from-source setup, local build commands, and the full list of runtime controls.
 
 See [docs/library-format.md](docs/library-format.md) for the local library format, Markdown scope, and attachment behavior.
