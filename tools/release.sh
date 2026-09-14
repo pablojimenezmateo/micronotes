@@ -76,6 +76,37 @@ if [[ $PUBLISH == 1 ]]; then
   command -v gh >/dev/null || die "--publish needs the gh CLI"
 fi
 
+# Can the release key actually sign, right now?
+#
+# Being in the keyring is not the question -- the question is whether
+# gpg-agent will hand over the secret key without a pinentry prompt this
+# process cannot answer. Asked HERE, before the build and the test gate, because
+# finding out at step 6 costs a full Release build and a test run and leaves the
+# tree bumped half-way through a release. The probe is a real detached signature
+# over a temporary file, because nothing weaker distinguishes "key present" from
+# "key usable".
+HAVE_KEY=0
+if gpg --list-secret-keys "${KEY_FPR// /}" >/dev/null 2>&1; then
+  _probe="$(mktemp)"; printf 'micronotes release signing probe\n' > "$_probe"
+  if gpg --local-user "${KEY_FPR// /}" --detach-sign --armor --yes \
+         --output "$_probe.asc" "$_probe" >/dev/null 2>&1; then
+    HAVE_KEY=1
+  fi
+  rm -f "$_probe" "$_probe.asc"
+  if [[ $HAVE_KEY == 0 ]]; then
+    die "release key $KEY_FPR is in the keyring but will not sign -- gpg-agent
+   needs the passphrase and cannot prompt from here. Unlock it once in your own
+   terminal, then re-run:
+
+     printf test | gpg --local-user ${KEY_FPR// /} --detach-sign --armor -o /dev/null -
+
+   (Or pass --skip-tests nothing: there is no flag to publish unsigned. Every
+   release carries both signatures.)"
+  fi
+elif [[ $PUBLISH == 1 ]]; then
+  die "release key $KEY_FPR is not in this keyring; --publish will not ship an unsigned release"
+fi
+
 confirm() {
   [[ $ASSUME_YES == 1 ]] && return 0
   read -r -p "   $1 [y/N] " a; [[ "$a" == [yY] ]]
@@ -190,10 +221,17 @@ bash "$REPO/scripts/ci/verify-deb-runtime.sh" "$DEB_PATH" \
 cp "$DEB_PATH" "$REPO/$DEB"
 ( cd "$REPO" && sha256sum "$DEB" > "$DEB.sha256" )
 info "checksum: $(cut -d' ' -f1 "$REPO/$DEB.sha256")"
-if gpg --list-secret-keys "${KEY_FPR// /}" >/dev/null 2>&1; then
-  gpg --detach-sign --armor --yes "$REPO/$DEB"
-  gpg --detach-sign --armor --yes "$REPO/$DEB.sha256"
-  ( cd "$REPO" && gpg --verify "$DEB.asc" "$DEB" )
+if [[ $HAVE_KEY == 1 ]]; then
+  # The guard above already proved this key signs, so a failure here is a real
+  # one and must stop the release rather than leave an unsigned artifact behind
+  # under a `set -e` abort with nothing said.
+  gpg --local-user "${KEY_FPR// /}" --detach-sign --armor --yes "$REPO/$DEB" \
+    || die "signing $DEB failed"
+  gpg --local-user "${KEY_FPR// /}" --detach-sign --armor --yes "$REPO/$DEB.sha256" \
+    || die "signing $DEB.sha256 failed"
+  # Round-trip what was just written, rather than trusting that it was.
+  ( cd "$REPO" && gpg --verify "$DEB.asc" "$DEB" ) \
+    || die "the signature just written does not verify against $DEB"
   # The public half ships with every release, so a user can verify without
   # having met the project before.
   gpg --armor --export "${KEY_FPR// /}" > "$REPO/micronotes-signing-key.asc"
