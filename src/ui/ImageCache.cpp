@@ -97,8 +97,13 @@ SDL_Texture* ImageCache::load(const std::filesystem::path& path, float& width, f
   return entry.texture;
 #else
   (void)path;
-  (void)width;
-  (void)height;
+  // Answered, not left alone. The size is an out-parameter, and a caller that
+  // measures several images through one pair of variables would otherwise carry
+  // the previous image's box onto this one -- a build without SDL3_image can
+  // decode nothing, so every image in it has no size rather than the last size
+  // that happened to be asked for.
+  width = 0.0f;
+  height = 0.0f;
   return nullptr;
 #endif
 }
