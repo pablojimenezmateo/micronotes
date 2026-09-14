@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(micronotes VERSION 0.6.0 LANGUAGES CXX C)
+project(micronotes VERSION 0.5.0 LANGUAGES CXX C)
 
 if(NOT UNIX OR APPLE)
   message(FATAL_ERROR "micronotes is Linux-only for this product scope.")
@@ -474,6 +474,133 @@ configure_file(
   @ONLY
 )
 
+# --- Runtime library bundling -----------------------------------------------
+#
+# micronotes links libSDL3.so.0 and libSDL3_ttf.so.0, and no Debian-family
+# distro packages SDL3 yet -- so on this machine, and on every machine that can
+# build this project at all, SDL3 is a from-source install under /usr/local.
+#
+# CPACK_DEBIAN_PACKAGE_SHLIBDEPS delegates to dpkg-shlibdeps, which can only
+# emit a `Depends:` for a library owned by an installed .deb. It maps
+# /usr/local/lib/libSDL3.so.0 to nothing and says nothing about it. The result
+# is a package whose binary has `NEEDED libSDL3.so.0`, no matching Depends:, no
+# RUNPATH and no bundled copy: `apt install ./micronotes.deb` satisfies every
+# listed dependency and the binary then dies in the loader on any machine but
+# the one that built it. microide shipped exactly that package for twenty
+# releases before anyone installed one.
+#
+# So: any linked library dpkg does NOT own is copied into the package under
+# ${libdir}/micronotes and reached through an $ORIGIN-relative RUNPATH.
+# Libraries dpkg DOES own (sqlite3, fontconfig, the C++ runtime) keep going
+# through shlibdeps, which is both correct and smaller. The package is then
+# self-sufficient no matter where SDL3 was found at configure time, and it keeps
+# working unchanged on the day a distro starts packaging SDL3 -- on that day the
+# ownership check simply starts returning "owned" and the bundling stops.
+set(MICRONOTES_BUNDLED_RUNTIME_LIBDIR "${CMAKE_INSTALL_LIBDIR}/micronotes")
+
+# Resolve an imported target to the real .so on disk, following symlinks, then
+# decide whether dpkg owns it. Sets <out_var> to the resolved path when it needs
+# bundling and to an empty string when it does not.
+function(micronotes_resolve_unpackaged_library target out_var)
+  set(${out_var} "" PARENT_SCOPE)
+  if(target STREQUAL "" OR NOT TARGET ${target})
+    return()
+  endif()
+
+  # IMPORTED_LOCATION is set per-config by CMake config packages; pkg-config
+  # imported targets carry no location at all, so fall back to searching the
+  # link interface for an absolute path to a shared object.
+  set(_lib "")
+  get_target_property(_lib ${target} IMPORTED_LOCATION)
+  if(NOT _lib)
+    foreach(_cfg RELEASE RELWITHDEBINFO MINSIZEREL DEBUG NOCONFIG)
+      get_target_property(_lib_cfg ${target} IMPORTED_LOCATION_${_cfg})
+      if(_lib_cfg)
+        set(_lib "${_lib_cfg}")
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(NOT _lib)
+    get_target_property(_link_libs ${target} INTERFACE_LINK_LIBRARIES)
+    if(_link_libs)
+      foreach(_candidate IN LISTS _link_libs)
+        if(_candidate MATCHES "\\.so(\\.[0-9]+)*$" AND IS_ABSOLUTE "${_candidate}")
+          set(_lib "${_candidate}")
+          break()
+        endif()
+      endforeach()
+    endif()
+  endif()
+  if(NOT _lib OR NOT EXISTS "${_lib}")
+    return()
+  endif()
+
+  get_filename_component(_lib "${_lib}" REALPATH)
+
+  # dpkg-owned means shlibdeps produces a correct Depends: and there is nothing
+  # to bundle. Not owned means bundling is the only way the package can start on
+  # a machine that is not this one.
+  find_program(MICRONOTES_DPKG_QUERY dpkg-query)
+  if(MICRONOTES_DPKG_QUERY)
+    execute_process(
+      COMMAND "${MICRONOTES_DPKG_QUERY}" --search "${_lib}"
+      RESULT_VARIABLE _owned
+      OUTPUT_QUIET
+      ERROR_QUIET)
+    if(_owned EQUAL 0)
+      return()
+    endif()
+  endif()
+
+  set(${out_var} "${_lib}" PARENT_SCOPE)
+endfunction()
+
+# Every runtime library the shipped binary links, not just the ones expected to
+# be unpackaged. The ownership check is what decides; listing sqlite3 and the
+# SDL3 satellites here costs nothing and means a future /usr/local build of any
+# of them is caught by the same rule rather than by a user's loader.
+set(MICRONOTES_BUNDLED_LIBRARIES "")
+foreach(_runtime_target
+    ${MICRONOTES_SDL3_TARGET}
+    ${MICRONOTES_SDL3_TTF_TARGET}
+    ${MICRONOTES_SDL3_IMAGE_TARGET}
+    ${MICRONOTES_SQLITE_TARGET})
+  micronotes_resolve_unpackaged_library("${_runtime_target}" _resolved)
+  if(NOT _resolved STREQUAL "")
+    list(APPEND MICRONOTES_BUNDLED_LIBRARIES "${_resolved}")
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES MICRONOTES_BUNDLED_LIBRARIES)
+
+if(MICRONOTES_BUNDLED_LIBRARIES)
+  # Install under the SONAME, not the realpath basename: the loader resolves
+  # `NEEDED libSDL3.so.0`, and the file on disk is libSDL3.so.0.5.0.
+  foreach(_bundled IN LISTS MICRONOTES_BUNDLED_LIBRARIES)
+    execute_process(
+      COMMAND sh -c "objdump -p '${_bundled}' | awk '/SONAME/ {print $2; exit}'"
+      OUTPUT_VARIABLE _soname
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if(_soname STREQUAL "")
+      get_filename_component(_soname "${_bundled}" NAME)
+    endif()
+    message(STATUS "Bundling unpackaged runtime library: ${_soname} (${_bundled})")
+    install(FILES "${_bundled}"
+            DESTINATION "${MICRONOTES_BUNDLED_RUNTIME_LIBDIR}"
+            RENAME "${_soname}")
+  endforeach()
+
+  # $ORIGIN is /usr/bin at run time, so this resolves to
+  # /usr/lib/<triplet>/micronotes. BUILD_RPATH is deliberately left alone: the
+  # build tree must keep resolving against /usr/local so `cmake --build build &&
+  # ./build/bin/micronotes` still works for developers.
+  set_target_properties(micronotes PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${MICRONOTES_BUNDLED_RUNTIME_LIBDIR}"
+    INSTALL_RPATH_USE_LINK_PATH FALSE
+    BUILD_WITH_INSTALL_RPATH FALSE)
+endif()
+
 install(TARGETS micronotes RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES "${MICRONOTES_DESKTOP_FILE}" DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/micronotes.svg" DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
@@ -481,14 +608,26 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/" DESTINATION $
 
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "${PROJECT_NAME}")
-set(CPACK_PACKAGE_CONTACT "micronotes")
+set(CPACK_PACKAGE_CONTACT "Pablo Jimenez Mateo <pablojimenezmateo@gmail.com>")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Pablo Jimenez Mateo <pablojimenezmateo@gmail.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "micronotes - a small Linux Markdown notes app")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+# cpack writes beside the build tree rather than into whatever directory it was
+# invoked from, so tools/release.sh can look for the artifact in one known place.
+set(CPACK_OUTPUT_FILE_PREFIX "${CMAKE_BINARY_DIR}")
 set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+if(MICRONOTES_BUNDLED_LIBRARIES)
+  # Without this, dpkg-shlibdeps walks the packaged binary, cannot resolve the
+  # bundled sonames, and warns; with it, it resolves them against the private
+  # directory and correctly emits Depends: only for the libraries the bundled
+  # ones themselves pull in from the archive.
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+      "${CMAKE_INSTALL_PREFIX}/${MICRONOTES_BUNDLED_RUNTIME_LIBDIR}")
+endif()
 
 include(CPack)
