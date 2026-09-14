@@ -674,6 +674,13 @@ void drawWarningNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
 }
 
 void drawCodeNote(SDL_Renderer* renderer, Rect box, SDL_Color color) {
+  // Every stroke below is a bare SDL_RenderLine, which takes the renderer's
+  // standing colour -- and `drawNoteGlyph` has already set it. This mark is the
+  // only one in the set that reaches for nothing else, so it is the only one
+  // where the parameter goes unread; said out loud rather than left for clang
+  // to notice, because "unused colour in a draw function" otherwise reads like
+  // a mark that forgot to paint itself.
+  (void)color;
   const auto [cx, cy] = gridFor(box);
   // `< >`, the two chevrons the chrome already draws for a disclosure, turned
   // outward and set either side of the centre. Three across against three

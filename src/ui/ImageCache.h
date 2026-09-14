@@ -78,13 +78,18 @@ private:
 
   void evict();
 
-  SDL_Renderer* renderer_ = nullptr;
+  // Both this and `tick_` are read only by the decode path, which compiles away
+  // entirely when SDL3_image is absent -- an optional dependency, so a build
+  // without it is a supported build rather than a broken one. Marked rather
+  // than #if'd: the member layout should not depend on which optional libraries
+  // were found.
+  [[maybe_unused]] SDL_Renderer* renderer_ = nullptr;
   // Keyed by the resolved path. Entries outlive their textures, so this grows
   // with the number of distinct pictures a session has seen rather than with
   // what it is holding -- 32 bytes each, against a texture's megabytes.
   std::map<std::string, Entry> entries_;
   std::uint64_t generation_ = 0;
-  std::uint64_t tick_ = 0;
+  [[maybe_unused]] std::uint64_t tick_ = 0;
   std::uint64_t bytes_ = 0;
 };
 
