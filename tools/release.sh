@@ -100,8 +100,8 @@ if gpg --list-secret-keys "${KEY_FPR// /}" >/dev/null 2>&1; then
 
      printf test | gpg --local-user ${KEY_FPR// /} --detach-sign --armor -o /dev/null -
 
-   (Or pass --skip-tests nothing: there is no flag to publish unsigned. Every
-   release carries both signatures.)"
+   There is deliberately no flag to publish unsigned: every release carries a
+   signature over the package and one over its checksum."
   fi
 elif [[ $PUBLISH == 1 ]]; then
   die "release key $KEY_FPR is not in this keyring; --publish will not ship an unsigned release"
