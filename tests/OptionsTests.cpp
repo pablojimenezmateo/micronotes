@@ -2,6 +2,7 @@
 
 #include "app/Application.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -52,4 +53,25 @@ MICRONOTES_TEST(options_leaves_the_pane_alone_when_nothing_asks) {
   MICRONOTES_REQUIRE(options.problems.empty());
   MICRONOTES_REQUIRE(options.windowWidth == 800);
   MICRONOTES_REQUIRE(options.windowHeight == 600);
+}
+
+// The version flag is the one option that must work with no display attached:
+// scripts/ci/verify-deb-runtime.sh launches the packaged binary with a
+// clean-machine library path and nothing else, and reads this line back.
+MICRONOTES_TEST(options_takes_the_version_flag_under_either_spelling) {
+  MICRONOTES_REQUIRE(parse({"--version"}).printVersion);
+  MICRONOTES_REQUIRE(parse({"-v"}).printVersion);
+  MICRONOTES_REQUIRE(!parse({"--size", "800x600"}).printVersion);
+}
+
+// What release.sh greps for. The line names the program and carries a bare
+// X.Y.Z, and the version in it is the one CMake compiled in rather than a
+// literal that can drift from the project's.
+MICRONOTES_TEST(version_line_names_the_program_and_the_compiled_in_version) {
+  const std::string line = micronotes::app::versionLine();
+  MICRONOTES_REQUIRE(line.rfind("micronotes ", 0) == 0);
+  MICRONOTES_REQUIRE(line == std::string("micronotes ") + MICRONOTES_VERSION);
+  const std::string version = line.substr(std::string("micronotes ").size());
+  MICRONOTES_REQUIRE(std::count(version.begin(), version.end(), '.') == 2);
+  MICRONOTES_REQUIRE(version.find_first_not_of("0123456789.") == std::string::npos);
 }

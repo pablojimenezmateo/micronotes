@@ -41,6 +41,12 @@ struct ApplicationOptions {
   std::optional<bool> showRightPanel;
   // Which of the right panel's views a captured frame should be showing.
   std::string rightPanelView;
+  // Print the version and exit without opening a window. Parsed here rather
+  // than in main() so the flag is covered by the same test as every other one,
+  // and so `tools/release.sh` can prove the built binary carries the version
+  // that was baked into it -- a release that says 0.6.0 everywhere except in
+  // the artifact is the one failure mode a version bump can have.
+  bool printVersion = false;
   // What the command line asked for and this build could not give it.
   //
   // Collected rather than ignored, and a value rather than a write to stderr,
@@ -55,5 +61,8 @@ struct ApplicationOptions {
 
 int run(ApplicationOptions options);
 ApplicationOptions parseArgs(int argc, char** argv);
+// "micronotes X.Y.Z" -- the one place the compiled-in version becomes a line of
+// text, so the CLI and the settings pane cannot state different versions.
+std::string versionLine();
 
 }

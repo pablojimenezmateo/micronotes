@@ -18,7 +18,9 @@ ApplicationOptions parseArgs(int argc, char** argv) {
   ApplicationOptions options;
   for(int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
-    if(arg == "--headless") {
+    if(arg == "--version" || arg == "-v") {
+      options.printVersion = true;
+    } else if(arg == "--headless") {
       options.headless = true;
     } else if(arg == "--library" && i + 1 < argc) {
       options.libraryRoot = argv[++i];
@@ -71,5 +73,7 @@ ApplicationOptions parseArgs(int argc, char** argv) {
   }
   return options;
 }
+
+std::string versionLine() { return std::string("micronotes ") + MICRONOTES_VERSION; }
 
 }
