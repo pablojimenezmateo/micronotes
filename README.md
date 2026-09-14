@@ -68,7 +68,7 @@ keystroke away.
 
 ## Install
 
-Tagged `v0.5.0`. micronotes ships as a signed Debian package for x86_64 Linux;
+Tagged `v0.6.0`. micronotes ships as a signed Debian package for x86_64 Linux;
 it bundles the SDL3 libraries no Debian-family distro packages yet, so it needs
 nothing hand-built to start.
 
@@ -78,14 +78,14 @@ then check both before installing anything:
 
 ```sh
 # The checksum says the download is intact.
-sha256sum -c micronotes_0.5.0_amd64.deb.sha256
+sha256sum -c micronotes_0.6.0_amd64.deb.sha256
 
 # The signature says it is the package the maintainer built. Import the key
 # once -- it is attached to every release as micronotes-signing-key.asc.
 gpg --import micronotes-signing-key.asc
-gpg --verify micronotes_0.5.0_amd64.deb.asc micronotes_0.5.0_amd64.deb
+gpg --verify micronotes_0.6.0_amd64.deb.asc micronotes_0.6.0_amd64.deb
 
-sudo apt install ./micronotes_0.5.0_amd64.deb
+sudo apt install ./micronotes_0.6.0_amd64.deb
 ```
 
 The release key is `0E32 39B7 1B0F 9598 B71A FB7B 6D33 9CCB FC51 5D70`
