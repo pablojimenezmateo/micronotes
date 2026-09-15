@@ -195,21 +195,27 @@ Holding the window fixed at 1600x1000 and varying the note:
 
 | note | bytes | peak RSS | over the 1.5 KB note |
 |---|---:|---:|---:|
-| Tiny | 1.5 KB | 166.5 MB | — |
-| Small | 28 KB | 168.2 MB | +1.7 MB |
-| Big | 285 KB | 177.1 MB | +10.6 MB |
-| Huge | 1.14 MB | 206.9 MB | +40.4 MB |
+| Tiny | 1.5 KB | 164.7 MB | — |
+| Small | 28 KB | 168.1 MB | +3.4 MB |
+| Big | 285 KB | 173.4 MB | +8.7 MB |
+| Huge | 1.14 MB | 191.0 MB | +26.3 MB |
 
-That part **is** ours: about **35x a note's own bytes**, linear in the note.
-The twelfth pass paid some of it — `TextRun` went from 88 bytes to 72, which
-took the Huge note's cost from +40.4 MB to +34.9 MB — and the rest is TD-53.
+That part **is** ours: about **23x a note's own bytes**, linear in the note.
+It was 35x when this entry was opened. `TextRun` carried 88 bytes per token
+then; the twelfth pass took it to 72 by narrowing the block-relative offsets
+and ordering the fields, and the thirteenth to 40 by moving the text out to one
+`BlockLayout::display` buffer per block (TD-53, closed). On the Huge note that
+is +40.4 MB -> +34.9 MB -> +26.3 MB.
 
 **Why it has not been paid.** The per-pixel half is a decision about a software
 rasteriser that is 80% of the figure and varies by machine, and the user's own
 session is Wayland on real hardware rather than `llvmpipe` under `Xvfb`, so
 those are different allocators behind the same call. Nothing here should be
-quoted as what a desktop does. The per-note half is TD-53, which names a
-specific change rather than a worry.
+quoted as what a desktop does. The per-note half has been worked twice and
+what is left of it is the runs array itself — 391,218 runs at 40 bytes for a
+1.1 MB note, which is 14.9 MB and is the layout rather than waste in it.
+Beating that means not laying the whole note out, which is a different design
+and not debt.
 
 What stays open *here* is that neither half is gated. Every existing lane stops
 short of the paint deliberately — that is what lets the harness be a command
@@ -217,35 +223,3 @@ rather than a sitting — so a session lane means a real window and the run-to-r
 spread and the driver gap come back with it. Until somebody wants that, the
 peak-RSS budget covers the app's structures and a session's memory is measured
 by hand, the way the tables above were.
-
-## TD-53 — Every token's text is copied out of a buffer the layout already has
-
-`doc::TextRun::text` is a `std::string` holding "byte-for-byte the source it
-displays, except that `\n` and `\t` become a single space each". The run also
-carries `srcStart`/`srcEnd`, which *identify those very bytes* in the block. So
-for almost every run in a note the string is a second copy of something the
-layout is already holding in `source_`.
-
-**What it costs.** 32 of `TextRun`'s 72 bytes are the `std::string` object, and
-there is one run per token — every word and every run of spaces — for every
-block, because a note is laid out whole rather than to the viewport. A
-`std::string_view` is 16, and the offsets that would make even that redundant
-are already there. Against the measured 35x-a-note's-bytes in TD-52, the string
-is the single largest line item. Words over fifteen bytes also take a heap
-allocation each, on top: `open.cold_layout` makes 17,132 allocations for the
-200 KB fixture.
-
-**Why it has not been paid.** The exception in that comment is the whole
-problem. A run whose source contains `\n` or `\t` displays something the
-buffer does not contain, so its text cannot be a view, and the runs that need
-this are not rare enough to ignore — every soft-wrapped line and every tab in a
-code block is one. Closing this means the rare case going somewhere else: runs
-carry a view by default and a side table holds the rewritten text for the ones
-that need it, keyed by run index. That is a new invariant on the hottest
-structure in the app — a view into `source_` is dangling the moment the buffer
-is spliced, and `DocumentLayout` splices it on every keystroke — where today
-the string owns its bytes and cannot dangle.
-
-It is worth doing, and it is worth doing on its own, with the peak-RSS budget
-and the allocation counts as the proof. It is not worth doing at the end of a
-pass that has already changed the struct's layout.

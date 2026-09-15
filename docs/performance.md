@@ -4192,3 +4192,71 @@ the offsets identifying those same bytes in `source_`. That is TD-53, and it is
 deliberately not this pass: a view into a buffer `DocumentLayout` splices on
 every keystroke is a new invariant on the hottest structure in the app, and it
 deserves its own pass with these same two instruments pointed at it.
+
+### The thirteenth pass: the run's text was a copy of bytes the layout already had
+
+TD-53 said `TextRun::text` was a `std::string` holding "byte-for-byte the source
+it displays, except that `\n` and `\t` become a single space each", while the
+run *also* carried `srcStart`/`srcEnd` identifying those very bytes. The
+exception was the whole reason it could not be a view, and the entry said
+closing it meant a side table for the rewritten runs and a new invariant on the
+hottest structure in the app.
+
+It needed neither. **The substitution is length preserving and byte aligned**:
+each of the three bytes becomes exactly one space, so the text at offset `i` is
+the source byte at offset `i`. A run's text therefore sits at exactly the offset
+that already addressed its source. So `BlockLayout` holds one `display` buffer
+per block — the block's bytes with the substitution applied — and the run holds
+nothing at all.
+
+`TextRun`: **72 bytes -> 40**. On a 1.1 MB note that is 391,218 runs and 12.5 MB.
+
+The second half was not in the struct. `Token::text` became a view into that
+same buffer, so `displayText` runs **once per block instead of once per token**
+— 391,218 string constructions per layout, gone — and `Flow` no longer moves a
+string into each run it emits. `InlineLayout::text` turned out to be the same
+concept under another name, and is `layout.display` now too.
+
+| | before | after | |
+|---|---:|---:|---|
+| `open.cold_layout` | 11,313 us | **4,662 us** | **-59%** |
+| `resize.width_step` | 9,950 us | **4,069 us** | **-59%** |
+| `type.middle` | 29 us | 14 us | -52% |
+| `shell.keystroke` | 76 us | 63 us | -17% |
+| `open.cold_layout` bytes | 7,246 KB | 5,212 KB | -28% |
+| `shell.keystroke` bytes | 20.5 KB | 12.8 KB | -38% |
+| harness `peak_rss` | 30.8 MB | 28.7 MB | -7% |
+| session, 1.14 MB note | 201.4 MB | **191.0 MB** | -10.4 MB |
+| that note's own cost | +34.9 MB | +26.3 MB | -25% |
+
+**A 59% drop wants proving, not reporting.** Every deterministic counter is
+byte-identical across the change — `layout.blocks_relaid` 157,545,
+`layout.tokens_staged` 2,524,857, `layout.flow_measures` 1,996,664,
+`layout.visual_rows` 3,085,920, `render.text_measure_calls` 725,570 — so it is
+the same work, not less of it. Screenshots are byte-identical under `cmp` at
+three note sizes. The win is the per-token string construction and the runs
+array being 2.6 MB of cacheline traffic where it was 4.7.
+
+ASan, UBSan **and** TSan, which is the point: this replaces owned strings with
+views into a buffer that `DocumentLayout` splices on every keystroke, and that
+is precisely the change whose failure mode is silent.
+
+"Shows nothing" used to be `text.empty()` — inferred from the absence of a
+string rather than stated. It is `TextRun::hidden` now, in three bytes of tail
+padding that were already there, with `shows()` for the readers that only ask
+the question. Without it a `Complex` block's placeholder run, which spans the
+block and displays none of it, would have started returning the block's text
+and quietly undone half of TD-41.
+
+**Two splits, because the tree's line ceiling caught this and asked for them.**
+`doc/BlockLayout.h` is what a laid-out block *is*, taken out of `doc/Layout.h`,
+which held both that and the whole incremental machinery over it — so
+`doc/Flow.h` and `doc/Tokenize.h`, the innermost loops in the app, were
+including a class with an `unordered_map` and three `std::function`s in it to
+see a `Token`. And `doc/LayoutStaging.cpp` is source bytes into token groups,
+the third of the units this file already names and the only one still living in
+`Layout.cpp`. The ratchet went 797 -> 789 in the same commit, as it asks.
+
+What is left of a note's memory is the runs array itself: 391,218 runs at 40
+bytes is 14.9 MB, which is the layout rather than waste in it. Beating that
+means not laying the whole note out, which is a different design and not debt.

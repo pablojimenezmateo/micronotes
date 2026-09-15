@@ -8,14 +8,13 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Six entries are open: one about selecting inside a block the live scanner
+  Five entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
   writing a CFF writer, one about the Links panel running a query on every
   save because its memo turns on the library's revision, one about a note
   inside a `files` folder being a file rather than a note, with only a status
-  message on open to say so, one about a session's memory being two costs with
-  only one of them ours, and one about every token's text being copied out of a
-  buffer the layout already holds. So
+  message on open to say so, and one about a session's memory being two costs
+  with only one of them ours. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.
@@ -53,10 +52,17 @@ App-only code stays outside, in the layer that owns the concept:
 
 - `src/doc/` -- the Markdown *document*: the block and inline scanners, the
   incremental layout, the edits, `[[wikilink]]` syntax, what a link target means.
-  Laying a block out is three units and they compose in that order:
-  `doc/Tokenize.h` turns source bytes into tokens, `doc/Flow.h` turns tokens
-  into visual lines, and `doc/LayoutUpdate.cpp` decides which blocks need either.
-  `doc/Layout.cpp` is what is left -- styling, staging, placement.
+  Laying a block out is four units and they compose in that order:
+  `doc/LayoutStaging.cpp` decides which of a block's bytes are content and what
+  the inline scanner said about each, `doc/Tokenize.h` turns those bytes into
+  tokens, `doc/Flow.h` turns tokens into visual lines, and
+  `doc/LayoutUpdate.cpp` decides which blocks need any of it.
+  `doc/Layout.cpp` is what is left -- styling, placement, the cache.
+  `doc/BlockLayout.h` is what a laid-out block *is* -- the runs, the lines, and
+  the `display` buffer their offsets index -- and knows nothing about a
+  document, which is what lets `doc/RenderLayout.h` produce the same type from
+  md4c's model with no note behind it. Include that rather than `doc/Layout.h`
+  when all you need is the shape.
   A block the scanner deliberately does *not* model -- a table, raw HTML, a
   footnote definition -- is parsed by md4c and laid out by `doc/RenderLayout.h`,
   through that same tokenizer and that same flow. It lives here rather than in
