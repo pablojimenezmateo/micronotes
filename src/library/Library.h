@@ -49,6 +49,18 @@ struct CompanionEntry {
   bool directory = false;
 };
 
+// How many of `companions` are Markdown files.
+//
+// The fourth question about the same convention, and the one that is about a
+// mistake rather than about a path. A `.md` under a files directory is a
+// *file*: it is not indexed, not searched, not backlinked and not rendered.
+// That is the right rule -- an attachment that happens to be Markdown is still
+// an attachment -- but it is also exactly what a reader gets when they make a
+// `files` directory by hand, having been refused the name in the app, and then
+// put notes in it. Nothing about the tree tells them those notes stopped being
+// notes, so the shell counts them and says so. See TD-51.
+std::size_t markdownCompanionCount(const std::vector<CompanionEntry>& companions);
+
 class Library {
 public:
   explicit Library(std::filesystem::path root);

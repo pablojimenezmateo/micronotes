@@ -5,6 +5,7 @@
 #include "core/attachments/AttachmentService.h"
 #include "app/Shell.h"
 #include "core/AppIdentity.h"
+#include "library/Library.h"
 #include "library/StatePaths.h"
 #include "core/platform/DurableFile.h"
 #include "core/platform/PathUtils.h"
@@ -120,6 +121,17 @@ bool openLibraryRoot(UiRuntime& ui, const std::filesystem::path& root) {
   ui.readingPage.setScroll(0);
   loadSelectedIntoEditor(ui);
   if(ui.state.selection().noteId.empty()) selectNoteAt(ui, 0);
+  // Markdown sitting in a files area is a file, not a note -- not indexed, not
+  // searched, not backlinked, not rendered. That is the convention working as
+  // intended for an attachment that happens to be Markdown, and a trap for a
+  // reader who made the `files` directory by hand. Nothing else in the window
+  // distinguishes the two, so say it once, on open. See TD-51.
+  if(const std::size_t stranded = library::markdownCompanionCount(ui.state.catalog().companions());
+     stranded > 0) {
+    ui.status = std::to_string(stranded) + (stranded == 1 ? " Markdown file is" : " Markdown files are") +
+                " inside a \"" + std::string(library::kFilesDirName) +
+                "\" folder, so they are attachments rather than notes";
+  }
   return true;
 }
 

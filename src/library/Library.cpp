@@ -99,6 +99,15 @@ bool isFilesDir(const std::filesystem::path& relative) {
   return sawFiles;
 }
 
+std::size_t markdownCompanionCount(const std::vector<CompanionEntry>& companions) {
+  std::size_t markdown = 0;
+  for(const auto& entry : companions) {
+    if(entry.directory) continue;
+    if(entry.path.extension() == ".md") ++markdown;
+  }
+  return markdown;
+}
+
 Library::Library(std::filesystem::path root)
   : root_(std::move(root)), safeRoot_(root_), trash_(root_) {}
 

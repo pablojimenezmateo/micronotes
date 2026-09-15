@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-50 have been used. Closing an entry means deleting it and saying so in the
+TD-51 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -121,3 +121,47 @@ mode this tree has spent several passes removing rather than adding. It is worth
 doing when a second memo wants the same distinction, so the split pays for more
 than one caller; until then the honest statement is that the Links panel costs
 a query per save and the counters say so.
+
+## TD-51 — A note inside a `files` folder stops being a note, and only the status bar says so
+
+`files` is the companion area's name. Everything under one is a *file*: listed
+in the tree, opened by the desktop's default handler, and never read, rendered
+or indexed — and `library/Library.h` is explicit that a `.md` under one is a
+file too. For an attachment that happens to be Markdown that is the right rule
+and it is not what this entry is about.
+
+It is about how a reader gets there. `NoteCatalog::createFolder` refuses
+`files` as a notebook name, so the reader who wanted one makes the directory in
+a file manager instead and puts notes in it. Every one of those notes is then a
+companion.
+
+**What it costs.** Measured by `shell_markdown_stranded_in_a_files_folder_is_reported_on_open`:
+a library with `Ordinary.md` at the root and `files/Recipe.md` under it has one
+note, not two. `Recipe.md` is absent from the note list, absent from
+`notes_fts` so a full-text search does not reach it, absent from `links` so
+nothing backlinks it and no `[[Recipe]]` resolves to it, and it opens in
+whatever the desktop hands a `.md` to rather than in micronotes. The note is
+not lost — the bytes are where the reader put them — but every feature the app
+has stops applying to it, and the tree draws it beside the notes with nothing
+to say which kind it is.
+
+**What has been paid.** The refusal now names the reason rather than saying
+"Notebook change failed", so the reader is told what `files` is for before they
+go around it. And `openLibraryRoot` counts the Markdown under the files areas
+and reports it once, on open, through `library::markdownCompanionCount`.
+Together those cover the reader who is about to make the mistake and the one
+who already has.
+
+**Why it has not been paid in full.** What is left is that the status line is
+a *message*, and a message is seen once and gone in a few seconds. The reader
+who opens the library on a Monday morning and looks at the tree sees nothing;
+the tree still draws `files/Recipe.md` with a file's affordances and no mark
+saying that this particular file would have been a note anywhere else in the
+library. Fixing that properly means the sidebar's companion rows carrying a
+state — which is a per-row lookup on a path extension in the row builder, and
+a visual treatment that has to distinguish "this is an attachment" from "this
+is an attachment that you probably meant to be a note" without turning the
+tree into a diagnostics panel. That is a design decision with a drawing change
+behind it, and it is worth making when somebody hits this a second time. The
+honest statement today is that the trap is signposted at both ends and still
+open in the middle.

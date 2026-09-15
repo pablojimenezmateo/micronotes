@@ -655,3 +655,43 @@ MICRONOTES_TEST(shell_a_notebook_cannot_be_called_files_and_the_refusal_says_why
   MICRONOTES_REQUIRE(ui.status.text == "Created notebook");
   MICRONOTES_REQUIRE(!ui.sidebar.creatingFolder);
 }
+
+// The other half of the same trap. The app refuses `files` as a notebook name,
+// so the reader makes the directory in a file manager and puts notes in it --
+// and a `.md` under a files directory is a *file*: not indexed, not searched,
+// not backlinked, not rendered. The rule is right and it stays; what was
+// missing is anything at all telling them. See TD-51.
+MICRONOTES_TEST(shell_markdown_stranded_in_a_files_folder_is_reported_on_open) {
+  const micronotes::tests::TempDir rootDir("micronotes-shell-stranded-md");
+  const auto& root = rootDir.path();
+  std::filesystem::create_directories(root / "files");
+  { std::ofstream f(root / "files" / "Recipe.md"); f << "---\nid: r1\ntitle: Recipe\n---\n\nStranded body.\n"; }
+  { std::ofstream f(root / "Ordinary.md"); f << "---\nid: o1\ntitle: Ordinary\n---\n\nOrdinary body.\n"; }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  // It really is stranded: one note, and the search does not reach it.
+  MICRONOTES_REQUIRE(ui.state.catalog().notes().size() == 1);
+  ui.state.setSearch("body", micronotes::library::SearchScope::All);
+  MICRONOTES_REQUIRE(ui.state.currentSearchResults().size() == 1);
+
+  // And the shell says so, naming the count and the reason.
+  MICRONOTES_REQUIRE(ui.status.text.find("1 Markdown file is") != std::string::npos);
+  MICRONOTES_REQUIRE(ui.status.text.find("attachments rather than notes") != std::string::npos);
+}
+
+// The ordinary case says nothing: a library whose attachments are attachments
+// has no news, and a status line that always fires is a status line nobody
+// reads.
+MICRONOTES_TEST(shell_ordinary_attachments_are_not_reported) {
+  const micronotes::tests::TempDir rootDir("micronotes-shell-ordinary-files");
+  const auto& root = rootDir.path();
+  std::filesystem::create_directories(root / "work" / "files");
+  { std::ofstream f(root / "work" / "files" / "spec.pdf"); f << "pdf"; }
+  { std::ofstream f(root / "work" / "Alpha.md"); f << "---\nid: a1\ntitle: Alpha\n---\n\nBody.\n"; }
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+  MICRONOTES_REQUIRE(ui.status.text.find("attachments rather than notes") == std::string::npos);
+}
