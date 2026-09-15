@@ -487,3 +487,62 @@ MICRONOTES_TEST(architecture_a_library_index_read_cannot_skip_the_flush) {
                              "flushDeferred(): " +
                                missing);
 }
+
+// Every write of a note's file, enumerated, for the reason
+// `architecture_a_library_index_read_cannot_skip_the_flush` enumerates the
+// index's reads: the rule is one a *caller* can forget, and forgetting it here
+// destroys somebody's work rather than showing a stale list.
+//
+// AGENTS.md states it: never write a note's file without checking what is
+// there. `ui::OpenNoteRecord` carries a `platform::FileSignature` per open note
+// and `AppState::writeOpenNote` compares it before writing, so a path that
+// reaches `catalog_.writeNote` without going through it can overwrite an edit
+// made in another program -- or, for the open note, the buffer on screen.
+//
+// Three call sites are accounted for and each is a different answer:
+//
+//   * `writeOpenNote` is the guarded path itself.
+//   * `removeTagEverywhere` routes the *open* note through `writeOpenNote` with
+//     the buffer's body, and every other note through a read-modify-write of
+//     its own file, which cannot be behind anything.
+//   * `appendToNote` is a read-modify-write too, and refuses the open note.
+//
+// A fourth site is one of those three or it is a new answer that has to be
+// written down here. This is deliberately over the file rather than over the
+// class: a note write added anywhere in `AppState.cpp` is what it has to catch.
+MICRONOTES_TEST(architecture_a_note_write_cannot_skip_the_signature_check) {
+  const auto source = repoRoot() / "src/ui/AppState.cpp";
+  const std::string text = withoutLineComments(readText(source));
+  micronotes::tests::require(text.find("AppState::writeOpenNote") != std::string::npos,
+                             "src/ui/AppState.cpp no longer defines writeOpenNote, so this test "
+                             "would scan for a rule that has moved and pass forever");
+
+  // Which `AppState::` method each `catalog_.writeNote...` call sits inside:
+  // the nearest definition above it.
+  const std::regex marker(R"(AppState::(\w+)\s*\(|catalog_\.(writeNoteAs|writeNote)\s*\()");
+  std::string enclosing;
+  std::set<std::string> writers;
+  for(std::sregex_iterator it(text.begin(), text.end(), marker), last; it != last; ++it) {
+    if((*it)[1].matched) {
+      enclosing = (*it)[1].str();
+      continue;
+    }
+    writers.insert(enclosing.empty() ? "<file scope>" : enclosing);
+  }
+  micronotes::tests::require(!writers.empty(),
+                             "no catalog_.writeNote call sites found in AppState.cpp -- the "
+                             "spelling changed and this test now guards nothing");
+
+  const std::set<std::string> accounted {"writeOpenNote", "removeTagEverywhere", "appendToNote"};
+  std::string unaccounted;
+  for(const auto& name : writers) {
+    if(accounted.count(name)) continue;
+    unaccounted += (unaccounted.empty() ? "" : ", ") + name;
+  }
+  micronotes::tests::require(
+    unaccounted.empty(),
+    "these methods write a note's file without being accounted for: " + unaccounted +
+      " -- every write must either go through AppState::writeOpenNote, which compares the "
+      "file's signature before writing, or be a read-modify-write of a note that is not the "
+      "open one. Say which it is in the test above, or route it through writeOpenNote.");
+}

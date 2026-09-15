@@ -374,3 +374,40 @@ MICRONOTES_TEST(app_state_keeps_notes_and_notebooks_out_of_a_files_area) {
   MICRONOTES_REQUIRE(state.deleteCompanion("other/files/b.pdf"));
   MICRONOTES_REQUIRE(state.catalog().trashEntries().size() == 1);
 }
+
+// `appendToNote` reads the note's file and writes it back, so on the open note
+// -- the one whose buffer can be ahead of its file -- that would append to the
+// last saved version and drop everything typed since.
+//
+// It held only because its single caller refuses a move into the note it is
+// moving out of, for an unrelated reason of its own. The precondition is the
+// callee's now. See `architecture_a_note_write_cannot_skip_the_signature_check`.
+MICRONOTES_TEST(app_state_append_refuses_the_open_note_rather_than_writing_the_disk_version) {
+  const micronotes::tests::TempDir rootDir("micronotes-append-open-note");
+  const auto& root = rootDir.path();
+  micronotes::ui::AppState state;
+  MICRONOTES_REQUIRE(state.openOrCreateLibrary(root));
+  const auto made = state.createNote("Target", {}, "Saved body.\n");
+  MICRONOTES_REQUIRE(made.has_value());
+  const std::string id = made->id;
+
+  // Saved once, so the file holds "Saved body." and the buffer then moves on
+  // without being saved -- which is the state every keystroke leaves.
+  MICRONOTES_REQUIRE(state.saveSelectedNote("Saved body.\n").ok);
+
+  // The open note is refused, and nothing is written.
+  MICRONOTES_REQUIRE(!state.appendToNote(id, "appended"));
+
+  const auto onDisk = state.catalog().loadNote(state.openNote().get().path);
+  MICRONOTES_REQUIRE(onDisk.body.find("appended") == std::string::npos);
+  MICRONOTES_REQUIRE(onDisk.body.find("Saved body.") != std::string::npos);
+
+  // A different note still appends, which is what the call is for.
+  const auto other = state.createNote("Other", {}, "Other body.\n");
+  MICRONOTES_REQUIRE(other.has_value());
+  MICRONOTES_REQUIRE(state.appendToNote(id, "appended"));
+  const auto target = state.catalog().findNote(id);
+  MICRONOTES_REQUIRE(target.has_value());
+  const auto reread = state.catalog().loadNote(target->path);
+  MICRONOTES_REQUIRE(reread.body.find("appended") != std::string::npos);
+}

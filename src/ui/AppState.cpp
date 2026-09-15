@@ -248,6 +248,16 @@ std::optional<library::NoteListItem> AppState::createNote(const std::string& tit
 bool AppState::appendToNote(std::string_view noteId, std::string_view text) {
   const library::NoteListItem* item = catalog_.noteById(noteId);
   if(!item) return false;
+  // Not the open note, and that is *checked* rather than assumed. This reads
+  // the file and writes it back, so on the one note whose buffer can be ahead
+  // of its file that would append to the last saved version and drop
+  // everything typed since -- the failure `writeOpenNote`'s signature check
+  // exists to prevent, reached by a path that never asks it.
+  //
+  // It held only because the single caller refuses a move into the note it is
+  // moving out of, for its own unrelated reason. A second caller would not
+  // have known to, and nothing here would have told it.
+  if(!noteId.empty() && noteId == openNote_.noteId()) return false;
   // Copied out before the write: the item is a borrow into the note list's
   // memo, and writing drops it.
   const auto path = item->path;
@@ -259,8 +269,9 @@ bool AppState::appendToNote(std::string_view noteId, std::string_view text) {
   if(!body.empty()) body += "\n\n";
   body += text;
   body += "\n";
-  // The target is not the open note, so nothing memoised here describes it --
-  // and appending to a body changes nothing the note list shows.
+  // The target is not the open note -- refused above -- so nothing memoised
+  // here describes it, and appending to a body changes nothing the note list
+  // shows.
   return catalog_.writeNote(path, note.metadata, body);
 }
 
