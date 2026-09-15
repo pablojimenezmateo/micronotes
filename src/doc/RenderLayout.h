@@ -85,14 +85,12 @@ struct RenderContext {
 };
 
 // One run of inlines, tokenized, broken to a width and placed.
-//
-// `text` has to outlive the layout and be moved with it: the runs' offsets
-// address it. It is the block's visible characters with the markup gone --
-// `**bold**` is the four bytes `bold` -- so it is not the source and cannot be
-// used as it.
 struct InlineLayout {
+  // Its `display` is md4c's flattened text -- the block's visible characters
+  // with the markup gone, `**bold**` being the four bytes `bold` -- which is
+  // what this type used to carry beside it under the name `text`. It is one
+  // concept and it lives on the layout with every other block's.
   BlockLayout layout;
-  std::string text;
   // The widest line's right edge, which is what a centred or right-aligned
   // table cell is placed by. Not the width it was broken to: a two-word cell
   // in a wide column has to be centred on the two words.

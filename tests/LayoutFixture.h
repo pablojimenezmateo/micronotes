@@ -174,9 +174,10 @@ inline Rect caretRectByWalking(const DocumentLayout& layout, std::size_t offset)
     return rect;
   }
   float x = best->rect.x;
-  if(local > best->srcStart && !best->text.empty()) {
-    const std::size_t take = std::min(local - best->srcStart, best->text.size());
-    x += stubMeasure(std::string_view(best->text).substr(0, take), best->style);
+  const std::string_view bestText = block.textOf(*best);
+  if(local > best->srcStart && !bestText.empty()) {
+    const std::size_t take = std::min<std::size_t>(local - best->srcStart, bestText.size());
+    x += stubMeasure(bestText.substr(0, take), best->style);
   } else if(local >= best->srcEnd) {
     x = best->rect.x + best->rect.w;
   }
@@ -226,7 +227,7 @@ inline bool layoutsAgree(const DocumentLayout& a, const DocumentLayout& b, std::
         const std::string in = on + " run " + std::to_string(r);
         if(leftRun.srcStart != rightRun.srcStart) return fail("run start" + in);
         if(leftRun.srcEnd != rightRun.srcEnd) return fail("run end" + in);
-        if(leftRun.text != rightRun.text) return fail("run text" + in);
+        if(left.textOf(leftRun) != right.textOf(rightRun)) return fail("run text" + in);
         if(leftRun.role != rightRun.role) return fail("run role" + in);
         if(leftRun.isMarker != rightRun.isMarker) return fail("run marker" + in);
         if(leftRun.linkIndex != rightRun.linkIndex) return fail("run link" + in);

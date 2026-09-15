@@ -21,12 +21,13 @@ std::size_t paintRuns(SDL_Renderer* renderer, TextRenderer& text, const doc::Blo
            palette.codeBackground);
     });
     for(const auto& run : layout.runsOf(line)) {
-      if(run.text.empty()) continue;
+      const std::string_view runText = layout.textOf(run);
+      if(runText.empty()) continue;
       ++drawn;
       const float x = paint.x + run.rect.x;
       const SDL_Color ink =
         run.role == doc::TextRole::Body ? paint.bodyInk : inkFor(palette, run.role);
-      text.draw(run.text, x, lineY, ink, textStyleFor(run.style));
+      text.draw(runText, x, lineY, ink, textStyleFor(run.style));
 
       if(run.style.strike) {
         hLine(renderer, x, x + run.rect.w, lineY + line.height * 0.45f, ink);

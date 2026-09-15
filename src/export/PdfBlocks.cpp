@@ -117,7 +117,7 @@ void paintBlockGround(PdfContent& content, const BlockInk& ink, const doc::Docum
 
   // The kind's own name, when the author wrote no title after `[!KIND]`.
   bool titled = false;
-  for(const auto& run : layout.runsOf(head)) titled = titled || !run.text.empty();
+  for(const auto& run : layout.runsOf(head)) titled = titled || run.shows();
   if(titled) return;
   doc::RunStyle label;
   label.size = printTypeMetrics().body;
@@ -208,7 +208,8 @@ void paintRuns(PdfContent& content, const BlockInk& ink, const doc::BlockLayout&
                        line.height - 1.0f, theme.codeBackground);
     });
     for(const auto& run : layout.runsOf(line)) {
-      if(run.text.empty()) continue;
+      const std::string_view runText = layout.textOf(run);
+      if(runText.empty()) continue;
       const float size = run.style.size > 0.0f ? run.style.size : defaultSize;
       const int slot = ink.faces->slot(run.style);
       auto& font = ink.document->font(slot);
@@ -217,7 +218,7 @@ void paintRuns(PdfContent& content, const BlockInk& ink, const doc::BlockLayout&
 
       const SDL_Color colour =
         run.role == doc::TextRole::Body ? paint.bodyInk : ui::inkFor(theme, run.role);
-      content.text(font, slot, size, x, baseline, run.text, colour);
+      content.text(font, slot, size, x, baseline, runText, colour);
 
       if(run.style.strike) {
         content.line(x, baseline - size * 0.28f, x + run.rect.w, baseline - size * 0.28f,

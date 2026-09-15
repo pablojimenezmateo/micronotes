@@ -204,6 +204,7 @@ set(MICRONOTES_APP_SOURCES
   src/doc/LinkTarget.cpp
   src/doc/WikiLink.cpp
   src/doc/Layout.cpp
+  src/doc/LayoutStaging.cpp
   src/doc/LayoutUpdate.cpp
   src/doc/LayoutQueries.cpp
   src/doc/RenderLayout.cpp

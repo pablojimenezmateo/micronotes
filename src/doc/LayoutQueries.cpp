@@ -108,9 +108,10 @@ Rect DocumentLayout::caretRect(std::size_t offset) const {
   }
 
   float x = best->rect.x;
-  if(local > best->srcStart && !best->text.empty()) {
-    const std::size_t take = std::min(local - best->srcStart, best->text.size());
-    x += metrics_.measure(std::string_view(best->text).substr(0, take), best->style);
+  const std::string_view bestText = layout->textOf(*best);
+  if(local > best->srcStart && !bestText.empty()) {
+    const std::size_t take = std::min<std::size_t>(local - best->srcStart, bestText.size());
+    x += metrics_.measure(bestText.substr(0, take), best->style);
   } else if(local >= best->srcEnd) {
     x = best->rect.x + best->rect.w;
   }
@@ -130,7 +131,7 @@ std::size_t DocumentLayout::offsetAt(float x, float y) const {
   const auto runs = layout.runsOf(line);
   const TextRun* chosen = nullptr;
   for(const auto& run : runs) {
-    if(run.text.empty()) continue;
+    if(layout.textOf(run).empty()) continue;
     if(!chosen || x >= run.rect.x) chosen = &run;
   }
   if(!chosen) {
@@ -142,16 +143,17 @@ std::size_t DocumentLayout::offsetAt(float x, float y) const {
   }
   if(x <= chosen->rect.x) return block.start + chosen->srcStart;
 
+  const std::string_view chosenText = layout.textOf(*chosen);
   float pen = chosen->rect.x;
   std::size_t i = 0;
-  while(i < chosen->text.size()) {
-    const std::size_t next = util::nextBoundary(chosen->text, i);
-    const float width = metrics_.measure(std::string_view(chosen->text).substr(i, next - i), chosen->style);
+  while(i < chosenText.size()) {
+    const std::size_t next = util::nextBoundary(chosenText, i);
+    const float width = metrics_.measure(chosenText.substr(i, next - i), chosen->style);
     if(x < pen + width / 2.0f) return block.start + chosen->srcStart + i;
     pen += width;
     i = next;
   }
-  return block.start + chosen->srcStart + chosen->text.size();
+  return block.start + chosen->srcStart + chosenText.size();
 }
 
 // The rect one visual line of a selection paints, or nothing when the line holds
@@ -165,7 +167,8 @@ std::optional<Rect> DocumentLayout::selectionRectFor(std::size_t block, const Vi
   float right = 0.0f;
   bool any = false;
   for(const auto& run : layout.runsOf(line)) {
-    if(run.text.empty()) continue;
+    const std::string_view runText = layout.textOf(run);
+    if(runText.empty()) continue;
     const std::size_t runStart = base + run.srcStart;
     const std::size_t runEnd = base + run.srcEnd;
     if(runEnd <= from || runStart >= to) continue;
@@ -174,13 +177,11 @@ std::optional<Rect> DocumentLayout::selectionRectFor(std::size_t block, const Vi
     float x0 = run.rect.x;
     float x1 = run.rect.x + run.rect.w;
     if(a > runStart) {
-      x0 += metrics_.measure(
-        std::string_view(run.text).substr(0, std::min(a - runStart, run.text.size())), run.style);
+      x0 += metrics_.measure(runText.substr(0, std::min(a - runStart, runText.size())), run.style);
     }
     if(b < runEnd) {
-      x1 = run.rect.x + metrics_.measure(
-                          std::string_view(run.text).substr(0, std::min(b - runStart, run.text.size())),
-                          run.style);
+      x1 = run.rect.x +
+           metrics_.measure(runText.substr(0, std::min(b - runStart, runText.size())), run.style);
     }
     if(!any) {
       left = x0;

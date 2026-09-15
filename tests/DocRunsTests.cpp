@@ -72,7 +72,7 @@ MICRONOTES_TEST(doc_runs_band_spans_the_whole_code_run_and_stops_there) {
   float last = -1.0f;
   for(const auto& line : block.lines) {
     for(const auto& run : block.runsOf(line)) {
-      if(run.role != micronotes::doc::TextRole::Code || run.isMarker || run.text.empty()) continue;
+      if(run.role != micronotes::doc::TextRole::Code || run.isMarker || !run.shows()) continue;
       if(first < 0.0f) first = run.rect.x;
       last = run.rect.x + run.rect.w;
     }

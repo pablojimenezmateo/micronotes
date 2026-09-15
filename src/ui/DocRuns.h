@@ -77,7 +77,7 @@ void forEachCodeSpan(std::span<const doc::TextRun> runs, Fn&& fn) {
   float left = 0.0f;
   float right = 0.0f;
   for(const auto& run : runs) {
-    if(run.text.empty()) continue;
+    if(!run.shows()) continue;
     // A marker is drawn in the muted ink and its own ground would show as two
     // tabs either side of the span, so a shown backtick ends the band rather
     // than extending it.

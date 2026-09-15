@@ -49,14 +49,14 @@ micronotes::doc::InlineLayout laidOut(const std::vector<micronotes::markdown::In
 // Every run's text, in order, which is the visible characters of the block.
 std::string joined(const micronotes::doc::InlineLayout& content) {
   std::string out;
-  for(const auto& run : content.layout.runs) out += run.text;
+  for(const auto& run : content.layout.runs) out += content.layout.textOf(run);
   return out;
 }
 
 const micronotes::doc::TextRun* runWithRole(const micronotes::doc::InlineLayout& content,
                                             TextRole role) {
   for(const auto& run : content.layout.runs) {
-    if(run.role == role && !run.text.empty()) return &run;
+    if(run.role == role && run.shows()) return &run;
   }
   return nullptr;
 }
@@ -83,7 +83,7 @@ MICRONOTES_TEST(render_layout_splits_a_wikilink_out_of_plain_text) {
   MICRONOTES_REQUIRE(joined(content) == "before Some Note after");
   const auto* link = runWithRole(content, TextRole::WikiLink);
   MICRONOTES_REQUIRE(link != nullptr);
-  MICRONOTES_REQUIRE(link->text == "Some");
+  MICRONOTES_REQUIRE(content.layout.textOf(*link) == "Some");
   MICRONOTES_REQUIRE(link->linkIndex >= 0);
   MICRONOTES_REQUIRE(content.layout.links[static_cast<std::size_t>(link->linkIndex)] ==
                      "Some Note");
@@ -138,7 +138,7 @@ MICRONOTES_TEST(render_layout_keeps_a_table_cells_own_runs) {
   bool mono = false;
   bool link = false;
   for(const auto& run : marked.layout.runs) {
-    if(run.text.empty()) continue;
+    if(!run.shows()) continue;
     strong = strong || run.style.strong;
     italic = italic || run.style.italic;
     mono = mono || run.style.mono;

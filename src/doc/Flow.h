@@ -1,6 +1,6 @@
 #pragma once
 
-#include "doc/Layout.h"
+#include "doc/BlockLayout.h"
 
 #include "core/util/Utf8.h"
 
@@ -22,11 +22,14 @@ public:
   Flow(const TextMetrics& metrics, const FlowGeometry& geometry, BlockLayout& out,
        FlowScratch& scratch);
 
-  // Non-const `groups`: a token's text is moved into the run it becomes rather
-  // than copied. Every word in the document was being materialised three times
-  // -- once out of the source, once into the token, once into the run -- and
-  // the third of those is pure waste, because a token is emitted exactly once
-  // and read never again.
+  // Non-const `groups`: the token buffer is the caller's and is written
+  // through, not read-only.
+  //
+  // Nothing about a token's *text* is carried into the run any more. It was
+  // materialised three times -- once out of the source, once into the token,
+  // once into the run -- and all three are gone: the block's `display` buffer
+  // holds the bytes once, the token views them, and the run addresses them with
+  // the offsets it was already carrying.
   //
   // `count` rather than `groups.size()`: the buffer belongs to the caller and
   // keeps the last block's groups past the live prefix, so that their token
@@ -189,7 +192,7 @@ inline void Flow::emit(Token& token, float width) {
   run.role = token.role;
   run.isMarker = token.isMarker;
   run.linkIndex = token.link;
-  if(!token.hidden) run.text = std::move(token.text);
+  run.hidden = token.hidden;
   penX_ += width;
 }
 

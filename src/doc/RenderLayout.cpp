@@ -204,7 +204,11 @@ InlineLayout layoutInlines(const RenderContext& context, const std::vector<Inlin
                            const RunStyle& base, float width, TextRole baseRole) {
   InlineLayout out;
   Flattened flat = flatten(inlines, baseRole, context);
-  out.text = std::move(flat.text);
+  // The same buffer every other `BlockLayout` carries, filled from md4c's
+  // flattened text rather than from the note: it is what the runs' offsets
+  // index. `InlineLayout` used to hold it under its own name, which made the
+  // one concept two.
+  displayTextInto(flat.text, &out.layout.display);
   out.layout.links = std::move(flat.links);
 
   // One group: a hard break inside the block arrives as a `\n` of its own and
@@ -220,9 +224,11 @@ InlineLayout layoutInlines(const RenderContext& context, const std::vector<Inlin
   // that is not hot would be optimising by guess.
   std::vector<LineGroup> groups(1);
   const float lineHeight = blockLineStep(context, base);
-  if(!out.text.empty()) {
-    appendContentTokens(out.text, 0, out.text.size(), flat.attrs, base, context.type.mono,
-                        groups.front());
+  if(!flat.text.empty()) {
+    // `flat.text` is the source -- `endsLine` reads its newlines -- and
+    // `out.layout.display` is those bytes with the newlines already spaces.
+    appendContentTokens(flat.text, out.layout.display, 0, 0, flat.text.size(), flat.attrs, base,
+                        context.type.mono, groups.front());
   }
   FlowScratch scratch;
   FlowGeometry geometry;

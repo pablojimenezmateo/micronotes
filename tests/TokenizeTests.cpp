@@ -9,7 +9,7 @@
 using micronotes::doc::Attr;
 using micronotes::doc::appendContentTokens;
 using micronotes::doc::appendPlainTokens;
-using micronotes::doc::displayText;
+using micronotes::doc::displayTextInto;
 using micronotes::doc::LineGroup;
 using micronotes::doc::RunStyle;
 using micronotes::doc::TextRole;
@@ -28,14 +28,52 @@ namespace {
 // token has no text and shows as "<hidden>" so the two are distinguishable.
 std::vector<std::string> textsOf(const LineGroup& group) {
   std::vector<std::string> out;
-  for(const auto& token : group) out.push_back(token.hidden ? "<hidden>" : token.text);
+  for(const auto& token : group) {
+    out.push_back(token.hidden ? "<hidden>" : std::string(token.text));
+  }
   return out;
 }
 
-LineGroup plain(std::string_view source) {
-  LineGroup out;
-  appendPlainTokens(source, 0, source.size(), RunStyle {}, out);
+// The one substitution, as a value, for the tests that are about it.
+std::string displayText(std::string_view source) {
+  std::string out;
+  displayTextInto(source, &out);
   return out;
+}
+
+// A token's text views a buffer it does not own, so the buffer has to outlive
+// the group. Held here, one per `plain`/`marked` call, which is what a
+// `BlockLayout::display` is to a real block's tokens.
+struct Staged {
+  std::string display;
+  LineGroup group;
+
+  // Reads as the token list it holds, because that is what every test here is
+  // about; the buffer is the part that only has to stay alive.
+  std::size_t size() const { return group.size(); }
+  bool empty() const { return group.empty(); }
+  const micronotes::doc::Token& operator[](std::size_t i) const { return group[i]; }
+  const micronotes::doc::Token& front() const { return group.front(); }
+  const micronotes::doc::Token& back() const { return group.back(); }
+};
+
+std::vector<std::string> textsOf(const Staged& staged) {
+  return textsOf(staged.group);
+}
+
+Staged plain(std::string_view source) {
+  Staged staged;
+  displayTextInto(source, &staged.display);
+  appendPlainTokens(source, staged.display, 0, 0, source.size(), RunStyle {}, staged.group);
+  return staged;
+}
+
+Staged marked(std::string_view source, const std::vector<Attr>& attrs) {
+  Staged staged;
+  displayTextInto(source, &staged.display);
+  appendContentTokens(source, staged.display, 0, 0, source.size(), attrs, RunStyle {}, 12.0f,
+                      staged.group);
+  return staged;
 }
 
 }
@@ -126,8 +164,7 @@ MICRONOTES_TEST(tokenize_splits_at_every_change_of_inline_attribute) {
   attrs[1].strong = true;
   // The comma carries no attribute, so it is a token of its own with no space
   // before it.
-  LineGroup out;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, out);
+  const auto out = marked(source, attrs);
   MICRONOTES_REQUIRE(textsOf(out) == std::vector<std::string>({"ab", ","}));
   MICRONOTES_REQUIRE(out[0].style.strong);
   MICRONOTES_REQUIRE(!out[1].style.strong);
@@ -142,8 +179,7 @@ MICRONOTES_TEST(tokenize_hides_markers_while_keeping_their_offsets) {
   std::vector<Attr> attrs(source.size());
   for(std::size_t i : {0u, 1u, 3u, 4u}) attrs[i].marker = true;
 
-  LineGroup hidden;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, hidden);
+  const auto hidden = marked(source, attrs);
   MICRONOTES_REQUIRE(textsOf(hidden) == std::vector<std::string>({"<hidden>", "x", "<hidden>"}));
   // Offsets are still complete and contiguous across the hidden runs.
   MICRONOTES_REQUIRE(hidden.front().start == 0);
@@ -158,8 +194,7 @@ MICRONOTES_TEST(tokenize_never_gives_a_marker_the_link_it_marks) {
   std::vector<Attr> attrs(source.size());
   for(auto& attr : attrs) attr.link = 7;
   attrs[0].marker = true;
-  LineGroup out;
-  appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, out);
+  const auto out = marked(source, attrs);
   MICRONOTES_REQUIRE(!out.empty());
   MICRONOTES_REQUIRE(out.front().isMarker);
   MICRONOTES_REQUIRE(out.front().link == -1);
@@ -168,10 +203,14 @@ MICRONOTES_TEST(tokenize_never_gives_a_marker_the_link_it_marks) {
 // Both forms append rather than replace, because a block is staged into one
 // buffer the layout owns and reuses across blocks.
 MICRONOTES_TEST(tokenize_appends_to_whatever_the_caller_already_staged) {
+  std::string one;
+  displayTextInto("one", &one);
+  std::string two;
+  displayTextInto("two", &two);
   LineGroup out;
-  appendPlainTokens("one", 0, 3, RunStyle {}, out);
+  appendPlainTokens("one", one, 0, 0, 3, RunStyle {}, out);
   const std::size_t after = out.size();
-  appendPlainTokens("two", 0, 3, RunStyle {}, out);
+  appendPlainTokens("two", two, 0, 0, 3, RunStyle {}, out);
   MICRONOTES_REQUIRE(out.size() == after + 1);
   MICRONOTES_REQUIRE(textsOf(out) == std::vector<std::string>({"one", "two"}));
 }
@@ -182,11 +221,9 @@ MICRONOTES_TEST(tokenize_appends_to_whatever_the_caller_already_staged) {
 // and this is what says they stayed in step.
 MICRONOTES_TEST(tokenize_plain_path_agrees_with_the_general_one_on_unmarked_text) {
   for(const std::string source : {"one two", "a\n   b", "a\nb", "trailing  ", "  leading"}) {
-    LineGroup viaPlain;
-    appendPlainTokens(source, 0, source.size(), RunStyle {}, viaPlain);
-    LineGroup viaContent;
+    const auto viaPlain = plain(source);
     const std::vector<Attr> attrs(source.size());
-    appendContentTokens(source, 0, source.size(), attrs, RunStyle {}, 12.0f, viaContent);
+    const auto viaContent = marked(source, attrs);
 
     micronotes::tests::require(textsOf(viaPlain) == textsOf(viaContent),
                                "the plain and general tokenizers disagree on: " + source);

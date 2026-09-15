@@ -192,7 +192,7 @@ MICRONOTES_TEST(layout_ends_a_line_where_the_writer_ended_one) {
     const auto& first = layout.layout(0);
     out.lines = first.lines.size();
     for(const auto& line : first.lines) {
-      for(const auto& run : first.runsOf(line)) out.text += run.text;
+      for(const auto& run : first.runsOf(line)) out.text += first.textOf(run);
     }
     return out;
   };
@@ -365,24 +365,66 @@ MICRONOTES_TEST(layout_does_not_call_a_writers_line_break_a_wrap) {
 
 // There is one `TextRun` per *token* -- every word and every run of spaces --
 // for every block of the note, because a note is laid out whole and not to the
-// viewport. So this struct's size is the layout's memory, near enough: a real
-// session holds about 35 times a note's own bytes, and measured against a
-// 1.1 MB note, taking this from 88 bytes to 72 took 5.5 MB off the process.
+// viewport. So this struct's size is the layout's memory, near enough: on a
+// 1.1 MB note it is 391,218 runs.
 //
-// A static_assert rather than a comment, because the two ways it grows back are
-// both invisible in review: a member added in the middle rather than at the
-// narrow end, and one of the 32-bit offsets widened to `std::size_t` by someone
-// who has not noticed they are block-relative. Either shows up here.
+// 88 bytes -> 72 (narrowing the block-relative offsets and ordering the fields
+// wide to narrow) -> 40 (the `std::string` moving out to
+// `BlockLayout::display`, which the offsets already addressed).
+//
+// A static_assert rather than a comment, because the ways it grows back are
+// invisible in review: a member added in the middle rather than at the narrow
+// end, an offset widened to `std::size_t` by someone who has not noticed they
+// are block-relative, or a string coming back to hold what the buffer holds.
 //
 // If this fails, the question is not "what number should it say now" -- it is
 // whether the field that was added has to be in this struct at all.
 MICRONOTES_TEST(layout_text_run_stays_small) {
-  static_assert(sizeof(micronotes::doc::TextRun) <= 72,
+  static_assert(sizeof(micronotes::doc::TextRun) <= 40,
                 "TextRun is one-per-token over the whole note: see docs/performance.md, "
-                "'The twelfth pass', before letting it grow");
+                "'The thirteenth pass', before letting it grow");
   // The offsets are block-relative and stay narrow. A block four gigabytes long
   // is not a thing, and every reader promotes them with `block.start + ...`.
   static_assert(sizeof(micronotes::doc::TextRun::srcStart) == 4);
   static_assert(sizeof(micronotes::doc::TextRun::srcEnd) == 4);
-  MICRONOTES_REQUIRE(sizeof(micronotes::doc::TextRun) <= 72);
+  MICRONOTES_REQUIRE(sizeof(micronotes::doc::TextRun) <= 40);
+}
+
+// The contract that lets the run hold no text: the substitution is length
+// preserving and byte aligned, so a run's text sits at exactly the offset that
+// already addressed its source. If a substitution ever changed a byte count,
+// every run in the note would address the wrong bytes and nothing would fail to
+// compile.
+MICRONOTES_TEST(layout_a_runs_text_is_its_own_source_range_of_the_display_buffer) {
+  DocumentLayout layout;
+  layout.setMetrics(stubMetrics());
+  LayoutOptions options;
+  options.width = 4000.0f;
+  // A tab and a newline inside the block, which are the bytes that get replaced.
+  layout.update("alpha\tbeta\ngamma **bold**", options);
+
+  for(std::size_t i = 0; i < layout.blocks().size(); ++i) {
+    const auto& block = layout.layout(i);
+    MICRONOTES_REQUIRE(block.display.size() ==
+                       layout.blocks()[i].end() - layout.blocks()[i].start);
+    for(const auto& run : block.runs) {
+      const auto text = block.textOf(run);
+      if(!run.shows()) {
+        MICRONOTES_REQUIRE(text.empty());
+        continue;
+      }
+      // The length is the source range's, exactly.
+      MICRONOTES_REQUIRE(text.size() == run.srcEnd - run.srcStart);
+      // And the bytes are the source's, except for the three that become a
+      // space.
+      const std::string_view source =
+        std::string_view(layout.source())
+          .substr(layout.blocks()[i].start + run.srcStart, text.size());
+      for(std::size_t b = 0; b < text.size(); ++b) {
+        const char from = source[b];
+        const char expected = (from == '\n' || from == '\t' || from == '\r') ? ' ' : from;
+        MICRONOTES_REQUIRE(text[b] == expected);
+      }
+    }
+  }
 }

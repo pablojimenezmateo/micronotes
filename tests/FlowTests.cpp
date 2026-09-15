@@ -2,9 +2,11 @@
 
 #include "doc/Flow.h"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using micronotes::doc::BlockLayout;
@@ -12,7 +14,7 @@ using micronotes::doc::Flow;
 using micronotes::doc::FlowGeometry;
 using micronotes::doc::FlowScratch;
 using micronotes::doc::LineGroup;
-using micronotes::doc::Metrics;
+using micronotes::doc::TextMetrics;
 using micronotes::doc::RunStyle;
 using micronotes::doc::TextRole;
 using micronotes::doc::Token;
@@ -30,8 +32,8 @@ namespace {
 
 // One unit of width per character, so a column of 10 fits exactly ten
 // characters and every expectation below is countable by hand.
-Metrics unitMetrics() {
-  Metrics metrics;
+TextMetrics unitMetrics() {
+  TextMetrics metrics;
   metrics.measure = [](std::string_view value, const RunStyle&) {
     return static_cast<float>(value.size());
   };
@@ -39,21 +41,30 @@ Metrics unitMetrics() {
   return metrics;
 }
 
-Token word(std::string text, std::size_t start) {
-  Token token;
-  token.start = start;
-  token.end = start + text.size();
-  token.text = std::move(text);
-  token.style = RunStyle {};
-  token.role = TextRole::Body;
-  return token;
+// A token before it has a buffer to look at.
+//
+// A real `Token::text` is a *view* into the block's `display` buffer, so a test
+// cannot hand one a string it owns itself. These name the text and where it
+// sits; `flowOne` then builds the one buffer from the lot and points every
+// token into it, which is what staging a real block does.
+struct Piece {
+  std::string text;
+  std::size_t start = 0;
+  bool space = false;
+  bool lineBreak = false;
+  bool isMarker = false;
+  bool hidden = false;
+};
+
+Piece word(std::string text, std::size_t start) {
+  return Piece {std::move(text), start, false, false, false, false};
 }
 
-Token space(std::size_t start, bool lineBreak = false) {
-  Token token = word(" ", start);
-  token.space = true;
-  token.lineBreak = lineBreak;
-  return token;
+Piece space(std::size_t start, bool lineBreak = false) {
+  Piece piece = word(" ", start);
+  piece.space = true;
+  piece.lineBreak = lineBreak;
+  return piece;
 }
 
 FlowGeometry column(float width, bool wrap = true) {
@@ -69,36 +80,90 @@ std::vector<std::string> linesOf(const BlockLayout& out) {
   std::vector<std::string> lines;
   for(const auto& line : out.lines) {
     std::string text;
-    for(const auto& run : out.runsOf(line)) text += run.text;
+    for(const auto& run : out.runsOf(line)) text += out.textOf(run);
     lines.push_back(text);
   }
   return lines;
 }
 
 // Flows one group of tokens through a column of `width`.
-BlockLayout flowOne(std::vector<Token> tokens, float width, bool wrap = true) {
+// Lays every group's pieces into one display buffer and builds the tokens that
+// view it. Groups are placed consecutively, because two groups are two lines of
+// one block: a real block's groups never overlap in the source.
+//
+// The buffer is finished before a single view is taken. A token pointing into
+// `out.display` while it was still growing would be pointing at freed bytes,
+// which is the one way this contract can be got wrong, so the fixture is shaped
+// to make that ordering explicit rather than incidental.
+void stageInto(const std::vector<std::vector<Piece>>& pieceGroups, BlockLayout& out,
+               std::vector<LineGroup>& groups) {
+  std::vector<std::vector<std::pair<std::size_t, const Piece*>>> placed;
+  std::size_t at = 0;
+  std::size_t end = 0;
+  for(const auto& pieces : pieceGroups) {
+    std::vector<std::pair<std::size_t, const Piece*>> row;
+    std::size_t groupEnd = at;
+    for(const auto& piece : pieces) {
+      const std::size_t start = at + piece.start;
+      row.push_back({start, &piece});
+      groupEnd = std::max(groupEnd, start + piece.text.size());
+    }
+    placed.push_back(std::move(row));
+    end = std::max(end, groupEnd);
+    at = groupEnd;
+  }
+
+  out.display.assign(end, ' ');
+  for(const auto& row : placed) {
+    for(const auto& [start, piece] : row) out.display.replace(start, piece->text.size(), piece->text);
+  }
+
+  groups.clear();
+  for(const auto& row : placed) {
+    LineGroup tokens;
+    tokens.reserve(row.size());
+    for(const auto& [start, piece] : row) {
+      Token token;
+      token.start = start;
+      token.end = start + piece->text.size();
+      if(!piece->hidden) {
+        token.text = std::string_view(out.display).substr(start, piece->text.size());
+      }
+      token.style = RunStyle {};
+      token.role = TextRole::Body;
+      token.space = piece->space;
+      token.lineBreak = piece->lineBreak;
+      token.isMarker = piece->isMarker;
+      token.hidden = piece->hidden;
+      tokens.push_back(std::move(token));
+    }
+    groups.push_back(std::move(tokens));
+  }
+}
+
+BlockLayout flowOne(const std::vector<Piece>& pieces, float width, bool wrap = true) {
   BlockLayout out;
-  FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
   std::vector<LineGroup> groups;
-  groups.push_back(std::move(tokens));
+  stageInto({pieces}, out, groups);
+  FlowScratch scratch;
+  const TextMetrics metrics = unitMetrics();
   Flow flow(metrics, column(width, wrap), out, scratch);
   flow.run(groups, groups.size());
   return out;
 }
 
-std::vector<Token> sentence(const std::vector<std::string>& words) {
-  std::vector<Token> tokens;
+std::vector<Piece> sentence(const std::vector<std::string>& words) {
+  std::vector<Piece> pieces;
   std::size_t at = 0;
   for(std::size_t i = 0; i < words.size(); ++i) {
     if(i > 0) {
-      tokens.push_back(space(at));
+      pieces.push_back(space(at));
       at += 1;
     }
-    tokens.push_back(word(words[i], at));
+    pieces.push_back(word(words[i], at));
     at += words[i].size();
   }
-  return tokens;
+  return pieces;
 }
 
 }
@@ -124,7 +189,7 @@ MICRONOTES_TEST(flow_keeps_everything_on_one_line_when_wrap_is_off) {
 // inline attribute, so `*emphasis*, code` arrives as two adjacent non-space
 // tokens; breaking between them would open a line with a comma.
 MICRONOTES_TEST(flow_does_not_break_between_adjacent_non_space_tokens) {
-  std::vector<Token> tokens;
+  std::vector<Piece> tokens;
   tokens.push_back(word("aaaa", 0));
   tokens.push_back(space(4));
   tokens.push_back(word("emphasis", 5));  // one cluster with the comma below
@@ -140,7 +205,7 @@ MICRONOTES_TEST(flow_does_not_break_between_adjacent_non_space_tokens) {
 // A cluster wider than the column has to break inside itself -- between its
 // tokens where it can.
 MICRONOTES_TEST(flow_breaks_an_over_wide_cluster_between_its_tokens) {
-  std::vector<Token> tokens;
+  std::vector<Piece> tokens;
   tokens.push_back(word("aaaaa", 0));
   tokens.push_back(word("bbbbb", 5));
   const auto out = flowOne(std::move(tokens), 6.0f);
@@ -178,7 +243,7 @@ MICRONOTES_TEST(flow_splits_a_long_word_on_codepoint_boundaries) {
 // trailing newline is the block's own terminator and must not leave an empty
 // line under it.
 MICRONOTES_TEST(flow_applies_a_hard_break_only_when_a_word_follows) {
-  std::vector<Token> tokens;
+  std::vector<Piece> tokens;
   tokens.push_back(word("aaa", 0));
   tokens.push_back(space(3, /*lineBreak=*/true));
   tokens.push_back(word("bbb", 4));
@@ -187,7 +252,7 @@ MICRONOTES_TEST(flow_applies_a_hard_break_only_when_a_word_follows) {
   MICRONOTES_REQUIRE(broken[0] == "aaa ");
   MICRONOTES_REQUIRE(broken[1] == "bbb");
 
-  std::vector<Token> trailing;
+  std::vector<Piece> trailing;
   trailing.push_back(word("aaa", 0));
   trailing.push_back(space(3, /*lineBreak=*/true));
   const auto ended = linesOf(flowOne(std::move(trailing), 40.0f));
@@ -203,7 +268,7 @@ MICRONOTES_TEST(flow_marks_only_the_lines_a_column_break_continued) {
   MICRONOTES_REQUIRE(!wrapped.lines[0].continuation);
   MICRONOTES_REQUIRE(wrapped.lines[1].continuation);
 
-  std::vector<Token> hard;
+  std::vector<Piece> hard;
   hard.push_back(word("aaa", 0));
   hard.push_back(space(3, /*lineBreak=*/true));
   hard.push_back(word("bbb", 4));
@@ -218,9 +283,9 @@ MICRONOTES_TEST(flow_marks_only_the_lines_a_column_break_continued) {
 MICRONOTES_TEST(flow_records_run_offsets_relative_to_the_block) {
   BlockLayout out;
   FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
+  const TextMetrics metrics = unitMetrics();
   std::vector<LineGroup> groups;
-  groups.push_back(sentence({"aaa", "bbb"}));
+  stageInto({sentence({"aaa", "bbb"})}, out, groups);
   FlowGeometry geometry = column(40.0f);
   geometry.base = 100;
   // The tokens were built at offsets 0..7; shift them to sit at the base.
@@ -239,8 +304,8 @@ MICRONOTES_TEST(flow_records_run_offsets_relative_to_the_block) {
 // A hidden marker measures zero and still takes its place in the cluster, so
 // the source offset it anchors stays with the word it belongs to.
 MICRONOTES_TEST(flow_emits_a_hidden_token_as_a_zero_width_run_with_no_text) {
-  std::vector<Token> tokens;
-  Token marker = word("**", 0);
+  std::vector<Piece> tokens;
+  Piece marker = word("**", 0);
   marker.hidden = true;
   marker.isMarker = true;
   tokens.push_back(std::move(marker));
@@ -249,11 +314,11 @@ MICRONOTES_TEST(flow_emits_a_hidden_token_as_a_zero_width_run_with_no_text) {
 
   MICRONOTES_REQUIRE(out.runs.size() == 2);
   MICRONOTES_REQUIRE(out.runs[0].rect.w == 0.0f);
-  MICRONOTES_REQUIRE(out.runs[0].text.empty());
+  MICRONOTES_REQUIRE(out.textOf(out.runs[0]).empty());
   MICRONOTES_REQUIRE(out.runs[0].isMarker);
   // The word that follows starts where the marker did, not two glyphs in.
   MICRONOTES_REQUIRE(out.runs[1].rect.x == 0.0f);
-  MICRONOTES_REQUIRE(out.runs[1].text == "bold");
+  MICRONOTES_REQUIRE(out.textOf(out.runs[1]) == "bold");
 }
 
 // The scratch buffers are borrowed, and a second block must not inherit the
@@ -261,16 +326,16 @@ MICRONOTES_TEST(flow_emits_a_hidden_token_as_a_zero_width_run_with_no_text) {
 // what lets one `FlowScratch` serve a whole document.
 MICRONOTES_TEST(flow_reuses_borrowed_scratch_without_carrying_state_over) {
   FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
+  const TextMetrics metrics = unitMetrics();
 
   BlockLayout first;
   std::vector<LineGroup> groupsA;
-  groupsA.push_back(sentence({"aaa", "bbb", "ccc"}));
+  stageInto({sentence({"aaa", "bbb", "ccc"})}, first, groupsA);
   Flow(metrics, column(8.0f), first, scratch).run(groupsA, groupsA.size());
 
   BlockLayout second;
   std::vector<LineGroup> groupsB;
-  groupsB.push_back(sentence({"aaa", "bbb", "ccc"}));
+  stageInto({sentence({"aaa", "bbb", "ccc"})}, second, groupsB);
   Flow(metrics, column(8.0f), second, scratch).run(groupsB, groupsB.size());
 
   MICRONOTES_REQUIRE(linesOf(first) == linesOf(second));
@@ -281,10 +346,9 @@ MICRONOTES_TEST(flow_reuses_borrowed_scratch_without_carrying_state_over) {
 MICRONOTES_TEST(flow_starts_a_new_line_for_every_group) {
   BlockLayout out;
   FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
+  const TextMetrics metrics = unitMetrics();
   std::vector<LineGroup> groups;
-  groups.push_back(sentence({"aaa"}));
-  groups.push_back(sentence({"bbb"}));
+  stageInto({sentence({"aaa"}), sentence({"bbb"})}, out, groups);
   Flow flow(metrics, column(40.0f), out, scratch);
   flow.run(groups, groups.size());
 
@@ -302,10 +366,10 @@ MICRONOTES_TEST(flow_starts_a_new_line_for_every_group) {
 MICRONOTES_TEST(flow_reads_only_the_staged_prefix_of_the_group_buffer) {
   BlockLayout out;
   FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
+  const TextMetrics metrics = unitMetrics();
   std::vector<LineGroup> groups;
-  groups.push_back(sentence({"live"}));
-  groups.push_back(sentence({"stale"}));  // past the prefix: must not be read
+  // Past the prefix: must not be read.
+  stageInto({sentence({"live"}), sentence({"stale"})}, out, groups);
   Flow flow(metrics, column(40.0f), out, scratch);
   flow.run(groups, 1);
 
@@ -319,9 +383,9 @@ MICRONOTES_TEST(flow_reads_only_the_staged_prefix_of_the_group_buffer) {
 MICRONOTES_TEST(flow_places_the_first_line_at_the_given_top_and_tiles_from_there) {
   BlockLayout out;
   FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
+  const TextMetrics metrics = unitMetrics();
   std::vector<LineGroup> groups;
-  groups.push_back(sentence({"aaa", "bbb", "ccc"}));
+  stageInto({sentence({"aaa", "bbb", "ccc"})}, out, groups);
   FlowGeometry geometry = column(8.0f);
   geometry.top = 5.0f;
   geometry.lineHeight = 2.0f;
@@ -338,9 +402,9 @@ MICRONOTES_TEST(flow_places_the_first_line_at_the_given_top_and_tiles_from_there
 MICRONOTES_TEST(flow_indents_every_line_to_the_text_left) {
   BlockLayout out;
   FlowScratch scratch;
-  const Metrics metrics = unitMetrics();
+  const TextMetrics metrics = unitMetrics();
   std::vector<LineGroup> groups;
-  groups.push_back(sentence({"aaa", "bbb"}));
+  stageInto({sentence({"aaa", "bbb"})}, out, groups);
   FlowGeometry geometry = column(4.0f);
   geometry.textLeft = 12.0f;
   Flow flow(metrics, geometry, out, scratch);

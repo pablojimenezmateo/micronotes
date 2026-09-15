@@ -1,6 +1,6 @@
 #pragma once
 
-#include "doc/Layout.h"
+#include "doc/BlockLayout.h"
 
 #include "core/util/StringUtil.h"
 
@@ -30,15 +30,28 @@ using microcore::util::isAsciiSpace;
 
 // Newlines and tabs become one space each, so a run's text stays byte-aligned
 // with the source it came from and prefix measurement maps offsets to pixels.
-inline std::string displayText(std::string_view source) {
-  std::string out(source);
-  for(char& c : out) {
+//
+// **Length preserving and byte aligned**, and that is the property everything
+// downstream rests on: each of the three bytes becomes exactly one space, so
+// the text at offset `i` of the result is the source byte at offset `i`. It is
+// what lets a run address its text with the same number that already addressed
+// its source, and so what lets `BlockLayout::display` be one buffer per block
+// instead of a `std::string` per run.
+inline void displayTextInto(std::string_view source, std::string* out) {
+  out->assign(source);
+  for(char& c : *out) {
     if(c == '\n' || c == '\t' || c == '\r') c = ' ';
   }
-  return out;
 }
 
-inline Token makeToken(std::string_view source, std::size_t start, std::size_t end, const RunStyle& style,
+// `display` is the block's substituted bytes and `base` the source offset it
+// starts at, so `start`/`end` -- which are absolute -- index it at `- base`.
+//
+// The token's text is a *view* into that buffer. It used to be a `std::string`
+// built here, per token, only so that `Flow` could move it into the run it
+// became; the run does not hold one any more, so neither does this.
+inline Token makeToken(std::string_view display, std::size_t base, std::size_t start,
+                std::size_t end, const RunStyle& style,
                 TextRole role, bool marker, bool hidden, int link, bool lineBreak = false) {
   Token token;
   token.start = start;
@@ -49,7 +62,7 @@ inline Token makeToken(std::string_view source, std::size_t start, std::size_t e
   token.hidden = hidden;
   token.link = link;
   token.lineBreak = lineBreak;
-  if(!hidden) token.text = displayText(source.substr(start, end - start));
+  if(!hidden) token.text = display.substr(start - base, end - start);
   token.space = !token.text.empty() && std::all_of(token.text.begin(), token.text.end(), [](char c) { return c == ' '; });
   return token;
 }
@@ -81,7 +94,8 @@ inline std::size_t tokenEstimate(std::size_t bytes) {
 // pays for markup this block does not have: a heap-allocated attribute slot per
 // content byte, zero-filled and then read back, to conclude that every byte is
 // plain. Kept directly below its general form so the two stay in step.
-inline void appendPlainTokens(std::string_view source, std::size_t from, std::size_t to,
+inline void appendPlainTokens(std::string_view source, std::string_view display,
+                       std::size_t displayBase, std::size_t from, std::size_t to,
                        const RunStyle& base, LineGroup& out) {
   out.reserve(out.size() + tokenEstimate(to - from));
   std::size_t i = from;
@@ -91,19 +105,21 @@ inline void appendPlainTokens(std::string_view source, std::size_t from, std::si
     while(j < to && isAsciiSpace(source[j]) == space) ++j;
     const bool endsLine = space && source.substr(i, j - i).find('\n') != std::string_view::npos;
     if(endsLine && j - i > 1) {
-      out.push_back(makeToken(source, i, j - 1, base, TextRole::Body, false, true, -1));
-      out.push_back(makeToken(source, j - 1, j, base, TextRole::Body, false, false, -1, true));
+      out.push_back(makeToken(display, displayBase, i, j - 1, base, TextRole::Body, false, true, -1));
+      out.push_back(makeToken(display, displayBase, j - 1, j, base, TextRole::Body, false, false, -1, true));
       i = j;
       continue;
     }
-    out.push_back(makeToken(source, i, j, base, TextRole::Body, false, false, -1, endsLine));
+    out.push_back(makeToken(display, displayBase, i, j, base, TextRole::Body, false, false, -1, endsLine));
     i = j;
   }
 }
 
 // Splits `[from, to)` into tokens that share one set of inline attributes, with
 // whitespace kept as its own token so wrapping has break opportunities.
-inline void appendContentTokens(std::string_view source, std::size_t from, std::size_t to, const std::vector<Attr>& attrs,
+inline void appendContentTokens(std::string_view source, std::string_view display,
+                         std::size_t displayBase, std::size_t from, std::size_t to,
+                         const std::vector<Attr>& attrs,
                          const RunStyle& base, float monoSize, LineGroup& out) {
   out.reserve(out.size() + tokenEstimate(to - from));
   std::size_t i = from;
@@ -124,13 +140,13 @@ inline void appendContentTokens(std::string_view source, std::size_t from, std::
     const bool endsLine =
       space && !hidden && source.substr(i, j - i).find('\n') != std::string_view::npos;
     if(endsLine && j - i > 1) {
-      out.push_back(makeToken(source, i, j - 1, style, role, attr.marker, true, -1));
-      out.push_back(makeToken(source, j - 1, j, style, role, attr.marker, false,
+      out.push_back(makeToken(display, displayBase, i, j - 1, style, role, attr.marker, true, -1));
+      out.push_back(makeToken(display, displayBase, j - 1, j, style, role, attr.marker, false,
                               attr.marker ? -1 : attr.link, true));
       i = j;
       continue;
     }
-    out.push_back(makeToken(source, i, j, style, role, attr.marker, hidden,
+    out.push_back(makeToken(display, displayBase, i, j, style, role, attr.marker, hidden,
                             attr.marker ? -1 : attr.link, endsLine));
     i = j;
   }

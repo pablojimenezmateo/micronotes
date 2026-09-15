@@ -376,7 +376,7 @@ void PageView::drawBlockDecorations(SDL_Renderer* renderer, TextRenderer& text) 
 
     bool titled = false;
     if(!layout.lines.empty()) {
-      for(const auto& run : layout.runsOf(layout.lines.front())) titled = titled || !run.text.empty();
+      for(const auto& run : layout.runsOf(layout.lines.front())) titled = titled || run.shows();
     }
     if(titled) continue;
     ui::TextStyle label;
