@@ -3,6 +3,7 @@
 #include "doc/BlockScan.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/BandSplice.h"
 
 #include <algorithm>
 #include <iterator>
@@ -149,14 +150,14 @@ bool outlineUpdate(std::string_view source, doc::BlockSpan blocks, const doc::Bl
     out[i].offset =
       static_cast<std::size_t>(static_cast<std::ptrdiff_t>(out[i].offset) + relay.byteShift);
   }
-  // And the middle is spliced rather than rebuilt on top of. `erase`/`insert`
-  // move the tail's entries, which for a type holding a `std::string` is a
-  // pointer swap each and no allocation at all -- and `replaced` is empty for
-  // any keystroke that did not touch a heading, which is nearly all of them.
-  out.erase(out.begin() + static_cast<std::ptrdiff_t>(headEntries),
-            out.begin() + static_cast<std::ptrdiff_t>(tailFrom));
-  out.insert(out.begin() + static_cast<std::ptrdiff_t>(headEntries),
-             std::make_move_iterator(replaced.begin()), std::make_move_iterator(replaced.end()));
+  // And the middle is spliced rather than rebuilt on top of. The tail's entries
+  // are carried by move, which for a type holding a `std::string` is a pointer
+  // swap each and no allocation at all -- and `replaced` is empty for any
+  // keystroke that did not touch a heading, which is nearly all of them.
+  // `erase` then `insert` was what this said, and it moved that tail twice.
+  microcore::util::replaceBand(out, headEntries, tailFrom - headEntries,
+                               std::make_move_iterator(replaced.begin()),
+                               std::make_move_iterator(replaced.end()));
 
   // A heading added or removed in the middle changes the indentation of
   // everything under it, so there is no bounded answer to want and this redoes

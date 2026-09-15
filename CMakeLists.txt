@@ -387,6 +387,7 @@ add_executable(micronotes_tests
   tests/FramePolicyTests.cpp
   tests/FrameTraceTests.cpp
   tests/FuzzyTests.cpp
+  tests/BandSpliceTests.cpp
   tests/InlineScanTests.cpp
   tests/CaptureLadderTests.cpp
   tests/GlyphTests.cpp

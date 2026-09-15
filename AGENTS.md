@@ -397,7 +397,11 @@ when the counters went in it turned out to be 70% of every frame.
   each row's source range -- there were two of those and the second had no
   callers left, which is how a tree comes to break lines by two different
   rules; `core/util/Utf8.h` has the
-  boundary walks; `core/util/Hash.h` is the one FNV; `core/platform/PathUtils.h`
+  boundary walks; `core/util/Hash.h` is the one FNV; `core/util/BandSplice.h`
+  is the one *splice* -- replacing a band in the middle of a sorted vector with
+  the tail moved exactly once, which four bounded readouts had each written out
+  and two of them as `erase` then `insert`, which moves it twice;
+  `core/platform/PathUtils.h`
   has `uniquePath`, `sanitizeFileStem` and `displayPath`; `ui/Memo.h` is how a
   memoised value is spelled; `ui/TextFit.h` is the measured text helpers;
   `library/Metadata.h` has the two front-matter shape rules

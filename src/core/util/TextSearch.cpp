@@ -1,6 +1,7 @@
 #include "core/util/TextSearch.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/BandSplice.h"
 #include "core/util/StringUtil.h"
 
 #include <algorithm>
@@ -247,17 +248,7 @@ bool findAllUpdate(std::vector<TextMatch>* matches, std::vector<TextMatch>* scra
   perf::addCounter(perf::CounterId::TextSearchUpdates);
   perf::addCounter(perf::CounterId::TextSearchUpdateBytes, at > scanFrom ? at - scanFrom : 0);
 
-  if(keep + middle < tail) {
-    std::move(out.begin() + static_cast<std::ptrdiff_t>(tail), out.end(),
-              out.begin() + static_cast<std::ptrdiff_t>(keep + middle));
-    out.resize(total);
-  } else if(keep + middle > tail) {
-    out.resize(total);
-    std::move_backward(out.begin() + static_cast<std::ptrdiff_t>(tail),
-                       out.begin() + static_cast<std::ptrdiff_t>(tail + tailCount),
-                       out.begin() + static_cast<std::ptrdiff_t>(total));
-  }
-  std::copy(scratch->begin(), scratch->end(), out.begin() + static_cast<std::ptrdiff_t>(keep));
+  replaceBand(out, keep, tail - keep, scratch->begin(), scratch->end());
   for(std::size_t i = keep + middle; i < total; ++i) {
     out[i].start = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(out[i].start) + delta);
     out[i].end = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(out[i].end) + delta);

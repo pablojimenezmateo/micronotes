@@ -4037,14 +4037,58 @@ never runs looks precisely like one that is merely slow — with the counter
 above as the only thing that could tell the difference. `app::layoutRevision` is
 that shift, written once.
 
-### Open: three surfaces have a relay now, and each wrote its own splice
+### The eleventh pass: four splices were one splice, and two of them moved the tail twice
 
+The open question the tenth pass left was whether the five bounded readouts --
 `doc::DocumentLayout`, `editor::softWrapUpdate`, the status bar's caret walk,
-the find bar's match list and now the outline are five bounded readouts, and
-each carries its own "keep the head, shift the tail, redo the middle" loop over
-a different element type. The loops are not identical — the find bar's list is
-byte ranges, the outline's is entries with strings, the wrap's is rows — but the
-*banding* is the same three questions each time, and this pass's bug was in the
-banding rather than in anything about headings. Whether that is one algorithm
-over a concept or five instances of a pattern is worth deciding before a sixth
-one is written, and the honest answer today is that nobody has looked.
+the find bar's match list and the outline -- were one algorithm or five
+instances of a pattern. Somebody has looked now, and the answer is *four and a
+half*.
+
+**The caret walk is not one of them.** It has no list: it counts newlines
+between an anchor and the caret. Pulling it in would have been a shape rather
+than a subject, so it stays where it is.
+
+**The other four split cleanly in two.** *Finding* the band is genuinely
+different in each, and each reason is about the thing being read out: a wrap
+band is a logical line, so it widens to one; a match band has to be *walked*
+forward until the rescan's cursor lands on a boundary the old list also had,
+because a rescan can emit a match running past where the old list resumes; a
+block band is whatever the relay names. None of that generalises and none of it
+should.
+
+What *is* the same, four times, is everything after the band is known: make
+`[first, first + oldCount)` into `[first, first + newCount)` and leave the tail
+correct. That is `microcore::util::openBand` and its `replaceBand` form, and it
+is now written once.
+
+The four had written it four ways, and two of them were slower than they read:
+
+| | was | is |
+|---|---|---|
+| `softWrapUpdate` | `erase` then `insert` | `replaceBand` |
+| `outlineUpdate` | `erase` then `insert` | `replaceBand` |
+| `findAllUpdate` | `move`/`move_backward` + `resize`, by hand | `replaceBand` |
+| `DocumentLayout::alignPlacement` | eight hand-ordered moves over four parallel arrays | four `openBand`s |
+
+`erase` followed by `insert` moves the tail **twice**: down to close the hole,
+then back up to open it again. On the outline's five-hundred-heading fixture
+that is two passes over the carried entries per keystroke where one will do,
+and on the raw pane's rows the same. The layout's version was already one pass
+but was eight moves whose *order* had to be right in each of four copies --
+grow resizes then moves backwards, shrink moves then resizes -- and getting
+that wrong in one copy is a block's layout read out of memory it no longer
+owns. Four calls now, and the ordering is decided in one place.
+
+**What it measured.** Nothing, and that is the honest reading. Every allocation
+count in the shell lane is byte-identical across the change -- `shell.keystroke`
+20 allocations, `shell.raw_pane_rewrap` 0, `shell.outline_panel` 10 -- and the
+timings moved less than the run-to-run spread on this machine, which
+`docs/performance.md` has already established cannot resolve under 5%. The
+tails on the fixtures are tens of elements, so halving a pass over them is
+below the floor. This is an ownership change with a constant-factor win behind
+it, not a speedup, and it is recorded as one.
+
+What it *does* buy is the sixth caller. The next bounded readout gets the
+splice for free and cannot get the move order wrong, which is the failure this
+tree has spent several passes removing rather than adding.

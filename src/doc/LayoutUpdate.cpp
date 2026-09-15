@@ -3,6 +3,7 @@
 #include "CoreAliases.h"
 #include "core/perf/Perf.h"
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/BandSplice.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -218,29 +219,23 @@ private:
     // the layout behind it, and moved by the change in block count -- so moving
     // them is a memmove of four parallel arrays, where rebuilding them is a hash
     // of every byte and a map probe per block.
+    //
+    // Everything before the carried tail is re-derived by `walkDirtyRanges`, so
+    // what each array wants is one band -- `[0, oldTail)` becoming
+    // `[0, newTail)` -- with its contents left to that walk. Which is
+    // `util::openBand`, and the four arrays are four calls to it rather than
+    // the eight hand-ordered moves this was: grow resizes then moves backwards,
+    // shrink moves then resizes, and getting that order wrong in one of four
+    // copies is a block's layout read out of memory it no longer owns.
     const std::size_t oldTail = previousCount_ - tail_;
-    if(shift_ > 0) {
-      resizeArrays();
-      std::move_backward(doc_.placed_.begin() + oldTail, doc_.placed_.begin() + previousCount_,
-                         doc_.placed_.end());
-      std::move_backward(doc_.flags_.begin() + oldTail, doc_.flags_.begin() + previousCount_,
-                         doc_.flags_.end());
-      std::move_backward(doc_.liveKeys_.begin() + oldTail, doc_.liveKeys_.begin() + previousCount_,
-                         doc_.liveKeys_.end());
-      std::move_backward(doc_.lineStart_.begin() + oldTail,
-                         doc_.lineStart_.begin() + previousCount_ + 1, doc_.lineStart_.end());
-      return;
-    }
     const std::size_t newTail = count_ - tail_;
-    std::move(doc_.placed_.begin() + oldTail, doc_.placed_.begin() + previousCount_,
-              doc_.placed_.begin() + newTail);
-    std::move(doc_.flags_.begin() + oldTail, doc_.flags_.begin() + previousCount_,
-              doc_.flags_.begin() + newTail);
-    std::move(doc_.liveKeys_.begin() + oldTail, doc_.liveKeys_.begin() + previousCount_,
-              doc_.liveKeys_.begin() + newTail);
-    std::move(doc_.lineStart_.begin() + oldTail, doc_.lineStart_.begin() + previousCount_ + 1,
-              doc_.lineStart_.begin() + newTail);
-    resizeArrays();
+    util::openBand(doc_.placed_, 0, oldTail, newTail);
+    util::openBand(doc_.flags_, 0, oldTail, newTail);
+    util::openBand(doc_.liveKeys_, 0, oldTail, newTail);
+    // `lineStart_` carries one extra entry -- the document's total row count --
+    // so its tail is one longer and its band is the same one. The sizes follow:
+    // `count_ + 1` is what `size() - oldTail + newTail` comes to.
+    util::openBand(doc_.lineStart_, 0, oldTail, newTail);
   }
 
   // The four parallel arrays and the row index, to the block count this call

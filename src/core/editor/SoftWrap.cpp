@@ -1,6 +1,7 @@
 #include "core/editor/SoftWrap.h"
 
 #include "core/perf/PerformanceCounters.h"
+#include "core/util/BandSplice.h"
 #include "core/util/Utf8.h"
 
 #include <algorithm>
@@ -175,14 +176,10 @@ std::size_t softWrapUpdate(std::vector<SoftWrapRow>& rows, SoftWrapScratch& scra
   perf::addCounter(perf::CounterId::EditorSoftWrapRowsShifted, rows.size() - last - 1);
 
   // The common case by a wide margin -- a typed character rewraps one line into
-  // the same number of rows -- and it is the one that needs no move at all.
-  if(now == was) {
-    std::copy(relaid.begin(), relaid.end(), rows.begin() + static_cast<std::ptrdiff_t>(first));
-  } else {
-    const auto at = rows.begin() + static_cast<std::ptrdiff_t>(first);
-    rows.erase(at, at + static_cast<std::ptrdiff_t>(was));
-    rows.insert(rows.begin() + static_cast<std::ptrdiff_t>(first), relaid.begin(), relaid.end());
-  }
+  // the same number of rows -- and `replaceBand` is a straight copy for it.
+  // What it is not is `erase` then `insert`, which was what this said and
+  // which moves the tail twice when the count changes.
+  util::replaceBand(rows, first, was, relaid.begin(), relaid.end());
 
   // The tail is the same rows, further along by the edit's delta. An addition
   // per row rather than a measurement per row, which is the whole point.
