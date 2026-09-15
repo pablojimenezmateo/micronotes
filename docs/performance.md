@@ -4260,3 +4260,60 @@ the third of the units this file already names and the only one still living in
 What is left of a note's memory is the runs array itself: 391,218 runs at 40
 bytes is 14.9 MB, which is the layout rather than waste in it. Beating that
 means not laying the whole note out, which is a different design and not debt.
+
+### The fourteenth pass: a coalesced save allocated a whole note to replace a whole note
+
+TD-48 made a save defer the half of its index write that scales with the note,
+and sixty saves coalesce into one transaction. What the coalescing did not do is
+reuse anything. Each save built `std::string(written->body)` — a fresh 200 KB
+allocation — and destroyed the 200 KB string belonging to the save it was
+replacing. A `malloc`/`free` pair per second while somebody types, for a note
+whose length barely moves between two keystrokes.
+
+The standing write's buffer is right there and is already the right size, so
+`assign` into it. Safe because `before`, which aliases `standing->row`, is read
+on the line above and not again.
+
+```
+save.autosave_note allocated   204.1 KB -> 29.1 KB    -86%
+```
+
+**Allocated bytes and nothing else**, because this machine was under another
+build at load 22 while the pass ran, and the persistence lane is wall-clock by
+design — a durable write is two `fsync` barriers, and on process CPU time an
+18 ms save reads as 60 us of work. The timings that day were noise and are not
+claimed. This is exactly the case the allocation counter exists for.
+
+A budget holds it, and the relationship is exact rather than approximate: a
+coalesced write is *by definition* one that found a standing write to replace,
+and replacing it means its buffer is there to be written into. So
+`library.index_deferred_body_buffer_reused` and
+`library.index_writes_coalesced` are the same number or something has started
+allocating a note per save again. Confirmed by disabling the reuse and watching
+the harness exit 1 with "coalesced 60 ... reused only 0".
+
+The Links panel still allocates 204.3 KB a save, because with that view open
+every save flushes and there is no standing write to reuse. That is TD-49
+costing what its entry says it costs, now visible in a second place.
+
+#### And a write that was safe by luck
+
+Chasing the save path turned up something that is not about performance at all.
+`AppState::appendToNote` reads a note's file, appends to it and writes it back.
+For the *open* note — the one whose buffer can be ahead of its file — that
+appends to the last saved version and drops everything typed since, which is
+precisely the failure `writeOpenNote`'s signature check exists to prevent,
+reached by a path that never asks it. Its comment said "the target is not the
+open note". Nothing made that true.
+
+It held because its single caller refuses a move into the note it is moving out
+of, for its own unrelated reason. The precondition is the callee's now.
+
+And the reason it was hard to see: **nothing enumerated the note-write call
+sites**, so there was no answer to "is this one safe?" short of reading all of
+them. `architecture_a_note_write_cannot_skip_the_signature_check` now finds
+every `catalog_.writeNote` in `AppState.cpp`, names the method it sits in, and
+fails on one that is not accounted for — the same shape as
+`architecture_a_library_index_read_cannot_skip_the_flush`, and for the same
+reason: the rule is one a caller can forget, and forgetting this one destroys
+somebody's work rather than showing a stale list.

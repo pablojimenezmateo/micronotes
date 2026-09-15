@@ -372,7 +372,14 @@ when the counters went in it turned out to be 70% of every frame.
   `ui::OpenNoteRecord` carries a `platform::FileSignature` per open note and
   `AppState::writeOpenNote` -- the one path every save, rename, icon and tag
   edit goes through -- compares it before writing; a path that skips that
-  comparison can destroy an edit made in another program. If two versions of a note exist and cannot be
+  comparison can destroy an edit made in another program.
+  `architecture_a_note_write_cannot_skip_the_signature_check` enumerates every
+  `catalog_.writeNote` in `AppState.cpp` and fails on one it does not account
+  for, so a new write path is a decision rather than an oversight. There are
+  three today and each is a different answer: `writeOpenNote` is the guarded
+  path, and `removeTagEverywhere` and `appendToNote` are read-modify-writes of
+  notes that are not the open one -- which the second of those now *checks*
+  rather than assuming. If two versions of a note exist and cannot be
   merged, both end up in the library -- micronotes does not choose. See
   `docs/library-format.md`, "Changes Made Outside micronotes".
 - Prefer RAII, explicit ownership, and value semantics. Reach for inheritance
