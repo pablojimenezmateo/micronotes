@@ -181,13 +181,7 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
   const auto askFind = [&] { micronotes::app::refreshFindMatches(ui); };
   const auto askRawPane = [&] { sink += micronotes::app::rawPaneRows(text, ui, page).size(); };
 
-  bool ok = true;
-  const auto gate = [&](const char* name, const Cost& cost, std::uint64_t budget) {
-    if(cost.medianMicros <= budget) return;
-    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds " << budget
-              << "us\n";
-    ok = false;
-  };
+  BudgetGate gate;
 
   // Each surface on its own, with the rest of the keystroke performed untimed
   // around it -- so what is measured is that surface's answer to a buffer that
@@ -402,16 +396,16 @@ bool shellBudgets(const std::filesystem::path& root, const std::string& body) {
                 << " splices over " << builds
                 << " builds -- the block relay is being refused and the rebuild is back to "
                    "costing the note rather than the edit\n";
-      ok = false;
+      gate.fail();
     }
   }
   if(at(CounterId::RightPanelOutlineScans) > at(CounterId::RightPanelOutlineBlocksBorrowed)) {
     std::cerr << "BUDGET FAILED: shell.outline_panel scanned the note more often than it borrowed "
                  "the page's partition -- the right panel is being asked before the content is "
                  "laid out\n";
-    ok = false;
+    gate.fail();
   }
-  return ok;
+  return gate.held();
 }
 
 }

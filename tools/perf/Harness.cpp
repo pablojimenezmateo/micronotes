@@ -131,17 +131,25 @@ void printCounters() {
 // It covers the fixture as well as the layout -- a thousand notes on disk and an
 // SQLite index are in here too -- so it is a number to watch move between runs
 // rather than to attribute to any one part.
-void printPeakMemory() {
+bool gatePeakMemory(double budgetMb) {
   std::ifstream status("/proc/self/status");
   std::string line;
   while(std::getline(status, line)) {
     if(line.compare(0, 6, "VmHWM:") != 0) continue;
     const auto digits = line.find_first_of("0123456789");
     if(digits == std::string::npos) break;
-    std::printf("\n=== peak resident memory ===\npeak_rss %.1f MB\n",
-                std::strtod(line.c_str() + digits, nullptr) / 1024.0);
-    return;
+    const double peakMb = std::strtod(line.c_str() + digits, nullptr) / 1024.0;
+    std::printf("\n=== peak resident memory ===\npeak_rss %.1f MB (budget %.1f MB)\n", peakMb,
+                budgetMb);
+    if(peakMb <= budgetMb) return true;
+    std::fprintf(stderr, "BUDGET FAILED: peak_rss %.1f MB exceeds %.1f MB\n", peakMb, budgetMb);
+    return false;
   }
+  // No `VmHWM` to read. Saying so is the point: a silent return here is a
+  // budget that quietly stops existing, which is the failure this whole
+  // addition is about.
+  std::cerr << "BUDGET FAILED: peak_rss could not be read from /proc/self/status\n";
+  return false;
 }
 
 }

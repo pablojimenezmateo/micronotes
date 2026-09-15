@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-51 have been used. Closing an entry means deleting it and saying so in the
+TD-52 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -165,3 +165,52 @@ tree into a diagnostics panel. That is a design decision with a drawing change
 behind it, and it is worth making when somebody hits this a second time. The
 honest statement today is that the trap is signposted at both ends and still
 open in the middle.
+
+## TD-52 — Nothing measures what a note on screen costs in memory
+
+The harness gates peak resident memory as of the twelfth pass, and the figure
+is the steadiest instrument it has: 31.9–32.1 MB over four runs, a 0.6% spread.
+But **the harness draws nothing** — no window, no textures, no GPU driver — so
+what it bounds is the app's own data structures and not what a reader's session
+holds.
+
+**What it costs.** Measured under `Xvfb` with the software rasteriser, which
+is the only headless window available here:
+
+| | peak RSS |
+|---|---:|
+| `--version`, no window | 6.4 MB |
+| window, empty library | 144.4 MB |
+| window, 300-note 9.5 MB library, no note open | 145.5 MB |
+| + one 32 KB note, raw pane only | 152.5 MB |
+| + one 32 KB note, split pane and right panel | 171.0 MB |
+
+The library is ~1 MB, which is fine and is what the index being on disk buys.
+The window is 138 MB, which is Mesa's `llvmpipe` and not this tree. What is
+ours and unaccounted for is the last two rows: **~8 MB for a 32 KB note in one
+pane and ~27 MB in two**, or roughly 250x to 850x the note's own bytes. The
+suspects are the per-run glyph textures, the `BlockLayout` arrays for every
+block of the note, and the two surfaces each holding their own, but nothing
+here has taken them apart — the numbers above are a total, not a breakdown.
+
+**Why it has not been paid.** Two reasons, and the first is the honest one.
+Nobody has shown this is a problem: 171 MB for a note-taking app with a window
+open is unremarkable beside what a browser tab costs, and no reader has said
+anything about it. It is on the register because it is *unmeasured*, which is
+the state this file exists to record, not because it is known to be too much.
+
+The second is that measuring it properly is a lane the harness cannot host.
+Every existing lane stops short of the paint deliberately — that is what lets
+the harness be a command rather than a sitting, and what keeps its numbers
+free of the GPU driver. A memory lane that could see a texture atlas needs a
+real window, which means a real session, which means the run-to-run spread and
+the `llvmpipe`-versus-hardware gap come back. The cheap version — peak RSS of
+a `--screenshot` run, differenced against the same run with no note selected —
+is what the table above is, and it is a total with no attribution. Turning it
+into a budget means deciding what to do about a driver that is 80% of the
+figure and varies by machine, and that is a decision, not an afternoon.
+
+Note also that the session figures above are `llvmpipe` under `Xvfb`, and the
+user's own session is Wayland on real hardware. Those are different allocators
+behind the same call, so the 138 MB baseline in particular should not be
+quoted as what anyone's desktop does.

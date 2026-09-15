@@ -103,13 +103,7 @@ bool fontBudgets(const std::string& base) {
   options.width = 700.0f;
   options.type = micronotes::app::documentTypeMetrics();
 
-  bool ok = true;
-  const auto gate = [&ok](const char* name, const Cost& cost, std::uint64_t budget) {
-    if(cost.medianMicros <= budget) return;
-    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds " << budget
-              << "us\n";
-    ok = false;
-  };
+  BudgetGate gate;
 
   // Opening the note with a cold measure cache each time -- which is what
   // starting the app does, and the one place shaping is the whole cost.
@@ -193,7 +187,7 @@ bool fontBudgets(const std::string& base) {
   std::printf("%-40s %12llu calls %12llu hits %6.1f%%\n", "font.type_middle.measures",
               static_cast<unsigned long long>(typeCalls), static_cast<unsigned long long>(typeHits),
               rate(typeCalls, typeHits));
-  return ok;
+  return gate.held();
 }
 
 }

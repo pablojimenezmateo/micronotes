@@ -4092,3 +4092,58 @@ it, not a speedup, and it is recorded as one.
 What it *does* buy is the sixth caller. The next bounded readout gets the
 splice for free and cannot get the move order wrong, which is the failure this
 tree has spent several passes removing rather than adding.
+
+### The twelfth pass: the steadiest number in the harness was the one nothing checked
+
+`AGENTS.md` says it outright: *a lane the harness does not have is a budget
+nothing enforces*, and the eighth pass is the cautionary tale behind the
+sentence — every budget in this file was a layout or a paint, so autosave grew
+a whole-library tree walk and three whole-file reads with the suite green
+throughout.
+
+This pass went looking for the same shape somewhere else and found it in the
+open: `printPeakMemory` had been **printing** the run's peak resident memory
+since the harness was split up, and nothing read it. Ten passes of budgets on
+microseconds, and the one number about memory was a line of output.
+
+**It was never the reliability that was missing.** Four runs on an idle
+machine:
+
+```
+peak_rss 31.9 MB
+peak_rss 31.9 MB
+peak_rss 32.0 MB
+peak_rss 32.1 MB
+```
+
+A spread of 0.6%, against a wall clock this file has already recorded swinging
+49% of the minimum on `open.cold_layout`. Peak RSS is the *steadiest*
+instrument the harness has, and it was the only one not gated. It is now
+`gatePeakMemory`, budgeted at 48 MB in `tools/PerfMain.cpp`, and it fails the
+run like any other budget — verified by setting the budget to 8 MB and watching
+the harness exit 1 with `BUDGET FAILED: peak_rss 32.0 MB exceeds 8.0 MB`,
+rather than by trusting that it would.
+
+Two things about the number are worth writing down before somebody compares it
+to something it is not.
+
+**The harness draws nothing**, so 32 MB is the app's own allocations — the
+block layouts, the measure cache, the SQLite index, the fixture. A real session
+is several times that and most of the difference is not micronotes: measured
+under `Xvfb` with the software rasteriser, a window with an *empty* library
+peaks at 144 MB and one with a 300-note, 9.5 MB library at 145 MB. The library
+costs about 1 MB; the window costs 138. That is Mesa's `llvmpipe`, not this
+tree, and it is why the budget is on the harness and not on a session.
+
+**What a session does add is per-note**, and that part is ours: the same window
+with one 32 KB note open in the split pane peaks at 171 MB against the 145 MB
+it sits at with none, and with the raw pane alone at 152 MB. So a note on
+screen is ~8 MB in one pane and ~27 MB in two with the right panel — for 32 KB
+of text. Nothing here has established what that is made of, and the budget
+added in this pass cannot see it, because the harness has no window. It is
+`TD-52`.
+
+Also folded in, because it was the same subject: six lanes had each written out
+the budget-check lambda, byte-identical six times. That is `BudgetGate` now,
+one class in `perf/Harness.h`, with a `fail()` for the checks that are a
+counter ratio or a byte total rather than a `Cost` against a clock.

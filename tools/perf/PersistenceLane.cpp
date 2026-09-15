@@ -55,13 +55,7 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
   }
   state.selectNote(notes.front().id);
 
-  bool ok = true;
-  const auto gate = [&](const char* name, const Cost& cost, std::uint64_t budget) {
-    if(cost.medianMicros <= budget) return;
-    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds " << budget
-              << "us\n";
-    ok = false;
-  };
+  BudgetGate gate;
 
   std::string text = body;
   gate("save.autosave_note", measureWallIterations("save.autosave_note", 16, [&](int i) {
@@ -115,7 +109,7 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
                 << " saves into " << flushes
                 << " index transactions -- something is reading the index once per save and the "
                    "deferral in LibraryIndex is buying nothing\n";
-      ok = false;
+      gate.fail();
     }
   }
 
@@ -136,7 +130,7 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
        }),
        kAutosaveBudgetMicros);
   std::filesystem::remove(root / ".micronotes" / "perf-write.tmp");
-  return ok;
+  return gate.held();
 }
 
 }

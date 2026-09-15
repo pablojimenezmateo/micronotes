@@ -8,12 +8,13 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Four entries are open: one about selecting inside a block the live scanner
+  Five entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
   writing a CFF writer, one about the Links panel running a query on every
-  save because its memo turns on the library's revision, and one about a note
+  save because its memo turns on the library's revision, one about a note
   inside a `files` folder being a file rather than a note, with only a status
-  message on open to say so. So
+  message on open to say so, and one about nothing measuring what a note on
+  screen costs in memory. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.
@@ -258,6 +259,13 @@ the short version:
 - **Frame trace** (`src/app/FrameTrace.h`) answers *did the frame make it*.
   Rolling p50/p95/max over 120 frames plus what the frame drew. Percentiles, not
   a mean: a mean hides exactly the frames the user notices.
+- **Peak RSS** answers *what did the run hold*. Read from `VmHWM` at the end of
+  the harness and **gated**, like every timing budget, by `gatePeakMemory` in
+  `tools/PerfMain.cpp`. It is the steadiest instrument here -- a 0.6% spread
+  across runs against a wall clock that swings 49% -- and it was printed and
+  ungated for ten passes before anyone checked. The harness draws nothing, so
+  it bounds the app's own allocations and *not* a session's: a real window is
+  several times the figure and most of that is the GPU driver. See TD-52.
 
 Read them with the harness, which must be **Release** -- a Debug harness reports
 timings several times the real ones, which looks like a measurement and is not:

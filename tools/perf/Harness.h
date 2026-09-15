@@ -3,6 +3,7 @@
 #include "doc/Layout.h"
 
 #include <algorithm>
+#include <iostream>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -20,8 +21,6 @@
 // lane" meant pointing at a line number.
 namespace micronotes::perfharness {
 
-// read-modify-write, and a background thread could never charge its churn to a
-// measured iteration.
 // Allocation counting, for the half of a measurement that does not move with
 // the machine.
 //
@@ -57,7 +56,24 @@ std::uint64_t wallMicros();
 
 void printSamples();
 void printCounters();
-void printPeakMemory();
+
+// Peak resident memory, printed and **gated**.
+//
+// This was printed and nothing else for ten passes, which made it the one
+// number in the harness a change could double with every lane still green --
+// and `AGENTS.md` says in as many words that a lane the harness does not have
+// is a budget nothing enforces. It turns out to be the *steadiest* number
+// here: four runs on an idle machine gave 31.9, 31.9, 32.0 and 32.1 MB, a
+// spread of 0.6%, against a wall clock that swings 49% on `open.cold_layout`.
+// So it was never the reliability that was missing.
+//
+// The harness draws nothing -- no window, no textures, no GPU driver -- which
+// is what makes the figure the app's own allocations rather than Mesa's. A
+// real session is several times this and is not comparable; see
+// `docs/performance.md`.
+//
+// Returns false when the peak is over `budgetMb`, having said so.
+bool gatePeakMemory(double budgetMb);
 
 // Somewhere for a result to go. Without it the optimiser is entitled to notice
 // that nothing reads the answer and delete the work that produced it, which is
@@ -80,6 +96,36 @@ struct Cost {
   double allocations = 0.0;
   double kilobytes = 0.0;
   std::uint64_t largestBytes = 0;
+};
+
+// A lane's budget check, and the `ok` it accumulates into.
+//
+// Six lanes had written this lambda out, byte-identical, six times -- which is
+// six places to edit to change what a failure says, and six chances for one of
+// them to start saying something else. A lane holds one of these instead and
+// calls it; `held()` is what the lane returns.
+class BudgetGate {
+public:
+  void operator()(const char* name, const Cost& cost, std::uint64_t budgetMicros) {
+    if(cost.medianMicros <= budgetMicros) return;
+    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds "
+              << budgetMicros << "us\n";
+    held_ = false;
+  }
+
+  // For the checks that are not a `Cost` against a clock -- a counter ratio, a
+  // byte total, a peak. The lane says what went wrong; this only records that
+  // something did.
+  void fail() {
+    held_ = false;
+  }
+
+  bool held() const {
+    return held_;
+  }
+
+private:
+  bool held_ = true;
 };
 
 

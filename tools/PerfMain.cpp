@@ -22,6 +22,13 @@
 
 using namespace micronotes::perfharness;
 
+// What the whole run may peak at. The lanes settle at ~32 MB on this machine
+// with a spread of 0.6% across runs, so the headroom here is for the allocator
+// and the 1,000-note fixture rather than for drift: a lane that starts holding
+// a second copy of the note or of the library moves this by more than the
+// slack. See `docs/performance.md`, "The twelfth pass".
+constexpr double kPeakMemoryBudgetMb = 48.0;
+
 int main() {
   // The harness measures whether or not the developer remembered to export
   // anything: a benchmark whose instrumentation is off by default measures
@@ -93,7 +100,13 @@ int main() {
 
   printSamples();
   printCounters();
-  printPeakMemory();
+  // The peak the whole run reached, gated like every other budget. Headroom
+  // over the ~32 MB the lanes settle at, because the figure moves a little
+  // with the allocator and with how the 1,000-note fixture happens to land --
+  // but not enough headroom to hide a lane that starts holding a second copy
+  // of the note or of the library. Raising it is a decision to be made out
+  // loud, in `docs/performance.md`, the way the timing budgets are.
+  withinBudget = gatePeakMemory(kPeakMemoryBudgetMb) && withinBudget;
   std::filesystem::remove_all(root);
   return withinBudget ? 0 : 1;
 }

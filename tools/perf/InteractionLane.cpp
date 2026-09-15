@@ -65,13 +65,7 @@ bool interactionBudgets(const std::string& base) {
   const std::size_t blocks = layout.blockCount();
   std::cout << "interaction.blocks: " << blocks << "\n";
 
-  bool ok = true;
-  const auto gate = [&](const char* name, const Cost& cost, std::uint64_t budget) {
-    if(cost.medianMicros <= budget) return;
-    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds " << budget
-              << "us\n";
-    ok = false;
-  };
+  BudgetGate gate;
 
   // Typing at the top, in the middle and at the end. They are three scenarios
   // rather than one because the incremental path is asymmetric: an edit near the
@@ -196,7 +190,7 @@ bool interactionBudgets(const std::string& base) {
     relayout();
   }
 
-  return ok;
+  return gate.held();
 }
 
 }

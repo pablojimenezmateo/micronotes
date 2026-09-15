@@ -49,13 +49,7 @@ bool searchBudgets(const std::filesystem::path& root) {
     return false;
   }
 
-  bool ok = true;
-  const auto gate = [&](const char* name, const Cost& cost, std::uint64_t budget) {
-    if(cost.medianMicros <= budget) return;
-    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds " << budget
-              << "us\n";
-    ok = false;
-  };
+  BudgetGate gate;
 
   // Every note in the fixture carries this word, so the result set is the
   // 200-row cap and every one of those rows has a snippet built for it.
@@ -83,7 +77,7 @@ bool searchBudgets(const std::filesystem::path& root) {
          sink += results.size();
        }),
        kSearchHitBudgetMicros);
-  return ok;
+  return gate.held();
 }
 
 }

@@ -77,7 +77,7 @@ static UndoSession undoSession(std::size_t noteBytes, int edits) {
 
 bool undoBudgets() {
   std::cout << "\n=== what an editing session retains for undo ===\n";
-  bool ok = true;
+  BudgetGate gate;
   const auto report = [&](const char* name, const UndoSession& session, std::size_t noteBytes,
                           std::size_t budget) {
     std::printf("%-40s %10.1f KB retained %6zu steps %8.1f KB note %6.2fx\n", name,
@@ -87,7 +87,7 @@ bool undoBudgets() {
     if(session.retainedBytes <= budget) return;
     std::cerr << "BUDGET FAILED: " << name << " retains " << session.retainedBytes
               << " bytes, over " << budget << "\n";
-    ok = false;
+    gate.fail();
   };
 
   // A small note, edited for a long time. This is the case the count ceiling
@@ -114,16 +114,10 @@ bool undoBudgets() {
     if(editor.undoDepth() < 8) {
       std::cerr << "BUDGET FAILED: undo.whole_note_replacements kept only " << editor.undoDepth()
                 << " steps\n";
-      ok = false;
+      gate.fail();
     }
   }
 
-  const auto gate = [&](const char* name, const Cost& cost, std::uint64_t budget) {
-    if(cost.medianMicros <= budget) return;
-    std::cerr << "BUDGET FAILED: " << name << " " << cost.medianMicros << "us exceeds " << budget
-              << "us\n";
-    ok = false;
-  };
 
   // And what one step *costs*, which is the other half of the story: a history
   // of whole-buffer snapshots is not only large, it charges a copy of the note
@@ -146,7 +140,7 @@ bool undoBudgets() {
          }),
          kUndoStepBudgetMicros);
   }
-  return ok;
+  return gate.held();
 }
 
 }
