@@ -8,13 +8,14 @@ First-stop operating guide for agents working in this repository.
 - Priority order: **speed, then correctness, then low CPU/memory**.
 - Known debt is in `docs/tech-debt.md`, numbered `TD-n`. Read it before deciding
   something is unaccounted for, and add to it rather than leaving a `TODO`.
-  Five entries are open: one about selecting inside a block the live scanner
+  Six entries are open: one about selecting inside a block the live scanner
   does not model, one about how far a CFF face can be subsetted without
   writing a CFF writer, one about the Links panel running a query on every
   save because its memo turns on the library's revision, one about a note
   inside a `files` folder being a file rather than a note, with only a status
-  message on open to say so, and one about nothing measuring what a note on
-  screen costs in memory. So
+  message on open to say so, one about a session's memory being two costs with
+  only one of them ours, and one about every token's text being copied out of a
+  buffer the layout already holds. So
   something that looks unaccounted for elsewhere
   probably is, and the honest answers are to fix it or to open an entry that
   says what it costs and why not.

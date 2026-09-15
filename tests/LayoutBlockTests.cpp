@@ -362,3 +362,27 @@ MICRONOTES_TEST(layout_does_not_call_a_writers_line_break_a_wrap) {
   MICRONOTES_REQUIRE(lines.size() == 3);
   for(const auto& line : lines) MICRONOTES_REQUIRE(!line.continuation);
 }
+
+// There is one `TextRun` per *token* -- every word and every run of spaces --
+// for every block of the note, because a note is laid out whole and not to the
+// viewport. So this struct's size is the layout's memory, near enough: a real
+// session holds about 35 times a note's own bytes, and measured against a
+// 1.1 MB note, taking this from 88 bytes to 72 took 5.5 MB off the process.
+//
+// A static_assert rather than a comment, because the two ways it grows back are
+// both invisible in review: a member added in the middle rather than at the
+// narrow end, and one of the 32-bit offsets widened to `std::size_t` by someone
+// who has not noticed they are block-relative. Either shows up here.
+//
+// If this fails, the question is not "what number should it say now" -- it is
+// whether the field that was added has to be in this struct at all.
+MICRONOTES_TEST(layout_text_run_stays_small) {
+  static_assert(sizeof(micronotes::doc::TextRun) <= 72,
+                "TextRun is one-per-token over the whole note: see docs/performance.md, "
+                "'The twelfth pass', before letting it grow");
+  // The offsets are block-relative and stay narrow. A block four gigabytes long
+  // is not a thing, and every reader promotes them with `block.start + ...`.
+  static_assert(sizeof(micronotes::doc::TextRun::srcStart) == 4);
+  static_assert(sizeof(micronotes::doc::TextRun::srcEnd) == 4);
+  MICRONOTES_REQUIRE(sizeof(micronotes::doc::TextRun) <= 72);
+}

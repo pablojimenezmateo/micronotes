@@ -4147,3 +4147,48 @@ Also folded in, because it was the same subject: six lanes had each written out
 the budget-check lambda, byte-identical six times. That is `BudgetGate` now,
 one class in `perf/Harness.h`, with a `fail()` for the checks that are a
 counter ratio or a byte total rather than a `Cost` against a clock.
+
+#### And then the budget caught its own first win
+
+The point of adding an instrument is to use it, so the same pass went looking
+for what the new number could see. It turned out to be one struct.
+
+`doc::TextRun` was **88 bytes**, and there is one per *token* -- every word and
+every run of spaces -- for every block of the note, because a note is laid out
+whole and not to the viewport. An English word plus its space is six source
+bytes and two runs, which is where TD-52's "about 35 times a note's own bytes"
+comes from.
+
+Two things in it were larger than they had to be. `srcStart` and `srcEnd` were
+`std::size_t` and are *block-relative* -- a single block four gigabytes long is
+not a thing, and every reader already promotes them with `block.start + ...`.
+And the members were ordered so that `role`, `isMarker` and `linkIndex` sat
+between two wide fields, padding twice. Ordered wide to narrow with 32-bit
+offsets, the struct is **72 bytes**.
+
+What it bought, on both instruments:
+
+| | before | after | |
+|---|---:|---:|---|
+| `open.cold_layout` allocated bytes | 8431.5 KB | 7246.8 KB | **-14.0%** |
+| `type.middle` allocated bytes | 4.6 KB | 3.8 KB | -17% |
+| harness `peak_rss` | 32.1 MB | 30.8 MB | -4% |
+| session, 1.14 MB note open | 206.9 MB | 201.4 MB | **-5.5 MB** |
+| session, note's own cost | +40.4 MB | +34.9 MB | -13.6% |
+
+The allocation *counts* are identical -- 17,132 for `open.cold_layout` before
+and after -- which is exactly what a struct shrink should do and what says the
+change is the size and not a behaviour. The screenshots are byte-identical
+under `cmp` at all three note sizes. And the harness's peak RSS moved by 1.3 MB
+against a run-to-run spread of 0.2 MB, so it is a result rather than noise: the
+budget added an hour earlier is what made that sentence sayable.
+
+`layout_text_run_stays_small` is a `static_assert` on the size, because the two
+ways it grows back -- a member added in the middle, an offset widened to
+`std::size_t` -- are both invisible in review.
+
+What is left is the 32 bytes of `std::string` in a struct that already carries
+the offsets identifying those same bytes in `source_`. That is TD-53, and it is
+deliberately not this pass: a view into a buffer `DocumentLayout` splices on
+every keystroke is a new invariant on the hottest structure in the app, and it
+deserves its own pass with these same two instruments pointed at it.

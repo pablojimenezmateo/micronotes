@@ -11,7 +11,7 @@ here rather than duplicated, because that file carries the numbers and the
 history that make them make sense.
 
 **Adding an entry:** take the next free number, never reuse one. Numbers up to
-TD-52 have been used. Closing an entry means deleting it and saying so in the
+TD-53 have been used. Closing an entry means deleting it and saying so in the
 commit; a register of things that turned out to be fine is a register nobody
 reads.
 
@@ -166,51 +166,86 @@ behind it, and it is worth making when somebody hits this a second time. The
 honest statement today is that the trap is signposted at both ends and still
 open in the middle.
 
-## TD-52 — Nothing measures what a note on screen costs in memory
+## TD-52 — A session's memory is two costs and only one of them is ours
 
 The harness gates peak resident memory as of the twelfth pass, and the figure
-is the steadiest instrument it has: 31.9–32.1 MB over four runs, a 0.6% spread.
-But **the harness draws nothing** — no window, no textures, no GPU driver — so
-what it bounds is the app's own data structures and not what a reader's session
-holds.
+is the steadiest instrument it has. But **the harness draws nothing** — no
+window, no textures, no GPU driver — so what it bounds is the app's own data
+structures and not what a reader's session holds.
 
-**What it costs.** Measured under `Xvfb` with the software rasteriser, which
-is the only headless window available here:
+This entry was opened saying a note on screen costs ~27 MB and naming the glyph
+textures as a suspect. **That was wrong and the measurements are below**, kept
+because the wrong version is the reason to distrust a total with no attribution.
 
-| | peak RSS |
-|---|---:|
-| `--version`, no window | 6.4 MB |
-| window, empty library | 144.4 MB |
-| window, 300-note 9.5 MB library, no note open | 145.5 MB |
-| + one 32 KB note, raw pane only | 152.5 MB |
-| + one 32 KB note, split pane and right panel | 171.0 MB |
+**What it costs.** Two separable things. Holding the note fixed and varying the
+window, under `Xvfb` with the software rasteriser:
 
-The library is ~1 MB, which is fine and is what the index being on disk buys.
-The window is 138 MB, which is Mesa's `llvmpipe` and not this tree. What is
-ours and unaccounted for is the last two rows: **~8 MB for a 32 KB note in one
-pane and ~27 MB in two**, or roughly 250x to 850x the note's own bytes. The
-suspects are the per-run glyph textures, the `BlockLayout` arrays for every
-block of the note, and the two surfaces each holding their own, but nothing
-here has taken them apart — the numbers above are a total, not a breakdown.
+| window | pixels | no note loaded | note loaded | delta |
+|---|---:|---:|---:|---:|
+| 400x300 | 0.12 M | 122.4 MB | 125.3 MB | +3.0 MB |
+| 800x600 | 0.48 M | 129.0 MB | 135.9 MB | +7.0 MB |
+| 1600x1000 | 1.60 M | 145.3 MB | 171.0 MB | +25.7 MB |
 
-**Why it has not been paid.** Two reasons, and the first is the honest one.
-Nobody has shown this is a problem: 171 MB for a note-taking app with a window
-open is unremarkable beside what a browser tab costs, and no reader has said
-anything about it. It is on the register because it is *unmeasured*, which is
-the state this file exists to record, not because it is known to be too much.
+The delta scales with window **area**, at roughly 16 MB per megapixel, which is
+the rasteriser and not this tree. The texture cache was ruled out directly: a
+full split-pane screenshot does 148 rasterisations, not the 4,096 the cache
+would hold.
 
-The second is that measuring it properly is a lane the harness cannot host.
-Every existing lane stops short of the paint deliberately — that is what lets
-the harness be a command rather than a sitting, and what keeps its numbers
-free of the GPU driver. A memory lane that could see a texture atlas needs a
-real window, which means a real session, which means the run-to-run spread and
-the `llvmpipe`-versus-hardware gap come back. The cheap version — peak RSS of
-a `--screenshot` run, differenced against the same run with no note selected —
-is what the table above is, and it is a total with no attribution. Turning it
-into a budget means deciding what to do about a driver that is 80% of the
-figure and varies by machine, and that is a decision, not an afternoon.
+Holding the window fixed at 1600x1000 and varying the note:
 
-Note also that the session figures above are `llvmpipe` under `Xvfb`, and the
-user's own session is Wayland on real hardware. Those are different allocators
-behind the same call, so the 138 MB baseline in particular should not be
-quoted as what anyone's desktop does.
+| note | bytes | peak RSS | over the 1.5 KB note |
+|---|---:|---:|---:|
+| Tiny | 1.5 KB | 166.5 MB | — |
+| Small | 28 KB | 168.2 MB | +1.7 MB |
+| Big | 285 KB | 177.1 MB | +10.6 MB |
+| Huge | 1.14 MB | 206.9 MB | +40.4 MB |
+
+That part **is** ours: about **35x a note's own bytes**, linear in the note.
+The twelfth pass paid some of it — `TextRun` went from 88 bytes to 72, which
+took the Huge note's cost from +40.4 MB to +34.9 MB — and the rest is TD-53.
+
+**Why it has not been paid.** The per-pixel half is a decision about a software
+rasteriser that is 80% of the figure and varies by machine, and the user's own
+session is Wayland on real hardware rather than `llvmpipe` under `Xvfb`, so
+those are different allocators behind the same call. Nothing here should be
+quoted as what a desktop does. The per-note half is TD-53, which names a
+specific change rather than a worry.
+
+What stays open *here* is that neither half is gated. Every existing lane stops
+short of the paint deliberately — that is what lets the harness be a command
+rather than a sitting — so a session lane means a real window and the run-to-run
+spread and the driver gap come back with it. Until somebody wants that, the
+peak-RSS budget covers the app's structures and a session's memory is measured
+by hand, the way the tables above were.
+
+## TD-53 — Every token's text is copied out of a buffer the layout already has
+
+`doc::TextRun::text` is a `std::string` holding "byte-for-byte the source it
+displays, except that `\n` and `\t` become a single space each". The run also
+carries `srcStart`/`srcEnd`, which *identify those very bytes* in the block. So
+for almost every run in a note the string is a second copy of something the
+layout is already holding in `source_`.
+
+**What it costs.** 32 of `TextRun`'s 72 bytes are the `std::string` object, and
+there is one run per token — every word and every run of spaces — for every
+block, because a note is laid out whole rather than to the viewport. A
+`std::string_view` is 16, and the offsets that would make even that redundant
+are already there. Against the measured 35x-a-note's-bytes in TD-52, the string
+is the single largest line item. Words over fifteen bytes also take a heap
+allocation each, on top: `open.cold_layout` makes 17,132 allocations for the
+200 KB fixture.
+
+**Why it has not been paid.** The exception in that comment is the whole
+problem. A run whose source contains `\n` or `\t` displays something the
+buffer does not contain, so its text cannot be a view, and the runs that need
+this are not rare enough to ignore — every soft-wrapped line and every tab in a
+code block is one. Closing this means the rare case going somewhere else: runs
+carry a view by default and a side table holds the rewritten text for the ones
+that need it, keyed by run index. That is a new invariant on the hottest
+structure in the app — a view into `source_` is dangling the moment the buffer
+is spliced, and `DocumentLayout` splices it on every keystroke — where today
+the string owns its bytes and cannot dangle.
+
+It is worth doing, and it is worth doing on its own, with the peak-RSS budget
+and the allocation counts as the proof. It is not worth doing at the end of a
+pass that has already changed the struct's layout.

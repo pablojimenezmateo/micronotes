@@ -45,7 +45,7 @@ struct RunStyle {
 
 // Semantic color role. The layout never names a color; the view maps these onto
 // theme tokens.
-enum class TextRole {
+enum class TextRole : std::uint8_t {
   Body,
   Marker,
   Link,
@@ -111,19 +111,36 @@ struct Attr {
   }
 };
 
+// One measured, placed stretch of a block's text.
+//
+// **The field order is the struct's size**, and the size is the layout's memory.
+// There is one of these per *token* -- every word and every run of spaces -- for
+// every block of the note, laid out whole rather than to the viewport. Measured
+// on a real session, a note costs about 35 times its own bytes in resident
+// memory, and this struct is nearly all of it: an English word plus its space
+// is six source bytes and two runs.
+//
+// So the members are ordered wide to narrow, and the two offsets are 32-bit.
+// They are relative to the owning block, and a single block four gigabytes long
+// is not a thing; every reader promotes them with `block.start + run.srcStart`
+// already. That took the struct from 88 bytes to 72. Adding a member in the
+// middle, or widening one, puts it back -- `text_run_stays_small` in
+// `LayoutBlockTests` is what says so out loud.
 struct TextRun {
-  // Relative to the owning block's `start`, so one cached layout can serve
-  // every position an identical block appears at. Add `blocks()[i].start`.
-  std::size_t srcStart = 0;
-  std::size_t srcEnd = 0;
-  Rect rect;
-  RunStyle style;
-  TextRole role = TextRole::Body;
-  bool isMarker = false;
-  int linkIndex = -1;
   // Byte-for-byte the source it displays, except that `\n` and `\t` become a
   // single space each, so a prefix measurement still maps offsets to pixels.
+  // See TD-53: that exception is the only reason this is a string rather than a
+  // view into the note's own buffer.
   std::string text;
+  Rect rect;
+  // Relative to the owning block's `start`, so one cached layout can serve
+  // every position an identical block appears at. Add `blocks()[i].start`.
+  std::uint32_t srcStart = 0;
+  std::uint32_t srcEnd = 0;
+  RunStyle style;
+  int linkIndex = -1;
+  TextRole role = TextRole::Body;
+  bool isMarker = false;
 };
 
 // One wrapped row of a block. Its runs live in the block's single run array
