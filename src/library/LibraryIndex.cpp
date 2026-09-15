@@ -508,7 +508,21 @@ LibraryIndex::FileRefresh LibraryIndex::refreshPath(const std::filesystem::path&
     // in `notes` and tokenising the same 200 KB into `notes_fts` -- and for
     // fifty-nine saves out of sixty it stands in for them permanently, because
     // the next keystroke's save replaces this row before anything reads it.
-    row.ownBody(std::string(written->body));
+    //
+    // Into the buffer the coalesced write was already holding, when there is
+    // one. Those fifty-nine saves each *allocated* a 200 KB string and freed
+    // the 200 KB string of the save they replaced -- a malloc/free pair per
+    // second while somebody types, for a note whose length barely moves between
+    // two keystrokes. `assign` into capacity that is already the right size is
+    // the memcpy without either. Safe because `before` -- which aliases
+    // `standing->row` -- has been read on the line above and is not read again.
+    std::string buffer;
+    if(standing) {
+      buffer = std::move(standing->row.owned);
+      perf::addCounter(perf::CounterId::LibraryIndexDeferredBodyReused);
+    }
+    buffer.assign(written->body);
+    row.ownBody(std::move(buffer));
     auto pending = std::make_unique<DeferredNoteWrite>();
     pending->row = std::move(row);
     pending->hadRow = hadPriorRow;

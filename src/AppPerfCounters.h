@@ -40,6 +40,7 @@
   /* the deferral is buying nothing.                                           */     \
   X(LibraryIndexWritesDeferred, "library.index_writes_deferred")                       \
   X(LibraryIndexWritesCoalesced, "library.index_writes_coalesced")                     \
+  X(LibraryIndexDeferredBodyReused, "library.index_deferred_body_buffer_reused")       \
   X(LibraryIndexFlushes, "library.index_flushes")                                      \
   X(LibraryIndexRowsDeleted, "library.index_rows_deleted")                             \
   X(LibraryNoteFilesCalls, "library.note_files_calls")                                 \

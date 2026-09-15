@@ -81,6 +81,7 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
     const auto coalescedBefore = readCounter(CounterId::LibraryIndexWritesCoalesced);
     const auto flushesBefore = readCounter(CounterId::LibraryIndexFlushes);
     const auto indexedBefore = readCounter(CounterId::LibraryIndexBodyBytesIndexed);
+    const auto reusedBefore = readCounter(CounterId::LibraryIndexDeferredBodyReused);
 
     constexpr int kMinuteOfTyping = 60;
     for(int i = 0; i < kMinuteOfTyping; ++i) {
@@ -97,6 +98,7 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
     const auto coalesced = readCounter(CounterId::LibraryIndexWritesCoalesced) - coalescedBefore;
     const auto flushes = readCounter(CounterId::LibraryIndexFlushes) - flushesBefore;
     const auto indexed = readCounter(CounterId::LibraryIndexBodyBytesIndexed) - indexedBefore;
+    const auto reused = readCounter(CounterId::LibraryIndexDeferredBodyReused) - reusedBefore;
     std::printf("%-30s %5d saves %5llu deferred %5llu coalesced %4llu transactions %7.2f MB "
                 "tokenised\n",
                 "save.minute_of_typing", kMinuteOfTyping,
@@ -104,6 +106,22 @@ bool persistenceBudgets(const std::filesystem::path& root, const std::string& bo
                 static_cast<unsigned long long>(coalesced),
                 static_cast<unsigned long long>(flushes),
                 static_cast<double>(indexed) / (1024.0 * 1024.0));
+    std::printf("%-30s %5llu buffers reused of %llu coalesced\n", "save.deferred_body",
+                static_cast<unsigned long long>(reused),
+                static_cast<unsigned long long>(coalesced));
+    // A coalesced write is by definition one that found a standing write to
+    // replace, and replacing it means its body buffer is there to be written
+    // into. So these two are the same number or something has started
+    // allocating a whole note per save again -- which is invisible in a wall
+    // clock dominated by two `fsync` barriers, and is exactly the shape a
+    // counter is for.
+    if(reused != coalesced) {
+      std::cerr << "BUDGET FAILED: save.minute_of_typing coalesced " << coalesced
+                << " index writes but reused only " << reused
+                << " body buffers -- a coalesced save is allocating a fresh copy of the note "
+                   "instead of writing into the one it is replacing\n";
+      gate.fail();
+    }
     if(flushes > 1) {
       std::cerr << "BUDGET FAILED: save.minute_of_typing turned " << kMinuteOfTyping
                 << " saves into " << flushes
