@@ -8,7 +8,6 @@
 #include "ui/Overlay.h"
 #include "library/Library.h"
 #include "library/Metadata.h"
-#include "core/platform/PathUtils.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -133,7 +132,20 @@ void saveFolderRename(UiRuntime& ui) {
     return;
   }
   const bool creating = ui.sidebar.creatingFolder;
-  const bool saved = creating ? ui.state.createFolder(ui.fields.folderRename.text()) : ui.state.renameSelectedFolder(ui.fields.folderRename.text());
+  const std::filesystem::path name = ui.fields.folderRename.text();
+  // The one refusal a reader can act on, said before it is made. `files` is the
+  // companion area's name -- a notebook that took it would turn its notes into
+  // files -- and the catalog refuses it by returning an empty path, which
+  // everything above here can only report as "failed". That sent somebody to
+  // the file manager to make the directory by hand, which is the one outcome
+  // the rule exists to prevent: the notes inside it stop being notes.
+  if(library::insideFilesDir(name)) {
+    ui.status = "\"" + std::string(library::kFilesDirName) +
+                "\" is where a notebook keeps its attachments, so it cannot be a notebook name";
+    return;
+  }
+  const bool saved =
+    creating ? ui.state.createFolder(name) : ui.state.renameSelectedFolder(name);
   if(saved) {
     ui.sidebar.creatingFolder = false;
     ui.focus = FocusArea::Folders;

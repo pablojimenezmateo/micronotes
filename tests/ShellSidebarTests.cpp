@@ -4,6 +4,7 @@
 #include "app/Shell.h"
 #include "app/SidebarModel.h"
 #include "app/Notes.h"
+#include "app/Prompts.h"
 #include "app/SessionState.h"
 
 #include <algorithm>
@@ -615,4 +616,42 @@ MICRONOTES_TEST(shell_a_file_dropped_into_files_refreshes_only_that_directory) {
   using microcore::perf::CounterId;
   MICRONOTES_REQUIRE(microcore::perf::readCounter(CounterId::LibraryFilesDirRefreshes) >= 1);
   MICRONOTES_REQUIRE(microcore::perf::readCounter(CounterId::LibraryIndexRefreshCalls) == 0);
+}
+
+// A notebook cannot be called `files`, and the refusal has to say so. It did
+// not: `NoteCatalog::createFolder` returns an empty path and every layer above
+// it could only report "Notebook change failed", so the reader's next move was
+// to make the directory in a file manager -- which is the one outcome the rule
+// exists to prevent, because the notes they then put in it stop being notes.
+MICRONOTES_TEST(shell_a_notebook_cannot_be_called_files_and_the_refusal_says_why) {
+  const micronotes::tests::TempDir rootDir("micronotes-shell-files-notebook");
+  const auto& root = rootDir.path();
+
+  micronotes::app::UiRuntime ui;
+  MICRONOTES_REQUIRE(micronotes::app::openLibraryRoot(ui, root));
+
+  ui.sidebar.creatingFolder = true;
+  ui.fields.folderRename.beginWith("files");
+  micronotes::app::saveFolderRename(ui);
+
+  // Refused, and the status names the reason rather than the outcome.
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "files"));
+  MICRONOTES_REQUIRE(ui.status.text.find("attachments") != std::string::npos);
+  MICRONOTES_REQUIRE(ui.status.text.find("files") != std::string::npos);
+  // And the prompt stays up, so the name can be corrected in place.
+  MICRONOTES_REQUIRE(ui.sidebar.creatingFolder);
+
+  // The rule is about the whole path, not the last component: a notebook
+  // *under* a files directory is a companion folder, not a notebook.
+  ui.fields.folderRename.beginWith("work/files/notes");
+  micronotes::app::saveFolderRename(ui);
+  MICRONOTES_REQUIRE(!std::filesystem::exists(root / "work" / "files" / "notes"));
+  MICRONOTES_REQUIRE(ui.status.text.find("attachments") != std::string::npos);
+
+  // And a name that only looks like it: the match is exact and case-sensitive.
+  ui.fields.folderRename.beginWith("Files");
+  micronotes::app::saveFolderRename(ui);
+  MICRONOTES_REQUIRE(std::filesystem::exists(root / "Files"));
+  MICRONOTES_REQUIRE(ui.status.text == "Created notebook");
+  MICRONOTES_REQUIRE(!ui.sidebar.creatingFolder);
 }
